@@ -14,3 +14,18 @@ class OpenAIClient:
             texts = [texts]
         out = self.client.embeddings.create(input=texts, model=model)
         return [x.embedding for x in out.data]
+
+    def get_completion(
+        self,
+        prompt: str,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.1,
+        max_tokens: int = 4096,
+    ) -> str:
+        out = self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return out.choices[0].message.content
