@@ -1,7 +1,13 @@
 from openai import OpenAI
 
 
-class OpenAIClient:
+class Client:
+    """Base class for LLM clients."""
+    pass
+
+
+class OpenAIClient(Client):
+    """OpenAI client."""
     def __init__(self, api_key: str):
         self.client = OpenAI(api_key=api_key)
 
