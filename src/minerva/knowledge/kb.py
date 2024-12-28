@@ -49,4 +49,10 @@ class CompanyKB:
       
     @property
     def transcripts(self):
+        """Get transcripts collection"""
         return self.db.transcripts
+
+    @property
+    def tickers(self) -> list[str]:
+        """Get unique tickers in the database."""
+        return self.db.transcripts.distinct("ticker")
