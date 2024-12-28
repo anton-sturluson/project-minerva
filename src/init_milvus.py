@@ -105,7 +105,7 @@ def add_documents(
     "--query", type=str, default="", 
     help="Query to search for in the vector database")
 @click.option(
-    "--ticker", type=str, default="AVGO", 
+    "--tickers", type=str, default="AVGO", 
     help="Ticker of the companies (separated by comma) to include")
 @click.option(
     "--db-path", type=str, default="../data/milvus_demo.db", 
@@ -114,7 +114,7 @@ def add_documents(
 @click.option(
     "--query-save-dir", type=str, default="../data/query_results", 
     help="Directory to save query results")
-def main(query: str, ticker: str, db_path: str, query_save_dir: str):
+def main(query: str, tickers: str, db_path: str, query_save_dir: str):
     if not query:
         raise ValueError("Query is required")
 
@@ -130,15 +130,15 @@ def main(query: str, ticker: str, db_path: str, query_save_dir: str):
             db_path = DEFAULT_DB_PATH
         logger.info("Initializing Milvus Vector Database...")
         db: MilvusVectorDB = init_milvus(db_path=db_path)
-        add_documents(db, embedding_fn, ticker)
-
+        for ticker in tickers.split(","):
+            add_documents(db, embedding_fn, ticker.strip())
 
     output_fields: list[str] = ["text", "speaker", "year", "quarter", 
                                 "transcript_index", "chunk_index"]
     res: list[list[dict]] = db.search(
         queries=query,
         embedding_fn=embedding_fn,
-        filter=f"ticker == '{ticker}'",
+        # filter=f"ticker == '{ticker}'",
         output_fields=output_fields,
         limit=20,
     )
