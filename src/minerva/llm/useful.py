@@ -23,3 +23,8 @@ def generate_filename(client: Client, text: str, ext: str = ".yml") -> str:
     "{text}"
     """
     return client.get_completion(prompt) + ext
+
+
+def try_test_prompt(client: Client) -> str:
+    prompt: str = "Do not return anything."
+    return client.get_completion(prompt)
