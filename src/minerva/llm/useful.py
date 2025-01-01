@@ -55,7 +55,7 @@ def try_test_prompt(client: Client) -> str:
 def generate_topic(
     client: Client, 
     text: str, 
-    model_name: str = "claude-3-5-sonnet-latest",
+    model_name: str = "claude-3-5-haiku-latest",
     temperature: float = 0.3,
     max_tokens: int = 4096,
 ) -> str:
