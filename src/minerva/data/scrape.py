@@ -111,14 +111,6 @@ def parse_transcript(transcript: str) -> list[dict[str, int | str]]:
 
     return parsed
 
-    # parsed_lst: list[dict[str, str]] = []
-    # for i, line in enumerate(transcript.split("\n")):
-    #     line_split: list[str] = line.split(":")
-    #     speaker: str = line_split[0]
-    #     text: str = ":".join(line_split[1:])
-    #     parsed_lst.append({"index": i, "speaker": speaker, "text": text})
-    # return parsed_lst
-
 
 def get_one_transcript(ticker: str, year: int, quarter: int) -> dict[str, int | str] | None:
     """
