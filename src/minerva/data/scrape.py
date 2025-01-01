@@ -65,8 +65,6 @@ def _chunk(speakers: list[dict] | dict, min_sentences: int = 6) -> list[dict]:
     chunks: list[ChunkOutput] = []
     for speaker_map in tqdm(speakers, desc="Chunking Transcript"):
         speaker_index: int = speaker_map["speaker_index"]
-        if speaker_index == 3:
-            break
         text: str = speaker_map["text"]
         num_sentences: int = _get_num_sentences(text)
         if num_sentences < min_sentences:
