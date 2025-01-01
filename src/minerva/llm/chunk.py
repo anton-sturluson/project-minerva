@@ -83,37 +83,63 @@ def parse_prompt_output(text: str) -> str | None:
     return output_match.group(1)
 
 
-def chunk_and_parse_output(text: str, client: Client | None = None) -> list[dict]:
+def chunk_and_parse_output(text: str, client: Client | None = None) -> dict[str, dict]:
     """
     Chunk the given text and parse the output into a list of chunks.
 
     Returns:
-        A list of chunks information in the format of
+        A dictionary with the following structure:
         ```python
-        [
-            {
-                "chunk_topic": str,
-                "chunk": str,
-                "chunk_index": int
-            }
-        ]
+        {
+            "chunks": [ # list of chunked text and metadata
+                {
+                    "chunk_topic": str,
+                    "text": str,
+                    "chunk_index": int,
+                }
+            ],
+            "chunk_prompt_output": str # the prompt output of the chunking process
+            "parsed_output": str # parsing-attempted output from the chunk prompt output
+            "failure": bool # whether the chunking process failed
+        }
         ```
-        In case of failures, the output will be either a parsed output
-        or prompt output of the chunking process.
+        In case of failures, the text will be the original text and the 
+        chunk topic will be an empty string.
     """
+    output: dict = {
+        "chunks": [
+            {
+                "text": text,
+                "chunk_topic": "",
+                "chunk_index": 0,
+            }
+        ],
+        "chunk_prompt_output": "",
+        "parsed_output": "",
+        "failure": False
+    }
+
     chunk_output: str = chunk_text(text, client)
+    output["chunk_prompt_output"] = chunk_output
+
     parsed_output: str | None = parse_prompt_output(chunk_output)
+    output["parsed_output"] = parsed_output
+
     if parsed_output is None:
-        print(f"`chunk_and_parse_output`: Failed to parse output: {chunk_output}")
-        return [chunk_output]
+        output["failure"] = True
+        print(f"`chunk_and_parse_output`: Failed to parse: {chunk_output}")
+        return output
 
     try:
-        if not TEST_MODE:
+        if TEST_MODE:
+            output["chunks"] = parsed_output
+        else:
             chunks: list[dict] = yaml.safe_load(parsed_output)
             for i, chunk in enumerate(chunks):
                 chunk["chunk_index"] = i
-            return chunks
-        return [parsed_output]
+            output["chunks"] = chunks
+        return output
     except yaml.YAMLError as e:
         print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
-        return [parsed_output]
+        output["failure"] = True
+        return output
