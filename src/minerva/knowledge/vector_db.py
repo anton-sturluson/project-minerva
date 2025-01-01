@@ -2,8 +2,6 @@ from typing import Callable
 
 from pymilvus import MilvusClient, CollectionSchema
 
-from minerva.llm import OpenAIClient
-
 
 class MilvusVectorDB:
     def __init__(self, db_path: str, collection_name: str):
@@ -27,7 +25,9 @@ class MilvusVectorDB:
         embedding_fn: Callable
     ):
         """Add documents to the vector database."""
-        assert len(documents) == len(metadata)
+        if len(documents) != len(metadata):
+            raise ValueError("`add_documents` requires the number of documents "
+                             "and metadata to be the same.")
 
         vectors: list[list[float]] = embedding_fn(documents)
         data = [
@@ -42,6 +42,7 @@ class MilvusVectorDB:
         queries: str | list[str], 
         embedding_fn: Callable,
         output_fields: list[str],
+        filter: str = "",
         limit: int = 10
     ):
         """Search for similar documents in the vector database."""
@@ -51,6 +52,7 @@ class MilvusVectorDB:
         res = self.client.search(
             collection_name=self.collection_name,
             data=query_vectors,
+            filter=filter,
             limit=limit,
             output_fields=output_fields
         )
