@@ -1,6 +1,4 @@
-from copy import deepcopy
-
-from pymongo import MongoClient, UpdateOne
+from pymongo import MongoClient
 
 
 class CompanyKB:
@@ -36,7 +34,9 @@ class CompanyKB:
         for transcript in new_transcripts:
             key: tuple[int, int] = (transcript["year"], transcript["quarter"])
             if key in saved_transcripts:
-                saved_transcripts[key]["transcript"] = transcript["transcript"]
+                saved_transcripts[key]["speakers"] = transcript["speakers"]
+                if "chunking_output" in transcript:
+                    saved_transcripts[key]["chunking_output"] = transcript["chunking_output"]
             else:
                 saved_transcripts[key] = transcript
 

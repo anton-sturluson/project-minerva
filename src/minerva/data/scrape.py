@@ -1,11 +1,13 @@
-import requests
+"""Utilities for scraping transcripts from the web."""
+from dataclasses import asdict
 import json
 import re
+import requests
 
 from tqdm import tqdm
 import yfinance as yf
 
-from minerva.llm.chunk import chunk_and_parse_output
+from minerva.llm.chunk import chunk_and_parse_output, ChunkOutput
 from minerva.llm.client import AnthropicClient
 from minerva.llm.useful import generate_topic
 from minerva.util.env import ANTHROPIC_API_KEY
@@ -19,12 +21,21 @@ def _get_num_sentences(text: str) -> int:
     return len(re.split(r'[.!?]', text)) - 1
 
 
-def _chunk(transcripts: list[dict] | str, min_sentences: int = 7) -> list[dict[str, int | str]]:
+def _generate_missing_topics(chunk_output: ChunkOutput):
+    """Generate topics for chunks that don't have one."""
+    for chunk in chunk_output.chunks:
+        if not chunk.get("chunk_topic"):
+            chunk["chunk_topic"] = generate_topic(client, chunk["text"])
+
+
+def _chunk(speakers: list[dict] | dict, min_sentences: int = 6) -> list[dict]:
     """
-    Chunk the given list of texts into smaller chunks.
+    Chunk the given transcript into smaller chunks.
 
     Args:
-        transcripts: The list of transcripts to chunk.
+        speakers: The list of transcripts per speaker to chunk. If a dictionary
+            is provided, we assume to chunk a single speaker's transcript
+            and turn it into a list of speakers.
         min_sentences: The minimum number of sentences in a chunk. If a text has fewer
             than this number of sentences, it will be added to the output as a single chunk.
 
@@ -33,42 +44,40 @@ def _chunk(transcripts: list[dict] | str, min_sentences: int = 7) -> list[dict[s
         ```python
         [
             {
-                "speaker_index": int,
-                "chunk_index": int,
-                "chunk_topic": str,
-                "text": str
+                "chunks": [
+                    {
+                        "chunk_index": int,
+                        "chunk_topic": str,
+                        "text": str
+                    }
+                ],
+                "chunk_prompt_output": str,
+                "parsed_output": str,
+                "failure": bool,
+                "speaker_index": int
             }
         ]
         ```
     """
-    if isinstance(transcripts, dict):
-        transcripts = [transcripts]
+    if isinstance(speakers, dict):
+        speakers = [speakers]
 
-    chunks: list[dict] = []
-    chunk_index: int = 0
-    for transcript_map in transcripts:
-        transcript_index: int = transcript_map["index"]
-        text: str = transcript_map["text"]
+    chunks: list[ChunkOutput] = []
+    for speaker_map in tqdm(speakers, desc="Chunking Transcript"):
+        speaker_index: int = speaker_map["speaker_index"]
+        if speaker_index == 3:
+            break
+        text: str = speaker_map["text"]
         num_sentences: int = _get_num_sentences(text)
         if num_sentences < min_sentences:
-            chunks.append({
-                "transcript_index": transcript_index,
-                "chunk_index": chunk_index,
-                "chunk_topic": generate_topic(client, text),
-                "chunk": text
-            })
-            chunk_index += 1
-            continue
+            chunk_output = ChunkOutput()
+            chunk_output.add_chunk(text)
+        else:
+            chunk_output: ChunkOutput = chunk_and_parse_output(text)
 
-        chunks_i: list[dict] = chunk_and_parse_output(text)
-        if not chunks_i:
-            print(f"`_chunk`: Error/empty chunking text: {text}")
-            continue
-
-        for chunk_i in chunks_i:
-            chunk_i["transcript_index"] = transcript_index
-        chunk_index += len(chunks_i)
-        chunks.extend(chunks_i)
+        _generate_missing_topics(chunk_output)
+        chunk_output.speaker_index = speaker_index
+        chunks.append(asdict(chunk_output))
 
     return chunks
 
@@ -107,7 +116,6 @@ def parse_transcript(transcript: str) -> list[dict[str, int | str]]:
         speaker: str = match[0].strip()
         text: str = match[1].strip()
         parsed.append({"speaker_index": i, "speaker": speaker, "text": text})
-        print(f"[{i}] {speaker}: {text}", end="\n\n")
 
     return parsed
 
@@ -119,9 +127,9 @@ def get_one_transcript(ticker: str, year: int, quarter: int) -> dict[str, int | 
     {
         "year": int,
         "quarter": int,
-        "transcript": [
+        "speakers": [
             {
-                "index": int,
+                "speaker_index": int,
                 "speaker": str,
                 "text": str
             }
@@ -133,13 +141,15 @@ def get_one_transcript(ticker: str, year: int, quarter: int) -> dict[str, int | 
                     f"ticker={ticker}&year={year}&quarter={quarter}")
     response = requests.get(api_url, headers={'X-Api-Key': 'YOUR_API_KEY'})
     if response.status_code == requests.codes.ok:
+        # it returns an empty list when there is no data
+        # or a dictionary when there is data
         transcript_info: list | dict = json.loads(response.text)
-        if not transcript_info or "transcript" not in transcript_info: # empty list
+        if not transcript_info or "transcript" not in transcript_info:
             return None
         return {
             "year": year,
             "quarter": quarter,
-            "transcript": parse_transcript(transcript_info["transcript"])
+            "speakers": parse_transcript(transcript_info["transcript"])
         }
     else:
         print("Error:", response.status_code, response.text)
@@ -161,9 +171,9 @@ def get_transcripts(
         {
             "year": int,
             "quarter": int,
-            "transcript": [
+            "speakers": [
                 {
-                    "index": int,
+                    "speaker_index": int,
                     "speaker": str,
                     "text": str
                 }
@@ -189,7 +199,7 @@ def get_transcripts(
                     continue
 
                 if chunk_transcripts:
-                    transcript_map["chunking_output"] = _chunk(transcript_map["transcript"])
+                    transcript_map["chunking_output"] = _chunk(transcript_map["speakers"])
                 transcripts.append(transcript_map)
 
             except Exception as e:
@@ -220,13 +230,14 @@ def construct_company_kb(
             {
                 "year": int,
                 "quarter": int,
-                "transcript": [
+                "speakers": [
                     {
-                        "index": int,
+                        "speaker_index": int,
                         "speaker": str,
                         "text": str
                     }
-                ]
+                ],
+                "chunking_output": list[ChunkOutput.__dict__]
             }
         ]
     }

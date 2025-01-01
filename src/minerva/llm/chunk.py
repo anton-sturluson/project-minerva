@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 import re
 
 import yaml
@@ -6,6 +7,27 @@ from minerva.llm.client import Client, AnthropicClient
 from minerva.llm.useful import try_test_prompt
 from minerva.util.env import ANTHROPIC_API_KEY
 from minerva.util.env import TEST_MODE
+
+
+@dataclass
+class ChunkOutput:
+    chunks: list[dict] = field(default_factory=list)
+    chunk_prompt_output: str = ""
+    parsed_output: str = ""
+    failure: bool = False
+    speaker_index: int = -1 # need to be updated by caller
+
+    def add_chunk(self, text: str, topic: str = ""):
+        """Add a chunk to the list."""
+        self.chunks.append({
+            "text": text,
+            "chunk_topic": topic,
+            "chunk_index": len(self.chunks),
+        })
+    
+    def reset_chunks(self):
+        """Reset the chunks list."""
+        self.chunks = []
 
 
 def chunk_prompt(text: str) -> str:
@@ -68,12 +90,19 @@ def chunk_prompt(text: str) -> str:
     """
 
 
-def chunk_text(text: str, client: Client | None = None) -> str:
+def chunk_text(
+    text: str,
+    client: Client | None = None,
+    model_name: str = "claude-3-5-sonnet-latest",
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+) -> str:
     if not client:
         client = AnthropicClient(api_key=ANTHROPIC_API_KEY)
     if TEST_MODE:
         return try_test_prompt(client)
-    return client.get_completion(chunk_prompt(text))
+    return client.get_completion(chunk_prompt(text), model=model_name,
+                                 temperature=temperature, max_tokens=max_tokens)
 
 
 def parse_prompt_output(text: str) -> str | None:
@@ -106,40 +135,32 @@ def chunk_and_parse_output(text: str, client: Client | None = None) -> dict[str,
         In case of failures, the text will be the original text and the 
         chunk topic will be an empty string.
     """
-    output: dict = {
-        "chunks": [
-            {
-                "text": text,
-                "chunk_topic": "",
-                "chunk_index": 0,
-            }
-        ],
-        "chunk_prompt_output": "",
-        "parsed_output": "",
-        "failure": False
-    }
+    output: ChunkOutput = ChunkOutput()
+    output.add_chunk(text)
 
     chunk_output: str = chunk_text(text, client)
-    output["chunk_prompt_output"] = chunk_output
+    output.chunk_prompt_output = chunk_output
 
     parsed_output: str | None = parse_prompt_output(chunk_output)
-    output["parsed_output"] = parsed_output
+    output.parsed_output = parsed_output
 
     if parsed_output is None:
-        output["failure"] = True
-        print(f"`chunk_and_parse_output`: Failed to parse: {chunk_output}")
+        output.failure = True
+        print(f"`chunk_and_parse_output`: Failed to parse prompt output: {chunk_output}")
         return output
 
     try:
         if TEST_MODE:
-            output["chunks"] = parsed_output
+            output.chunks = parsed_output
         else:
             chunks: list[dict] = yaml.safe_load(parsed_output)
-            for i, chunk in enumerate(chunks):
-                chunk["chunk_index"] = i
-            output["chunks"] = chunks
+            output.reset_chunks()
+            for chunk in chunks:
+                output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
+        output.failure = False
         return output
+
     except yaml.YAMLError as e:
         print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
-        output["failure"] = True
+        output.failure = True
         return output
