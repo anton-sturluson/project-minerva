@@ -62,36 +62,40 @@ def init_milvus(
 
 def add_documents(
     db: MilvusVectorDB, 
+    kb: CompanyKB,
     embedding_fn: Callable,
     ticker: str
 ):
     """Add documents in the KB to Milvus Vector Database."""
-    kb = CompanyKB()
     for company_map in tqdm(kb.transcripts.find({"ticker": ticker}), desc="Adding documents"):
-        for transcript_maps in tqdm(company_map["transcripts"], desc="Adding transcripts"):
-            year: int = transcript_maps["year"]
-            quarter: int = transcript_maps["quarter"]
+        for transcript_map in tqdm(company_map["transcripts"], desc="Adding transcripts"):
+            year: int = transcript_map["year"]
+            quarter: int = transcript_map["quarter"]
+            company_name: str = company_map["company_name"]
 
-            # transcript_map: dict[str, int | str]
+            transcript_index_map: dict[int, dict] = {
+                line_map["index"]: line_map
+                for line_map in transcript_map["transcript"]
+            }
             docs: list[str] = []
             metadata: list[dict] = []
-            for transcript_map in transcript_maps["transcript"]:
-                text: str = transcript_map["text"]
-                speaker: str = transcript_map["speaker"]
-                transcript_index: int = transcript_map["index"]
-                # chunk: str
-                for i, chunk in enumerate(transcript_map["chunks"]):
-                    docs.append(chunk)
-                    metadata.append({
-                        "text": chunk,
-                        "ticker": ticker,
-                        "company_name": company_map["company_name"],
-                        "speaker": speaker,
-                        "year": year,
-                        "quarter": quarter,
-                        "transcript_index": transcript_index,
-                        "chunk_index": i
-                    })
+            for chunk_map in transcript_map["chunks"]:
+                transcript_index: int = chunk_map["transcript_index"]
+                transcript_line_map: dict = transcript_index_map.get(transcript_index)
+                if not transcript_line_map:
+                    continue
+
+                docs.append(chunk_map["chunk"])
+                metadata.append({
+                    "text": chunk_map["chunk"],
+                    "ticker": ticker,
+                    "company_name": company_name,
+                    "speaker": transcript_line_map["speaker"],
+                    "year": year,
+                    "quarter": quarter,
+                    "transcript_index": transcript_index,
+                    "chunk_index": chunk_map["chunk_index"]
+                })
 
             db.add_documents(
                 documents=docs,
@@ -105,7 +109,7 @@ def add_documents(
     "--query", type=str, default="", 
     help="Query to search for in the vector database")
 @click.option(
-    "--tickers", type=str, default="AVGO", 
+    "--tickers", type=str, default="all",
     help="Ticker of the companies (separated by comma) to include")
 @click.option(
     "--db-path", type=str, default="../data/milvus_demo.db", 
@@ -118,6 +122,7 @@ def main(query: str, tickers: str, db_path: str, query_save_dir: str):
     if not query:
         raise ValueError("Query is required")
 
+    kb = CompanyKB()
     openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
     embedding_fn: Callable = openai_client.get_embedding
 
@@ -130,6 +135,8 @@ def main(query: str, tickers: str, db_path: str, query_save_dir: str):
             db_path = DEFAULT_DB_PATH
         logger.info("Initializing Milvus Vector Database...")
         db: MilvusVectorDB = init_milvus(db_path=db_path)
+        if tickers == "all":
+            tickers = kb.tickers
         for ticker in tickers.split(","):
             add_documents(db, embedding_fn, ticker.strip())
 
