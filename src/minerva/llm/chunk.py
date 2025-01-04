@@ -76,12 +76,12 @@ def chunk_prompt(text: str) -> str:
     </text_breakdown>
 
     <output>
-    - chunk_topic: Generic Topic 0
-      chunk: Generic text for chunk 0
-    - chunk_topic: Generic Topic 1
-      chunk: Generic text for chunk 1
-    - chunk_topic: Generic Topic 2
-      chunk: Generic text for chunk 2
+    - chunk_topic: Topic 0
+      chunk: Text for chunk 0
+    - chunk_topic: Topic 1
+      chunk: Text for chunk 1
+    - chunk_topic: Topic 2
+      chunk: Text for chunk 2
     </output>
 
     Remember to use only the information provided in the original text, without adding any external knowledge or hallucinated content. Prioritize completeness and coherence of ideas in your chunking.
