@@ -67,7 +67,9 @@ def chunk_prompt(text: str) -> str:
 
     Output Format:
     After your analysis, present each chunk in a YAML-like structure with numbered entries. 
-    Each entry should include a chunk index, chunk topic, the chunk text, and the soure of . Ensure that the chunks collectively cover all the information in the original text without redundancy or hallucination.
+    Each entry should include a chunk index, chunk topic, the chunk text, and the source of the 
+    chunk. Ensure that the chunks collectively cover all the information in the original text 
+    without redundancy or hallucination.
 
     Example output structure (using generic content):
 
@@ -84,7 +86,9 @@ def chunk_prompt(text: str) -> str:
       chunk: Text for chunk 2
     </output>
 
-    Remember to use only the information provided in the original text, without adding any external knowledge or hallucinated content. Prioritize completeness and coherence of ideas in your chunking.
+    Remember to use only the information provided in the original text, without adding 
+    any external knowledge or hallucinated content. Prioritize completeness and coherence 
+    of ideas in your chunking.
 
     Please proceed with your analysis and chunking of the provided text.
     """
