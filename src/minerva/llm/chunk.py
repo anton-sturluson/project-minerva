@@ -97,6 +97,23 @@ def chunk_text(
     temperature: float = 0.3,
     max_tokens: int = 4096,
 ) -> str:
+    """
+    Chunk the given text using the specified LLM client.
+
+    Args:
+        text: The text to chunk.
+        client: The LLM client to use. Defaults to AnthropicClient.
+        model_name: The model to use. Defaults to "claude-3-5-sonnet-latest".
+        temperature: The temperature to use. Defaults to 0.3.
+        max_tokens: The maximum number of tokens to generate. Defaults to 4096.
+
+    Returns:
+        str: The chunked text.
+
+    Raises:
+        Exception: If the LLM fails to chunk the text. Exception
+            depends on the LLM client.
+    """
     if not client:
         client = AnthropicClient(api_key=ANTHROPIC_API_KEY)
     if TEST_MODE:
@@ -106,6 +123,9 @@ def chunk_text(
 
 
 def parse_prompt_output(text: str) -> str | None:
+    """
+    Parse the prompt output to get the chunked text.
+    """
     output_match = re.search(r'<output>(.*?)</output>', text, re.DOTALL)
     if not output_match:
         return None
@@ -138,7 +158,13 @@ def chunk_and_parse_output(text: str, client: Client | None = None) -> dict[str,
     output: ChunkOutput = ChunkOutput()
     output.add_chunk(text)
 
-    chunk_output: str = chunk_text(text, client)
+    try:
+        chunk_output: str = chunk_text(text, client)
+    except Exception as e:
+        print(f"`chunk_and_parse_output`: Error chunking text: {e}")
+        output.failure = True
+        return output
+
     output.chunk_prompt_output = chunk_output
 
     parsed_output: str | None = parse_prompt_output(chunk_output)
