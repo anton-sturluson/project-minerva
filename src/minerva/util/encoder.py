@@ -5,7 +5,7 @@ from json import JSONEncoder
 
 # from bson import json_util
 import numpy as np
-# from pydantic import BaseModel
+from pydantic import BaseModel
 
 
 class FileJSONEncoder(JSONEncoder):
@@ -27,7 +27,7 @@ class FileJSONEncoder(JSONEncoder):
             return o.tolist()
 
         if isinstance(o, BaseModel):
-            # return o.model_dump()
+            return o.model_dump()
 
         if is_dataclass(o):
             return asdict(o, dict_factory=OrderedDict)
