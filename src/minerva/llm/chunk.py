@@ -3,9 +3,9 @@ import re
 
 import yaml
 
-from minerva.llm.client import Client, AnthropicClient
+from minerva.llm.client import Client, AnthropicClient, OpenAIClient
 from minerva.llm.useful import try_test_prompt
-from minerva.util.env import ANTHROPIC_API_KEY
+from minerva.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
 from minerva.util.env import TEST_MODE
 
 
@@ -30,7 +30,9 @@ class ChunkOutput:
         self.chunks = []
 
 
-def chunk_prompt(text: str) -> str:
+# mysteries... why does Claude perform better when it creates its own prompt?
+# similarly, why does GPT perform better when it creates its own prompt?
+def claude_chunk_prompt(text: str) -> str:
     return f"""
     You are an expert system designed to extract and structure data from complex texts. Your task is to analyze the following text and divide it into meaningful chunks of information:
 
@@ -94,10 +96,61 @@ def chunk_prompt(text: str) -> str:
     """
 
 
+def gpt_chunk_prompt(text: str) -> str:
+        return f"""
+    You are an expert system designed to extract and structure data from complex texts. Your task is to analyze the following text and divide it into meaningful chunks of information.
+
+    Here is the text to analyze:
+
+    <text_to_analyze>
+    {text}
+    </text_to_analyze>
+
+    Instructions:
+    1. Read through the entire text carefully.
+    2. Identify key pieces of information, such as facts, metrics (e.g., numbers, percentages), events, and concepts.
+    3. Before you begin chunking, outline your strategy for dividing the text. Describe:
+       - How you will identify key topics and themes
+       - The approach you will take to ensure each chunk is self-contained and coherent
+       - How you will handle overlapping or redundant information
+    4. Create chunks that:
+       - Focus on a single key idea or concept
+       - Contain enough context to be fully understood on their own
+       - Avoid overlap with other chunks
+       - Do not exceed a paragraph in length, but can span multiple sentences if necessary
+    5. Ensure that all content from the original text is included, without redundancy or hallucination. Do not add external knowledge.
+    6. Avoid special characters inappropriate for YAML files, such as ":", "|", and "=".
+
+    Before finalizing the output, wrap your analysis in <text_breakdown> tags:
+    1. Identify and outline the main topics or themes in the text.
+    2. For each topic:
+       - List key information points
+       - Group related information and form initial chunks
+    3. Review your chunks to ensure completeness and coherence, removing overlaps where necessary.
+
+    Output Format:
+    After your analysis, present each chunk in a YAML-like structure with numbered entries:
+    <output>
+    - chunk_topic: Topic 0
+      chunk: Text for chunk 0
+    - chunk_topic: Topic 1
+      chunk: Text for chunk 1
+    - chunk_topic: Topic 2
+      chunk: Text for chunk 2
+    </output>
+
+    **Important**:
+    - Do **not** surround any chunks with double quotations. Chunks should be presented as plain text without any enclosing quotation marks.
+    - Focus on extracting and structuring the information from the original text, and ensure that the chunks are well-formed, without hallucinated content or extraneous quotations.
+
+    Please proceed with your analysis and chunking of the provided text.
+    """
+
+
 def chunk_text(
     text: str,
     client: Client | None = None,
-    model_name: str = "claude-3-5-sonnet-latest",
+    model_name: str = "gpt-4o",
     temperature: float = 0.3,
     max_tokens: int = 4096,
 ) -> str:
@@ -118,11 +171,20 @@ def chunk_text(
         Exception: If the LLM fails to chunk the text. Exception
             depends on the LLM client.
     """
-    if not client:
-        client = AnthropicClient(api_key=ANTHROPIC_API_KEY)
+    if model_name.startswith("claude"):
+        prompt: str = claude_chunk_prompt(text)
+        if not client:
+            client = AnthropicClient(api_key=ANTHROPIC_API_KEY)
+    elif model_name.startswith("gpt"):
+        prompt: str = gpt_chunk_prompt(text)
+        if not client:
+            client = OpenAIClient(api_key=OPENAI_API_KEY)
+    else:
+        raise ValueError(f"Invalid model name: {model_name}")
+    
     if TEST_MODE:
         return try_test_prompt(client)
-    return client.get_completion(chunk_prompt(text), model=model_name,
+    return client.get_completion(prompt, model=model_name,
                                  temperature=temperature, max_tokens=max_tokens)
 
 
