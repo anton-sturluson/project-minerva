@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 from anthropic import Anthropic
 from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 class Client(ABC):
@@ -28,12 +29,21 @@ class Client(ABC):
         """
         raise NotImplementedError
 
+    @staticmethod
+    def retry():
+        return retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=4, max=10),
+            reraise=True
+        )
+
 
 class OpenAIClient(Client):
     """OpenAI client."""
     def __init__(self, api_key: str):
         self.client = OpenAI(api_key=api_key)
 
+    @Client.retry()
     def get_embedding(
         self,
         texts: str | list[str],
@@ -44,6 +54,7 @@ class OpenAIClient(Client):
         out = self.client.embeddings.create(input=texts, model=model)
         return [x.embedding for x in out.data]
 
+    @Client.retry()
     def get_completion(
         self,
         prompt: str,
@@ -65,6 +76,7 @@ class AnthropicClient(Client):
     def __init__(self, api_key: str):
         self.client = Anthropic(api_key=api_key)
 
+    @Client.retry()
     def get_completion(
         self,
         prompt: str,

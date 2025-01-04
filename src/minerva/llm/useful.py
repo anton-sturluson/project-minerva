@@ -22,6 +22,10 @@ def generate_filename(
 
     Returns:
         A file name as a summary of the given text.
+
+    Raises:
+        Exception: If the LLM fails to generate a file name. Exception
+            depends on the LLM client.
     """
     prompt: str = f"""
     Given the following text, generate a concise and clear file name that summarizes the key
@@ -71,6 +75,10 @@ def generate_topic(
 
     Returns:
         A topic as a summary of the given text.
+
+    Raises:
+        Exception: If the LLM fails to generate a topic. Exception
+            depends on the LLM client.
     """
     prompt: str = f"""
         Extract the single most important topic from the text below, using 1-5 words in a clear, concise phrase. 
