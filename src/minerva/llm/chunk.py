@@ -154,7 +154,7 @@ def chunk_text(
     text: str,
     model_name: str = "gpt-4o",
     temperature: float = 0.3,
-    max_tokens: int = 4096,
+    max_tokens: int = 16_384,
 ) -> str:
     """
     Chunk the given text using the specified LLM client.
