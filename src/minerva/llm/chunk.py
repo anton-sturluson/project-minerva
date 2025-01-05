@@ -15,6 +15,7 @@ class ChunkOutput:
     chunk_prompt_output: str = ""
     preprocessed_prompt_output: str = ""
     failure: bool = False
+    error_message: str = ""
     speaker: str = "" # need to be updated by caller
     speaker_index: int = -1 # need to be updated by caller
 
@@ -244,4 +245,5 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
     except yaml.YAMLError as e:
         print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
         output.failure = True
+        output.error_message = str(e)
         return output
