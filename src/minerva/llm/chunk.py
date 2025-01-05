@@ -230,9 +230,6 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
     preprocessed_prompt_output: str = preprocess_prompt_output(chunk_prompt_output)
     output.preprocessed_prompt_output = preprocessed_prompt_output
 
-    # print(chunk_prompt_output)
-    # raise Exception("Stop")
-
     try:
         if TEST_MODE:
             output.chunks = chunk_prompt_output
@@ -245,7 +242,6 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
         return output
 
     except yaml.YAMLError as e:
-        print(preprocessed_prompt_output)
         print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
         output.failure = True
         return output
