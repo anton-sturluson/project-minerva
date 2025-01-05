@@ -200,6 +200,9 @@ def preprocess_prompt_output(text: str) -> str:
     
     # Then, remove any code blocks marked with ```yaml or other code types
     cleaned_text = re.sub(r'```.*?\n(.*?)\n```', r'\1', cleaned_text, flags=re.DOTALL)
+
+    # strip any leading or trailing whitespace
+    cleaned_text = cleaned_text.strip()
     
     return cleaned_text
 
@@ -242,7 +245,12 @@ def _truncate_chunk(text: str) -> str:
         valid_entries.append("\n".join(current_entry))
     
     # Join the valid entries into a single string and return as YAML format
-    return "\n".join(valid_entries) if valid_entries else ""
+    truncated: str = "\n".join(valid_entries) if valid_entries else ""
+
+    # if the truncated text doesn't end in a double quote, add one
+    if not truncated.endswith('"'):
+        truncated += '"'
+    return truncated
 
 
 def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str, dict]:
