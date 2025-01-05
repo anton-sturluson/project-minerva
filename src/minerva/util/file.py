@@ -125,6 +125,16 @@ class File:
             except Exception as e:
                 print("Failed to write JSON file: ", e)
 
+        elif self.path.suffix == ".jsonl":
+            try:
+                with self.path.open("w", encoding=self.encoding) as f:
+                    for line in data:
+                        f.write(json.dumps(line) + "\n")
+                return
+
+            except Exception as e:
+                print("Failed to write JSONL file: ", e)
+
         elif self.path.suffix in [".yaml", ".yml"]:
             try:
                 if isinstance(data, str):
