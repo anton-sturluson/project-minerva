@@ -254,11 +254,14 @@ def main(
         save_requests(kb, output_path, min_sentences, limit, failure_only)
         batch: Batch = _send_batch(client, output_path)
 
-        while batch.status != "completed":
+        while batch.status not in ["completed", "failed"]:
             print(f"`main`: batch status: {batch.status}. Sleeping for {SLEEP_TIME} seconds...")
             time.sleep(SLEEP_TIME)
             batch: Batch = _get_batch(client, batch.id)
-        print(f"`main`: batch successful: {batch.id}")
+        print(f"`main`: batch status: {batch.status}")
+        if batch.status == "failed":
+            print(f"`main`: batch failed: {batch.error}")
+            return
         file_id: str = batch.output_file_id
 
     print(f"`main`: ingesting batch results: {file_id}...")
