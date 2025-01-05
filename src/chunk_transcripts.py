@@ -122,9 +122,7 @@ def save_requests(
         limit: The number of transcripts to process.
         failure_only: Whether to only include transcripts that failed to chunk.
     """
-    # FIXME: debugging stuff
-    query = {"ticker": "NVDA"}
-    cursor = kb.transcripts.find(query)
+    cursor = kb.transcripts.find()
     if limit > 0:
         cursor = cursor.limit(limit)
 
@@ -220,10 +218,7 @@ def _ingest_one_transcript(ticker: str, transcript_map: dict, content_map: dict)
 
 def ingest(client: OpenAIClient, kb: CompanyKB, file_id: str):
     content_map: dict[str, dict] = _load_file(client, file_id)
-    # FIXME: debugging stuff
-    query = {"ticker": "NVDA"}
-
-    for company_map in kb.transcripts.find(query):
+    for company_map in kb.transcripts.find():
         ticker: str = company_map["ticker"]
         print("Ticker:", ticker)
         transcripts: list[dict] = company_map.get("transcripts", [])
