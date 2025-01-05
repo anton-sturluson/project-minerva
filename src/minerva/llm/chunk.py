@@ -289,7 +289,9 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
             chunks: list[dict] = yaml.safe_load(preprocessed_prompt_output)
             output.reset_chunks()
             for chunk in chunks:
-                output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
+                # chunk can be a None
+                if isinstance(chunk, dict):
+                    output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
         output.failure = False
         return output
     except yaml.YAMLError as e:
@@ -310,5 +312,5 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
             output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
     except yaml.YAMLError as e:
         output.truncation_error_message = str(e)
-        print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
+        print(f"`chunk_and_parse_output`: Failed with truncation: {e}")
     return output
