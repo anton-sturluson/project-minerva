@@ -129,7 +129,6 @@ def save_requests(
     requests: list[dict] = []
     for company_map in cursor:
         ticker: str = company_map["ticker"]
-        print("Ticker:", ticker)
         for transcript_map in company_map.get("transcripts", []):
             requests.extend(_get_requests_from_one_transcript(
                 ticker, transcript_map, failure_only, min_sentences))
@@ -220,7 +219,7 @@ def ingest(client: OpenAIClient, kb: CompanyKB, file_id: str):
     content_map: dict[str, dict] = _load_file(client, file_id)
     for company_map in kb.transcripts.find():
         ticker: str = company_map["ticker"]
-        print("Ticker:", ticker)
+        print(f"`ingest`: Ticker: {ticker}")
         transcripts: list[dict] = company_map.get("transcripts", [])
         for transcript_map in tqdm(transcripts, desc="Processing transcripts"):
             transcript_map["chunking_output"] = _ingest_one_transcript(
