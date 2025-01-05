@@ -1,10 +1,18 @@
-from minerva.llm.client import Client
+from .client import Client, AnthropicClient, OpenAIClient
+from minerva.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
+
+
+def _init_client(model_name: str) -> Client:
+    """Initialize the client for the given model name."""
+    if model_name.startswith("claude"):
+        return AnthropicClient(ANTHROPIC_API_KEY)
+    else:
+        return OpenAIClient(OPENAI_API_KEY)
 
 
 def generate_filename(
-    client: Client, 
     text: str, 
-    model_name: str = "claude-3-5-sonnet-latest",
+    model_name: str = "claude-3-5-haiku-latest",
     temperature: float = 0.3,
     max_tokens: int = 4096,
     ext: str = ".yml"
@@ -13,7 +21,6 @@ def generate_filename(
     Generate a file name as a summary of the given text.
 
     Args:
-        client: Client
         text: str
         model_name: str = "claude-3-5-sonnet-latest"
         temperature: float = 0.3
@@ -46,6 +53,7 @@ def generate_filename(
     Text:
     "{text}"
     """
+    client: Client = _init_client(model_name)
     name: str = client.get_completion(prompt, model=model_name, 
                                       temperature=temperature, max_tokens=max_tokens)
     return name + ext
@@ -57,7 +65,6 @@ def try_test_prompt(client: Client) -> str:
 
 
 def generate_topic(
-    client: Client, 
     text: str, 
     model_name: str = "claude-3-5-haiku-latest",
     temperature: float = 0.3,
@@ -67,7 +74,6 @@ def generate_topic(
     Generate a topic as a summary of the given text.
 
     Args:
-        client: Client
         text: str
         model_name: str = "claude-3-5-sonnet-latest"
         temperature: float = 0.3
@@ -96,5 +102,6 @@ def generate_topic(
         Output: Generic Topic
         </Example>
     """
+    client: Client = _init_client(model_name)
     return client.get_completion(prompt, model=model_name, 
                                  temperature=temperature, max_tokens=max_tokens)
