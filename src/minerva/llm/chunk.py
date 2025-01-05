@@ -3,9 +3,9 @@ import re
 
 import yaml
 
-from minerva.llm.client import Client, AnthropicClient
+from minerva.llm.client import Client, AnthropicClient, OpenAIClient
 from minerva.llm.useful import try_test_prompt
-from minerva.util.env import ANTHROPIC_API_KEY
+from minerva.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
 from minerva.util.env import TEST_MODE
 
 
@@ -13,8 +13,12 @@ from minerva.util.env import TEST_MODE
 class ChunkOutput:
     chunks: list[dict] = field(default_factory=list)
     chunk_prompt_output: str = ""
-    parsed_output: str = ""
+    preprocessed_prompt_output: str = ""
+    truncated_prompt_output: str = ""
     failure: bool = False
+    error_message: str = ""
+    truncation_error_message: str = ""
+    speaker: str = "" # need to be updated by caller
     speaker_index: int = -1 # need to be updated by caller
 
     def add_chunk(self, text: str, topic: str = ""):
@@ -29,8 +33,18 @@ class ChunkOutput:
         """Reset the chunks list."""
         self.chunks = []
 
+    def _preprocess_text(self, text: str) -> str:
+        """Preprocess the text to remove special characters."""
+        if text.startswith(("'", '"', '“', '”')):
+            text = text[1:]
+        if text.endswith(("'", '"', '“', '”')):
+            text = text[:-1]
+        return text
 
-def chunk_prompt(text: str) -> str:
+
+# mysteries... why does Claude perform better when it creates its own prompt?
+# similarly, why does GPT perform better when it creates its own prompt?
+def claude_chunk_prompt(text: str) -> str:
     return f"""
     You are an expert system designed to extract and structure data from complex texts. Your task is to analyze the following text and divide it into meaningful chunks of information:
 
@@ -67,7 +81,9 @@ def chunk_prompt(text: str) -> str:
 
     Output Format:
     After your analysis, present each chunk in a YAML-like structure with numbered entries. 
-    Each entry should include a chunk index, chunk topic, the chunk text, and the soure of . Ensure that the chunks collectively cover all the information in the original text without redundancy or hallucination.
+    Each entry should include a chunk index, chunk topic, the chunk text, and the source of the 
+    chunk. Ensure that the chunks collectively cover all the information in the original text 
+    without redundancy or hallucination.
 
     Example output structure (using generic content):
 
@@ -76,15 +92,62 @@ def chunk_prompt(text: str) -> str:
     </text_breakdown>
 
     <output>
-    - chunk_topic: Generic Topic 0
-      chunk: Generic text for chunk 0
-    - chunk_topic: Generic Topic 1
-      chunk: Generic text for chunk 1
-    - chunk_topic: Generic Topic 2
-      chunk: Generic text for chunk 2
+    - chunk_topic: Topic 0
+      chunk: Text for chunk 0
+    - chunk_topic: Topic 1
+      chunk: Text for chunk 1
+    - chunk_topic: Topic 2
+      chunk: Text for chunk 2
     </output>
 
-    Remember to use only the information provided in the original text, without adding any external knowledge or hallucinated content. Prioritize completeness and coherence of ideas in your chunking.
+    Remember to use only the information provided in the original text, without adding 
+    any external knowledge or hallucinated content. Prioritize completeness and coherence 
+    of ideas in your chunking.
+
+    Please proceed with your analysis and chunking of the provided text.
+    """
+
+
+def gpt_chunk_prompt(text: str) -> str:
+    return f"""
+    You are an expert system designed to extract and structure data from complex texts. Your task is to analyze the following text and divide it into meaningful chunks of information.
+
+    Here is the text to analyze:
+
+    <text_to_analyze>
+    {text}
+    </text_to_analyze>
+
+    Instructions:
+    1. Read through the entire text carefully.
+    2. **Create chunks**:
+        - Do not alter the original text. Present as is.
+       - Each chunk should focus on one key idea, fact, metric, event, or concept.
+       - If necessary, a chunk may span multiple sentences or even a paragraph to maintain coherence.
+       - Ensure all content from the original text is captured, without redundancy or hallucination.
+    3. **Review your chunks**:
+       - After creating the chunks, review them to ensure completeness and coherence.
+       - Resolve any overlaps between chunks and ensure no information is missing.
+       - If a chunk is too general or lacks specific content, assign it the topic `"Generic Topic"`.
+
+    Output Format:
+    After your analysis and chunking, present each chunk in the following YAML-like structure. 
+    The output should be compatible with YAML. 
+    **DO NOT** start or end with special characters like '```' or '```yaml' or '<output>' or '</output>'.
+
+    <output>
+    - chunk_topic: "Generic Topic"
+      chunk: "Text for generic chunk if content is lacking or overly broad"
+    - chunk_topic: "Specific Topic"
+      chunk: "Text for chunk with more specific content"
+    </output>
+
+    **Important**: 
+    1. Enclose each `chunk` in double quotations to ensure YAML compatibility. 
+        This will prevent issues with special characters during YAML decoding.
+    2. Ensure proper indentation for YAML files:
+       - The `-` character for each chunk should align at the same level of indentation.
+       - The `chunk_topic` and `chunk` should be indented by 2 spaces beneath the `-`.
 
     Please proceed with your analysis and chunking of the provided text.
     """
@@ -92,10 +155,9 @@ def chunk_prompt(text: str) -> str:
 
 def chunk_text(
     text: str,
-    client: Client | None = None,
-    model_name: str = "claude-3-5-sonnet-latest",
+    model_name: str = "gpt-4o",
     temperature: float = 0.3,
-    max_tokens: int = 4096,
+    max_tokens: int = 16_384,
 ) -> str:
     """
     Chunk the given text using the specified LLM client.
@@ -114,27 +176,86 @@ def chunk_text(
         Exception: If the LLM fails to chunk the text. Exception
             depends on the LLM client.
     """
-    if not client:
+    if model_name.startswith("claude"):
+        prompt: str = claude_chunk_prompt(text)
         client = AnthropicClient(api_key=ANTHROPIC_API_KEY)
+    elif model_name.startswith("gpt"):
+        prompt: str = gpt_chunk_prompt(text)
+        client = OpenAIClient(api_key=OPENAI_API_KEY)
+    else:
+        raise ValueError(f"Invalid model name: {model_name}")
+    
     if TEST_MODE:
         return try_test_prompt(client)
-    return client.get_completion(chunk_prompt(text), model=model_name,
+    return client.get_completion(prompt, model=model_name,
                                  temperature=temperature, max_tokens=max_tokens)
 
 
-def parse_prompt_output(text: str) -> str | None:
+def preprocess_prompt_output(text: str) -> str:
     """
-    Parse the prompt output to get the chunked text.
+    Preprocess the prompt output to get the chunked text.
     """
-    output_match = re.search(r'<output>(.*?)</output>', text, re.DOTALL)
-    if not output_match:
-        return None
-    return output_match.group(1)
+    # First, remove the <output> and </output> tags
+    cleaned_text: str = re.sub(r'<output>\s*|\s*</output>', '', text)
+    
+    # Then, remove any code blocks marked with ```yaml or other code types
+    cleaned_text = re.sub(r'```.*?\n(.*?)(?=\n```|$)', r'\1', cleaned_text, flags=re.DOTALL)
+
+    # strip any leading or trailing whitespace
+    cleaned_text = cleaned_text.strip()
+    
+    return cleaned_text
 
 
-def chunk_and_parse_output(text: str, client: Client | None = None) -> dict[str, dict]:
+def _truncate_chunk(text: str) -> str:
     """
-    Chunk the given text and parse the output into a list of chunks.
+    Sometimes the prompt output has an invalid output. For example, this is an 
+    invalid output:
+
+    ```output
+    - chunk_topic: "Gross Margin Expectations"
+      chunk: "GAAP and non-GAAP gross margins are expected to be 74.8% and 75.5%, respectively, plus or minus 50 basis points, consistent with our discussion last quarter. For the full year, we expect gross margins to be in the mid-70s percent range."
+
+    - chunk_topic: "Operating Expenses
+    ```
+    This can be made valid by truncating the last line.
+    """
+    # Initialize a list to hold valid entries
+    valid_entries = []
+    # Temporary holder for a chunk
+    current_entry = []
+    
+    # Iterate over each line in the input text
+    for line in text.strip().split("\n"):
+        if not line:
+            continue
+        # Check for the start of a new chunk_topic
+        if line.startswith('- chunk_topic'):
+            # If we have a previous entry and it is complete, add it to valid_entries
+            if current_entry and 'chunk:' in current_entry[-1]:
+                valid_entries.append("\n".join(current_entry))
+            # Reset current_entry for the new chunk
+            current_entry = [line]
+        else:
+            # Continue adding lines to the current chunk
+            current_entry.append(line)
+    
+    # Check the last chunk if it was complete
+    if current_entry and 'chunk:' in current_entry[-1]:
+        valid_entries.append("\n".join(current_entry))
+    
+    # Join the valid entries into a single string and return as YAML format
+    truncated: str = "\n".join(valid_entries) if valid_entries else ""
+
+    # if the truncated text doesn't end in a double quote, add one
+    if not truncated.endswith('"'):
+        truncated += '"'
+    return truncated
+
+
+def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str, dict]:
+    """
+    Parse the given text into a list of chunks.
 
     Returns:
         A dictionary with the following structure:
@@ -148,7 +269,6 @@ def chunk_and_parse_output(text: str, client: Client | None = None) -> dict[str,
                 }
             ],
             "chunk_prompt_output": str # the prompt output of the chunking process
-            "parsed_output": str # parsing-attempted output from the chunk prompt output
             "failure": bool # whether the chunking process failed
         }
         ```
@@ -156,37 +276,41 @@ def chunk_and_parse_output(text: str, client: Client | None = None) -> dict[str,
         chunk topic will be an empty string.
     """
     output: ChunkOutput = ChunkOutput()
-    output.add_chunk(text)
+    output.add_chunk(original_text)
+    output.chunk_prompt_output = chunk_prompt_output
 
-    try:
-        chunk_output: str = chunk_text(text, client)
-    except Exception as e:
-        print(f"`chunk_and_parse_output`: Error chunking text: {e}")
-        output.failure = True
-        return output
-
-    output.chunk_prompt_output = chunk_output
-
-    parsed_output: str | None = parse_prompt_output(chunk_output)
-    output.parsed_output = parsed_output
-
-    if parsed_output is None:
-        output.failure = True
-        print(f"`chunk_and_parse_output`: Failed to parse prompt output: {chunk_output}")
-        return output
+    preprocessed_prompt_output: str = preprocess_prompt_output(chunk_prompt_output)
+    output.preprocessed_prompt_output = preprocessed_prompt_output
 
     try:
         if TEST_MODE:
-            output.chunks = parsed_output
+            output.chunks = chunk_prompt_output
         else:
-            chunks: list[dict] = yaml.safe_load(parsed_output)
+            chunks: list[dict] = yaml.safe_load(preprocessed_prompt_output)
             output.reset_chunks()
             for chunk in chunks:
-                output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
+                # chunk can be a None
+                if isinstance(chunk, dict):
+                    output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
         output.failure = False
         return output
-
     except yaml.YAMLError as e:
-        print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
-        output.failure = True
-        return output
+        # this is a faiilure even if it works with truncation since
+        # information is lost
+        output.failure = True 
+        output.error_message = str(e)
+        print(f"`chunk_and_parse_output`: Error loading YAML. Retrying with truncation: {e}")
+
+    # attempt to fix by truncating the last line
+    truncated_prompt_output: str = _truncate_chunk(chunk_prompt_output)
+    output.truncated_prompt_output = truncated_prompt_output
+
+    try:
+        chunks: list[dict] = yaml.safe_load(truncated_prompt_output)
+        output.reset_chunks()
+        for chunk in chunks:
+            output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
+    except yaml.YAMLError as e:
+        output.truncation_error_message = str(e)
+        print(f"`chunk_and_parse_output`: Failed with truncation: {e}")
+    return output

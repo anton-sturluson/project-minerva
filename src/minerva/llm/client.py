@@ -70,6 +70,14 @@ class OpenAIClient(Client):
         )
         return out.choices[0].message.content
 
+    @property
+    def batches(self):
+        return self.client.batches
+
+    @property
+    def files(self):
+        return self.client.files
+
 
 class AnthropicClient(Client):
     """Anthropic client."""
