@@ -196,10 +196,10 @@ def preprocess_prompt_output(text: str) -> str:
     Preprocess the prompt output to get the chunked text.
     """
     # First, remove the <output> and </output> tags
-    cleaned_text = re.sub(r'<output>\s*|\s*</output>', '', text)
+    cleaned_text: str = re.sub(r'<output>\s*|\s*</output>', '', text)
     
     # Then, remove any code blocks marked with ```yaml or other code types
-    cleaned_text = re.sub(r'```.*?\n(.*?)\n```', r'\1', cleaned_text, flags=re.DOTALL)
+    cleaned_text = re.sub(r'```.*?\n(.*?)(?=\n```|$)', r'\1', cleaned_text, flags=re.DOTALL)
 
     # strip any leading or trailing whitespace
     cleaned_text = cleaned_text.strip()
@@ -297,6 +297,7 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
         # information is lost
         output.failure = True 
         output.error_message = str(e)
+        print(f"`chunk_and_parse_output`: Error loading YAML. Retrying with truncation: {e}")
 
     # attempt to fix by truncating the last line
     truncated_prompt_output: str = _truncate_chunk(chunk_prompt_output)
