@@ -74,7 +74,7 @@ def save_requests(
     for company_map in cursor:
         ticker: str = company_map["ticker"]
         print("Ticker:", ticker)
-        for i, transcript_map in enumerate(company_map.get("transcripts", [])):
+        for transcript_map in company_map.get("transcripts", []):
             year: int = transcript_map["year"]
             quarter: int = transcript_map["quarter"]
             for speaker_map in transcript_map["speakers"]:
@@ -87,8 +87,6 @@ def save_requests(
                                                   speaker_map["speaker_index"])
                 prompt: str = gpt_chunk_prompt(speaker_map["text"])
                 requests.append(_get_request(request_id, prompt))
-            if i == 0:
-                break
 
     if output_file_path:
         File(output_file_path).save(requests)
@@ -163,7 +161,6 @@ def ingest(client: OpenAIClient, kb: CompanyKB, file_id: str):
                 chunk_output.speaker_index = speaker_index
                 _generate_missing_topics(chunk_output)
                 transcript_map["chunking_output"].append(asdict(chunk_output))
-            break
 
         kb.add_transcripts(ticker, transcripts)
 
