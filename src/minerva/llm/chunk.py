@@ -14,8 +14,10 @@ class ChunkOutput:
     chunks: list[dict] = field(default_factory=list)
     chunk_prompt_output: str = ""
     preprocessed_prompt_output: str = ""
+    truncated_prompt_output: str = ""
     failure: bool = False
     error_message: str = ""
+    truncation_error_message: str = ""
     speaker: str = "" # need to be updated by caller
     speaker_index: int = -1 # need to be updated by caller
 
@@ -202,6 +204,47 @@ def preprocess_prompt_output(text: str) -> str:
     return cleaned_text
 
 
+def _truncate_chunk(text: str) -> str:
+    """
+    Sometimes the prompt output has an invalid output. For example, this is an 
+    invalid output:
+
+    ```output
+    - chunk_topic: "Gross Margin Expectations"
+      chunk: "GAAP and non-GAAP gross margins are expected to be 74.8% and 75.5%, respectively, plus or minus 50 basis points, consistent with our discussion last quarter. For the full year, we expect gross margins to be in the mid-70s percent range."
+
+    - chunk_topic: "Operating Expenses
+    ```
+    This can be made valid by truncating the last line.
+    """
+    # Initialize a list to hold valid entries
+    valid_entries = []
+    # Temporary holder for a chunk
+    current_entry = []
+    
+    # Iterate over each line in the input text
+    for line in text.strip().split("\n"):
+        if not line:
+            continue
+        # Check for the start of a new chunk_topic
+        if line.startswith('- chunk_topic'):
+            # If we have a previous entry and it is complete, add it to valid_entries
+            if current_entry and 'chunk:' in current_entry[-1]:
+                valid_entries.append("\n".join(current_entry))
+            # Reset current_entry for the new chunk
+            current_entry = [line]
+        else:
+            # Continue adding lines to the current chunk
+            current_entry.append(line)
+    
+    # Check the last chunk if it was complete
+    if current_entry and 'chunk:' in current_entry[-1]:
+        valid_entries.append("\n".join(current_entry))
+    
+    # Join the valid entries into a single string and return as YAML format
+    return "\n".join(valid_entries) if valid_entries else ""
+
+
 def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str, dict]:
     """
     Parse the given text into a list of chunks.
@@ -241,9 +284,22 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
                 output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
         output.failure = False
         return output
-
     except yaml.YAMLError as e:
-        print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
-        output.failure = True
+        # this is a faiilure even if it works with truncation since
+        # information is lost
+        output.failure = True 
         output.error_message = str(e)
-        return output
+
+    # attempt to fix by truncating the last line
+    truncated_prompt_output: str = _truncate_chunk(chunk_prompt_output)
+    output.truncated_prompt_output = truncated_prompt_output
+
+    try:
+        chunks: list[dict] = yaml.safe_load(truncated_prompt_output)
+        output.reset_chunks()
+        for chunk in chunks:
+            output.add_chunk(chunk["chunk"], chunk["chunk_topic"])
+    except yaml.YAMLError as e:
+        output.truncation_error_message = str(e)
+        print(f"`chunk_and_parse_output`: Error loading YAML: {e}")
+    return output
