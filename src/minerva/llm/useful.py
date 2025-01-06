@@ -41,10 +41,10 @@ def generate_filename(
     """
     prompt: str = f"""
     Given the following text, generate a concise and clear file name that summarizes the key
-    content in a format appropriate for saving as a file. The file name should be brief, avoid
-    special characters (except hyphens or underscores), and reflect the primary topic or
-    purpose of the text. It should be clear and recognizable, such that someone can infer the
-    content of the file without opening it.
+    content in a format appropriate for saving as a file. The file name should be brief, **no
+    more than 7 words**, avoid special characters (except hyphens or underscores),
+    and reflect the primary topic or purpose of the text. It should be clear and recognizable,
+    such that someone can infer the content of the file without opening it.
 
     <Example>
     Example Input:
@@ -92,8 +92,9 @@ def generate_topic(
             depends on the LLM client.
     """
     prompt: str = f"""
-        Extract the single most important topic from the text below, using 1-5 words in a clear, concise phrase.
-        If the text lacks any substantive topic or meaningful content, output exactly 'Generic Topic':
+        Extract the single most important topic from the text below, using **1-5 words**
+        in a clear, concise phrase. If the text lacks any substantive topic or meaningful content,
+        output exactly 'Generic Topic':
 
         <Text>
         {text}
