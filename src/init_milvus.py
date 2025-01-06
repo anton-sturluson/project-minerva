@@ -61,7 +61,7 @@ def _init(
 
 
 def _get_text_to_embed(company: str, topic: str, text: str, speaker: str) -> str:
-    return f"[company={company}, topic={topic}, speaker={speaker}] {text}"
+    return f"- company: {company}\n- topic: {topic}\n- speaker: {speaker}\n- text: {text}"
 
 
 def add_documents(
@@ -151,13 +151,13 @@ def main(force_init: bool, query: str, tickers: str, db_path: str, query_save_di
     if query:
         output_fields: list[str] = [
             "company_name", "year", "quarter", "text",
-            "speaker_index", "chunk_index", "text"]
+            "speaker", "speaker_index", "chunk_index", "text"]
         res: list[list[dict]] = db.search(
             queries=query,
             embedding_fn=embedding_fn,
             # filter=f"ticker == '{ticker}'",
             output_fields=output_fields,
-            limit=20,
+            limit=50,
         )
         file_name: str = llm.generate_filename(query, ext=".yml")
         file_path: File = File(query_save_dir) / file_name
