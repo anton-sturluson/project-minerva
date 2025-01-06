@@ -149,8 +149,9 @@ def main(force_init: bool, query: str, tickers: str, db_path: str, query_save_di
             add_documents(db, kb, embedding_fn, ticker)
 
     if query:
-        output_fields: list[str] = ["text", "speaker", "year", "quarter",
-                                    "speaker_index", "chunk_index"]
+        output_fields: list[str] = [
+            "company_name", "year", "quarter", "text",
+            "speaker_index", "chunk_index", "text"]
         res: list[list[dict]] = db.search(
             queries=query,
             embedding_fn=embedding_fn,
