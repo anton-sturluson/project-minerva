@@ -19,8 +19,8 @@ class MilvusVectorDB:
         )
 
     def add_documents(
-        self, 
-        documents: list[str], 
+        self,
+        documents: list[str],
         metadata: list[dict],
         embedding_fn: Callable
     ):
@@ -38,8 +38,8 @@ class MilvusVectorDB:
         self.client.insert(collection_name=self.collection_name, data=data)
 
     def search(
-        self, 
-        queries: str | list[str], 
+        self,
+        queries: str | list[str],
         embedding_fn: Callable,
         output_fields: list[str],
         filter: str = "",
