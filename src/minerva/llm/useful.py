@@ -10,8 +10,13 @@ def _init_client(model_name: str) -> Client:
         return OpenAIClient(OPENAI_API_KEY)
 
 
+def _preprocess(text: str) -> str:
+    """Strip single or double quotes from the text."""
+    return text.replace('"', "").replace("'", "")
+
+
 def generate_filename(
-    text: str, 
+    text: str,
     model_name: str = "claude-3-5-haiku-latest",
     temperature: float = 0.3,
     max_tokens: int = 4096,
@@ -54,9 +59,9 @@ def generate_filename(
     "{text}"
     """
     client: Client = _init_client(model_name)
-    name: str = client.get_completion(prompt, model=model_name, 
+    name: str = client.get_completion(prompt, model=model_name,
                                       temperature=temperature, max_tokens=max_tokens)
-    return name + ext
+    return _preprocess(name + ext)
 
 
 def try_test_prompt(client: Client) -> str:
@@ -65,7 +70,7 @@ def try_test_prompt(client: Client) -> str:
 
 
 def generate_topic(
-    text: str, 
+    text: str,
     model_name: str = "claude-3-5-haiku-latest",
     temperature: float = 0.3,
     max_tokens: int = 4096,
@@ -87,9 +92,9 @@ def generate_topic(
             depends on the LLM client.
     """
     prompt: str = f"""
-        Extract the single most important topic from the text below, using 1-5 words in a clear, concise phrase. 
+        Extract the single most important topic from the text below, using 1-5 words in a clear, concise phrase.
         If the text lacks any substantive topic or meaningful content, output exactly 'Generic Topic':
-        
+
         <Text>
         {text}
         </Text>
@@ -97,11 +102,12 @@ def generate_topic(
         <Example>
         Example with topic: "The rapid advancement of artificial intelligence has led to breakthroughs in healthcare diagnostics."
         Output: AI healthcare diagnostics
-        
+
         Example without topic: "Things happened and stuff occurred in places with people."
         Output: Generic Topic
         </Example>
     """
     client: Client = _init_client(model_name)
-    return client.get_completion(prompt, model=model_name, 
-                                 temperature=temperature, max_tokens=max_tokens)
+    output: str = client.get_completion(prompt, model=model_name,
+                                        temperature=temperature, max_tokens=max_tokens)
+    return _preprocess(output)
