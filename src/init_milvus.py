@@ -159,10 +159,11 @@ def main(force_init: bool, query: str, tickers: str, db_path: str, query_save_di
             output_fields=output_fields,
             limit=50,
         )
+        res = res[0][::-1] # FIXME
         file_name: str = llm.generate_filename(query, ext=".yml")
         file_path: File = File(query_save_dir) / file_name
         logging.info("Saving query results to %s...", file_path)
-        file_path.save(res[0])
+        file_path.save(res)
 
 
 if __name__ == "__main__":
