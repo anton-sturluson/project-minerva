@@ -108,6 +108,7 @@ def _get_requests_from_one_transcript(
 def save_requests(
     kb: CompanyKB, 
     output_path: str,
+    tickers: list[str] | None = None,
     min_sentences: int = 6,
     limit: int = -1,
     failure_only: bool = False
@@ -118,11 +119,15 @@ def save_requests(
     Args:
         kb: The KB to save the requests for.
         output_path: The path to save the requests.
+        tickers: The tickers to process.
         min_sentences: The minimum number of sentences required for chunking.
         limit: The number of transcripts to process.
         failure_only: Whether to only include transcripts that failed to chunk.
     """
-    cursor = kb.transcripts.find()
+    query = {}
+    if tickers:
+        query = {"ticker": {"$in": tickers}}
+    cursor = kb.transcripts.find(query)
     if limit > 0:
         cursor = cursor.limit(limit)
 
@@ -215,9 +220,20 @@ def _ingest_one_transcript(ticker: str, transcript_map: dict, content_map: dict)
     return chunking_output
 
 
-def ingest(client: OpenAIClient, kb: CompanyKB, file_id: str):
+def ingest(
+    client: OpenAIClient, 
+    kb: CompanyKB, 
+    file_id: str, 
+    tickers: list[str] | None = None
+):
     content_map: dict[str, dict] = _load_file(client, file_id)
-    for company_map in kb.transcripts.find():
+
+    query = {}
+    if tickers:
+        query = {"ticker": {"$in": tickers}}
+    cursor = kb.transcripts.find(query)
+
+    for company_map in cursor:
         ticker: str = company_map["ticker"]
         print(f"`ingest`: Ticker: {ticker}")
         transcripts: list[dict] = company_map.get("transcripts", [])
@@ -240,18 +256,25 @@ def ingest(client: OpenAIClient, kb: CompanyKB, file_id: str):
               help="The file ID of the batch results to ingest.")
 @click.option("--failure-only", is_flag=True, show_default=True,
               help="Only ingest transcripts that failed to chunk.")
+@click.option("--tickers", type=str, default="all", show_default=True,
+              help="The tickers to process (separated by comma).")
 def main(
     min_sentences: int, 
     output_path: str, 
     limit: int, 
     file_id: str,
-    failure_only: bool
+    failure_only: bool,
+    tickers: str
 ):
     client = OpenAIClient(api_key=OPENAI_API_KEY)
     kb = CompanyKB()
 
+    _tickers: list[str] | None = None
+    if tickers != "all":
+        _tickers = tickers.split(",")
+
     if not file_id:
-        save_requests(kb, output_path, min_sentences, limit, failure_only)
+        save_requests(kb, output_path, _tickers, min_sentences, limit, failure_only)
         batch: Batch = _send_batch(client, output_path)
 
         while batch.status not in ["completed", "failed"]:
@@ -265,7 +288,7 @@ def main(
         file_id: str = batch.output_file_id
 
     print(f"`main`: ingesting batch results: {file_id}...")
-    ingest(client, kb, file_id)
+    ingest(client, kb, file_id, _tickers)
     print("`main`: ingesting finished...")
 
 
