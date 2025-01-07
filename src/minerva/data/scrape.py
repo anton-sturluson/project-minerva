@@ -114,6 +114,7 @@ def get_transcripts(
         start_quarter: The start quarter to get transcripts.
         end_quarter: The end quarter to get transcripts.
     """
+    print("`get_transcripts`: Ticker:", ticker)
     transcripts: list[dict[str, int | str]] = []
     for year in tqdm(range(start_year, end_year + 1), desc="Years"):
         for quarter in tqdm(range(start_quarter, end_quarter + 1), desc="Quarters"):
