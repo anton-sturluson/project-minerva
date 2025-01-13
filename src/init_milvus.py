@@ -60,8 +60,22 @@ def _init(
     return db
 
 
-def _get_text_to_embed(company: str, topic: str, text: str, speaker: str) -> str:
-    return f"- company: {company}\n- topic: {topic}\n- speaker: {speaker}\n- text: {text}"
+def _get_text_to_embed(
+    ticker: str,
+    company: str, 
+    speaker: str,
+    fiscal_year: int,
+    quarter: int,
+    topic: str, 
+    text: str
+) -> str:
+    """
+    Transform transcript into a format to embed into Milvus.
+    """
+    company_info: str = f"company: {company} (ticker: {ticker})"
+    fiscal_info: str = f"FY{fiscal_year} Q{quarter}"
+    speaker_info: str = f"speaker: {speaker}, topic: {topic}"
+    return f"[{company_info}, {fiscal_info}, {speaker_info}]\n{text}"
 
 
 def add_documents(
@@ -89,7 +103,8 @@ def add_documents(
                     if not text:
                         continue
 
-                    embed_text: str = _get_text_to_embed(company_name, topic, text, speaker)
+                    embed_text: str = _get_text_to_embed(
+                        ticker, company_name, speaker, year, quarter, topic, text)
                     docs.append(embed_text)
                     metadata.append({
                         "text": embed_text,
@@ -141,7 +156,7 @@ def main(force_init: bool, query: str, tickers: str, db_path: str, query_save_di
         logger.info("Initializing Milvus Vector Database...")
         db: MilvusVectorDB = _init(db_path=db_path)
         if tickers == "all":
-            tickers = kb.tickers
+            tickers = kb.unique_tickers
         else:
             tickers = tickers.split(",")
 
