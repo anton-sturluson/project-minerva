@@ -87,8 +87,7 @@ def get_transcripts(
     start_year: int, 
     end_year: int,
     start_quarter: int,
-    end_quarter: int,
-    chunk_transcripts: bool = False
+    end_quarter: int
 ) -> list[dict[str, int | str]]:
     """
     Get the transcripts for a given ticker, start year, and end year, in the format of
@@ -114,8 +113,8 @@ def get_transcripts(
         end_year: The end year to get transcripts.
         start_quarter: The start quarter to get transcripts.
         end_quarter: The end quarter to get transcripts.
-        chunk_transcripts: Whether to chunk the transcripts into smaller chunks.
     """
+    print("`get_transcripts`: Ticker:", ticker)
     transcripts: list[dict[str, int | str]] = []
     for year in tqdm(range(start_year, end_year + 1), desc="Years"):
         for quarter in tqdm(range(start_quarter, end_quarter + 1), desc="Quarters"):
@@ -123,9 +122,6 @@ def get_transcripts(
                 transcript_map: dict[str, int | str] | None = get_one_transcript(ticker, year, quarter)
                 if not transcript_map:
                     continue
-
-                if chunk_transcripts:
-                    transcript_map["chunking_output"] = _chunk(transcript_map["speakers"])
                 transcripts.append(transcript_map)
 
             except Exception as e:
@@ -141,8 +137,7 @@ def construct_company_kb(
     start_year: int, 
     end_year: int,
     start_quarter: int,
-    end_quarter: int,
-    chunk_transcripts: bool = False
+    end_quarter: int
 ) -> dict[str, list | str]:
     """
     Get the transcript for a given ticker, year, and quarter, in the format of
@@ -175,13 +170,12 @@ def construct_company_kb(
         end_year: The end year to get transcripts.
         start_quarter: The start quarter to get transcripts.
         end_quarter: The end quarter to get transcripts.
-        chunk_transcripts: Whether to chunk the transcripts into smaller chunks.
     """
     company_info: dict[str, str] | None = get_company_info(ticker)
     out = {
         "ticker": ticker,
         "transcripts": get_transcripts(ticker, start_year, end_year, 
-                                       start_quarter, end_quarter, chunk_transcripts)
+                                       start_quarter, end_quarter)
     }
     if company_info:
         out["company_name"] = company_info.get("longName", "")

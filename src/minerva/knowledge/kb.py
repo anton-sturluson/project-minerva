@@ -1,4 +1,5 @@
 from pymongo import MongoClient
+from pymongo.collection import Collection
 
 
 class CompanyKB:
@@ -53,13 +54,27 @@ class CompanyKB:
             {"$set": {"transcripts": transcripts}},
             upsert=True
         )
-      
+
+    def add_ticker(self, ticker: str, ticker_info: dict):
+        """Add a ticker to the database."""
+        self.tickers.update_one(
+            {"ticker": ticker},
+            {"$set": ticker_info},
+            upsert=True
+        )
+
+    # properteis
     @property
-    def transcripts(self):
+    def transcripts(self) -> Collection:
         """Get transcripts collection"""
         return self.db.transcripts
 
     @property
-    def tickers(self) -> list[str]:
+    def tickers(self) -> Collection:
+        """Get tickers collection"""
+        return self.db.tickers
+
+    @property
+    def unique_tickers(self) -> list[str]:
         """Get unique tickers in the database."""
         return self.db.transcripts.distinct("ticker")

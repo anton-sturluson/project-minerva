@@ -22,10 +22,7 @@ def ticker_exists(client: MongoClient, ticker: str) -> bool:
 @click.option(
     "--quarters", type=str, default="1-4", show_default=True,
     help="Quarters to add transcripts (separated by '-')")
-@click.option(
-    "--chunk-transcripts", type=bool, default=False, is_flag=True,
-    help="Whether to chunk transcripts")
-def main(tickers: str, years: str, quarters: str, chunk_transcripts: bool):
+def main(tickers: str, years: str, quarters: str):
     client = MongoClient()
     kb_client = CompanyKB(client)
 
@@ -36,15 +33,13 @@ def main(tickers: str, years: str, quarters: str, chunk_transcripts: bool):
         ticker = ticker.strip()
         if not ticker_exists(client, ticker):
             company_info: dict = construct_company_kb(
-                ticker, start_year, end_year, start_quarter, end_quarter,
-                chunk_transcripts=chunk_transcripts)
+                ticker, start_year, end_year, start_quarter, end_quarter)
             if not TEST_MODE:
                 kb_client.add_company_info(ticker, company_info)
 
         else:
             transcripts: list[dict] = get_transcripts(
-                ticker, start_year, end_year, start_quarter, end_quarter,
-                chunk_transcripts=chunk_transcripts)
+                ticker, start_year, end_year, start_quarter, end_quarter)
             if not TEST_MODE:
                 kb_client.add_transcripts(ticker, transcripts)
 
