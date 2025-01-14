@@ -126,36 +126,32 @@ def add_documents(
 
 @click.command()
 @click.option(
-    "--force-init", type=bool, is_flag=True,
-    help="Whether to force initializing the Milvus Vector Database")
-@click.option(
-    "--tickers", type=str, default="all",
-    help="Ticker of the companies (separated by comma) to include")
+    "--query", type=str, required=True,
+    help="Query to search for in the vector database")
 @click.option(
     "--db-path", type=str, default="../data/milvus_demo.db",
     help=("Path to the Milvus Vector Database. If not provided, a new database "
           "will be created.  "))
-def main(force_init: bool, tickers: str, db_path: str):
-    kb = CompanyKB()
-    openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
-    embedding_fn: Callable = openai_client.get_embedding
+@click.option(
+    "--query-save-dir", type=str, default="../data/query_results",
+    help="Directory to save query results")
+def main(query: str, db_path: str, query_save_dir: str):
 
-    if not force_init and File(db_path).exists:
-        logger.info("Loading Milvus Vector DB from %s...", db_path)
-        db: MilvusVectorDB = MilvusVectorDB(
-            db_path=db_path, collection_name=DEFAULT_COLLECTION_NAME)
-    else:
-        if not db_path:
-            db_path = DEFAULT_DB_PATH
-        logger.info("Initializing Milvus Vector Database...")
-        db: MilvusVectorDB = _init(db_path=db_path)
-        if tickers == "all":
-            tickers = kb.unique_tickers
-        else:
-            tickers = tickers.split(",")
-
-        for ticker in tickers:
-            add_documents(db, kb, embedding_fn, ticker)
+    output_fields: list[str] = [
+        "company_name", "year", "quarter", "text",
+        "speaker", "speaker_index", "chunk_index", "text"]
+    res: list[list[dict]] = db.search(
+        queries=query,
+        embedding_fn=embedding_fn,
+        # filter=f"ticker == '{ticker}'",
+        output_fields=output_fields,
+        limit=50,
+    )
+    res = res[0][::-1] # FIXME
+    file_name: str = llm.generate_filename(query, ext=".yml")
+    file_path: File = File(query_save_dir) / file_name
+    logging.info("Saving query results to %s...", file_path)
+    file_path.save(res)
 
 
 if __name__ == "__main__":
