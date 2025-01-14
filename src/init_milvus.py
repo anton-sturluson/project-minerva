@@ -13,7 +13,6 @@ from minerva.llm.client import OpenAIClient
 from minerva.util.env import OPENAI_API_KEY
 from minerva.util.file import File
 
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -21,7 +20,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 DEFAULT_DB_PATH: str = "../data/milvus_demo.db"
 DEFAULT_COLLECTION_NAME: str = "demo_collection"
-
 
 def _init(
     db_path: str = DEFAULT_DB_PATH,
@@ -78,6 +76,82 @@ def _get_text_to_embed(
     return f"[{company_info}, {fiscal_info}, {speaker_info}]\n{text}"
 
 
+def _transcript_exists(
+    db: MilvusVectorDB,
+    ticker: str,
+    year: int,
+    quarter: int,
+    chunk_index: int
+) -> bool:
+    """Check if a partial trasncript with this metadata exists in the database."""
+    filter_: str = (
+        f"ticker == '{ticker}' and year == {year} and quarter == {quarter} "
+        f"and chunk_index == {chunk_index}"
+    )
+    out = db.client.query(
+        collection_name=DEFAULT_COLLECTION_NAME,
+        filter=filter_,
+        output_fields=["ticker"]
+    )
+    return len(out) > 0
+
+
+def _add_transcript(
+    db: MilvusVectorDB,
+    ticker: str,
+    company_name: str,
+    transcript_map: dict,
+    embedding_fn: Callable
+) -> None:
+    year: int = transcript_map["year"]
+    quarter: int = transcript_map["quarter"]
+
+    docs: list[str] = []
+    metadata: list[dict] = []
+    for chunk_map in transcript_map.get("chunking_output", []):
+        speaker: str = chunk_map.get("speaker", "")
+
+        for chunk in chunk_map.get("chunks", []):
+            text: str = chunk.get("text")
+            topic: str = chunk.get("chunk_topic", "")
+            if not text:
+                logger.warning(
+                    "`add_documents`: found empty text in transcript - "
+                    "(ticker: %s, year: %d, quarter: %d, speaker: %s, chunk_index: %d)",
+                    ticker, year, quarter, speaker, chunk_index
+                )
+                continue
+
+            chunk_index: int = chunk["chunk_index"]
+            if _transcript_exists(db, ticker, year, quarter, chunk_index):
+                logger.info(
+                    "`add_documents`: found existing transcript - "
+                    "(ticker: %s, year: %d, quarter: %d, speaker: %s, chunk_index: %d)",
+                    ticker, year, quarter, speaker, chunk_index
+                )
+                continue
+
+            embed_text: str = _get_text_to_embed(
+                ticker, company_name, speaker, year, quarter, topic, text)
+            docs.append(embed_text)
+            metadata.append({
+                "text": text,
+                "ticker": ticker,
+                "company_name": company_name,
+                "speaker": speaker,
+                "year": year,
+                "quarter": quarter,
+                "speaker_index": chunk_map["speaker_index"],
+                "chunk_index": chunk_index
+            })
+
+    db.add_documents(
+        documents=docs,
+        metadata=metadata,
+        embedding_fn=embedding_fn
+    )
+
+
 def add_documents(
     db: MilvusVectorDB,
     kb: CompanyKB,
@@ -89,39 +163,7 @@ def add_documents(
     for company_map in tqdm(kb.transcripts.find(query), desc="Adding documents"):
         company_name: str = company_map["company_name"]
         for transcript_map in tqdm(company_map["transcripts"], desc="Adding transcripts"):
-            year: int = transcript_map["year"]
-            quarter: int = transcript_map["quarter"]
-
-            docs: list[str] = []
-            metadata: list[dict] = []
-            for chunk_map in transcript_map.get("chunking_output", []):
-                speaker: str = chunk_map.get("speaker", "")
-
-                for chunk in chunk_map.get("chunks", []):
-                    text: str = chunk.get("text")
-                    topic: str = chunk.get("chunk_topic", "")
-                    if not text:
-                        continue
-
-                    embed_text: str = _get_text_to_embed(
-                        ticker, company_name, speaker, year, quarter, topic, text)
-                    docs.append(embed_text)
-                    metadata.append({
-                        "text": embed_text,
-                        "ticker": ticker,
-                        "company_name": company_name,
-                        "speaker": speaker,
-                        "year": year,
-                        "quarter": quarter,
-                        "speaker_index": chunk_map["speaker_index"],
-                        "chunk_index": chunk["chunk_index"]
-                    })
-
-            db.add_documents(
-                documents=docs,
-                metadata=metadata,
-                embedding_fn=embedding_fn
-            )
+            _add_transcript(db, ticker, company_name, transcript_map, embedding_fn)
 
 
 @click.command()
