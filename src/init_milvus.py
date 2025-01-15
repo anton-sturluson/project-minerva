@@ -124,15 +124,16 @@ def _add_transcript(
 
             chunk_index: int = chunk["chunk_index"]
             if _transcript_exists(db, ticker, year, quarter, chunk_index):
-                logger.info(
-                    "`add_documents`: found existing transcript - "
-                    "(ticker: %s, year: %d, quarter: %d, speaker: %s, chunk_index: %d)",
-                    ticker, year, quarter, speaker, chunk_index
-                )
                 continue
 
-            embed_text: str = _get_text_to_embed(
-                ticker, company_name, speaker, year, quarter, topic, text)
+            logger.info(
+                "`add_documents`: Adding a new transcript to the vector DB - "
+                "($%s, FY%d Q%d, chunk_index: %d)",
+                ticker, year, quarter, chunk_index
+            )
+
+            embed_text: str = _get_text_to_embed(ticker, company_name, speaker, 
+                                                 year, quarter, topic, text)
             docs.append(embed_text)
             metadata.append({
                 "text": text,
@@ -191,13 +192,14 @@ def main(force_init: bool, tickers: str, db_path: str):
             db_path = DEFAULT_DB_PATH
         logger.info("Initializing Milvus Vector Database...")
         db: MilvusVectorDB = _init(db_path=db_path)
-        if tickers == "all":
-            tickers = kb.unique_tickers
-        else:
-            tickers = tickers.split(",")
 
-        for ticker in tickers:
-            add_documents(db, kb, embedding_fn, ticker)
+    if tickers == "all":
+        tickers = kb.unique_tickers
+    else:
+        tickers = tickers.split(",")
+
+    for ticker in tickers:
+        add_documents(db, kb, embedding_fn, ticker)
 
 
 if __name__ == "__main__":
