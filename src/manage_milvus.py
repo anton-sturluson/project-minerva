@@ -13,7 +13,6 @@ from minerva.llm.client import OpenAIClient
 from minerva.util.env import OPENAI_API_KEY
 from minerva.util.file import File
 
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -21,7 +20,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 DEFAULT_DB_PATH: str = "../data/milvus_demo.db"
 DEFAULT_COLLECTION_NAME: str = "demo_collection"
-
 
 def _init(
     db_path: str = DEFAULT_DB_PATH,
@@ -78,6 +76,85 @@ def _get_text_to_embed(
     return f"[{company_info}, {fiscal_info}, {speaker_info}]\n{text}"
 
 
+def _transcript_exists(
+    db: MilvusVectorDB,
+    ticker: str,
+    year: int,
+    quarter: int,
+    chunk_index: int
+) -> bool:
+    """Check if a partial trasncript with this metadata exists in the database."""
+    filter_: str = (
+        f"ticker == '{ticker}' and year == {year} and quarter == {quarter} "
+        f"and chunk_index == {chunk_index}"
+    )
+    out = db.client.query(
+        collection_name=DEFAULT_COLLECTION_NAME,
+        filter=filter_,
+        output_fields=["ticker"]
+    )
+    return len(out) > 0
+
+
+def _add_transcript(
+    db: MilvusVectorDB,
+    ticker: str,
+    company_name: str,
+    transcript_map: dict,
+    embedding_fn: Callable
+) -> None:
+    year: int = transcript_map["year"]
+    quarter: int = transcript_map["quarter"]
+
+    docs: list[str] = []
+    metadata: list[dict] = []
+    for chunk_map in transcript_map.get("chunking_output", []):
+        speaker: str = chunk_map.get("speaker", "")
+
+        for chunk in chunk_map.get("chunks", []):
+            text: str = chunk.get("text")
+            topic: str = chunk.get("chunk_topic", "")
+            if not text:
+                logger.warning(
+                    "`add_documents`: found empty text in transcript - "
+                    "(ticker: %s, year: %d, quarter: %d, speaker: %s, chunk_index: %d)",
+                    ticker, year, quarter, speaker, chunk_index
+                )
+                continue
+
+            chunk_index: int = chunk["chunk_index"]
+            if _transcript_exists(db, ticker, year, quarter, chunk_index):
+                continue
+
+            logger.info(
+                "`add_documents`: Adding a new transcript to the vector DB - "
+                "($%s, FY%d Q%d, chunk_index: %d)",
+                ticker, year, quarter, chunk_index
+            )
+
+            embed_text: str = _get_text_to_embed(ticker, company_name, speaker, 
+                                                 year, quarter, topic, text)
+            docs.append(embed_text)
+            metadata.append({
+                "text": text,
+                "embed_text": embed_text,
+                "topic": topic,
+                "ticker": ticker,
+                "company_name": company_name,
+                "speaker": speaker,
+                "year": year,
+                "quarter": quarter,
+                "speaker_index": chunk_map["speaker_index"],
+                "chunk_index": chunk_index
+            })
+
+    db.add_documents(
+        documents=docs,
+        metadata=metadata,
+        embedding_fn=embedding_fn
+    )
+
+
 def add_documents(
     db: MilvusVectorDB,
     kb: CompanyKB,
@@ -89,39 +166,7 @@ def add_documents(
     for company_map in tqdm(kb.transcripts.find(query), desc="Adding documents"):
         company_name: str = company_map["company_name"]
         for transcript_map in tqdm(company_map["transcripts"], desc="Adding transcripts"):
-            year: int = transcript_map["year"]
-            quarter: int = transcript_map["quarter"]
-
-            docs: list[str] = []
-            metadata: list[dict] = []
-            for chunk_map in transcript_map.get("chunking_output", []):
-                speaker: str = chunk_map.get("speaker", "")
-
-                for chunk in chunk_map.get("chunks", []):
-                    text: str = chunk.get("text")
-                    topic: str = chunk.get("chunk_topic", "")
-                    if not text:
-                        continue
-
-                    embed_text: str = _get_text_to_embed(
-                        ticker, company_name, speaker, year, quarter, topic, text)
-                    docs.append(embed_text)
-                    metadata.append({
-                        "text": embed_text,
-                        "ticker": ticker,
-                        "company_name": company_name,
-                        "speaker": speaker,
-                        "year": year,
-                        "quarter": quarter,
-                        "speaker_index": chunk_map["speaker_index"],
-                        "chunk_index": chunk["chunk_index"]
-                    })
-
-            db.add_documents(
-                documents=docs,
-                metadata=metadata,
-                embedding_fn=embedding_fn
-            )
+            _add_transcript(db, ticker, company_name, transcript_map, embedding_fn)
 
 
 @click.command()
@@ -129,19 +174,13 @@ def add_documents(
     "--force-init", type=bool, is_flag=True,
     help="Whether to force initializing the Milvus Vector Database")
 @click.option(
-    "--query", type=str, default="",
-    help="Query to search for in the vector database")
-@click.option(
     "--tickers", type=str, default="all",
     help="Ticker of the companies (separated by comma) to include")
 @click.option(
     "--db-path", type=str, default="../data/milvus_demo.db",
     help=("Path to the Milvus Vector Database. If not provided, a new database "
           "will be created.  "))
-@click.option(
-    "--query-save-dir", type=str, default="../data/query_results",
-    help="Directory to save query results")
-def main(force_init: bool, query: str, tickers: str, db_path: str, query_save_dir: str):
+def main(force_init: bool, tickers: str, db_path: str):
     kb = CompanyKB()
     openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
     embedding_fn: Callable = openai_client.get_embedding
@@ -155,30 +194,14 @@ def main(force_init: bool, query: str, tickers: str, db_path: str, query_save_di
             db_path = DEFAULT_DB_PATH
         logger.info("Initializing Milvus Vector Database...")
         db: MilvusVectorDB = _init(db_path=db_path)
-        if tickers == "all":
-            tickers = kb.unique_tickers
-        else:
-            tickers = tickers.split(",")
 
-        for ticker in tickers:
-            add_documents(db, kb, embedding_fn, ticker)
+    if tickers == "all":
+        tickers = kb.unique_tickers
+    else:
+        tickers = tickers.split(",")
 
-    if query:
-        output_fields: list[str] = [
-            "company_name", "year", "quarter", "text",
-            "speaker", "speaker_index", "chunk_index", "text"]
-        res: list[list[dict]] = db.search(
-            queries=query,
-            embedding_fn=embedding_fn,
-            # filter=f"ticker == '{ticker}'",
-            output_fields=output_fields,
-            limit=50,
-        )
-        res = res[0][::-1] # FIXME
-        file_name: str = llm.generate_filename(query, ext=".yml")
-        file_path: File = File(query_save_dir) / file_name
-        logging.info("Saving query results to %s...", file_path)
-        file_path.save(res)
+    for ticker in tickers:
+        add_documents(db, kb, embedding_fn, ticker)
 
 
 if __name__ == "__main__":
