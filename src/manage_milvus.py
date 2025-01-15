@@ -137,6 +137,8 @@ def _add_transcript(
             docs.append(embed_text)
             metadata.append({
                 "text": text,
+                "embed_text": embed_text,
+                "topic": topic,
                 "ticker": ticker,
                 "company_name": company_name,
                 "speaker": speaker,
