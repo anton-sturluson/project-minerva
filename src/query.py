@@ -36,7 +36,7 @@ def main(query: str, db_path: str, query_save_dir: str):
 
     output_fields: list[str] = [
         "company_name", "year", "quarter", "text",
-        "speaker", "speaker_index", "chunk_index", "text"]
+        "speaker", "speaker_index", "chunk_index", "topic"]
     res: list[list[dict]] = db.search(
         queries=query,
         embedding_fn=embedding_fn,
