@@ -18,16 +18,16 @@ class SevenPowerAnalyst():
 	# If you would like to add tools to your agents, you can learn more about it here:
 	# https://docs.crewai.com/concepts/agents#agent-tools
 	@agent
-	def researcher(self) -> Agent:
+	def company_analyst(self) -> Agent:
 		return Agent(
-			config=self.agents_config['researcher'],
+			config=self.agents_config['company_analyst'],
 			verbose=True
 		)
 
 	@agent
-	def reporting_analyst(self) -> Agent:
+	def company_analyst_critic(self) -> Agent:
 		return Agent(
-			config=self.agents_config['reporting_analyst'],
+			config=self.agents_config['company_analyst_critic'],
 			verbose=True
 		)
 
@@ -35,16 +35,28 @@ class SevenPowerAnalyst():
 	# task dependencies, and task callbacks, check out the documentation:
 	# https://docs.crewai.com/concepts/tasks#overview-of-a-task
 	@task
-	def research_task(self) -> Task:
+	def initial_company_analysis_task(self) -> Task:
 		return Task(
-			config=self.tasks_config['research_task'],
+			config=self.tasks_config['company_analysis_task'],
+			description="Conduct initial comprehensive analysis of the company following the provided framework.",
+			output_file='output/initial_report.md'
 		)
 
 	@task
-	def reporting_task(self) -> Task:
+	def company_analysis_critique_task(self) -> Task:
 		return Task(
-			config=self.tasks_config['reporting_task'],
-			output_file='report.md'
+			config=self.tasks_config['company_analysis_critique_task'],
+			input_files=['output/initial_report.md'],
+			output_file='output/critique.md'
+		)
+
+	@task
+	def final_company_analysis_task(self) -> Task:
+		return Task(
+			config=self.tasks_config['company_analysis_task'],
+			description="Revise and enhance the initial analysis based on the critique provided.",
+			input_files=['output/initial_report.md', 'output/critique.md'],
+			output_file='output/final_report.md'
 		)
 
 	@crew
