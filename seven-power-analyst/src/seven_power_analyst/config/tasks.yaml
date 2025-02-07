@@ -1,104 +1,48 @@
-company_analysis_task:
+seven_power_analysis_task:
   description: >
-    Conduct a comprehensive analysis of {company} by gathering detailed information
-    about their business operations and competitive position. Focus on:
-
-    1. Business Model & Economics
-    - Core revenue streams and pricing models
-    - Cost structure and unit economics
-    - Scale metrics (revenue, customers, transactions)
-    - Profitability trends and margins
-
-    2. Market Position & Competition
-    - Market share and growth trends
-    - Key competitors and their positions
-    - Entry barriers in the market
-    - Customer concentration and relationships
-
-    3. Operational Capabilities
-    - Key business processes and systems
-    - Technology infrastructure
-    - Supply chain and distribution
-    - Patents, licenses, and proprietary assets
-
-    4. Network & Relationships
-    - Customer network effects
-    - Partner ecosystem
-    - Platform dynamics (if applicable)
-    - Supplier relationships
-
-    5. Brand & Market Perception
-    - Brand strength metrics
-    - Customer satisfaction and loyalty
-    - Marketing effectiveness
-    - Reputation management
-
-    6. Resources & Know-how
-    - Key personnel and expertise
-    - Critical resources and access
-    - R&D capabilities
-    - Intellectual property
-
-    7. Historical Context
-    - Company evolution and pivotal changes
-    - Past competitive responses
-    - Success/failure patterns
-    - Strategic shifts
-
-    For each area, provide specific examples, concrete metrics, and supporting evidence.
-    Focus on facts and observations rather than conclusions about competitive advantages.
-
+    Conduct a comprehensive analysis of {company} using Hamilton Helmer's Seven Powers Framework,
+    examining Scale Economies, Network Economies, Counter-Positioning, Switching Costs,
+    Branding, Cornered Resource, and Process Power.
+  
   expected_output: >
-    A detailed, structured report containing:
-    - Comprehensive data points for each category
-    - Specific examples and case studies
-    - Concrete metrics and trends
-    - Historical context and evolution
-    - Supporting evidence and sources
-    Formatted as markdown without '```'
-  agent: company_analyst
+    A detailed, structured report analyzing each of the seven powers:
+    
+    1. Scale Economies
+       - Unit cost dynamics
+       - Volume/scale requirements
+       - Barriers to efficient scale
+    
+    2. Network Economies
+       - Network effects (direct/indirect)
+       - User base growth impact
+       - Switching costs
+    
+    3. Counter-Positioning
+       - Business model innovation
+       - Incumbent conflicts
+       - Sustainability of advantage
+    
+    4. Switching Costs
+       - Customer lock-in mechanisms
+       - Switching friction points
+       - Ongoing benefits
+    
+    5. Branding
+       - Brand strength metrics
+       - Emotional connections
+       - Premium pricing power
+    
+    6. Cornered Resource
+       - Exclusive assets/rights
+       - Scarcity factors
+       - Durability of control
+    
+    7. Process Power
+       - Proprietary processes
+       - Execution capabilities
+       - Replication barriers
 
-company_analysis_critique_task:
-  description: >
-    Review the company analysis and provide structured feedback to enhance its
-    comprehensiveness and quality. Evaluate the following aspects:
+    For each power, consider benefit and barrier of each power and classify
+    the strength of the power as Strong, Medium, or Weak.
 
-    1. Evidence Quality
-    - Are all claims supported by specific data or examples?
-    - Are metrics current and relevant?
-    - Are sources reliable and well-documented?
-    - Is historical context sufficient?
-
-    2. Coverage Completeness
-    - Are all key business areas adequately covered?
-    - Are there unexplored angles or perspectives?
-    - Is competitive context fully described?
-    - Are industry-specific factors addressed?
-
-    3. Analysis Depth
-    - Is the granularity of information sufficient?
-    - Are cause-and-effect relationships explored?
-    - Are trends and patterns well-documented?
-    - Is scale and significance of factors clear?
-
-    4. Potential Blindspots
-    - What alternative explanations might exist?
-    - Are there missing stakeholder perspectives?
-    - What emerging trends could impact the analysis?
-    - Are there hidden assumptions to challenge?
-
-    For each identified gap or improvement area, provide:
-    - Specific questions to explore
-    - Suggestions for additional data needed
-    - Potential sources or approaches for gathering missing information
-    - Rationale for why the additional information matters
-
-  expected_output: >
-    A structured critique containing:
-    - Specific gaps identified in the analysis
-    - Concrete questions to explore further
-    - Clear suggestions for additional research
-    - Explanation of why each gap matters
-    Each point should be actionable and focused on material improvements.
-    Formatted as markdown without '```'
-  agent: company_analyst_critic
+  agent: hamilton_helmer
