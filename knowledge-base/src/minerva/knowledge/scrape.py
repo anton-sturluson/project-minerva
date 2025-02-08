@@ -75,6 +75,9 @@ def get_one_transcript(ticker: str, year: int, quarter: int) -> dict[str, int | 
             logging.info("`get_one_transcript`: No transcript found for %s, Y%s Q%s",
                          ticker, year, quarter)
             return None
+
+        logging.info("`get_one_transcript`: Found transcript for %s, Y%s Q%s",
+                     ticker, year, quarter)
         
         speakers: list[dict] = parse_transcript(transcript_info["transcript"])
         full_transcript: str = "\n\n".join(
