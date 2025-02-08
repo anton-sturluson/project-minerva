@@ -47,11 +47,6 @@ class CompanyKB:
             for transcript in transcript_map.get("transcripts", [])
         }
 
-        for k, t in saved_transcripts.items():
-            if "full_transcript" not in t:
-                t["full_transcript"]= "\n\n".join(
-                    f"[{speaker['speaker']}] {speaker['text']}" for speaker in t["speakers"])
-
         for transcript in new_transcripts:
             key: tuple[int, int] = (transcript["year"], transcript["quarter"])
             if key in saved_transcripts and overwrite:
