@@ -2,14 +2,10 @@ import click
 from pymongo import MongoClient
 from tqdm import tqdm
 
-from minerva.data.scrape import construct_company_kb, get_transcripts
+from minerva.knowledge import kb_util
 from minerva.knowledge.kb import CompanyKB
+from minerva.knowledge.scrape import construct_company_kb, get_transcripts
 from minerva.util.env import TEST_MODE
-
-
-def ticker_exists(client: MongoClient, ticker: str) -> bool:
-    """Check if a ticker exists in the database."""
-    return client.company_db.transcripts.find_one({"ticker": ticker}) is not None
 
 
 @click.command()
@@ -31,7 +27,7 @@ def main(tickers: str, years: str, quarters: str):
 
     for ticker in tqdm(tickers.split(","), desc="Tickers"):
         ticker = ticker.strip()
-        if not ticker_exists(client, ticker):
+        if not kb_util.ticker_exists(client, ticker):
             company_info: dict = construct_company_kb(
                 ticker, start_year, end_year, start_quarter, end_quarter)
             if not TEST_MODE:
