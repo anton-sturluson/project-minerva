@@ -1,18 +1,18 @@
 """Utilities for scraping transcripts from the web."""
-from dataclasses import asdict
 import json
+import logging
 import re
 import requests
 
-from tqdm import tqdm
 import yfinance as yf
 
+logging.basicConfig(level=logging.INFO)
 
 def get_company_info(ticker: str) -> dict | None:
     try:
         return yf.Ticker(ticker).info
     except yf.exceptions.YFException as e:
-        print(f"`get_company_info`: Error fetching company info for {ticker}: {e}")
+        logging.error(f"`get_company_info`: Error fetching company info for {ticker}: {e}")
         return None
 
 
@@ -59,7 +59,8 @@ def get_one_transcript(ticker: str, year: int, quarter: int) -> dict[str, int | 
                 "speaker": str,
                 "text": str
             }
-        ]
+        ],
+        "full_transcript": str
     }
     ```
     """
@@ -71,14 +72,22 @@ def get_one_transcript(ticker: str, year: int, quarter: int) -> dict[str, int | 
         # or a dictionary when there is data
         transcript_info: list | dict = json.loads(response.text)
         if not transcript_info or "transcript" not in transcript_info:
+            logging.info("`get_one_transcript`: No transcript found for %s, Y%s Q%s",
+                         ticker, year, quarter)
             return None
+        
+        speakers: list[dict] = parse_transcript(transcript_info["transcript"])
+        full_transcript: str = "\n\n".join(
+            f"[{speaker['speaker']}] {speaker['text']}" for speaker in speakers)
+
         return {
             "year": year,
             "quarter": quarter,
-            "speakers": parse_transcript(transcript_info["transcript"])
+            "speakers": speakers,
+            "full_transcript": full_transcript
         }
     else:
-        print("Error:", response.status_code, response.text)
+        logging.error("Error: %s, %s", response.status_code, response.text)
         return None
 
 
@@ -102,7 +111,8 @@ def get_transcripts(
                     "speaker": str,
                     "text": str
                 }
-            ]
+            ],
+            "full_transcript": str
         }
     ]
     ```
@@ -114,10 +124,10 @@ def get_transcripts(
         start_quarter: The start quarter to get transcripts.
         end_quarter: The end quarter to get transcripts.
     """
-    print("`get_transcripts`: Ticker:", ticker)
+    logging.info("`get_transcripts`: Ticker: %s", ticker)
     transcripts: list[dict[str, int | str]] = []
-    for year in tqdm(range(start_year, end_year + 1), desc="Years"):
-        for quarter in tqdm(range(start_quarter, end_quarter + 1), desc="Quarters"):
+    for year in range(start_year, end_year + 1):
+        for quarter in range(start_quarter, end_quarter + 1):
             try:
                 transcript_map: dict[str, int | str] | None = get_one_transcript(ticker, year, quarter)
                 if not transcript_map:
@@ -125,20 +135,14 @@ def get_transcripts(
                 transcripts.append(transcript_map)
 
             except Exception as e:
-                print(f"get_transcripts: Error fetching transcript for {ticker} "
-                      f"{year}-Q{quarter}: {e}")
+                logging.error("get_transcripts: Error fetching transcript for %s "
+                              "Y%s-Q%s: %s", ticker, year, quarter, e)
                 raise
 
     return transcripts
 
 
-def construct_company_kb(
-    ticker: str, 
-    start_year: int, 
-    end_year: int,
-    start_quarter: int,
-    end_quarter: int
-) -> dict[str, list | str]:
+def init_company_kb(ticker: str) -> dict[str, list | str]:
     """
     Get the transcript for a given ticker, year, and quarter, in the format of
     ```python
@@ -146,39 +150,18 @@ def construct_company_kb(
         "ticker": str,
         "company_name": str,
         "sector": str,
-        "industry": str,
-        "transcripts": [
-            {
-                "year": int,
-                "quarter": int,
-                "speakers": [
-                    {
-                        "speaker_index": int,
-                        "speaker": str,
-                        "text": str
-                    }
-                ],
-                "chunking_output": list[ChunkOutput.__dict__]
-            }
-        ]
+        "industry": str
     }
     ```
 
     Args:
         ticker: The ticker of the company.
-        start_year: The start year to get transcripts.
-        end_year: The end year to get transcripts.
-        start_quarter: The start quarter to get transcripts.
-        end_quarter: The end quarter to get transcripts.
     """
     company_info: dict[str, str] | None = get_company_info(ticker)
-    out = {
-        "ticker": ticker,
-        "transcripts": get_transcripts(ticker, start_year, end_year, 
-                                       start_quarter, end_quarter)
-    }
+    out = {"ticker": ticker}
     if company_info:
         out["company_name"] = company_info.get("longName", "")
         out["sector"] = company_info.get("sector", "")
         out["industry"] = company_info.get("industry", "")
+    out["transcripts"] = []
     return out
