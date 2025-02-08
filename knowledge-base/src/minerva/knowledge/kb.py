@@ -81,6 +81,14 @@ class CompanyKB:
             upsert=True
         )
 
+    def get_most_recent_transcript(self, ticker: str) -> dict:
+        """Get the most recent transcript for a ticker."""
+        transcript_map: dict | None = self.transcripts.find_one({"ticker": ticker})
+        if not transcript_map:
+            raise ValueError(f"Ticker {ticker} does not exist in the database.")
+
+        return transcript_map["transcripts"][-1]
+
     def get_most_recent_year(self, ticker: str) -> int | None:
         """Get the most recent year for a ticker."""
         transcript_map: dict | None = self.transcripts.find_one({"ticker": ticker})
