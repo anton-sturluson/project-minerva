@@ -43,9 +43,6 @@ def run(ticker: str, year: int, quarter: int, use_most_recent: bool, output_dir:
     else:
         transcript: dict | None = kb.get_transcript(ticker, year, quarter)
 
-    print("year", transcript["year"])
-    print("quarter", transcript["quarter"])
-
     if not transcript:
         raise ValueError(f"No transcript found for {ticker} (Y{year} Q{quarter})")
 
