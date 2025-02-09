@@ -1,41 +1,31 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[project]
+[tool.poetry]
 name = "minerva-knowledge"
+version = "0.1.0"
 description = "Knowledge base and document processing utilities"
+authors = ["a-sturluson"]
 readme = "README.md"
-requires-python = ">=3.12"
-authors = [
-    { name = "a-sturluson" },
-]
-dependencies = [
-    "openai>=1.0.0",
-    "pymilvus>=2.3.0",
-    "pymongo>=4.0.0",
-    "python-dotenv>=1.0.0",
-    "numpy>=1.24.0",
-    "pandas>=2.0.0",
-    "pydantic>=2.0.0",
-    "tiktoken>=0.5.0",
-    "grpcio>=1.70.0",
-    "grpcio-tools>=1.70.0",
-]
-dynamic = ["version"]
 
-[tool.hatch.version]
-path = "src/minerva_knowledge/__about__.py"
+[tool.poetry.dependencies]
+python = ">=3.12"
+openai = ">=1.0.0"
+pymilvus = ">=2.3.0"
+pymongo = ">=4.0.0"
+python-dotenv = ">=1.0.0"
+numpy = ">=1.24.0"
+pandas = ">=2.0.0"
+pydantic = ">=2.0.0"
+tiktoken = ">=0.5.0"
+grpcio = ">=1.70.0"
+grpcio-tools = ">=1.70.0"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "black>=23.0.0",
-    "isort>=5.0.0",
-]
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0.0"
+black = ">=23.0.0"
+isort = ">=5.0.0"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/minerva_knowledge"]
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 88
