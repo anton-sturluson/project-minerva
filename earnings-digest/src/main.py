@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 @click.option(
     "--output-dir",
     type=click.Path(path_type=Path),
-    default="../output",
+    default="output",
     help="Directory to save the output",
 )
 def run(ticker: str, year: int, quarter: int, use_most_recent: bool, output_dir: Path):

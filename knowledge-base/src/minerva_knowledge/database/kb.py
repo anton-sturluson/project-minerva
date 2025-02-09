@@ -72,7 +72,11 @@ class CompanyKB:
         return transcript_map["transcripts"][-1]
 
     def get_transcript(
-        self, ticker: str, year: int, quarter: int, most_recent: bool = False
+        self,
+        ticker: str,
+        year: int | None = None,
+        quarter: int | None = None,
+        most_recent: bool = False,
     ) -> dict | None:
         """Get a transcript for a ticker, year, and quarter."""
         transcript_map: dict | None = self.transcripts.find_one({"ticker": ticker})
