@@ -1,4 +1,5 @@
 """Custom JSON encoder encoding numpy objects and custom objects."""
+
 from collections import OrderedDict
 from dataclasses import asdict, is_dataclass
 from json import JSONEncoder
@@ -12,6 +13,7 @@ class FileJSONEncoder(JSONEncoder):
     """
     Custom JSON encoder for encoding various data types
     """
+
     def default(self, o):
         # try bson encoding first
         # try:

@@ -1,4 +1,5 @@
 """Knowledge base for company information."""
+
 import logging
 
 from pymongo import MongoClient
@@ -19,16 +20,11 @@ class CompanyKB:
         *NOTE*: This code is buggy and will overwrite existing transcripts.
         """
         self.transcripts.update_one(
-            {"ticker": ticker},
-            {"$set": transcript_info},
-            upsert=True
+            {"ticker": ticker}, {"$set": transcript_info}, upsert=True
         )
 
     def add_transcripts(
-        self, 
-        ticker: str, 
-        new_transcripts: list[dict], 
-        overwrite: bool = False
+        self, ticker: str, new_transcripts: list[dict], overwrite: bool = False
     ):
         """
         Add transcripts to the database.
@@ -58,8 +54,8 @@ class CompanyKB:
 
                 # delete old fields - probably too aggressive
                 # for field in list(saved_transcript.keys()):
-                #     if field not in transcript: 
-                #         logging.info("`add_transcripts`: Deleting field %s from transcript: %s", 
+                #     if field not in transcript:
+                #         logging.info("`add_transcripts`: Deleting field %s from transcript: %s",
                 #                      field, key)
                 #         del saved_transcript[field]
             else:
@@ -68,18 +64,12 @@ class CompanyKB:
         transcripts: list[dict] = list(saved_transcripts.values())
         transcripts.sort(key=lambda x: (x["year"], x["quarter"]))
         self.transcripts.update_one(
-            {"ticker": ticker},
-            {"$set": {"transcripts": transcripts}},
-            upsert=True
+            {"ticker": ticker}, {"$set": {"transcripts": transcripts}}, upsert=True
         )
 
     def add_ticker(self, ticker: str, ticker_info: dict):
         """Add a ticker to the database."""
-        self.tickers.update_one(
-            {"ticker": ticker},
-            {"$set": ticker_info},
-            upsert=True
-        )
+        self.tickers.update_one({"ticker": ticker}, {"$set": ticker_info}, upsert=True)
 
     def get_most_recent_transcript(self, ticker: str) -> dict:
         """Get the most recent transcript for a ticker."""

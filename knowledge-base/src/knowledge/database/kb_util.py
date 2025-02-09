@@ -1,6 +1,8 @@
 """Utility functions for knowledge base."""
+
 from pymongo import MongoClient
 import tiktoken
+
 
 def ticker_exists(client: MongoClient, ticker: str) -> bool:
     """Check if a ticker exists in the database."""

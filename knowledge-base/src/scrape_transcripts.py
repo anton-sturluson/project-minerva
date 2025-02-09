@@ -1,4 +1,5 @@
 """Script to manage the company knowledge base."""
+
 import logging
 
 import click
@@ -10,19 +11,33 @@ from knowledge.database.scrape import init_company_kb, get_transcripts
 
 logging.basicConfig(level=logging.INFO)
 
+
 @click.command()
 @click.option(
-    "--tickers", type=str, default="all",
-    help="Tickers to add to the database (separated by comma)")
+    "--tickers",
+    type=str,
+    default="all",
+    help="Tickers to add to the database (separated by comma)",
+)
 @click.option(
-    "--years", type=str, default="2024-2025", show_default=True,
-    help="Years to add transcripts (separated by '-')")
+    "--years",
+    type=str,
+    default="2024-2025",
+    show_default=True,
+    help="Years to add transcripts (separated by '-')",
+)
 @click.option(
-    "--quarters", type=str, default="1-4", show_default=True,
-    help="Quarters to add transcripts (separated by '-')")
+    "--quarters",
+    type=str,
+    default="1-4",
+    show_default=True,
+    help="Quarters to add transcripts (separated by '-')",
+)
 @click.option(
-    "--add-recent-transcripts", is_flag=True,
-    help="Find and add recent transcripts to the database")
+    "--add-recent-transcripts",
+    is_flag=True,
+    help="Find and add recent transcripts to the database",
+)
 def main(tickers: str, years: str, quarters: str, add_recent_transcripts: bool):
     client = MongoClient()
     kb_client = CompanyKB(client)
@@ -39,7 +54,9 @@ def main(tickers: str, years: str, quarters: str, add_recent_transcripts: bool):
         ticker_exists: bool = kb_util.ticker_exists(client, ticker)
 
         if not ticker_exists:
-            logging.info("Ticker %s doesn't exist in the database. Initializing...", ticker)
+            logging.info(
+                "Ticker %s doesn't exist in the database. Initializing...", ticker
+            )
             company_info: dict = init_company_kb(ticker)
             kb_client.add_company_info(ticker, company_info)
 
@@ -49,8 +66,11 @@ def main(tickers: str, years: str, quarters: str, add_recent_transcripts: bool):
             if recent_year is None or recent_quarter is None:
                 start_year, end_year = default_start_year, default_end_year
                 start_quarter, end_quarter = default_start_quarter, default_end_quarter
-                logging.info("Ticker %s doesn't have any transcripts in the database. "
-                             "Using default years and quarters...", ticker)
+                logging.info(
+                    "Ticker %s doesn't have any transcripts in the database. "
+                    "Using default years and quarters...",
+                    ticker,
+                )
 
             else:
                 # search for one more year if the most recent quarter is 4
@@ -68,10 +88,17 @@ def main(tickers: str, years: str, quarters: str, add_recent_transcripts: bool):
 
         logging.info(
             "[%s] Searching for transcripts from Y%s-%s, Q%s-%s",
-            ticker, start_year, end_year, start_quarter, end_quarter)
+            ticker,
+            start_year,
+            end_year,
+            start_quarter,
+            end_quarter,
+        )
         transcripts: list[dict] = get_transcripts(
-            ticker, start_year, end_year, start_quarter, end_quarter)
+            ticker, start_year, end_year, start_quarter, end_quarter
+        )
         kb_client.add_transcripts(ticker, transcripts)
 
+
 if __name__ == "__main__":
-    main() # pylint: disable=no-value-for-parameter
+    main()  # pylint: disable=no-value-for-parameter

@@ -20,7 +20,7 @@ def generate_filename(
     model_name: str = "claude-3-5-haiku-latest",
     temperature: float = 0.3,
     max_tokens: int = 4096,
-    ext: str = ".yml"
+    ext: str = ".yml",
 ) -> str:
     """
     Generate a file name as a summary of the given text.
@@ -60,8 +60,9 @@ def generate_filename(
     "{text}"
     """
     client: Client = _init_client(model_name)
-    name: str = client.get_completion(prompt, model=model_name,
-                                      temperature=temperature, max_tokens=max_tokens)
+    name: str = client.get_completion(
+        prompt, model=model_name, temperature=temperature, max_tokens=max_tokens
+    )
     return _preprocess(name + ext)
 
 
@@ -110,6 +111,7 @@ def generate_topic(
         </Example>
     """
     client: Client = _init_client(model_name)
-    output: str = client.get_completion(prompt, model=model_name,
-                                        temperature=temperature, max_tokens=max_tokens)
+    output: str = client.get_completion(
+        prompt, model=model_name, temperature=temperature, max_tokens=max_tokens
+    )
     return _preprocess(output)

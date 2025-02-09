@@ -18,26 +18,28 @@ class ChunkOutput:
     failure: bool = False
     error_message: str = ""
     truncation_error_message: str = ""
-    speaker: str = "" # need to be updated by caller
-    speaker_index: int = -1 # need to be updated by caller
+    speaker: str = ""  # need to be updated by caller
+    speaker_index: int = -1  # need to be updated by caller
 
     def add_chunk(self, text: str, topic: str = ""):
         """Add a chunk to the list."""
-        self.chunks.append({
-            "text": text,
-            "chunk_topic": topic,
-            "chunk_index": len(self.chunks),
-        })
-    
+        self.chunks.append(
+            {
+                "text": text,
+                "chunk_topic": topic,
+                "chunk_index": len(self.chunks),
+            }
+        )
+
     def reset_chunks(self):
         """Reset the chunks list."""
         self.chunks = []
 
     def _preprocess_text(self, text: str) -> str:
         """Preprocess the text to remove special characters."""
-        if text.startswith(("'", '"', '“', '”')):
+        if text.startswith(("'", '"', "“", "”")):
             text = text[1:]
-        if text.endswith(("'", '"', '“', '”')):
+        if text.endswith(("'", '"', "“", "”")):
             text = text[:-1]
         return text
 
@@ -184,11 +186,12 @@ def chunk_text(
         client = OpenAIClient(api_key=OPENAI_API_KEY)
     else:
         raise ValueError(f"Invalid model name: {model_name}")
-    
+
     if TEST_MODE:
         return try_test_prompt(client)
-    return client.get_completion(prompt, model=model_name,
-                                 temperature=temperature, max_tokens=max_tokens)
+    return client.get_completion(
+        prompt, model=model_name, temperature=temperature, max_tokens=max_tokens
+    )
 
 
 def preprocess_prompt_output(text: str) -> str:
@@ -196,20 +199,22 @@ def preprocess_prompt_output(text: str) -> str:
     Preprocess the prompt output to get the chunked text.
     """
     # First, remove the <output> and </output> tags
-    cleaned_text: str = re.sub(r'<output>\s*|\s*</output>', '', text)
-    
+    cleaned_text: str = re.sub(r"<output>\s*|\s*</output>", "", text)
+
     # Then, remove any code blocks marked with ```yaml or other code types
-    cleaned_text = re.sub(r'```.*?\n(.*?)(?=\n```|$)', r'\1', cleaned_text, flags=re.DOTALL)
+    cleaned_text = re.sub(
+        r"```.*?\n(.*?)(?=\n```|$)", r"\1", cleaned_text, flags=re.DOTALL
+    )
 
     # strip any leading or trailing whitespace
     cleaned_text = cleaned_text.strip()
-    
+
     return cleaned_text
 
 
 def _truncate_chunk(text: str) -> str:
     """
-    Sometimes the prompt output has an invalid output. For example, this is an 
+    Sometimes the prompt output has an invalid output. For example, this is an
     invalid output:
 
     ```output
@@ -224,26 +229,26 @@ def _truncate_chunk(text: str) -> str:
     valid_entries = []
     # Temporary holder for a chunk
     current_entry = []
-    
+
     # Iterate over each line in the input text
     for line in text.strip().split("\n"):
         if not line:
             continue
         # Check for the start of a new chunk_topic
-        if line.startswith('- chunk_topic'):
+        if line.startswith("- chunk_topic"):
             # If we have a previous entry and it is complete, add it to valid_entries
-            if current_entry and 'chunk:' in current_entry[-1]:
+            if current_entry and "chunk:" in current_entry[-1]:
                 valid_entries.append("\n".join(current_entry))
             # Reset current_entry for the new chunk
             current_entry = [line]
         else:
             # Continue adding lines to the current chunk
             current_entry.append(line)
-    
+
     # Check the last chunk if it was complete
-    if current_entry and 'chunk:' in current_entry[-1]:
+    if current_entry and "chunk:" in current_entry[-1]:
         valid_entries.append("\n".join(current_entry))
-    
+
     # Join the valid entries into a single string and return as YAML format
     truncated: str = "\n".join(valid_entries) if valid_entries else ""
 
@@ -272,7 +277,7 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
             "failure": bool # whether the chunking process failed
         }
         ```
-        In case of failures, the text will be the original text and the 
+        In case of failures, the text will be the original text and the
         chunk topic will be an empty string.
     """
     output: ChunkOutput = ChunkOutput()
@@ -297,9 +302,11 @@ def parse_chunk_output(original_text: str, chunk_prompt_output: str) -> dict[str
     except yaml.YAMLError as e:
         # this is a faiilure even if it works with truncation since
         # information is lost
-        output.failure = True 
+        output.failure = True
         output.error_message = str(e)
-        print(f"`chunk_and_parse_output`: Error loading YAML. Retrying with truncation: {e}")
+        print(
+            f"`chunk_and_parse_output`: Error loading YAML. Retrying with truncation: {e}"
+        )
 
     # attempt to fix by truncating the last line
     truncated_prompt_output: str = _truncate_chunk(chunk_prompt_output)

@@ -1,4 +1,5 @@
 """A script to chunk transcripts."""
+
 from dataclasses import asdict
 import json
 import re
@@ -21,9 +22,10 @@ SLEEP_TIME: int = 60
 
 # utility functions
 
+
 def _get_num_sentences(text: str) -> int:
     """Count the number of sentences in the given text."""
-    return len(re.split(r'[.!?]', text)) - 1
+    return len(re.split(r"[.!?]", text)) - 1
 
 
 def _generate_missing_topics(chunk_output: ChunkOutput):
@@ -32,14 +34,16 @@ def _generate_missing_topics(chunk_output: ChunkOutput):
         if not chunk.get("chunk_topic"):
             chunk["chunk_topic"] = generate_topic(chunk["text"])
 
+
 # OpenAI batch-related functions
 
+
 def _build_request(
-    request_id: str, 
+    request_id: str,
     prompt: str,
     model_name: str = "gpt-4o",
     temperature: float = 0.3,
-    max_tokens: int = 4096
+    max_tokens: int = 4096,
 ) -> dict:
     """Build a OpenAI batch request for chunking."""
     return {
@@ -50,10 +54,8 @@ def _build_request(
             "model": model_name,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
-        }
+            "messages": [{"role": "user", "content": prompt}],
+        },
     }
 
 
@@ -64,9 +66,9 @@ def _get_request_id(ticker: str, year: int, quarter: int, speaker_index: int) ->
 
 def _get_requests_from_one_transcript(
     ticker: str,
-    transcript_map: dict, 
+    transcript_map: dict,
     failure_only: bool = False,
-    min_sentences: int = 6
+    min_sentences: int = 6,
 ) -> list[dict]:
     """
     Get chunking requests for a transcript.
@@ -108,12 +110,12 @@ def _get_requests_from_one_transcript(
 
 
 def save_requests(
-    kb: CompanyKB, 
+    kb: CompanyKB,
     output_path: str,
     tickers: list[str] | None = None,
     min_sentences: int = 6,
     limit: int = -1,
-    failure_only: bool = False
+    failure_only: bool = False,
 ):
     """
     Build and save OpenAI chunking requests for all transcripts in the KB.
@@ -137,8 +139,11 @@ def save_requests(
     for company_map in cursor:
         ticker: str = company_map["ticker"]
         for transcript_map in company_map.get("transcripts", []):
-            requests.extend(_get_requests_from_one_transcript(
-                ticker, transcript_map, failure_only, min_sentences))
+            requests.extend(
+                _get_requests_from_one_transcript(
+                    ticker, transcript_map, failure_only, min_sentences
+                )
+            )
 
     if output_path:
         File(output_path).save(requests)
@@ -154,19 +159,18 @@ def _get_batch(client: OpenAIClient, batch_id: str) -> Batch:
 def _send_batch(client: OpenAIClient, output_path: str) -> Batch:
     """Send a batch to OpenAI."""
     batch_input_file: FileObject = client.files.create(
-        file=open(output_path, "rb"),
-        purpose="batch"
-    )    
+        file=open(output_path, "rb"), purpose="batch"
+    )
     file_id: str = batch_input_file.id
 
     batch: Batch = client.batches.create(
-        input_file_id=file_id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h"
+        input_file_id=file_id, endpoint="/v1/chat/completions", completion_window="24h"
     )
     return batch
 
+
 # ingesting batch results
+
 
 def _load_file(client: OpenAIClient, file_id: str) -> dict[str, dict]:
     """
@@ -199,7 +203,7 @@ def _ingest_one_transcript(ticker: str, transcript_map: dict, content_map: dict)
 
     Args:
         ticker: The ticker of the company.
-        transcript_map: The transcript to ingest. It maps speaker index to 
+        transcript_map: The transcript to ingest. It maps speaker index to
             transcript dictionary.
         content_map: Mapping request ID to chunking output.
     """
@@ -233,16 +237,13 @@ def _ingest_one_transcript(ticker: str, transcript_map: dict, content_map: dict)
         chunk_output.speaker_index = speaker_index
         _generate_missing_topics(chunk_output)
         chunking_map[speaker_index] = asdict(chunk_output)
-    
+
     chunking_output: list[dict] = [chunking_map[i] for i in sorted(chunking_map.keys())]
     return chunking_output
 
 
 def ingest(
-    client: OpenAIClient, 
-    kb: CompanyKB, 
-    file_id: str, 
-    tickers: list[str] | None = None
+    client: OpenAIClient, kb: CompanyKB, file_id: str, tickers: list[str] | None = None
 ):
     """
     Ingest a batch of transcripts.
@@ -266,32 +267,61 @@ def ingest(
         transcripts: list[dict] = company_map.get("transcripts", [])
         for transcript_map in tqdm(transcripts, desc="Processing transcripts"):
             transcript_map["chunking_output"] = _ingest_one_transcript(
-                ticker, transcript_map, content_map)
+                ticker, transcript_map, content_map
+            )
 
         kb.add_transcripts(ticker, transcripts)
 
 
 @click.command()
-@click.option("--min-sentences", type=int, default=6, show_default=True,
-              help="The minimum number of sentences required for chunking.")
-@click.option("--output-path", type=str, show_default=True,
-              default="../data/transcript_requests.jsonl",
-              help="The path to save the transcript requests.")
-@click.option("--limit", type=int, default=-1, show_default=True,
-              help="The number of transcripts to process.")
-@click.option("--file-id", type=str, default="", show_default=True,
-              help="The file ID of the batch results to ingest.")
-@click.option("--failure-only", is_flag=True, show_default=True,
-              help="Only ingest transcripts that failed to chunk.")
-@click.option("--tickers", type=str, default="all", show_default=True,
-              help="The tickers to process (separated by comma).")
+@click.option(
+    "--min-sentences",
+    type=int,
+    default=6,
+    show_default=True,
+    help="The minimum number of sentences required for chunking.",
+)
+@click.option(
+    "--output-path",
+    type=str,
+    show_default=True,
+    default="../data/transcript_requests.jsonl",
+    help="The path to save the transcript requests.",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=-1,
+    show_default=True,
+    help="The number of transcripts to process.",
+)
+@click.option(
+    "--file-id",
+    type=str,
+    default="",
+    show_default=True,
+    help="The file ID of the batch results to ingest.",
+)
+@click.option(
+    "--failure-only",
+    is_flag=True,
+    show_default=True,
+    help="Only ingest transcripts that failed to chunk.",
+)
+@click.option(
+    "--tickers",
+    type=str,
+    default="all",
+    show_default=True,
+    help="The tickers to process (separated by comma).",
+)
 def main(
-    min_sentences: int, 
-    output_path: str, 
-    limit: int, 
+    min_sentences: int,
+    output_path: str,
+    limit: int,
     file_id: str,
     failure_only: bool,
-    tickers: str
+    tickers: str,
 ):
     """Main function for chunking transcripts."""
     client = OpenAIClient(api_key=OPENAI_API_KEY)
@@ -306,7 +336,9 @@ def main(
         batch: Batch = _send_batch(client, output_path)
 
         while batch.status not in ["completed", "failed"]:
-            print(f"`main`: batch status: {batch.status}. Sleeping for {SLEEP_TIME} seconds...")
+            print(
+                f"`main`: batch status: {batch.status}. Sleeping for {SLEEP_TIME} seconds..."
+            )
             time.sleep(SLEEP_TIME)
             batch: Batch = _get_batch(client, batch.id)
         print(f"`main`: batch status: {batch.status}")

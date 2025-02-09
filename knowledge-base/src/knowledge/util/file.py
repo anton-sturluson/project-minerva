@@ -1,4 +1,5 @@
 """Utility functions for reading and writing files to S3 or local disk."""
+
 from io import BytesIO
 import json
 from pathlib import Path
@@ -20,11 +21,8 @@ class File:
         encoding: encoding to use when reading and writing files
             (default: "utf-8")
     """
-    def __init__(
-        self,
-        path: str | Path,
-        encoding: str = "utf-8"
-    ):
+
+    def __init__(self, path: str | Path, encoding: str = "utf-8"):
         if isinstance(path, str):
             path = Path(path)
 
@@ -57,14 +55,14 @@ class File:
 
         if self.path.suffix == ".json":
             out = json.loads(
-                out.decode(self.encoding), object_hook=json_util.object_hook)
+                out.decode(self.encoding), object_hook=json_util.object_hook
+            )
 
         elif self.path.suffix == ".jsonl":
             tmp_lst = []
             for line in out.decode(self.encoding).split("\n"):
                 if line:
-                    tmp_lst.append(
-                        json.loads(line, object_hook=json_util.object_hook))
+                    tmp_lst.append(json.loads(line, object_hook=json_util.object_hook))
             out = tmp_lst
 
         elif self.path.suffix in [".yaml", ".yml"]:
@@ -85,11 +83,7 @@ class File:
 
         return out
 
-    def save(
-        self,
-        data: Any,
-        indent: int | None = None
-    ):
+    def save(self, data: Any, indent: int | None = None):
         """Save data to S3 or local disk.
 
         Args:
@@ -104,10 +98,7 @@ class File:
         with self.path.open("rb") as f:
             return f.read()
 
-    def write_to_local(
-        self, data: Any,
-        indent: int | None = None
-    ):
+    def write_to_local(self, data: Any, indent: int | None = None):
         """Save data to local disk in bytes."""
         if not self.path.parent.exists():
             self.path.parent.mkdir(parents=True)
@@ -117,7 +108,8 @@ class File:
                 dumped_data = data
                 if not isinstance(dumped_data, str):
                     dumped_data: str = json.dumps(
-                        data, indent=indent, cls=FileJSONEncoder)
+                        data, indent=indent, cls=FileJSONEncoder
+                    )
                 with self.path.open("w", encoding=self.encoding) as f:
                     f.write(dumped_data)
                 return
