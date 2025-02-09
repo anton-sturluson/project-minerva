@@ -4,7 +4,6 @@ build-backend = "hatchling.build"
 
 [project]
 name = "minerva-knowledge"
-version = "0.1.0"
 description = "Knowledge base and document processing utilities"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +19,13 @@ dependencies = [
     "pandas>=2.0.0",
     "pydantic>=2.0.0",
     "tiktoken>=0.5.0",
+    "grpcio>=1.70.0",
+    "grpcio-tools>=1.70.0",
 ]
+dynamic = ["version"]
+
+[tool.hatch.version]
+path = "src/knowledge/__about__.py"
 
 [project.optional-dependencies]
 dev = [
@@ -35,7 +40,3 @@ packages = ["src/knowledge"]
 [tool.black]
 line-length = 88
 target-version = ["py38"]
-
-[tool.isort]
-profile = "black"
-multi_line_output = 3 
