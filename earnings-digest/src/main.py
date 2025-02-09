@@ -36,6 +36,8 @@ def run(ticker: str, year: int, quarter: int, use_most_recent: bool, output_dir:
     """
     if not output_dir.exists():
         output_dir.mkdir(parents=True)
+    if not str(output_dir).endswith(ticker):
+        output_dir = output_dir / ticker
 
     kb = CompanyKB()
     if use_most_recent:
