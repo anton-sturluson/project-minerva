@@ -71,6 +71,17 @@ class CompanyKB:
 
         return transcript_map["transcripts"][-1]
 
+    def get_transcript(self, ticker: str, year: int, quarter: int) -> dict | None:
+        """Get a transcript for a ticker, year, and quarter."""
+        transcript_map: dict | None = self.transcripts.find_one({"ticker": ticker})
+        if not transcript_map:
+            raise ValueError(f"Ticker {ticker} does not exist in the database.")
+
+        for transcript in transcript_map["transcripts"]:
+            if transcript["year"] == year and transcript["quarter"] == quarter:
+                return transcript
+        return None
+
     def get_most_recent_year(self, ticker: str) -> int | None:
         """Get the most recent year for a ticker."""
         transcript_map: dict | None = self.transcripts.find_one({"ticker": ticker})
