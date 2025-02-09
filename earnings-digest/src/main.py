@@ -39,7 +39,7 @@ def run(ticker: str, year: int, quarter: int, use_most_recent: bool, output_dir:
 
     kb = CompanyKB()
     if use_most_recent:
-        transcript: dict | None = kb.get_most_recent_transcript(ticker)
+        transcript: dict | None = kb.get_transcript(ticker, most_recent=True)
     else:
         transcript: dict | None = kb.get_transcript(ticker, year, quarter)
 
