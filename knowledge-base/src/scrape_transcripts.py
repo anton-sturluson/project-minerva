@@ -62,12 +62,16 @@ def main(tickers: str, years: str, quarters: str, add_recent_transcripts: bool):
                     start_year, end_year = recent_year, recent_year
                     start_quarter, end_quarter = recent_quarter + 1, 4
 
-            logging.info(
-                "[%s] Searching for transcripts from Y%s-%s, Q%s-%s",
-                ticker, start_year, end_year, start_quarter, end_quarter)
-            transcripts: list[dict] = get_transcripts(
-                ticker, start_year, end_year, start_quarter, end_quarter)
-            kb_client.add_transcripts(ticker, transcripts)
+        else:
+            start_year, end_year = default_start_year, default_end_year
+            start_quarter, end_quarter = default_start_quarter, default_end_quarter
+
+        logging.info(
+            "[%s] Searching for transcripts from Y%s-%s, Q%s-%s",
+            ticker, start_year, end_year, start_quarter, end_quarter)
+        transcripts: list[dict] = get_transcripts(
+            ticker, start_year, end_year, start_quarter, end_quarter)
+        kb_client.add_transcripts(ticker, transcripts)
 
 if __name__ == "__main__":
     main() # pylint: disable=no-value-for-parameter
