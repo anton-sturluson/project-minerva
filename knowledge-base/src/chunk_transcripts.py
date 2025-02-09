@@ -10,12 +10,12 @@ import click
 from openai.types import Batch, FileObject
 from tqdm import tqdm
 
-from knowledge.database.kb import CompanyKB
-from knowledge.llm.chunk import parse_chunk_output, gpt_chunk_prompt, ChunkOutput
-from knowledge.llm.client import OpenAIClient
-from knowledge.llm.useful import generate_topic
-from knowledge.util.env import OPENAI_API_KEY
-from knowledge.util.file import File
+from minerva_knowledge.database.kb import CompanyKB
+from minerva_knowledge.llm.chunk import parse_chunk_output, gpt_chunk_prompt, ChunkOutput
+from minerva_knowledge.llm.client import OpenAIClient
+from minerva_knowledge.llm.useful import generate_topic
+from minerva_knowledge.util.env import OPENAI_API_KEY
+from minerva_knowledge.util.file import File
 
 
 SLEEP_TIME: int = 60

@@ -7,12 +7,11 @@ import click
 from pymilvus import MilvusClient, DataType
 from tqdm import tqdm
 
-from knowledge.database.kb import CompanyKB
-from knowledge.database.vector_db import MilvusVectorDB
-from knowledge.llm import useful as llm
-from knowledge.llm.client import OpenAIClient
-from knowledge.util.env import OPENAI_API_KEY
-from knowledge.util.file import File
+from minerva_knowledge.database.kb import CompanyKB
+from minerva_knowledge.database.vector_db import MilvusVectorDB
+from minerva_knowledge.llm.client import OpenAIClient
+from minerva_knowledge.util.env import OPENAI_API_KEY
+from minerva_knowledge.util.file import File
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

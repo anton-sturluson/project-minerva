@@ -1,4 +1,4 @@
-from knowledge.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
+from minerva_knowledge.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
 from .client import Client, AnthropicClient, OpenAIClient
 
 

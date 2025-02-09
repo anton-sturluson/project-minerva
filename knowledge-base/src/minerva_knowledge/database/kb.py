@@ -1,7 +1,5 @@
 """Knowledge base for company information."""
 
-import logging
-
 from pymongo import MongoClient
 from pymongo.collection import Collection
 
@@ -52,12 +50,6 @@ class CompanyKB:
                 if "chunking_output" in transcript:
                     saved_transcript["chunking_output"] = transcript["chunking_output"]
 
-                # delete old fields - probably too aggressive
-                # for field in list(saved_transcript.keys()):
-                #     if field not in transcript:
-                #         logging.info("`add_transcripts`: Deleting field %s from transcript: %s",
-                #                      field, key)
-                #         del saved_transcript[field]
             else:
                 saved_transcripts[key] = transcript
 

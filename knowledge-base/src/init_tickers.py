@@ -3,8 +3,8 @@ from urllib.request import urlopen
 import certifi
 import json
 
-from knowledge.util.env import FMP_API_KEY
-from knowledge.database.kb import CompanyKB
+from minerva_knowledge.util.env import FMP_API_KEY
+from minerva_knowledge.database.kb import CompanyKB
 
 
 def get_jsonparsed_data(url):

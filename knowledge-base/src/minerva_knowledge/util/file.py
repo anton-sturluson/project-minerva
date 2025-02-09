@@ -10,7 +10,7 @@ from bson import json_util
 import yaml
 import pandas as pd
 
-from knowledge.util.encoder import FileJSONEncoder
+from minerva_knowledge.util.encoder import FileJSONEncoder
 
 
 class File:

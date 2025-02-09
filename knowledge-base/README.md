@@ -6,8 +6,8 @@ A Python package for managing and processing document knowledge bases, with supp
 
 ### From Source
 ```bash
-git clone https://github.com/yourusername/proejct-minerva.git
-cd proejct-minerva/knowledge-base
+git clone https://github.com/a-sturluson/project-minerva.git
+cd project-minerva/knowledge-base
 pip install -e .
 ```
 
@@ -20,9 +20,9 @@ pip install -e ".[dev]"
 ## Usage
 
 ```python
-from knowledge.database import KB
-from knowledge.llm import chunk_text, get_embeddings
-from knowledge.util import load_file
+from minerva_knowledge.database import KB
+from minerva_knowledge.llm import chunk_text, get_embeddings
+from minerva_knowledge.util import load_file
 
 # Initialize knowledge base
 kb = KB()

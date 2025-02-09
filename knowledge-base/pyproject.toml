@@ -25,7 +25,7 @@ dependencies = [
 dynamic = ["version"]
 
 [tool.hatch.version]
-path = "src/knowledge/__about__.py"
+path = "src/minerva_knowledge/__about__.py"
 
 [project.optional-dependencies]
 dev = [
@@ -35,8 +35,8 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/knowledge"]
+packages = ["src/minerva_knowledge"]
 
 [tool.black]
 line-length = 88
-target-version = ["py38"]
+target-version = ["py312"]
