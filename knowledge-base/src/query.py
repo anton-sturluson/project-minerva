@@ -4,11 +4,11 @@ from typing import Callable
 
 import click
 
-from minerva.knowledge.vector_db import MilvusVectorDB
-from minerva.llm import useful as llm
-from minerva.llm.client import OpenAIClient
-from minerva.util.env import OPENAI_API_KEY
-from minerva.util.file import File
+from knowledge.database.vector_db import MilvusVectorDB
+from knowledge.llm import useful as llm
+from knowledge.llm.client import OpenAIClient
+from knowledge.util.env import OPENAI_API_KEY
+from knowledge.util.file import File
 
 logging.basicConfig(
     level=logging.INFO,

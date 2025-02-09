@@ -4,10 +4,9 @@ import logging
 import click
 from pymongo import MongoClient
 
-from minerva.knowledge import kb_util
-from minerva.knowledge.kb import CompanyKB
-from minerva.knowledge.scrape import init_company_kb, get_transcripts
-from minerva.util.env import TEST_MODE
+from knowledge.database import kb_util
+from knowledge.database.kb import CompanyKB
+from knowledge.database.scrape import init_company_kb, get_transcripts
 
 logging.basicConfig(level=logging.INFO)
 

@@ -1,5 +1,5 @@
 """Utility functions for reading and writing files to S3 or local disk."""
-from io import BytesIO, StringIO
+from io import BytesIO
 import json
 from pathlib import Path
 import pickle
@@ -9,7 +9,7 @@ from bson import json_util
 import yaml
 import pandas as pd
 
-from minerva.util.encoder import FileJSONEncoder
+from knowledge.util.encoder import FileJSONEncoder
 
 
 class File:

@@ -1,5 +1,5 @@
+from knowledge.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
 from .client import Client, AnthropicClient, OpenAIClient
-from minerva.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
 
 
 def _init_client(model_name: str) -> Client:

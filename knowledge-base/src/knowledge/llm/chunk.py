@@ -3,10 +3,10 @@ import re
 
 import yaml
 
-from minerva.llm.client import Client, AnthropicClient, OpenAIClient
-from minerva.llm.useful import try_test_prompt
-from minerva.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
-from minerva.util.env import TEST_MODE
+from knowledge.llm.client import Client, AnthropicClient, OpenAIClient
+from knowledge.llm.useful import try_test_prompt
+from knowledge.util.env import ANTHROPIC_API_KEY, OPENAI_API_KEY
+from knowledge.util.env import TEST_MODE
 
 
 @dataclass
