@@ -1,3 +1,17 @@
+financial_extraction_task:
+  description: >
+    The task is to extract financial information from the earnings call transcript.
+    Every financial information should come with a citation to the source.
+
+    Earnings call transcript:
+    {earnings_call_transcript}
+  expected_output: >
+    The financial information should be in the following format:
+    - [Financial Information] (Source: [Source])
+    - [Financial Information] (Source: [Source])
+    - ...
+  agent: financial_expert
+
 earnings_call_digest_task:
   description: >
     The task is to summarize an earnings call by extracting key financial data, 
@@ -27,5 +41,6 @@ earnings_call_digest_task:
       7.	Analyst Questions: A summary of common analyst inquiries during the call 
       and how management responded, providing insights into investor concerns or points of focus.
       Show the analyst questions and the management's response in bullet points.
-
   agent: digest_writer
+  context:
+    - financial_extraction_task

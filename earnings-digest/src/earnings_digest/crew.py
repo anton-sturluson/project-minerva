@@ -30,6 +30,17 @@ class EarningsDigest:
     def digest_writer(self) -> Agent:
         return Agent(config=self.agents_config["digest_writer"], verbose=True)
 
+    @agent
+    def financial_expert(self) -> Agent:
+        return Agent(config=self.agents_config["financial_expert"], verbose=True)
+
+    @task
+    def financial_extraction_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["financial_extraction_task"],
+            output_file=str(self.output_dir / f"{self.ticker}_financial_extraction.md"),
+        )
+
     # To learn more about structured task outputs,
     # task dependencies, and task callbacks, check out the documentation:
     # https://docs.crewai.com/concepts/tasks#overview-of-a-task
@@ -37,7 +48,7 @@ class EarningsDigest:
     def earnings_call_digest_task(self) -> Task:
         return Task(
             config=self.tasks_config["earnings_call_digest_task"],
-            output_file=self.output_dir / f"{self.ticker}_earnings_call_digest.md",
+            output_file=str(self.output_dir / f"{self.ticker}_earnings_call_digest.md"),
         )
 
     @crew
