@@ -5,7 +5,7 @@ import json
 import re
 import time
 
-
+from aitoolkit.fileio import File
 import click
 from openai.types import Batch, FileObject
 from tqdm import tqdm
@@ -15,7 +15,6 @@ from minerva_knowledge.llm.chunk import parse_chunk_output, gpt_chunk_prompt, Ch
 from minerva_knowledge.llm.client import OpenAIClient
 from minerva_knowledge.llm.useful import generate_topic
 from minerva_knowledge.util.env import OPENAI_API_KEY
-from minerva_knowledge.util.file import File
 
 
 SLEEP_TIME: int = 60

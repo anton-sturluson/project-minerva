@@ -3,13 +3,13 @@
 import logging
 from typing import Callable
 
+from aitoolkit.fileio import File
 import click
 
 from minerva_knowledge.database.vector_db import MilvusVectorDB
 from minerva_knowledge.llm import useful as llm
 from minerva_knowledge.llm.client import OpenAIClient
 from minerva_knowledge.util.env import OPENAI_API_KEY
-from minerva_knowledge.util.file import File
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
