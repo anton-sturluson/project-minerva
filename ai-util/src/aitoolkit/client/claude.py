@@ -8,7 +8,7 @@ from anthropic import Anthropic
 from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel
 
-from client.base import BaseClient
+from .base import BaseClient
 
 # NO_RETRY_ERRORS: tuple[str] = (BadRequestError, ValueError, KeyError, TypeError)
 

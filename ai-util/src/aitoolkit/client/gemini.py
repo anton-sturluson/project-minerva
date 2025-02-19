@@ -4,7 +4,7 @@
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
-from client.base import BaseClient
+from .base import BaseClient
 
 # NO_RETRY_ERRORS: tuple[str] = (
 #     errors.UnsupportedFunctionError, errors.FunctionInvocationError,

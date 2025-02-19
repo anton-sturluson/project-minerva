@@ -4,7 +4,7 @@
 from langchain_together import ChatTogether
 from pydantic import BaseModel
 
-from client.base import BaseClient
+from .base import BaseClient
 
 # NO_RETRY_ERRORS: tuple[str] = (
 #     error.InvalidRequestError, error.AttributeError,
