@@ -1,0 +1,46 @@
+financial_extraction_task:
+  description: >
+    The task is to extract financial information from the earnings call transcript.
+    Every financial information should come with a citation to the source.
+
+    Earnings call transcript:
+    {earnings_call_transcript}
+  expected_output: >
+    The financial information should be in the following format:
+    - [Financial Information] (Source: [Source])
+    - [Financial Information] (Source: [Source])
+    - ...
+  agent: financial_expert
+
+earnings_call_digest_task:
+  description: >
+    The task is to summarize an earnings call by extracting key financial data, 
+    strategic announcements, and management’s outlook in a concise and neutral manner. 
+    The summary should capture the most relevant points, including financial performance, 
+    important company events, management sentiment, and industry trends, while ensuring 
+    clarity and brevity. The goal is to provide a clear overview that highlights the key 
+    takeaways for stakeholders, without unnecessary details or subjective interpretation.
+
+    Earnings call transcript:
+    {earnings_call_transcript}
+  expected_output: >
+    The summary should be in the following format. Do not put '**' in the headers.
+    	1.	Headline Summary: A brief introductory statement that encapsulates the key 
+      financial results (revenue, EPS, etc.) and the company’s general outlook.
+      2.	Financial Highlights: A short section summarizing key metrics such as 
+      revenue, earnings, profit margins, and growth rates.
+      3.	Key Announcements: A summary of major events or decisions with potential 
+      long-term impact, such as product launches, leadership changes, or acquisitions.
+      Also show how these announcements might affect the company's future performance.
+      4. Key investment and strategic decisions: Detailed summary of key investment and 
+      strategic decisions made by the company.
+      5.	Management Sentiment: A section summarizing the tone and outlook from the 
+      executives, interpreting their confidence or concerns based on their statements.
+      6.	Industry Trends: A brief discussion of relevant industry or market trends 
+      and how they might affect the company’s future performance.
+      7.	Analyst Questions: A summary of common analyst inquiries during the call 
+      and how management responded, providing insights into investor concerns or points of focus.
+      Show the analyst questions and the management's response in bullet points.
+  agent: digest_writer
+  context:
+    - financial_extraction_task
