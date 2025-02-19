@@ -1,0 +1,48 @@
+seven_power_analysis_task:
+  description: >
+    Conduct a comprehensive analysis of {company} using Hamilton Helmer's Seven Powers Framework,
+    examining Scale Economies, Network Economies, Counter-Positioning, Switching Costs,
+    Branding, Cornered Resource, and Process Power.
+  
+  expected_output: >
+    A detailed, structured report analyzing each of the seven powers:
+    
+    1. Scale Economies
+       - Unit cost dynamics
+       - Volume/scale requirements
+       - Barriers to efficient scale
+    
+    2. Network Economies
+       - Network effects (direct/indirect)
+       - User base growth impact
+       - Switching costs
+    
+    3. Counter-Positioning
+       - Business model innovation
+       - Incumbent conflicts
+       - Sustainability of advantage
+    
+    4. Switching Costs
+       - Customer lock-in mechanisms
+       - Switching friction points
+       - Ongoing benefits
+    
+    5. Branding
+       - Brand strength metrics
+       - Emotional connections
+       - Premium pricing power
+    
+    6. Cornered Resource
+       - Exclusive assets/rights
+       - Scarcity factors
+       - Durability of control
+    
+    7. Process Power
+       - Proprietary processes
+       - Execution capabilities
+       - Replication barriers
+
+    For each power, consider benefit and barrier of each power and classify
+    the strength of the power as Strong, Medium, or Weak.
+
+  agent: hamilton_helmer
