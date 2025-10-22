@@ -1,10 +1,10 @@
 """Main Knowledge Base interface combining MongoDB and Chroma."""
 
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from .mongo import MongoKB
 from .chroma import ChromaKB
-from .models import Section, QueryResult
+from .model import Section, QueryResult
 from .utils import build_section_path
 
 
@@ -18,30 +18,34 @@ class KnowledgeBase:
         mongo_database: str = "test",
         chroma_path: str = "./.chroma_db",
         chroma_collection: str = "knowledge_base",
-    ):
-        self.mongo = MongoKB(host=mongo_host, port=mongo_port, database=mongo_database)
-        self.chroma = ChromaKB(path=chroma_path, collection_name=chroma_collection)
+    ) -> None:
+        self.mongo: MongoKB = MongoKB(
+            host=mongo_host, port=mongo_port, database=mongo_database
+        )
+        self.chroma: ChromaKB = ChromaKB(
+            path=chroma_path, collection_name=chroma_collection
+        )
 
     def add(
         self,
         header: str,
         content: str,
-        parent_section: Optional[str] = None,
-        slug: Optional[str] = None,
+        parent_section: str | None = None,
+        slug: str | None = None,
     ) -> str:
         """Add knowledge to both MongoDB and Chroma."""
         # Add to MongoDB
-        section_id = self.mongo.add(
+        section_id: str = self.mongo.add(
             header=header, content=content, parent_id=parent_section, slug=slug
         )
 
         # Get the section to build metadata
-        section = self.mongo.get(section_id)
+        section: Section | None = self.mongo.get(section_id)
         if not section:
             raise ValueError(f"Failed to create section '{section_id}'")
 
         # Add to Chroma with metadata
-        metadata = {
+        metadata: dict[str, Any] = {
             "section_id": section_id,
             "header": header,
             "level": section.level,
@@ -51,10 +55,10 @@ class KnowledgeBase:
 
         return section_id
 
-    def get(self, identifier: str) -> Optional[Section]:
+    def get(self, identifier: str) -> Section | None:
         """Get a section by ID, slug, or numeric path."""
         # Try as section_id first
-        section = self.mongo.get(identifier)
+        section: Section | None = self.mongo.get(identifier)
         if section:
             return section
 
@@ -71,29 +75,31 @@ class KnowledgeBase:
 
         return None
 
-    def get_by_header(self, header: str) -> List[Section]:
+    def get_by_header(self, header: str) -> list[Section]:
         """Get sections by header name."""
         return self.mongo.get_by_header(header)
 
     def update(
         self,
         identifier: str,
-        header: Optional[str] = None,
-        content: Optional[str] = None,
+        header: str | None = None,
+        content: str | None = None,
     ) -> bool:
         """Update a section in both MongoDB and Chroma."""
-        section = self.get(identifier)
+        section: Section | None = self.get(identifier)
         if not section:
             return False
 
         # Update MongoDB
-        success = self.mongo.update(section.section_id, header=header, content=content)
+        success: bool = self.mongo.update(
+            section.section_id, header=header, content=content
+        )
 
         # Update Chroma if content changed
         if content is not None:
-            updated_section = self.mongo.get(section.section_id)
+            updated_section: Section | None = self.mongo.get(section.section_id)
             if updated_section:
-                metadata = {
+                metadata: dict[str, Any] = {
                     "section_id": section.section_id,
                     "header": updated_section.header,
                     "level": updated_section.level,
@@ -105,19 +111,19 @@ class KnowledgeBase:
 
     def delete(self, identifier: str, recursive: bool = False) -> bool:
         """Delete a section from both MongoDB and Chroma."""
-        section = self.get(identifier)
+        section: Section | None = self.get(identifier)
         if not section:
             return False
 
         if recursive:
             # Get all descendants to delete from Chroma
-            sections_to_delete = [section.section_id]
-            to_process = [section.section_id]
+            sections_to_delete: list[str] = [section.section_id]
+            to_process: list[str] = [section.section_id]
 
             while to_process:
-                current = to_process.pop()
-                children = self.mongo.get_children(current)
-                child_ids = [c.section_id for c in children]
+                current: str = to_process.pop()
+                children: list[Section] = self.mongo.get_children(current)
+                child_ids: list[str] = [c.section_id for c in children]
                 sections_to_delete.extend(child_ids)
                 to_process.extend(child_ids)
 
@@ -135,32 +141,33 @@ class KnowledgeBase:
         self,
         query: str,
         n_results: int = 5,
-        metadata_filter: Optional[Dict[str, Any]] = None,
-    ) -> List[QueryResult]:
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[QueryResult]:
         """Search for knowledge using semantic similarity."""
         # Search in Chroma
-        results = self.chroma.search(
+        results: list[QueryResult] = self.chroma.search(
             query, n_results=n_results, metadata_filter=metadata_filter
         )
 
         # Enrich results with MongoDB data
-        enriched = []
-        all_sections = self.mongo.list_all()
+        enriched: list[QueryResult] = []
+        all_sections: list[Section] = self.mongo.list_all()
 
         for result in results:
-            section = self.mongo.get(result.section_id)
+            section: Section | None = self.mongo.get(result.section_id)
             if section:
                 # Build path for the section
-                path = build_section_path(section, all_sections)
+                path: str = build_section_path(section, all_sections)
                 result.path = path
                 enriched.append(result)
 
         return enriched
 
-    def get_children(self, parent_identifier: Optional[str] = None) -> List[Section]:
+    def get_children(self, parent_identifier: str | None = None) -> list[Section]:
         """Get all direct children of a section."""
+        parent_id: str | None
         if parent_identifier:
-            parent = self.get(parent_identifier)
+            parent: Section | None = self.get(parent_identifier)
             if not parent:
                 return []
             parent_id = parent.section_id
@@ -169,26 +176,33 @@ class KnowledgeBase:
 
         return self.mongo.get_children(parent_id)
 
-    def get_tree(self, root_identifier: Optional[str] = None) -> str:
+    def get_tree(self, root_identifier: str | None = None) -> str:
         """Get formatted tree structure."""
         if root_identifier:
-            root = self.get(root_identifier)
+            root: Section | None = self.get(root_identifier)
             if not root:
                 raise ValueError(f"Section '{root_identifier}' not found")
             return self.mongo.export_tree(root.section_id)
         else:
             return self.mongo.export_tree()
 
-    def export(self, filepath: str, root_identifier: Optional[str] = None):
+    def export(self, filepath: str, root_identifier: str | None = None) -> None:
         """Export knowledge base tree to a text file."""
         if root_identifier:
-            root = self.get(root_identifier)
+            root: Section | None = self.get(root_identifier)
             if not root:
                 raise ValueError(f"Section '{root_identifier}' not found")
             self.mongo.export_to_file(filepath, root.section_id)
         else:
             self.mongo.export_to_file(filepath)
 
-    def close(self):
+    def set_collection(self, collection_name: str) -> None:
+        """Switch to a different collection."""
+        self.mongo.collection = self.mongo.db[collection_name.lower()]
+        self.chroma.collection = self.chroma.client.get_or_create_collection(
+            name=collection_name
+        )
+
+    def close(self) -> None:
         """Close all database connections."""
         self.mongo.close()

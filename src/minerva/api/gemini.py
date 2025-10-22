@@ -1,6 +1,5 @@
 """Gemini API client implementation."""
 
-from typing import List, Optional
 from google import genai
 from google.genai import types
 
@@ -12,7 +11,7 @@ from .base import BaseLLMClient, Message, ChatCompletionResponse
 class GeminiClient(BaseLLMClient):
     """Gemini API client for chat completions."""
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         """
         Initialize Gemini client.
 
@@ -21,7 +20,7 @@ class GeminiClient(BaseLLMClient):
             model: Model name. If None, uses default model.
         """
         super().__init__(api_key, model)
-        self.client = genai.Client(api_key=self.api_key or GOOGLE_API_KEY)
+        self.client: genai.Client = genai.Client(api_key=self.api_key or GOOGLE_API_KEY)
 
     def get_default_model(self) -> str:
         """Return the default Gemini model."""
@@ -29,10 +28,10 @@ class GeminiClient(BaseLLMClient):
 
     async def achat_completion(
         self,
-        messages: List[Message],
+        messages: list[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
-        response_schema: Optional[type] = None,
+        response_schema: type | None = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -49,8 +48,8 @@ class GeminiClient(BaseLLMClient):
             ChatCompletionResponse with the generated content.
         """
         # Separate system instruction from chat messages
-        system_instruction = None
-        contents = []
+        system_instruction: str | None = None
+        contents: list[types.Content] = []
 
         for msg in messages:
             if msg.role == "system":
@@ -65,7 +64,7 @@ class GeminiClient(BaseLLMClient):
                 )
 
         # Build generation config
-        config_params = {
+        config_params: dict = {
             "temperature": temperature,
             "max_output_tokens": max_tokens,
         }
@@ -80,24 +79,30 @@ class GeminiClient(BaseLLMClient):
         if system_instruction:
             config_params["system_instruction"] = system_instruction
 
-        config = types.GenerateContentConfig(**config_params)
+        config: types.GenerateContentConfig = types.GenerateContentConfig(
+            **config_params
+        )
 
         # Generate content using the async API
         response = await self.client.aio.models.generate_content(
             model=self.model, contents=contents, config=config
         )
 
-        # Extract usage metadata
         usage_metadata = response.usage_metadata
-        usage = {
+        usage: dict[str, int] = {
             "prompt_tokens": usage_metadata.prompt_token_count,
             "completion_tokens": usage_metadata.candidates_token_count,
             "total_tokens": usage_metadata.total_token_count,
         }
+
+        parsed_object = None
+        if response_schema:
+            parsed_object = response_schema.model_validate_json(response.text)
 
         return ChatCompletionResponse(
             content=response.text,
             model=self.model,
             usage=usage,
             raw_response=response,
+            parsed_object=parsed_object,
         )

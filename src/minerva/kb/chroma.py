@@ -1,11 +1,12 @@
 """Chroma vector database client for the Knowledge Base."""
 
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 import chromadb
+from chromadb.api.models.Collection import Collection
 from chromadb.config import Settings
 
-from .models import VectorDocument, QueryResult
+from .model import VectorDocument, QueryResult
 from .utils import chunk_text
 
 
@@ -14,29 +15,31 @@ class ChromaKB:
 
     def __init__(
         self, path: str = "./.chroma_db", collection_name: str = "knowledge_base"
-    ):
-        self.client = chromadb.PersistentClient(
+    ) -> None:
+        self.client: chromadb.PersistentClient = chromadb.PersistentClient(
             path=path, settings=Settings(anonymized_telemetry=False)
         )
-        self.collection = self.client.get_or_create_collection(name=collection_name)
+        self.collection: Collection = self.client.get_or_create_collection(
+            name=collection_name
+        )
 
     def add(
         self,
         section_id: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         chunk_size: int = 500,
     ) -> bool:
         """Add a section's content to the vector database."""
-        chunks = chunk_text(content, chunk_size=chunk_size)
+        chunks: list[str] = chunk_text(content, chunk_size=chunk_size)
         metadata = metadata or {}
 
-        ids = []
-        documents = []
-        metadatas = []
+        ids: list[str] = []
+        documents: list[str] = []
+        metadatas: list[dict[str, Any]] = []
 
         for i, chunk in enumerate(chunks):
-            chunk_id = f"{section_id}_{i}" if len(chunks) > 1 else section_id
+            chunk_id: str = f"{section_id}_{i}" if len(chunks) > 1 else section_id
             ids.append(chunk_id)
             documents.append(chunk)
             metadatas.append({**metadata, "chunk_index": i, "section_id": section_id})
@@ -44,14 +47,14 @@ class ChromaKB:
         self.collection.add(ids=ids, documents=documents, metadatas=metadatas)
         return True
 
-    def get(self, section_id: str) -> List[VectorDocument]:
+    def get(self, section_id: str) -> list[VectorDocument]:
         """Get all chunks for a section."""
-        results = self.collection.get(where={"section_id": section_id})
+        results: dict[str, Any] = self.collection.get(where={"section_id": section_id})
 
         if not results or not results["ids"]:
             return []
 
-        documents = []
+        documents: list[VectorDocument] = []
         for i, doc_id in enumerate(results["ids"]):
             documents.append(
                 VectorDocument(
@@ -69,7 +72,9 @@ class ChromaKB:
         """Delete all chunks for a section."""
         try:
             # Get all document IDs for this section
-            results = self.collection.get(where={"section_id": section_id})
+            results: dict[str, Any] = self.collection.get(
+                where={"section_id": section_id}
+            )
             if results and results["ids"]:
                 self.collection.delete(ids=results["ids"])
             return True
@@ -80,10 +85,10 @@ class ChromaKB:
         self,
         query: str,
         n_results: int = 5,
-        metadata_filter: Optional[Dict[str, Any]] = None,
-    ) -> List[QueryResult]:
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[QueryResult]:
         """Search for similar content using text query."""
-        results = self.collection.query(
+        results: dict[str, Any] = self.collection.query(
             query_texts=[query],
             n_results=n_results,
             where=metadata_filter,
@@ -92,16 +97,14 @@ class ChromaKB:
         if not results or not results["ids"] or not results["ids"][0]:
             return []
 
-        query_results = []
+        query_results: list[QueryResult] = []
         for i in range(len(results["ids"][0])):
             query_results.append(
                 QueryResult(
                     section_id=results["metadatas"][0][i]["section_id"],
                     header=results["metadatas"][0][i].get("header", ""),
                     content=results["documents"][0][i],
-                    score=1 - results["distances"][0][i]
-                    if results["distances"]
-                    else None,
+                    similarity=1 - results["distances"][0][i],
                     metadata=results["metadatas"][0][i],
                 )
             )
@@ -110,12 +113,12 @@ class ChromaKB:
 
     def search_by_embedding(
         self,
-        embedding: List[float],
+        embedding: list[float],
         n_results: int = 5,
-        metadata_filter: Optional[Dict[str, Any]] = None,
-    ) -> List[QueryResult]:
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[QueryResult]:
         """Search for similar content using embedding vector."""
-        results = self.collection.query(
+        results: dict[str, Any] = self.collection.query(
             query_embeddings=[embedding],
             n_results=n_results,
             where=metadata_filter,
@@ -124,16 +127,14 @@ class ChromaKB:
         if not results or not results["ids"] or not results["ids"][0]:
             return []
 
-        query_results = []
+        query_results: list[QueryResult] = []
         for i in range(len(results["ids"][0])):
             query_results.append(
                 QueryResult(
                     section_id=results["metadatas"][0][i]["section_id"],
                     header=results["metadatas"][0][i].get("header", ""),
                     content=results["documents"][0][i],
-                    score=1 - results["distances"][0][i]
-                    if results["distances"]
-                    else None,
+                    similarity=1 - results["distances"][0][i],
                     metadata=results["metadatas"][0][i],
                 )
             )
@@ -141,15 +142,21 @@ class ChromaKB:
         return query_results
 
     def update(
-        self, section_id: str, content: str, metadata: Optional[Dict[str, Any]] = None
+        self, section_id: str, content: str, metadata: dict[str, Any] | None = None
     ) -> bool:
         """Update a section's content in the vector database."""
         self.delete(section_id)
         return self.add(section_id, content, metadata)
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all documents from the collection."""
         self.client.delete_collection(self.collection.name)
         self.collection = self.client.get_or_create_collection(
-            name=self.collection.name
+            name=self.collection.name,
+            configuration={
+                "hnsw": {
+                    "space": "cosine",
+                    "ef_construction": 200
+                }
+            }
         )

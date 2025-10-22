@@ -1,7 +1,7 @@
 """HTML and SEC filing parsing utilities."""
 
 import re
-from typing import Dict, Optional
+from typing import Any
 from bs4 import BeautifulSoup
 
 
@@ -15,16 +15,16 @@ def extract_sec_document(file_path: str) -> str:
     Returns:
         HTML content from the document
     """
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
 
     # Extract content between <DOCUMENT> and </DOCUMENT>
-    doc_match = re.search(r'<DOCUMENT>(.*?)</DOCUMENT>', content, re.DOTALL)
+    doc_match = re.search(r"<DOCUMENT>(.*?)</DOCUMENT>", content, re.DOTALL)
     if doc_match:
         doc_content = doc_match.group(1)
 
         # Find the actual HTML start
-        html_match = re.search(r'(<html.*?>.*)', doc_content, re.DOTALL | re.IGNORECASE)
+        html_match = re.search(r"(<html.*?>.*)", doc_content, re.DOTALL | re.IGNORECASE)
         if html_match:
             return html_match.group(1)
 
@@ -34,7 +34,7 @@ def extract_sec_document(file_path: str) -> str:
     return content
 
 
-def parse_sec_header(file_path: str) -> Dict[str, str]:
+def parse_sec_header(file_path: str) -> dict[str, str]:
     """
     Extract metadata from SEC filing header.
 
@@ -44,26 +44,26 @@ def parse_sec_header(file_path: str) -> Dict[str, str]:
     Returns:
         Dictionary with SEC filing metadata
     """
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        content = f.read()
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        content: str = f.read()
 
-    metadata = {}
+    metadata: dict[str, str] = {}
 
     # Extract header section
-    header_match = re.search(r'<SEC-HEADER>(.*?)</SEC-HEADER>', content, re.DOTALL)
+    header_match = re.search(r"<SEC-HEADER>(.*?)</SEC-HEADER>", content, re.DOTALL)
     if not header_match:
         return metadata
 
-    header = header_match.group(1)
+    header: str = header_match.group(1)
 
     # Extract key fields
-    patterns = {
-        'accession_number': r'ACCESSION NUMBER:\s+(\S+)',
-        'submission_type': r'CONFORMED SUBMISSION TYPE:\s+(\S+)',
-        'filing_date': r'FILED AS OF DATE:\s+(\d+)',
-        'company_name': r'COMPANY CONFORMED NAME:\s+(.+?)$',
-        'cik': r'CENTRAL INDEX KEY:\s+(\d+)',
-        'period_of_report': r'CONFORMED PERIOD OF REPORT:\s+(\d+)',
+    patterns: dict[str, str] = {
+        "accession_number": r"ACCESSION NUMBER:\s+(\S+)",
+        "submission_type": r"CONFORMED SUBMISSION TYPE:\s+(\S+)",
+        "filing_date": r"FILED AS OF DATE:\s+(\d+)",
+        "company_name": r"COMPANY CONFORMED NAME:\s+(.+?)$",
+        "cik": r"CENTRAL INDEX KEY:\s+(\d+)",
+        "period_of_report": r"CONFORMED PERIOD OF REPORT:\s+(\d+)",
     }
 
     for key, pattern in patterns.items():
@@ -85,27 +85,27 @@ def html_to_text(html_content: str, clean: bool = True) -> str:
     Returns:
         Extracted text content
     """
-    soup = BeautifulSoup(html_content, 'lxml')
+    soup = BeautifulSoup(html_content, "lxml")
 
     # Remove script, style, and other non-content elements
-    for element in soup(['script', 'style', 'meta', 'link']):
+    for element in soup(["script", "style", "meta", "link"]):
         element.decompose()
 
     # Get text
-    text = soup.get_text(separator='\n')
+    text = soup.get_text(separator="\n")
 
     if clean:
         # Clean up excessive whitespace
         lines = (line.strip() for line in text.splitlines())
-        text = '\n'.join(line for line in lines if line)
+        text = "\n".join(line for line in lines if line)
 
         # Reduce multiple blank lines to single blank line
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text
 
 
-def extract_sec_sections(html_content: str) -> Dict[str, str]:
+def extract_sec_sections(html_content: str) -> dict[str, str]:
     """
     Extract major sections from SEC 10-K filing.
 
@@ -122,34 +122,34 @@ def extract_sec_sections(html_content: str) -> Dict[str, str]:
     Returns:
         Dictionary mapping section names to their content
     """
-    soup = BeautifulSoup(html_content, 'lxml')
-    sections = {}
+    soup = BeautifulSoup(html_content, "lxml")
+    sections: dict[str, str] = {}
 
     # Look for common section patterns
     # SEC filings often use specific formatting for item headers
-    item_pattern = re.compile(r'item\s+(\d+[a-z]?)[:\.\s]+(.+?)(?:\n|$)', re.IGNORECASE)
+    item_pattern = re.compile(r"item\s+(\d+[a-z]?)[:\.\s]+(.+?)(?:\n|$)", re.IGNORECASE)
 
-    text = soup.get_text()
+    text: str = soup.get_text()
 
     # Find all item headers
-    matches = list(item_pattern.finditer(text))
+    matches: list = list(item_pattern.finditer(text))
 
     for i, match in enumerate(matches):
-        item_num = match.group(1).upper()
-        item_title = match.group(2).strip()
-        section_name = f"Item {item_num}: {item_title}"
+        item_num: str = match.group(1).upper()
+        item_title: str = match.group(2).strip()
+        section_name: str = f"Item {item_num}: {item_title}"
 
         # Extract content between this item and the next
-        start_pos = match.end()
-        end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        start_pos: int = match.end()
+        end_pos: int = matches[i + 1].start() if i + 1 < len(matches) else len(text)
 
-        content = text[start_pos:end_pos].strip()
+        content: str = text[start_pos:end_pos].strip()
         sections[section_name] = content
 
     return sections
 
 
-def parse_sec_filing(file_path: str) -> Dict[str, any]:
+def parse_sec_filing(file_path: str) -> dict[str, Any]:
     """
     Parse SEC filing and extract all relevant information.
 
@@ -163,14 +163,14 @@ def parse_sec_filing(file_path: str) -> Dict[str, any]:
         - text: Plain text content
         - sections: Major sections (if identifiable)
     """
-    metadata = parse_sec_header(file_path)
-    html_content = extract_sec_document(file_path)
-    text_content = html_to_text(html_content)
-    sections = extract_sec_sections(html_content)
+    metadata: dict[str, str] = parse_sec_header(file_path)
+    html_content: str = extract_sec_document(file_path)
+    text_content: str = html_to_text(html_content)
+    sections: dict[str, str] = extract_sec_sections(html_content)
 
     return {
-        'metadata': metadata,
-        'html': html_content,
-        'text': text_content,
-        'sections': sections,
+        "metadata": metadata,
+        "html": html_content,
+        "text": text_content,
+        "sections": sections,
     }

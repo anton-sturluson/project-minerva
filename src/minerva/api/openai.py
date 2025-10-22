@@ -1,6 +1,5 @@
 """OpenAI API client implementation."""
 
-from typing import List, Optional
 from openai import AsyncOpenAI
 
 from minerva.util.env import OPENAI_API_KEY
@@ -11,7 +10,7 @@ from .base import BaseLLMClient, Message, ChatCompletionResponse
 class OpenAIClient(BaseLLMClient):
     """OpenAI API client for chat completions."""
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         """
         Initialize OpenAI client.
 
@@ -20,18 +19,18 @@ class OpenAIClient(BaseLLMClient):
             model: Model name. If None, uses default model.
         """
         super().__init__(api_key, model)
-        self.client = AsyncOpenAI(api_key=self.api_key or OPENAI_API_KEY)
+        self.client: AsyncOpenAI = AsyncOpenAI(api_key=self.api_key or OPENAI_API_KEY)
 
     def get_default_model(self) -> str:
         """Return the default OpenAI model."""
-        return "gpt-5-mini"
+        return "gpt-4.1-mini"
 
     async def achat_completion(
         self,
-        messages: List[Message],
+        messages: list[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
-        response_schema: Optional[type] = None,
+        response_schema: type | None = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -47,34 +46,39 @@ class OpenAIClient(BaseLLMClient):
         Returns:
             ChatCompletionResponse with the generated content.
         """
-        openai_messages = [
+        openai_messages: list[dict] = [
             {"role": msg.role, "content": msg.content} for msg in messages
         ]
 
-        params = {
+        params: dict = {
             "model": self.model,
             "messages": openai_messages,
             "temperature": temperature,
             "max_completion_tokens": max_tokens,
         }
-
-        # Add structured output if schema provided
-        if response_schema:
-            params["response_format"] = response_schema
-
         params.update(kwargs)
 
-        response = await self.client.chat.completions.create(**params)
+        content: str
+        parsed_object = None
+        if response_schema:
+            params["response_format"] = response_schema
+            response = await self.client.beta.chat.completions.parse(**params)
+            parsed_object = response.choices[0].message.parsed
+            content = parsed_object.model_dump_json()
+        else:
+            response = await self.client.chat.completions.create(**params)
+            content = response.choices[0].message.content
 
-        usage = {
+        usage: dict = {
             "prompt_tokens": response.usage.prompt_tokens,
             "completion_tokens": response.usage.completion_tokens,
             "total_tokens": response.usage.total_tokens,
         }
 
         return ChatCompletionResponse(
-            content=response.choices[0].message.content,
+            content=content,
             model=response.model,
             usage=usage,
             raw_response=response.model_dump(),
+            parsed_object=parsed_object,
         )

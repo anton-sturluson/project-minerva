@@ -1,7 +1,7 @@
 """Data models for the Knowledge Base."""
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -9,8 +9,8 @@ class Section(BaseModel):
     """Represents a section or subsection in the knowledge base."""
 
     section_id: str
-    parent_id: Optional[str] = None
-    slug: Optional[str] = None
+    parent_id: str | None = None
+    slug: str | None = None
     header: str
     content: str
     level: int = 0
@@ -29,7 +29,7 @@ class VectorDocument(BaseModel):
     section_id: str
     chunk_index: int = 0
     content: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueryResult(BaseModel):
@@ -38,6 +38,6 @@ class QueryResult(BaseModel):
     section_id: str
     header: str
     content: str
-    score: Optional[float] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    path: Optional[str] = None  # e.g., "1.2.3" or "section/subsection"
+    similarity: float
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    path: str | None = None  # e.g., "1.2.3" or "section/subsection"
