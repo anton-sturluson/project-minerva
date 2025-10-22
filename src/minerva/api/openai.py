@@ -31,7 +31,7 @@ class OpenAIClient(BaseLLMClient):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletionResponse:
         """
         Generate a chat completion using OpenAI.
@@ -45,7 +45,9 @@ class OpenAIClient(BaseLLMClient):
         Returns:
             ChatCompletionResponse with the generated content.
         """
-        openai_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
+        openai_messages = [
+            {"role": msg.role, "content": msg.content} for msg in messages
+        ]
 
         params = {
             "model": self.model,

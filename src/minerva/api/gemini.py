@@ -32,7 +32,7 @@ class GeminiClient(BaseLLMClient):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletionResponse:
         """
         Generate a chat completion using Gemini.
@@ -54,9 +54,13 @@ class GeminiClient(BaseLLMClient):
             if msg.role == "system":
                 system_instruction = msg.content
             elif msg.role == "user":
-                contents.append(types.Content(role="user", parts=[types.Part(text=msg.content)]))
+                contents.append(
+                    types.Content(role="user", parts=[types.Part(text=msg.content)])
+                )
             elif msg.role == "assistant":
-                contents.append(types.Content(role="model", parts=[types.Part(text=msg.content)]))
+                contents.append(
+                    types.Content(role="model", parts=[types.Part(text=msg.content)])
+                )
 
         # Build generation config
         config_params = {
@@ -72,9 +76,7 @@ class GeminiClient(BaseLLMClient):
 
         # Generate content using the async API
         response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=contents,
-            config=config
+            model=self.model, contents=contents, config=config
         )
 
         # Extract usage metadata

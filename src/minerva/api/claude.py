@@ -31,7 +31,7 @@ class ClaudeClient(BaseLLMClient):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletionResponse:
         """
         Generate a chat completion using Claude.

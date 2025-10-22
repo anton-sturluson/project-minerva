@@ -9,6 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class Message:
     """Represents a chat message."""
+
     role: str  # "system", "user", or "assistant"
     content: str
 
@@ -16,6 +17,7 @@ class Message:
 @dataclass
 class ChatCompletionResponse:
     """Standardized response from chat completion."""
+
     content: str
     model: str
     usage: Dict[str, int]
@@ -47,7 +49,7 @@ class BaseLLMClient(ABC):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletionResponse:
         """
         Generate a chat completion (async).
@@ -68,7 +70,7 @@ class BaseLLMClient(ABC):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
-        **kwargs
+        **kwargs,
     ) -> ChatCompletionResponse:
         """
         Generate a chat completion (sync).
@@ -82,7 +84,9 @@ class BaseLLMClient(ABC):
         Returns:
             ChatCompletionResponse with the generated content.
         """
-        return asyncio.run(self.achat_completion(messages, temperature, max_tokens, **kwargs))
+        return asyncio.run(
+            self.achat_completion(messages, temperature, max_tokens, **kwargs)
+        )
 
     async def achat(self, prompt: str, system: Optional[str] = None, **kwargs) -> str:
         """
