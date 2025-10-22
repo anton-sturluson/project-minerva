@@ -32,6 +32,7 @@ class GeminiClient(BaseLLMClient):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
+        response_schema: Optional[type] = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -41,6 +42,7 @@ class GeminiClient(BaseLLMClient):
             messages: List of messages in the conversation.
             temperature: Sampling temperature (0.0 to 2.0).
             max_tokens: Maximum tokens to generate.
+            response_schema: Optional Pydantic model for structured output.
             **kwargs: Additional Gemini-specific parameters.
 
         Returns:
@@ -67,6 +69,12 @@ class GeminiClient(BaseLLMClient):
             "temperature": temperature,
             "max_output_tokens": max_tokens,
         }
+
+        # Add structured output if schema provided
+        if response_schema:
+            config_params["response_mime_type"] = "application/json"
+            config_params["response_schema"] = response_schema
+
         config_params.update(kwargs)
 
         if system_instruction:

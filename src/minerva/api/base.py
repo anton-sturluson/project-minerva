@@ -49,6 +49,7 @@ class BaseLLMClient(ABC):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
+        response_schema: Optional[type] = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -58,6 +59,7 @@ class BaseLLMClient(ABC):
             messages: List of messages in the conversation.
             temperature: Sampling temperature (0.0 to 1.0).
             max_tokens: Maximum tokens to generate.
+            response_schema: Optional Pydantic model for structured output.
             **kwargs: Additional provider-specific parameters.
 
         Returns:
@@ -70,6 +72,7 @@ class BaseLLMClient(ABC):
         messages: List[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
+        response_schema: Optional[type] = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -79,13 +82,14 @@ class BaseLLMClient(ABC):
             messages: List of messages in the conversation.
             temperature: Sampling temperature (0.0 to 1.0).
             max_tokens: Maximum tokens to generate.
+            response_schema: Optional Pydantic model for structured output.
             **kwargs: Additional provider-specific parameters.
 
         Returns:
             ChatCompletionResponse with the generated content.
         """
         return asyncio.run(
-            self.achat_completion(messages, temperature, max_tokens, **kwargs)
+            self.achat_completion(messages, temperature, max_tokens, response_schema, **kwargs)
         )
 
     async def achat(self, prompt: str, system: Optional[str] = None, **kwargs) -> str:
