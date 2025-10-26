@@ -1,9 +1,8 @@
 """Base class for LLM API clients."""
 
-import asyncio
 from abc import ABC, abstractmethod
-from typing import Any
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -28,7 +27,7 @@ class ChatCompletionResponse:
 
 
 class BaseLLMClient(ABC):
-    """Base class for LLM API clients."""
+    """Base class for LLM API clients (async-first)."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
         """
@@ -47,22 +46,24 @@ class BaseLLMClient(ABC):
         pass
 
     @abstractmethod
-    async def achat_completion(
+    async def chat_completion(
         self,
         messages: list[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
         response_schema: type | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
-        Generate a chat completion (async).
+        Generate a chat completion.
 
         Args:
             messages: List of messages in the conversation.
             temperature: Sampling temperature (0.0 to 1.0).
             max_tokens: Maximum tokens to generate.
             response_schema: Optional Pydantic model for structured output.
+            model: Optional model override. If None, uses self.model.
             **kwargs: Additional provider-specific parameters.
 
         Returns:
@@ -70,41 +71,14 @@ class BaseLLMClient(ABC):
         """
         pass
 
-    def chat_completion(
-        self,
-        messages: list[Message],
-        temperature: float = 1.0,
-        max_tokens: int = 16_384,
-        response_schema: type | None = None,
-        **kwargs,
-    ) -> ChatCompletionResponse:
+    async def chat(self, prompt: str, system: str | None = None, **kwargs) -> str:
         """
-        Generate a chat completion (sync).
-
-        Args:
-            messages: List of messages in the conversation.
-            temperature: Sampling temperature (0.0 to 1.0).
-            max_tokens: Maximum tokens to generate.
-            response_schema: Optional Pydantic model for structured output.
-            **kwargs: Additional provider-specific parameters.
-
-        Returns:
-            ChatCompletionResponse with the generated content.
-        """
-        return asyncio.run(
-            self.achat_completion(
-                messages, temperature, max_tokens, response_schema, **kwargs
-            )
-        )
-
-    async def achat(self, prompt: str, system: str | None = None, **kwargs) -> str:
-        """
-        Convenience method for simple chat completion (async).
+        Convenience method for simple chat completion.
 
         Args:
             prompt: User prompt.
             system: Optional system message.
-            **kwargs: Additional parameters to pass to achat_completion.
+            **kwargs: Additional parameters to pass to chat_completion.
 
         Returns:
             The generated text content.
@@ -114,21 +88,11 @@ class BaseLLMClient(ABC):
             messages.append(Message(role="system", content=system))
         messages.append(Message(role="user", content=prompt))
 
-        response: ChatCompletionResponse = await self.achat_completion(
+        response: ChatCompletionResponse = await self.chat_completion(
             messages, **kwargs
         )
         return response.content
 
-    def chat(self, prompt: str, system: str | None = None, **kwargs) -> str:
-        """
-        Convenience method for simple chat completion (sync).
-
-        Args:
-            prompt: User prompt.
-            system: Optional system message.
-            **kwargs: Additional parameters to pass to achat_completion.
-
-        Returns:
-            The generated text content.
-        """
-        return asyncio.run(self.achat(prompt, system, **kwargs))
+    async def close(self) -> None:
+        """Close any open connections. Override in subclasses if needed."""
+        pass

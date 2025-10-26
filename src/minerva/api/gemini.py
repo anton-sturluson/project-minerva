@@ -26,12 +26,13 @@ class GeminiClient(BaseLLMClient):
         """Return the default Gemini model."""
         return "gemini-2.5-flash"
 
-    async def achat_completion(
+    async def chat_completion(
         self,
         messages: list[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
         response_schema: type | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -42,11 +43,13 @@ class GeminiClient(BaseLLMClient):
             temperature: Sampling temperature (0.0 to 2.0).
             max_tokens: Maximum tokens to generate.
             response_schema: Optional Pydantic model for structured output.
+            model: Optional model override. If None, uses self.model.
             **kwargs: Additional Gemini-specific parameters.
 
         Returns:
             ChatCompletionResponse with the generated content.
         """
+        model_to_use: str = model or self.model
         # Separate system instruction from chat messages
         system_instruction: str | None = None
         contents: list[types.Content] = []
@@ -85,7 +88,7 @@ class GeminiClient(BaseLLMClient):
 
         # Generate content using the async API
         response = await self.client.aio.models.generate_content(
-            model=self.model, contents=contents, config=config
+            model=model_to_use, contents=contents, config=config
         )
 
         usage_metadata = response.usage_metadata
@@ -101,8 +104,12 @@ class GeminiClient(BaseLLMClient):
 
         return ChatCompletionResponse(
             content=response.text,
-            model=self.model,
+            model=model_to_use,
             usage=usage,
             raw_response=response,
             parsed_object=parsed_object,
         )
+
+    async def close(self) -> None:
+        """Close the Gemini client and cleanup resources."""
+        await self.client.aio.aclose()

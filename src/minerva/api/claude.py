@@ -28,12 +28,13 @@ class ClaudeClient(BaseLLMClient):
         """Return the default Claude model."""
         return "claude-haiku-4-5"
 
-    async def achat_completion(
+    async def chat_completion(
         self,
         messages: list[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
         response_schema: type | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -44,11 +45,14 @@ class ClaudeClient(BaseLLMClient):
             temperature: Sampling temperature (0.0 to 1.0).
             max_tokens: Maximum tokens to generate.
             response_schema: Optional Pydantic model for structured output.
+            model: Optional model override. If None, uses self.model.
             **kwargs: Additional Claude-specific parameters.
 
         Returns:
             ChatCompletionResponse with the generated content.
         """
+        model_to_use: str = model or self.model
+
         system_message: str | None = None
         conversation_messages: list[dict] = []
 
@@ -59,7 +63,7 @@ class ClaudeClient(BaseLLMClient):
                 conversation_messages.append({"role": msg.role, "content": msg.content})
 
         params: dict = {
-            "model": self.model,
+            "model": model_to_use,
             "messages": conversation_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -109,3 +113,7 @@ class ClaudeClient(BaseLLMClient):
             raw_response=response.model_dump(),
             parsed_object=parsed_object,
         )
+
+    async def close(self) -> None:
+        """Close the Claude client and cleanup resources."""
+        await self.client.close()

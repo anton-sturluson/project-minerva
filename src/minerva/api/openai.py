@@ -25,12 +25,13 @@ class OpenAIClient(BaseLLMClient):
         """Return the default OpenAI model."""
         return "gpt-4.1-mini"
 
-    async def achat_completion(
+    async def chat_completion(
         self,
         messages: list[Message],
         temperature: float = 1.0,
         max_tokens: int = 16_384,
         response_schema: type | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> ChatCompletionResponse:
         """
@@ -41,17 +42,20 @@ class OpenAIClient(BaseLLMClient):
             temperature: Sampling temperature (0.0 to 2.0).
             max_tokens: Maximum tokens to generate.
             response_schema: Optional Pydantic model for structured output.
+            model: Optional model override. If None, uses self.model.
             **kwargs: Additional OpenAI-specific parameters.
 
         Returns:
             ChatCompletionResponse with the generated content.
         """
+        model_to_use: str = model or self.model
+
         openai_messages: list[dict] = [
             {"role": msg.role, "content": msg.content} for msg in messages
         ]
 
         params: dict = {
-            "model": self.model,
+            "model": model_to_use,
             "messages": openai_messages,
             "temperature": temperature,
             "max_completion_tokens": max_tokens,
@@ -82,3 +86,7 @@ class OpenAIClient(BaseLLMClient):
             raw_response=response.model_dump(),
             parsed_object=parsed_object,
         )
+
+    async def close(self) -> None:
+        """Close the OpenAI client and cleanup resources."""
+        await self.client.close()
