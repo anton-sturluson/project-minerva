@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
+from collections import defaultdict
 from typing import Any, TYPE_CHECKING
 
 from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncResult
 
 from minerva.core.node import EntityNode, TopicNode
+
 if TYPE_CHECKING:
     from minerva.core.base import BaseNode, BaseRelation
 
@@ -38,14 +39,10 @@ class Neo4jDriver:
         if not nodes:
             return
 
-        from collections import defaultdict
         nodes_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
         for node in nodes:
-            node_type: str = node.type
-            node_data: dict[str, Any] = node.model_dump()
-            node_data['created_at'] = node.created_at.isoformat()
-            nodes_by_type[node_type].append(node_data)
+            nodes_by_type[node.type].append(node.to_neo4j_params())
 
         async with self.driver.session(database=self.database) as session:
             for node_type, node_list in nodes_by_type.items():
@@ -56,7 +53,7 @@ class Neo4jDriver:
                     SET n = node
                     SET n.created_at = datetime(node.created_at)
                     """,
-                    {'nodes': node_list}
+                    {"nodes": node_list},
                 )
 
     async def bulk_create_relations(self, relations: list[BaseRelation]) -> None:
@@ -69,37 +66,31 @@ class Neo4jDriver:
         if not relations:
             return
 
-        from collections import defaultdict
         relations_by_class: dict[type, list[dict[str, Any]]] = defaultdict(list)
 
         for relation in relations:
-            relation_class: type = type(relation)
-            relation_data: dict[str, Any] = relation.model_dump()
-            relation_data['created_at'] = relation.created_at.isoformat()
-            relations_by_class[relation_class].append(relation_data)
+            relations_by_class[type(relation)].append(relation.to_neo4j_params())
 
         async with self.driver.session(database=self.database) as session:
             for relation_class, relation_list in relations_by_class.items():
-                sample_relation: BaseRelation = relation_class(**relation_list[0])
-                relation_type: str = sample_relation.type
+                metadata: dict[str, Any] = relation_class.get_neo4j_metadata()
+                relation_type: str = relation_class(**relation_list[0]).type
 
-                all_fields: set[str] = set(relation_list[0].keys())
-                base_fields: set[str] = {'id', 'created_at', 'from_id', 'to_id', 'type'}
-                property_fields: list[str] = sorted(all_fields - base_fields)
-
-                properties: str = ', '.join([
-                    f'{field}: rel.{field}' for field in ['id', 'created_at'] + property_fields
-                ])
+                from_label: str = metadata["from_label"]
+                to_label: str = metadata["to_label"]
+                properties: str = ", ".join(
+                    [f"{p}: rel.{p}" for p in metadata["properties"]]
+                )
 
                 query: str = f"""
                 UNWIND $relations AS rel
-                MATCH (from_node {{id: rel.from_id}})
-                MATCH (to_node {{id: rel.to_id}})
+                MATCH (from_node:{from_label} {{id: rel.from_id}})
+                MATCH (to_node:{to_label} {{id: rel.to_id}})
                 CREATE (from_node)-[r:{relation_type} {{{properties}}}]->(to_node)
                 SET r.created_at = datetime(rel.created_at)
                 """
 
-                await session.run(query, {'relations': relation_list})
+                await session.run(query, {"relations": relation_list})
 
     async def create_vector_indexes(self) -> None:
         """Create vector indexes for embedding fields."""

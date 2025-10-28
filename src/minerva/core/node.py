@@ -11,6 +11,7 @@ from minerva.core.base import BaseNode
 from minerva.prompt.entity import summarize_entity
 from minerva.prompt.model import TopicSummary
 from minerva.prompt.topic import summarize_leaf_topic, summarize_parent_topic
+
 if TYPE_CHECKING:
     from minerva.kb.driver import Neo4jDriver
 
@@ -20,27 +21,6 @@ class SourceNode(BaseNode):
 
     content: str
 
-    async def create(
-        self,
-        driver: Neo4jDriver | None = None,
-        session: AsyncSession | None = None,
-    ):
-        """Create this Source node in the graph."""
-        await self._run_query(
-            """
-            CREATE (n:Source {
-                id: $id,
-                created_at: datetime($created_at),
-                content: $content
-            })
-            """,
-            driver=driver,
-            session=session,
-            id=self.id,
-            created_at=self.created_at.isoformat(),
-            content=self.content,
-        )
-
 
 class EntityNode(BaseNode):
     """Entity node representing a concept or object."""
@@ -48,31 +28,6 @@ class EntityNode(BaseNode):
     name: str
     name_embedding: list[float]
     summary: str
-
-    async def create(
-        self,
-        driver: Neo4jDriver | None = None,
-        session: AsyncSession | None = None,
-    ):
-        """Create this Entity node in the graph."""
-        await self._run_query(
-            """
-            CREATE (n:Entity {
-                id: $id,
-                created_at: datetime($created_at),
-                name: $name,
-                name_embedding: $name_embedding,
-                summary: $summary
-            })
-            """,
-            driver=driver,
-            session=session,
-            id=self.id,
-            created_at=self.created_at.isoformat(),
-            name=self.name,
-            name_embedding=self.name_embedding,
-            summary=self.summary,
-        )
 
     async def summarize(self, driver: Neo4jDriver) -> str:
         """
@@ -235,30 +190,3 @@ class TopicNode(BaseNode):
                 driver=driver, session=session
             )
             return await summarize_parent_topic(children)
-
-    async def create(
-        self,
-        driver: Neo4jDriver | None = None,
-        session: AsyncSession | None = None,
-    ):
-        """Create this Topic node in the graph."""
-        await self._run_query(
-            """
-            CREATE (n:Topic {
-                id: $id,
-                created_at: datetime($created_at),
-                name: $name,
-                summary: $summary,
-                summary_embedding: $summary_embedding,
-                level: $level
-            })
-            """,
-            driver=driver,
-            session=session,
-            id=self.id,
-            created_at=self.created_at.isoformat(),
-            name=self.name,
-            summary=self.summary,
-            summary_embedding=self.summary_embedding,
-            level=self.level,
-        )
