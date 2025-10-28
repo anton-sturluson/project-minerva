@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from uuid import uuid4
 
-from neo4j import AsyncSession
 from pydantic import BaseModel, Field
 
 from minerva.core.util import camel_to_snake
-
-if TYPE_CHECKING:
-    from minerva.kb.driver import Neo4jDriver
 
 
 class BaseNode(BaseModel):
@@ -31,35 +27,6 @@ class BaseNode(BaseModel):
         data: dict[str, Any] = self.model_dump()
         data["created_at"] = self.created_at.isoformat()
         return data
-
-    async def create(
-        self,
-        driver: Neo4jDriver | None = None,
-        session: AsyncSession | None = None,
-    ):
-        """
-        Create this node in the graph. Must be implemented by subclasses.
-
-        Args:
-            driver: Neo4j driver (creates temp session if session not provided)
-            session: Existing session (prioritized if provided)
-        """
-        raise NotImplementedError
-
-    async def _run_query(
-        self,
-        query: str,
-        driver: Neo4jDriver | None = None,
-        session: AsyncSession | None = None,
-        **params,
-    ):
-        """Helper to run query with session or driver."""
-        if session:
-            await session.run(query, params)
-        elif driver:
-            await driver.run(query, params)
-        else:
-            raise ValueError("Must provide either driver or session")
 
     @property
     def type(self) -> str:
@@ -98,35 +65,6 @@ class BaseRelation(BaseModel):
                 - properties: List of property names (excluding from_id, to_id)
         """
         raise NotImplementedError
-
-    async def create(
-        self,
-        driver: Neo4jDriver | None = None,
-        session: AsyncSession | None = None,
-    ):
-        """
-        Create this relation in the graph. Must be implemented by subclasses.
-
-        Args:
-            driver: Neo4j driver (creates temp session if session not provided)
-            session: Existing session (prioritized if provided)
-        """
-        raise NotImplementedError
-
-    async def _run_query(
-        self,
-        query: str,
-        driver: Neo4jDriver | None = None,
-        session: AsyncSession | None = None,
-        **params,
-    ):
-        """Helper to run query with session or driver."""
-        if session:
-            await session.run(query, params)
-        elif driver:
-            await driver.run(query, params)
-        else:
-            raise ValueError("Must provide either driver or session")
 
     @property
     def type(self) -> str:
