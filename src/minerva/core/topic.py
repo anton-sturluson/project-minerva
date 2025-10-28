@@ -37,9 +37,7 @@ class TopicManager:
         entities: list[EntityNode] = await self._get_entities()
         relations: list[RelatesToRelation] = await self._get_relations()
 
-        hierarchy: CommunityHierarchy = await self.algorithm.detect(
-            entities, relations
-        )
+        hierarchy: CommunityHierarchy = await self.algorithm.detect(entities, relations)
 
         await self.driver.bulk_create_nodes(hierarchy.topics)
         await self.driver.bulk_create_relations(

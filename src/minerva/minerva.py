@@ -8,7 +8,11 @@ from minerva.core.node import EntityNode, SourceNode
 from minerva.core.relation import MentionsRelation, RelatesToRelation
 from minerva.kb.driver import Neo4jDriver
 from minerva.prompt.entity import extract_entities, resolve_entities
-from minerva.prompt.model import EntityExtractionResult, EntityResolution, FactExtractionResult
+from minerva.prompt.model import (
+    EntityExtractionResult,
+    EntityResolution,
+    FactExtractionResult,
+)
 from minerva.prompt.relation import extract_facts
 from minerva.util.env import NEO4J_DATABASE, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 
@@ -66,7 +70,10 @@ class Minerva:
         }
 
     async def _resolve_entities(
-        self, context: str, extracted_entities: list[str], model: str = "gemini-2.5-flash"
+        self,
+        context: str,
+        extracted_entities: list[str],
+        model: str = "gemini-2.5-flash",
     ) -> list[EntityNode]:
         """
         Resolve entities from extracted entities.

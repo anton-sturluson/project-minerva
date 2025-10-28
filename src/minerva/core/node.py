@@ -11,6 +11,7 @@ from minerva.core.base import BaseNode
 from minerva.prompt.entity import summarize_entity
 from minerva.prompt.model import TopicSummary
 from minerva.prompt.topic import summarize_leaf_topic, summarize_parent_topic
+
 if TYPE_CHECKING:
     from minerva.kb.driver import Neo4jDriver
 

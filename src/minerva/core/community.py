@@ -7,7 +7,11 @@ import networkx as nx
 from pydantic import BaseModel, Field
 
 from minerva.core.node import EntityNode, TopicNode
-from minerva.core.relation import BelongsToRelation, IsSubtopicRelation, RelatesToRelation
+from minerva.core.relation import (
+    BelongsToRelation,
+    IsSubtopicRelation,
+    RelatesToRelation,
+)
 from minerva.kb.driver import Neo4jDriver
 
 
@@ -122,7 +126,9 @@ class LouvainDetector:
         level_topic_map: dict[tuple[int, int], str] = {}
 
         for stored_level in range(num_levels):
-            communities_at_level: set[int] = set(level_partitions[stored_level].values())
+            communities_at_level: set[int] = set(
+                level_partitions[stored_level].values()
+            )
             for community_id in communities_at_level:
                 topic: TopicNode = TopicNode(
                     name=f"Topic_{stored_level}_{community_id}",
