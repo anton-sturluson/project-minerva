@@ -61,8 +61,6 @@ class Minerva:
             source_node=source_node, entities=entities, context=source
         )
 
-        await self._summarize_entities(entities=entities)
-
         return {
             "source_id": source_node.id,
             "entity_ids": [e.id for e in entities],
@@ -171,27 +169,6 @@ class Minerva:
             await self.driver.bulk_create_relations(relations)
 
         return relations
-
-    async def _summarize_entities(
-        self, entities: list[EntityNode], model: str = "gemini-2.5-flash"
-    ) -> None:
-        """
-        Generate summaries for entities based on their relationships.
-
-        Args:
-            entities: List of entities to summarize
-            model: LLM model to use for summarization
-        """
-        import asyncio
-
-        tasks: list = [entity.summarize(self.driver) for entity in entities]
-        summaries: list[str] = await asyncio.gather(*tasks)
-
-        for entity, summary in zip(entities, summaries):
-            await self.driver.query(
-                "MATCH (e:Entity {id: $id}) SET e.summary = $summary",
-                {"id": entity.id, "summary": summary},
-            )
 
     async def close(self) -> None:
         """Close the Neo4j driver connection and all LLM client sessions."""

@@ -43,6 +43,7 @@ class TopicManager:
         await self.driver.bulk_create_relations(
             hierarchy.subtopic_relations + hierarchy.belongs_to_relations
         )
+        await self.driver.bulk_update_relations(hierarchy.updated_relations)
 
         await self._generate_summaries(hierarchy.topics)
 
@@ -75,7 +76,6 @@ class TopicManager:
                 id=r["e"]["id"],
                 name=r["e"]["name"],
                 name_embedding=r["e"]["name_embedding"],
-                summary=r["e"]["summary"],
             )
             for r in results
         ]
@@ -143,6 +143,10 @@ class TopicManager:
                 {"id": topic.id, "name": summary.name, "summary": summary.summary}
                 for topic, summary in zip(level_topics, summaries)
             ]
+
+            for topic, summary in zip(level_topics, summaries):
+                topic.name = summary.name
+                topic.summary = summary.summary
 
             await self._bulk_update_topic_summaries(update_data)
 

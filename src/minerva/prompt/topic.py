@@ -37,11 +37,11 @@ async def summarize_leaf_topic(
 
     client: BaseLLMClient = get_client(model)
 
-    entity_summaries: str = "\n".join([f"- {e.name}: {e.summary}" for e in entities])
+    entity_names: str = "\n".join([f"- {e.name}" for e in entities])
 
     relation_facts: str = "\n".join(
         [
-            f"- {r['from_name']} {r['relation_type']} {r['to_name']}: {r['fact']}"
+            f"- [src:{r['from_name']} -> rel:{r['relation_type']} -> dst:{r['to_name']}]\n{r['fact']}"
             for r in relations
         ]
     )
@@ -50,29 +50,37 @@ async def summarize_leaf_topic(
         Message(
             role="system",
             content="""
-            You are a helpful assistant that creates concise summaries of topics based on entities and their relationships.
+            You are analyzing edge communities from hierarchical link clustering (HLC).
 
-            Your summary should:
-            1. Identify the main theme or domain of the topic
-            2. Highlight key entities and their roles
-            3. Note important relationships and patterns
-            4. Be concise (2-4 sentences)
+            You will be given:
+            - Entity names (nodes) that participate in this edge community
+            - Relationships (edges) with their types and facts
 
-            Create a short, descriptive name (2-4 words) that captures the essence of the topic.
+            Your task is to identify what connects these RELATIONSHIPS, not the entities themselves.
+            Focus on:
+            1. The pattern of how entities are connected (relationship types)
+            2. The semantic content of the facts in the relationships
+            3. The common theme or domain that these specific relationships represent
+
+            Remember: This is an edge-centric community. Entities may belong to multiple topics,
+            but these relationships cluster together because they share structural or semantic similarity.
+
+            Create a concise name (2-5 words) and summary (1-3 sentences) that captures the essence
+            of what these relationships have in common.
             """,
         ),
         Message(
             role="user",
             content=f"""
-            <ENTITIES>
-            {entity_summaries}
-            </ENTITIES>
+            <ENTITY_NAMES>
+            {entity_names}
+            </ENTITY_NAMES>
 
             <RELATIONSHIPS>
             {relation_facts if relation_facts else "No relationships available."}
             </RELATIONSHIPS>
 
-            Please create a name and summary for this topic.
+            Analyze the pattern and theme of these relationships to create a topic name and summary.
             """,
         ),
     ]
@@ -114,25 +122,31 @@ async def summarize_parent_topic(
         Message(
             role="system",
             content="""
-            You are a helpful assistant that creates high-level summaries of topics based on their subtopic summaries.
+            You are analyzing hierarchical edge communities from HLC (Hierarchical Link Clustering).
 
-            Your summary should:
-            1. Synthesize the common themes across subtopics
-            2. Identify the overarching domain or category
-            3. Note diversity or breadth of coverage
-            4. Be concise (1-3 sentences)
+            You will be given child topics, where each child represents a cluster of similar relationships.
+            Your task is to identify the higher-level pattern that connects these relationship clusters.
 
-            Create a short, descriptive name (2-4 words) that captures the overarching theme.
+            Focus on:
+            1. What semantic or structural similarities link these child relationship communities
+            2. The broader domain or context that encompasses these relationship patterns
+            3. How these relationship types relate to each other at a higher abstraction level
+
+            Remember: You are analyzing patterns in RELATIONSHIPS (edges), not just entity groupings.
+            The hierarchy represents merging of similar edge communities.
+
+            Create a concise name (2-5 words) and summary (2-3 sentences) that captures the
+            overarching relationship pattern or domain.
             """,
         ),
         Message(
             role="user",
             content=f"""
-            <SUBTOPICS>
+            <CHILD_EDGE_COMMUNITIES>
             {child_summaries}
-            </SUBTOPICS>
+            </CHILD_EDGE_COMMUNITIES>
 
-            Please create a name and higher-level summary that encompasses these subtopics.
+            Identify the higher-level relationship pattern that connects these edge communities.
             """,
         ),
     ]

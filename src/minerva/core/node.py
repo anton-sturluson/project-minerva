@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from neo4j import AsyncResult, AsyncSession
 
 from minerva.core.base import BaseNode
-from minerva.prompt.entity import summarize_entity
 from minerva.prompt.model import TopicSummary
 from minerva.prompt.topic import summarize_leaf_topic, summarize_parent_topic
 
@@ -27,49 +26,6 @@ class EntityNode(BaseNode):
 
     name: str
     name_embedding: list[float]
-    summary: str
-
-    async def summarize(self, driver: Neo4jDriver) -> str:
-        """
-        Generate summary for this entity based on 1-hop relations.
-
-        Args:
-            driver: Neo4j driver for querying relations
-
-        Returns:
-            Generated summary string
-        """
-        results: list[dict] = await driver.query(
-            """
-            MATCH (e:Entity {id: $entity_id})-[r:RELATES_TO]-(neighbor:Entity)
-            RETURN neighbor.name as neighbor_name,
-                   r.relation_type as relation_type,
-                   r.fact as fact,
-                   CASE
-                     WHEN startNode(r) = e THEN 'outgoing'
-                     ELSE 'incoming'
-                   END as direction
-            """,
-            {"entity_id": self.id},
-        )
-
-        relations: list[dict] = [
-            {
-                "neighbor_name": r["neighbor_name"],
-                "relation_type": r["relation_type"],
-                "fact": r["fact"],
-                "direction": r["direction"],
-            }
-            for r in results
-        ]
-
-        summary: str = await summarize_entity(
-            entity_name=self.name,
-            relations=relations,
-        )
-
-        self.summary = summary
-        return summary
 
 
 class TopicNode(BaseNode):
@@ -105,7 +61,6 @@ class TopicNode(BaseNode):
                 id=r["e"]["id"],
                 name=r["e"]["name"],
                 name_embedding=r["e"]["name_embedding"],
-                summary=r["e"]["summary"],
             )
             for r in records
         ]
@@ -139,7 +94,7 @@ class TopicNode(BaseNode):
     ) -> list["TopicNode"]:
         """Fetch all child topics of this topic."""
         query: str = """
-            MATCH (parent:Topic {id: $topic_id})-[:IS_SUBTOPIC]->(child:Topic)
+            MATCH (child:Topic)-[:IS_SUBTOPIC]->(parent:Topic {id: $topic_id})
             RETURN child
             """
         params: dict = {"topic_id": self.id}
