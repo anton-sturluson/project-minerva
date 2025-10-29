@@ -139,7 +139,7 @@ class TopicNode(BaseNode):
     ) -> list["TopicNode"]:
         """Fetch all child topics of this topic."""
         query: str = """
-            MATCH (parent:Topic {id: $topic_id})-[:IS_SUBTOPIC]->(child:Topic)
+            MATCH (child:Topic)-[:IS_SUBTOPIC]->(parent:Topic {id: $topic_id})
             RETURN child
             """
         params: dict = {"topic_id": self.id}

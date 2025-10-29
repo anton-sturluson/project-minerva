@@ -27,6 +27,7 @@ class RelatesToRelation(BaseRelation):
     fact_embedding: list[float]
     sources: list[str]
     contradictory_relations: list[str]
+    topic_id: str | None = None
 
     @classmethod
     def get_neo4j_metadata(cls) -> dict[str, Any]:
@@ -41,6 +42,7 @@ class RelatesToRelation(BaseRelation):
                 "fact_embedding",
                 "sources",
                 "contradictory_relations",
+                "topic_id",
             ],
         }
 
