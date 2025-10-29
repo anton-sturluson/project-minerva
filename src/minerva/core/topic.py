@@ -75,7 +75,6 @@ class TopicManager:
                 id=r["e"]["id"],
                 name=r["e"]["name"],
                 name_embedding=r["e"]["name_embedding"],
-                summary=r["e"]["summary"],
             )
             for r in results
         ]
