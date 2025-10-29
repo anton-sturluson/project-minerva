@@ -96,20 +96,26 @@ class Exporter:
             lines.append(f"{indent}- **{topic.name}**\n")
 
         if include_summary and topic.summary:
-            summary_indent: str = "  " * min(indent_level, 3) if indent_level > 0 else ""
+            summary_indent: str = (
+                "  " * min(indent_level, 3) if indent_level > 0 else ""
+            )
             lines.append(f"{summary_indent}  {topic.summary}\n")
 
         if topic.level == 0:
             relations: list[dict] = await topic.get_relations(driver=self.driver)
             if relations:
-                facts_indent: str = "  " * min(indent_level, 3) if indent_level > 0 else ""
+                facts_indent: str = (
+                    "  " * min(indent_level, 3) if indent_level > 0 else ""
+                )
                 lines.append(f"\n{facts_indent}  *Facts:*\n")
                 for rel in relations:
                     from_name: str = rel.get("from_name", "")
                     to_name: str = rel.get("to_name", "")
                     relation_type: str = rel.get("relation_type", "")
                     fact: str = rel.get("fact", "")
-                    fact_indent: str = "  " * (min(indent_level, 3) + 1) if indent_level > 0 else ""
+                    fact_indent: str = (
+                        "  " * (min(indent_level, 3) + 1) if indent_level > 0 else ""
+                    )
                     lines.append(
                         f"{fact_indent}  - **{from_name}** *{relation_type}* **{to_name}**: {fact}\n"
                     )
@@ -118,7 +124,9 @@ class Exporter:
             if children:
                 for child in children:
                     child_markdown: str = await self._format_topic_markdown(
-                        child, indent_level=indent_level + 1, include_summary=include_summary
+                        child,
+                        indent_level=indent_level + 1,
+                        include_summary=include_summary,
                     )
                     lines.append(child_markdown)
 
