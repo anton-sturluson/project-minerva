@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncResult
 
 from minerva.core.node import EntityNode, TopicNode
+from minerva.util.env import NEO4J_DATABASE, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 
 if TYPE_CHECKING:
     from minerva.core.base import BaseNode, BaseRelation
@@ -18,10 +19,10 @@ class Neo4jDriver:
 
     def __init__(
         self,
-        uri: str = "bolt://localhost:7687",
-        user: str = "neo4j",
-        password: str = "password",
-        database: str = "neo4j",
+        uri: str = NEO4J_URI,
+        user: str = NEO4J_USER,
+        password: str = NEO4J_PASSWORD,
+        database: str = NEO4J_DATABASE,
     ):
         self.uri: str = uri
         self.user: str = user

@@ -14,7 +14,6 @@ from minerva.prompt.model import (
     FactExtractionResult,
 )
 from minerva.prompt.relation import extract_facts
-from minerva.util.env import NEO4J_DATABASE, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 
 
 class Minerva:
@@ -32,12 +31,7 @@ class Minerva:
             neo4j_password: Neo4j password (defaults to NEO4J_PASSWORD env var)
             neo4j_database: Neo4j database name (defaults to NEO4J_DATABASE env var)
         """
-        self.driver: Neo4jDriver = Neo4jDriver(
-            uri=NEO4J_URI,
-            user=NEO4J_USER,
-            password=NEO4J_PASSWORD,
-            database=NEO4J_DATABASE,
-        )
+        self.driver: Neo4jDriver = Neo4jDriver()
 
     async def learn(self, source: str) -> dict[str, Any]:
         """
