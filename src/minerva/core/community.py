@@ -363,7 +363,12 @@ class HLCDetector:
 
     def _convert_to_hlc_format(
         self, graph: nx.Graph, relations: list[RelatesToRelation]
-    ) -> tuple[dict[str, set[str]], set[tuple[str, str]], dict[str, str], dict[tuple[str, str], RelatesToRelation]]:
+    ) -> tuple[
+        dict[str, set[str]],
+        set[tuple[str, str]],
+        dict[str, str],
+        dict[tuple[str, str], RelatesToRelation],
+    ]:
         """Convert NetworkX graph to HLC format with ID mappings."""
         adj: dict[str, set[str]] = {}
         for node in graph.nodes():
@@ -447,8 +452,12 @@ class HLCDetector:
             parent_cid: int = next_cid
             next_cid += 1
 
-            child1_level: int = cid_to_level.get(child1_cid, -1) if child1_exists else -1
-            child2_level: int = cid_to_level.get(child2_cid, -1) if child2_exists else -1
+            child1_level: int = (
+                cid_to_level.get(child1_cid, -1) if child1_exists else -1
+            )
+            child2_level: int = (
+                cid_to_level.get(child2_cid, -1) if child2_exists else -1
+            )
             parent_level: int = max(child1_level, child2_level) + 1
 
             parent_topic: TopicNode = TopicNode(
@@ -475,8 +484,12 @@ class HLCDetector:
                     )
                 )
 
-            child1_edges: set[tuple[str, str]] = cid_to_edges.get(child1_cid, set()) if child1_exists else set()
-            child2_edges: set[tuple[str, str]] = cid_to_edges.get(child2_cid, set()) if child2_exists else set()
+            child1_edges: set[tuple[str, str]] = (
+                cid_to_edges.get(child1_cid, set()) if child1_exists else set()
+            )
+            child2_edges: set[tuple[str, str]] = (
+                cid_to_edges.get(child2_cid, set()) if child2_exists else set()
+            )
             cid_to_edges[parent_cid] = child1_edges | child2_edges
 
         num_levels: int = max(t.level for t in topics) + 1 if topics else 0

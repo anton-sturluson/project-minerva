@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncResult
 
 from minerva.core.node import EntityNode, TopicNode
+from minerva.util.env import NEO4J_DATABASE, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 
 if TYPE_CHECKING:
     from minerva.core.base import BaseNode, BaseRelation
@@ -18,10 +19,10 @@ class Neo4jDriver:
 
     def __init__(
         self,
-        uri: str = "bolt://localhost:7687",
-        user: str = "neo4j",
-        password: str = "password",
-        database: str = "neo4j",
+        uri: str = NEO4J_URI,
+        user: str = NEO4J_USER,
+        password: str = NEO4J_PASSWORD,
+        database: str = NEO4J_DATABASE,
     ):
         self.uri: str = uri
         self.user: str = user
@@ -204,25 +205,6 @@ class Neo4jDriver:
                 for record in records
             ]
 
-    async def get_entities(self, topic_id: str) -> list[EntityNode]:
-        """Get all entities belonging to a topic."""
-        results: list[dict[str, Any]] = await self.query(
-            """
-            MATCH (e:Entity)-[:BELONGS_TO]->(t:Topic {id: $topic_id})
-            RETURN e
-            """,
-            {"topic_id": topic_id},
-        )
-        return [
-            EntityNode(
-                id=r["e"]["id"],
-                name=r["e"]["name"],
-                name_embedding=r["e"]["name_embedding"],
-                summary=r["e"]["summary"],
-            )
-            for r in results
-        ]
-
     async def get_hierarchy(self, root_id: str | None = None) -> dict[str, Any]:
         """
         Get topic hierarchy as a nested dictionary.
@@ -287,26 +269,6 @@ class Neo4jDriver:
                 summary=r["t"]["summary"],
                 summary_embedding=r["t"]["summary_embedding"],
                 level=r["t"]["level"],
-            )
-            for r in results
-        ]
-
-    async def get_children(self, topic_id: str) -> list[TopicNode]:
-        """Get all child topics of a parent topic."""
-        results: list[dict[str, Any]] = await self.query(
-            """
-            MATCH (parent:Topic {id: $topic_id})-[:IS_SUBTOPIC]->(child:Topic)
-            RETURN child
-            """,
-            {"topic_id": topic_id},
-        )
-        return [
-            TopicNode(
-                id=r["child"]["id"],
-                name=r["child"]["name"],
-                summary=r["child"]["summary"],
-                summary_embedding=r["child"]["summary_embedding"],
-                level=r["child"]["level"],
             )
             for r in results
         ]
