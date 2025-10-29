@@ -27,6 +27,9 @@ class CommunityHierarchy(BaseModel):
     belongs_to_relations: list[BelongsToRelation] = Field(
         description="Entity-topic memberships (leaf level only)"
     )
+    updated_relations: list[RelatesToRelation] = Field(
+        description="Relations with updated topic_id assignments"
+    )
     num_levels: int = Field(description="Number of hierarchy levels")
 
 
@@ -295,6 +298,7 @@ class HLCDetector:
                 topics=[],
                 subtopic_relations=[],
                 belongs_to_relations=[],
+                updated_relations=[],
                 num_levels=0,
             )
 
@@ -427,17 +431,24 @@ class HLCDetector:
                 topics=topics,
                 subtopic_relations=subtopic_relations,
                 belongs_to_relations=belongs_to_relations,
+                updated_relations=list(edge_to_relation.values()),
                 num_levels=1,
             )
 
         next_cid: int = max(edge2cid.values()) + 1
 
         for child1_cid, child2_cid, similarity in linkage:
+            child1_exists: bool = child1_cid in cid_to_topic_id
+            child2_exists: bool = child2_cid in cid_to_topic_id
+
+            if not child1_exists and not child2_exists:
+                continue
+
             parent_cid: int = next_cid
             next_cid += 1
 
-            child1_level: int = cid_to_level.get(child1_cid, 0)
-            child2_level: int = cid_to_level.get(child2_cid, 0)
+            child1_level: int = cid_to_level.get(child1_cid, -1) if child1_exists else -1
+            child2_level: int = cid_to_level.get(child2_cid, -1) if child2_exists else -1
             parent_level: int = max(child1_level, child2_level) + 1
 
             parent_topic: TopicNode = TopicNode(
@@ -450,23 +461,23 @@ class HLCDetector:
             cid_to_topic_id[parent_cid] = parent_topic.id
             cid_to_level[parent_cid] = parent_level
 
-            if child1_cid in cid_to_topic_id:
+            if child1_exists:
                 subtopic_relations.append(
                     IsSubtopicRelation(
                         from_id=cid_to_topic_id[child1_cid], to_id=parent_topic.id
                     )
                 )
 
-            if child2_cid in cid_to_topic_id:
+            if child2_exists:
                 subtopic_relations.append(
                     IsSubtopicRelation(
                         from_id=cid_to_topic_id[child2_cid], to_id=parent_topic.id
                     )
                 )
 
-            cid_to_edges[parent_cid] = (
-                cid_to_edges[child1_cid] | cid_to_edges[child2_cid]
-            )
+            child1_edges: set[tuple[str, str]] = cid_to_edges.get(child1_cid, set()) if child1_exists else set()
+            child2_edges: set[tuple[str, str]] = cid_to_edges.get(child2_cid, set()) if child2_exists else set()
+            cid_to_edges[parent_cid] = child1_edges | child2_edges
 
         num_levels: int = max(t.level for t in topics) + 1 if topics else 0
 
@@ -474,6 +485,7 @@ class HLCDetector:
             topics=topics,
             subtopic_relations=subtopic_relations,
             belongs_to_relations=belongs_to_relations,
+            updated_relations=list(edge_to_relation.values()),
             num_levels=num_levels,
         )
 

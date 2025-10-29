@@ -92,6 +92,38 @@ class Neo4jDriver:
 
                 await session.run(query, {"relations": relation_list})
 
+    async def bulk_update_relations(self, relations: list[BaseRelation]) -> None:
+        """
+        Bulk update relationships in the graph using MERGE/SET for efficiency.
+
+        Args:
+            relations: List of relation objects to update
+        """
+        if not relations:
+            return
+
+        relations_by_class: dict[type, list[dict[str, Any]]] = defaultdict(list)
+
+        for relation in relations:
+            relations_by_class[type(relation)].append(relation.to_neo4j_params())
+
+        async with self.driver.session(database=self.database) as session:
+            for relation_class, relation_list in relations_by_class.items():
+                metadata: dict[str, Any] = relation_class.get_neo4j_metadata()
+                relation_type: str = relation_class(**relation_list[0]).type
+
+                properties: str = ", ".join(
+                    [f"r.{p} = rel.{p}" for p in metadata["properties"]]
+                )
+
+                query: str = f"""
+                UNWIND $relations AS rel
+                MATCH (from_node)-[r:{relation_type} {{id: rel.id}}]->(to_node)
+                SET {properties}
+                """
+
+                await session.run(query, {"relations": relation_list})
+
     async def create_vector_indexes(self) -> None:
         """Create vector indexes for embedding fields."""
         async with self.driver.session(database=self.database) as session:

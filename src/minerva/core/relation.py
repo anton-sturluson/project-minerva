@@ -48,7 +48,7 @@ class RelatesToRelation(BaseRelation):
 
 
 class IsSubtopicRelation(BaseRelation):
-    """Relation from parent Topic to child Topic."""
+    """Relation from child Topic to parent Topic."""
 
     @classmethod
     def get_neo4j_metadata(cls) -> dict[str, Any]:
