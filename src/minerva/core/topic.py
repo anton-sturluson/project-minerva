@@ -27,9 +27,13 @@ class TopicManager:
         self.driver: Neo4jDriver = driver
         self.algorithm: CommunityDetector = algorithm
 
-    async def detect(self) -> CommunityHierarchy:
+    async def detect(self, **kwargs) -> CommunityHierarchy:
         """
         Detect topics in the knowledge graph and generate summaries.
+
+        Args:
+            **kwargs: Additional arguments to pass to the detection algorithm
+                     (e.g., threshold_selector for HLCDetector)
 
         Returns:
             CommunityHierarchy with fully summarized topics
@@ -37,7 +41,9 @@ class TopicManager:
         entities: list[EntityNode] = await self._get_entities()
         relations: list[RelatesToRelation] = await self._get_relations()
 
-        hierarchy: CommunityHierarchy = await self.algorithm.detect(entities, relations)
+        hierarchy: CommunityHierarchy = await self.algorithm.detect(
+            entities, relations, **kwargs
+        )
 
         await self.driver.bulk_create_nodes(hierarchy.topics)
         await self.driver.bulk_create_relations(

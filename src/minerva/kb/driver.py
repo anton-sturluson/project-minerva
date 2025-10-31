@@ -157,6 +157,19 @@ class Neo4jDriver:
         async with self.driver.session(database=self.database) as session:
             await session.run("MATCH (n) DETACH DELETE n")
 
+    async def clear_topics(self) -> None:
+        """Delete all topic nodes and topic-related relationships, keeping entities intact."""
+        async with self.driver.session(database=self.database) as session:
+            await session.run("MATCH ()-[r:IS_SUBTOPIC|BELONGS_TO]->() DELETE r")
+            await session.run("MATCH (t:Topic) DELETE t")
+            await session.run(
+                """
+                MATCH ()-[r:RELATES_TO]->()
+                WHERE r.topic_id IS NOT NULL
+                SET r.topic_id = null
+                """
+            )
+
     async def query(
         self, cypher: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
