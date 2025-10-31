@@ -331,7 +331,7 @@ class HLCDetector:
         self,
         entities: list[EntityNode],
         relations: list[RelatesToRelation],
-        threshold_selector: ThresholdSelector | None = LocalMaximaSelector(top_k=3),
+        threshold_selector: ThresholdSelector = LocalMaximaSelector(top_k=3),
     ) -> CommunityHierarchy:
         """
         Detect edge-centric communities using HLC with overlapping node membership.
@@ -340,7 +340,6 @@ class HLCDetector:
             entities: List of entities to cluster
             relations: List of relations between entities
             threshold_selector: Strategy for selecting threshold levels (default: LocalMaximaSelector with top_k=3)
-                               Set to None to use old behavior (all levels from linkage)
 
         Returns:
             CommunityHierarchy with topics and relations
@@ -365,19 +364,14 @@ class HLCDetector:
             threshold=self.threshold, dendro_flag=True
         )
 
-        if threshold_selector is None:
-            hierarchy: CommunityHierarchy = self._build_hierarchy_from_linkage(
-                edge2cid, linkage, edge_to_relation
-            )
-        else:
-            thresholds: list[float] = threshold_selector.select(list_D, linkage)
+        thresholds: list[float] = threshold_selector.select(list_D, linkage)
 
-            if not thresholds:
-                thresholds = [S_max]
+        if not thresholds:
+            thresholds = [S_max]
 
-            hierarchy = self._build_selective_hierarchy(
-                thresholds, linkage, edge_to_relation, orig_cid2edge
-            )
+        hierarchy: CommunityHierarchy = self._build_selective_hierarchy(
+            thresholds, linkage, edge_to_relation, orig_cid2edge
+        )
 
         return hierarchy
 
@@ -449,122 +443,6 @@ class HLCDetector:
         node_to_id: dict[str, str] = {node: node for node in graph.nodes()}
 
         return adj, edges, node_to_id, edge_to_relation
-
-    def _build_hierarchy_from_linkage(
-        self,
-        edge2cid: dict[tuple[str, str], int],
-        linkage: list[tuple[int, int, float]],
-        edge_to_relation: dict[tuple[str, str], RelatesToRelation],
-    ) -> CommunityHierarchy:
-        """Build multi-level topic hierarchy from HLC linkage dendrogram."""
-        topics: list[TopicNode] = []
-        subtopic_relations: list[IsSubtopicRelation] = []
-        belongs_to_relations: list[BelongsToRelation] = []
-
-        cid_to_edges: dict[int, set[tuple[str, str]]] = defaultdict(set)
-        for edge, cid in edge2cid.items():
-            cid_to_edges[cid].add(edge)
-
-        cid_to_topic_id: dict[int, str] = {}
-        cid_to_level: dict[int, int] = {}
-
-        for cid in set(edge2cid.values()):
-            topic: TopicNode = TopicNode(
-                name=f"EdgeCommunity_0_{cid}",
-                summary="",
-                summary_embedding=[],
-                level=0,
-            )
-            topics.append(topic)
-            cid_to_topic_id[cid] = topic.id
-            cid_to_level[cid] = 0
-
-        node_to_topics: dict[str, set[str]] = defaultdict(set)
-        for edge, cid in edge2cid.items():
-            n1, n2 = edge
-            topic_id: str = cid_to_topic_id[cid]
-            node_to_topics[n1].add(topic_id)
-            node_to_topics[n2].add(topic_id)
-
-            if edge in edge_to_relation:
-                edge_to_relation[edge].topic_id = topic_id
-
-        for node_id, topic_ids in node_to_topics.items():
-            for topic_id in topic_ids:
-                belongs_to_relations.append(
-                    BelongsToRelation(from_id=node_id, to_id=topic_id)
-                )
-
-        if not linkage:
-            return CommunityHierarchy(
-                topics=topics,
-                subtopic_relations=subtopic_relations,
-                belongs_to_relations=belongs_to_relations,
-                updated_relations=list(edge_to_relation.values()),
-                num_levels=1,
-            )
-
-        next_cid: int = max(edge2cid.values()) + 1
-
-        for child1_cid, child2_cid, similarity in linkage:
-            child1_exists: bool = child1_cid in cid_to_topic_id
-            child2_exists: bool = child2_cid in cid_to_topic_id
-
-            if not child1_exists and not child2_exists:
-                continue
-
-            parent_cid: int = next_cid
-            next_cid += 1
-
-            child1_level: int = (
-                cid_to_level.get(child1_cid, -1) if child1_exists else -1
-            )
-            child2_level: int = (
-                cid_to_level.get(child2_cid, -1) if child2_exists else -1
-            )
-            parent_level: int = max(child1_level, child2_level) + 1
-
-            parent_topic: TopicNode = TopicNode(
-                name=f"EdgeCommunity_{parent_level}_{parent_cid}",
-                summary="",
-                summary_embedding=[],
-                level=parent_level,
-            )
-            topics.append(parent_topic)
-            cid_to_topic_id[parent_cid] = parent_topic.id
-            cid_to_level[parent_cid] = parent_level
-
-            if child1_exists:
-                subtopic_relations.append(
-                    IsSubtopicRelation(
-                        from_id=cid_to_topic_id[child1_cid], to_id=parent_topic.id
-                    )
-                )
-
-            if child2_exists:
-                subtopic_relations.append(
-                    IsSubtopicRelation(
-                        from_id=cid_to_topic_id[child2_cid], to_id=parent_topic.id
-                    )
-                )
-
-            child1_edges: set[tuple[str, str]] = (
-                cid_to_edges.get(child1_cid, set()) if child1_exists else set()
-            )
-            child2_edges: set[tuple[str, str]] = (
-                cid_to_edges.get(child2_cid, set()) if child2_exists else set()
-            )
-            cid_to_edges[parent_cid] = child1_edges | child2_edges
-
-        num_levels: int = max(t.level for t in topics) + 1 if topics else 0
-
-        return CommunityHierarchy(
-            topics=topics,
-            subtopic_relations=subtopic_relations,
-            belongs_to_relations=belongs_to_relations,
-            updated_relations=list(edge_to_relation.values()),
-            num_levels=num_levels,
-        )
 
     def _build_selective_hierarchy(
         self,
