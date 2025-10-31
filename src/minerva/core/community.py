@@ -286,47 +286,6 @@ class HLCDetector:
         self.driver: Neo4jDriver = driver
         self.threshold: float | None = threshold
 
-    @staticmethod
-    def _reconstruct_partition_at_threshold(
-        linkage: list[tuple[int, int, float]], threshold: float
-    ) -> dict[int, int]:
-        """
-        Reconstruct partition at specific similarity threshold.
-
-        Args:
-            linkage: List of (child1_cid, child2_cid, similarity) tuples
-            threshold: Similarity threshold to cut dendrogram
-
-        Returns:
-            Mapping from original community ID to final community ID at this threshold
-        """
-        if not linkage:
-            return {}
-
-        max_cid: int = max(max(c1, c2) for c1, c2, _ in linkage)
-        cid_to_final: dict[int, int] = {i: i for i in range(max_cid + 1)}
-
-        next_cid: int = max_cid + 1
-
-        for child1_cid, child2_cid, similarity in linkage:
-            if similarity < threshold:
-                break
-
-            current_cid1: int = cid_to_final.get(child1_cid, child1_cid)
-            current_cid2: int = cid_to_final.get(child2_cid, child2_cid)
-
-            if current_cid1 == current_cid2:
-                continue
-
-            new_cid: int = next_cid
-            next_cid += 1
-
-            for cid in cid_to_final:
-                if cid_to_final[cid] == current_cid1 or cid_to_final[cid] == current_cid2:
-                    cid_to_final[cid] = new_cid
-
-        return cid_to_final
-
     async def detect(
         self,
         entities: list[EntityNode],
@@ -360,16 +319,23 @@ class HLCDetector:
         )
 
         hlc: HLC = HLC(adj, edges)
-        edge2cid, S_max, D_max, list_D, orig_cid2edge, linkage = hlc.single_linkage(
+        _, S_max, _, list_D, orig_cid2edge, linkage = hlc.single_linkage(
             threshold=self.threshold, dendro_flag=True
         )
 
+        print(f"[DEBUG] Partition density curve has {len(list_D)} points")
+        print(f"[DEBUG] S_max (optimal threshold): {S_max:.4f}")
+
         thresholds: list[float] = threshold_selector.select(list_D, linkage)
+        print(f"[DEBUG] Threshold selector returned: {thresholds}")
 
         if not thresholds:
             thresholds = [S_max]
+            print(f"[DEBUG] Using fallback threshold: [{S_max:.4f}]")
+        else:
+            print(f"[DEBUG] Using {len(thresholds)} selected thresholds")
 
-        hierarchy: CommunityHierarchy = self._build_selective_hierarchy(
+        hierarchy: CommunityHierarchy = self._build_hierarchy(
             thresholds, linkage, edge_to_relation, orig_cid2edge
         )
 
@@ -444,7 +410,7 @@ class HLCDetector:
 
         return adj, edges, node_to_id, edge_to_relation
 
-    def _build_selective_hierarchy(
+    def _build_hierarchy(
         self,
         thresholds: list[float],
         linkage: list[tuple[int, int, float]],
@@ -464,8 +430,6 @@ class HLCDetector:
             CommunityHierarchy with only selected levels
         """
         topics: list[TopicNode] = []
-        subtopic_relations: list[IsSubtopicRelation] = []
-        belongs_to_relations: list[BelongsToRelation] = []
 
         if not thresholds:
             return CommunityHierarchy(
@@ -476,70 +440,83 @@ class HLCDetector:
                 num_levels=0,
             )
 
-        thresholds_sorted: list[float] = sorted(thresholds, reverse=True)
-
         level_to_partition: dict[int, dict[int, int]] = {}
-        for level_idx, threshold in enumerate(thresholds_sorted):
+        for level_idx, threshold in enumerate(thresholds):
             partition: dict[int, int] = self._reconstruct_partition_at_threshold(
                 linkage, threshold
             )
             level_to_partition[level_idx] = partition
 
-        orig_cid_to_topics: dict[int, dict[int, str]] = defaultdict(dict)
+        cid_to_topic_by_level: dict[int, dict[int, str]] = defaultdict(dict)
 
-        for level_idx in range(len(thresholds_sorted)):
+        for level_idx in range(len(thresholds)):
             partition: dict[int, int] = level_to_partition[level_idx]
-            final_cids: set[int] = set(partition.values())
 
-            for final_cid in final_cids:
+            merged_cids_with_edges: set[int] = {
+                partition[orig_cid] for orig_cid in orig_cid2edge.keys()
+            }
+
+            cid_to_topic_at_level: dict[int, TopicNode] = {}
+            for merged_cid in merged_cids_with_edges:
                 topic: TopicNode = TopicNode(
-                    name=f"EdgeCommunity_{level_idx}_{final_cid}",
+                    name=f"EdgeCommunity_{level_idx}_{merged_cid}",
                     summary="",
                     summary_embedding=[],
                     level=level_idx,
                 )
                 topics.append(topic)
+                cid_to_topic_at_level[merged_cid] = topic
 
-                for orig_cid, mapped_cid in partition.items():
-                    if mapped_cid == final_cid:
-                        orig_cid_to_topics[orig_cid][level_idx] = topic.id
+            for orig_cid in orig_cid2edge.keys():
+                merged_cid: int = partition[orig_cid]
+                cid_to_topic_by_level[orig_cid][level_idx] = cid_to_topic_at_level[
+                    merged_cid
+                ].id
 
+        belongs_to_relations: list[BelongsToRelation] = []
         for orig_cid, edge in orig_cid2edge.items():
-            if orig_cid not in orig_cid_to_topics:
+            topic_by_level: dict[int, str] = cid_to_topic_by_level.get(orig_cid, {})
+            leaf_topic_id: str | None = topic_by_level.get(0)
+
+            if not leaf_topic_id:
                 continue
 
             if edge in edge_to_relation:
-                if 0 in orig_cid_to_topics[orig_cid]:
-                    edge_to_relation[edge].topic_id = orig_cid_to_topics[orig_cid][0]
+                edge_to_relation[edge].topic_id = leaf_topic_id
 
             n1, n2 = edge
-            if 0 in orig_cid_to_topics[orig_cid]:
-                leaf_topic_id: str = orig_cid_to_topics[orig_cid][0]
-                belongs_to_relations.append(
-                    BelongsToRelation(from_id=n1, to_id=leaf_topic_id)
-                )
-                belongs_to_relations.append(
-                    BelongsToRelation(from_id=n2, to_id=leaf_topic_id)
-                )
+            belongs_to_relations.append(
+                BelongsToRelation(from_id=n1, to_id=leaf_topic_id)
+            )
+            belongs_to_relations.append(
+                BelongsToRelation(from_id=n2, to_id=leaf_topic_id)
+            )
 
-        for orig_cid in orig_cid_to_topics:
-            topic_by_level: dict[int, str] = orig_cid_to_topics[orig_cid]
-            for level_idx in range(len(thresholds_sorted) - 1):
-                if level_idx in topic_by_level and level_idx + 1 in topic_by_level:
-                    child_topic_id: str = topic_by_level[level_idx]
-                    parent_topic_id: str = topic_by_level[level_idx + 1]
+        subtopic_relations: list[IsSubtopicRelation] = []
+        for topic_by_level in cid_to_topic_by_level.values():
+            for level_idx in range(len(thresholds) - 1):
+                child_topic_id: str | None = topic_by_level.get(level_idx)
+                parent_topic_id: str | None = topic_by_level.get(level_idx + 1)
 
-                    if child_topic_id != parent_topic_id:
-                        subtopic_relations.append(
-                            IsSubtopicRelation(
-                                from_id=child_topic_id, to_id=parent_topic_id
-                            )
+                if (
+                    child_topic_id
+                    and parent_topic_id
+                    and child_topic_id != parent_topic_id
+                ):
+                    subtopic_relations.append(
+                        IsSubtopicRelation(
+                            from_id=child_topic_id, to_id=parent_topic_id
                         )
+                    )
 
-        subtopic_relations = list({(r.from_id, r.to_id): r for r in subtopic_relations}.values())
-        belongs_to_relations = list({(r.from_id, r.to_id): r for r in belongs_to_relations}.values())
+        subtopic_relations: list[IsSubtopicRelation] = list(
+            {(r.from_id, r.to_id): r for r in subtopic_relations}.values()
+        )
+        belongs_to_relations: list[BelongsToRelation] = list(
+            {(r.from_id, r.to_id): r for r in belongs_to_relations}.values()
+        )
 
-        num_levels: int = len(thresholds_sorted)
+        num_levels: int = len(thresholds)
 
         return CommunityHierarchy(
             topics=topics,
@@ -548,6 +525,50 @@ class HLCDetector:
             updated_relations=list(edge_to_relation.values()),
             num_levels=num_levels,
         )
+
+    @staticmethod
+    def _reconstruct_partition_at_threshold(
+        linkage: list[tuple[int, int, float]], threshold: float
+    ) -> dict[int, int]:
+        """
+        Reconstruct partition at specific similarity threshold.
+
+        Args:
+            linkage: List of (child1_cid, child2_cid, similarity) tuples
+            threshold: Similarity threshold to cut dendrogram
+
+        Returns:
+            Mapping from original community ID to final community ID at this threshold
+        """
+        if not linkage:
+            return {}
+
+        max_cid: int = max(max(c1, c2) for c1, c2, _ in linkage)
+        cid_to_final: dict[int, int] = {i: i for i in range(max_cid + 1)}
+
+        next_cid: int = max_cid + 1
+
+        for child1_cid, child2_cid, similarity in linkage:
+            if similarity < threshold:
+                break
+
+            current_cid1: int = cid_to_final.get(child1_cid, child1_cid)
+            current_cid2: int = cid_to_final.get(child2_cid, child2_cid)
+
+            if current_cid1 == current_cid2:
+                continue
+
+            new_cid: int = next_cid
+            next_cid += 1
+
+            for cid in cid_to_final:
+                if (
+                    cid_to_final[cid] == current_cid1
+                    or cid_to_final[cid] == current_cid2
+                ):
+                    cid_to_final[cid] = new_cid
+
+        return cid_to_final
 
     async def _compute_edge_scores(
         self, entity_id: str, topics: list[TopicNode]
