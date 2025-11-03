@@ -24,7 +24,7 @@ class RelatesToRelation(BaseRelation):
 
     relation_type: str
     fact: str
-    fact_embedding: list[float]
+    fact_embedding: list[float]  # 768D embedding from EmbeddingGemma
     sources: list[str]
     contradictory_relations: list[str]
     topic_id: str | None = None
@@ -37,6 +37,8 @@ class RelatesToRelation(BaseRelation):
             "properties": [
                 "id",
                 "created_at",
+                "from_id",
+                "to_id",
                 "relation_type",
                 "fact",
                 "fact_embedding",

@@ -25,7 +25,7 @@ class EntityNode(BaseNode):
     """Entity node representing a concept or object."""
 
     name: str
-    name_embedding: list[float]
+    name_embedding: list[float]  # 768D embedding from EmbeddingGemma
 
 
 class TopicNode(BaseNode):
@@ -33,7 +33,7 @@ class TopicNode(BaseNode):
 
     name: str
     summary: str
-    summary_embedding: list[float]
+    summary_embedding: list[float]  # 768D embedding from EmbeddingGemma
     level: int
 
     async def get_entities(

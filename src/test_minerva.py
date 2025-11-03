@@ -4,10 +4,8 @@ import asyncio
 
 from minerva.clustering.threshold_selector import LocalMaximaSelector
 from minerva.core.community import HLCDetector
-from minerva.core.node import EntityNode
 from minerva.minerva import Minerva
 
-# Test samples - Financial report texts with overlapping entities
 SAMPLE_TEXT_1 = """
 Apple Inc. reported quarterly revenue of $119.6 billion for Q1 FY2024. iPhone sales
 reached $69.7 billion, driven by strong demand in China and India. Services revenue,
@@ -19,9 +17,11 @@ enhancing Siri capabilities.
 SAMPLE_TEXT_2 = """
 Apple Inc. announced plans to invest $15 billion in expanding its Services division,
 targeting growth in India, Brazil, and Indonesia. CEO Tim Cook outlined the vision
-for Apple Music to reach 200 million subscribers by 2025. CFO Luca Maestri noted that
-iCloud revenue grew 18% quarter-over-quarter. Goldman Sachs analysts raised their price
-target, citing the recurring revenue stability provided by Services.
+for Apple Music to reach 200 million subscribers by 2025. Tim Cook also emphasized
+the company's continued focus on artificial intelligence, particularly for enhancing
+Siri's capabilities. CFO Luca Maestri noted that iCloud revenue grew 18% quarter-over-quarter.
+Goldman Sachs analysts raised their price target, citing the recurring revenue stability
+provided by Services.
 """
 
 SAMPLE_TEXT_3 = """
@@ -34,12 +34,12 @@ on-device machine learning model developed in their labs in Cupertino.
 """
 
 SAMPLE_TEXT_4 = """
-The App Store generated $1.1 trillion in billings and sales in 2023, according to Apple Inc.
-The platform hosts over 1.8 million apps serving more than 650 million weekly visitors. Epic
-Games continues its legal battle over the 30% commission rate that Apple charges developers.
-Apple's Phil Schiller defended the App Store model, emphasizing security and user privacy
-protections. Meanwhile, smaller developers called for reduced fees, particularly for
-subscription-based services that fall under Apple's Services revenue category.
+In Q1 FY2024, Apple Inc. reported strong quarterly revenue of $119.6 billion, according
+to CEO Tim Cook. Tim Cook, who leads Apple Inc., emphasized the company's commitment to
+artificial intelligence integration, particularly for enhancing Siri capabilities. The
+Services division, which includes Apple Music and iCloud, continues to be a major revenue
+driver for the company. Apple Music and iCloud are key components of the Services offering
+that generated $23.1 billion in revenue.
 """
 
 
@@ -56,7 +56,7 @@ async def learn_texts() -> None:
         await minerva.driver.create_vector_indexes()
         print("Vector indexes created.\n")
 
-        texts: list[str] = [SAMPLE_TEXT_1, SAMPLE_TEXT_2, SAMPLE_TEXT_3]
+        texts: list[str] = [SAMPLE_TEXT_1, SAMPLE_TEXT_2, SAMPLE_TEXT_3, SAMPLE_TEXT_4]
 
         for i, text in enumerate(texts, 1):
             print(f"{'=' * 80}")
@@ -69,7 +69,7 @@ async def learn_texts() -> None:
             entity_query: str = """
             MATCH (e:Entity)
             WHERE e.id IN $entity_ids
-            RETURN e.id as id, e.name as name, e.summary as summary
+            RETURN e.id as id, e.name as name
             """
             entities: list[dict] = await minerva.driver.query(
                 entity_query, {"entity_ids": result["entity_ids"]}
@@ -77,7 +77,7 @@ async def learn_texts() -> None:
 
             print(f"Extracted {len(entities)} entities:")
             for entity in entities:
-                print(f"  - {entity['name']} (id={entity['id']}): {entity['summary']}")
+                print(f"  - {entity['name']} (id={entity['id']})")
             print()
 
             relation_query: str = """

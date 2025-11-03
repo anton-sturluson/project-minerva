@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 async def summarize_leaf_topic(
     entities: list[EntityNode],
     relations: list[dict],
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-2.5-flash-lite",
 ) -> TopicSummary:
     """
     Generate summary for a leaf topic from its entities and relations.
@@ -95,7 +95,7 @@ async def summarize_leaf_topic(
 
 
 async def summarize_parent_topic(
-    child_topics: list[TopicNode], model: str = "gemini-2.5-flash"
+    child_topics: list[TopicNode], model: str = "gemini-2.5-flash-lite"
 ) -> TopicSummary:
     """
     Generate summary for a parent topic from its child topics.
