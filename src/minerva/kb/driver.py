@@ -135,7 +135,7 @@ class Neo4jDriver:
                 FOR (n:Entity)
                 ON n.name_embedding
                 OPTIONS {indexConfig: {
-                    `vector.dimensions`: 10,
+                    `vector.dimensions`: 768,
                     `vector.similarity_function`: 'cosine'
                 }}
                 """
@@ -147,7 +147,7 @@ class Neo4jDriver:
                 FOR ()-[r:RELATES_TO]-()
                 ON r.fact_embedding
                 OPTIONS {indexConfig: {
-                    `vector.dimensions`: 10,
+                    `vector.dimensions`: 768,
                     `vector.similarity_function`: 'cosine'
                 }}
                 """
@@ -209,12 +209,13 @@ class Neo4jDriver:
                 threshold=threshold,
             )
             records: list[dict[str, Any]] = [dict(record) async for record in result]
+            for record in records:
+                print("\t-", record["node"]["name"], record["score"])
             return [
                 EntityNode(
                     id=record["node"]["id"],
                     name=record["node"]["name"],
                     name_embedding=record["node"]["name_embedding"],
-                    summary=record["node"]["summary"],
                 )
                 for record in records
             ]
@@ -240,7 +241,7 @@ class Neo4jDriver:
                 """
                 CALL db.index.vector.queryRelationships('fact_embedding', $limit, $embedding) YIELD relationship, score
                 WHERE score >= $threshold AND type(relationship) = 'RELATES_TO'
-                RETURN relationship, startNode(relationship).id as from_id, endNode(relationship).id as to_id, score
+                RETURN relationship, relationship.from_id as from_id, relationship.to_id as to_id, score
                 ORDER BY score DESC
                 """,
                 limit=limit,
@@ -248,6 +249,8 @@ class Neo4jDriver:
                 threshold=threshold,
             )
             records: list[dict[str, Any]] = [dict(record) async for record in result]
+            for record in records:
+                print("\t-", record["relationship"]["fact"], record["score"])
             return [
                 RelatesToRelation(
                     id=record["relationship"]["id"],

@@ -69,7 +69,7 @@ async def learn_texts() -> None:
             entity_query: str = """
             MATCH (e:Entity)
             WHERE e.id IN $entity_ids
-            RETURN e.id as id, e.name as name, e.summary as summary
+            RETURN e.id as id, e.name as name
             """
             entities: list[dict] = await minerva.driver.query(
                 entity_query, {"entity_ids": result["entity_ids"]}
@@ -77,7 +77,7 @@ async def learn_texts() -> None:
 
             print(f"Extracted {len(entities)} entities:")
             for entity in entities:
-                print(f"  - {entity['name']} (id={entity['id']}): {entity['summary']}")
+                print(f"  - {entity['name']} (id={entity['id']})")
             print()
 
             relation_query: str = """

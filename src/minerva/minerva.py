@@ -5,6 +5,7 @@ from typing import Any
 
 from minerva.api.client import close_all_clients
 from minerva.core.base import BaseRelation, BaseNode
+from minerva.core.extractor import EmbeddingExtractor
 from minerva.core.node import EntityNode, SourceNode
 from minerva.core.relation import MentionsRelation, RelatesToRelation
 from minerva.kb.driver import Neo4jDriver
@@ -23,17 +24,21 @@ class Minerva:
 
     def __init__(
         self,
+        embedding_model: str = "google/embeddinggemma-300m",
+        embedding_batch_size: int = 32,
     ):
         """
-        Initialize Minerva with Neo4j connection.
+        Initialize Minerva with Neo4j connection and embedding extractor.
 
         Args:
-            neo4j_uri: Neo4j connection URI (defaults to NEO4J_URI env var)
-            neo4j_user: Neo4j username (defaults to NEO4J_USER env var)
-            neo4j_password: Neo4j password (defaults to NEO4J_PASSWORD env var)
-            neo4j_database: Neo4j database name (defaults to NEO4J_DATABASE env var)
+            embedding_model: HuggingFace model for embeddings
+            embedding_batch_size: Batch size for embedding extraction
         """
         self.driver: Neo4jDriver = Neo4jDriver()
+        self.embedding_extractor: EmbeddingExtractor = EmbeddingExtractor(
+            model_name=embedding_model,
+            batch_size=embedding_batch_size,
+        )
 
     async def learn(self, source: str) -> dict[str, Any]:
         """
@@ -52,7 +57,9 @@ class Minerva:
             source, extraction_result.entities
         )
 
-        mentions_relations: list[MentionsRelation] = await self._create_mention_relations(
+        mentions_relations: list[
+            MentionsRelation
+        ] = await self._create_mention_relations(
             source_node=source_node, entities=entities
         )
 
@@ -72,9 +79,7 @@ class Minerva:
             )
 
         nodes_to_create: list[BaseNode] = [source_node] + new_entities
-        edges_to_create: list[BaseRelation] = (
-            mentions_relations + new_relations
-        )
+        edges_to_create: list[BaseRelation] = mentions_relations + new_relations
         await self.driver.bulk_create_nodes(nodes_to_create)
         await self.driver.bulk_create_relations(edges_to_create)
         await self.driver.bulk_update_relations(relations_to_update)
@@ -103,10 +108,18 @@ class Minerva:
         if not extracted_entities:
             return [], []
 
-        async def process_entity(entity_name: str) -> tuple[int, EntityNode]:
-            similar_entities: list[EntityNode] = (
-                await self.driver.find_similar_entities(name_embedding=[1.0] * 10)
-            )
+        entity_embeddings: list[list[float]] = self.embedding_extractor.extract_batch(
+            extracted_entities
+        )
+
+        async def process_entity(i: int, entity_name: str) -> tuple[int, EntityNode]:
+            name_embedding: list[float] = entity_embeddings[i]
+            print("Entity:", entity_name)
+            similar_entities: list[
+                EntityNode
+            ] = await self.driver.find_similar_entities(name_embedding=name_embedding)
+
+            print()
 
             if similar_entities:
                 resolution: EntityResolution = await resolve_entity(
@@ -122,13 +135,12 @@ class Minerva:
 
             new_node: EntityNode = EntityNode(
                 name=entity_name,
-                name_embedding=[1.0] * 10,
-                summary="",
+                name_embedding=name_embedding,
             )
             return (0, new_node)
 
         results: list[tuple[int, EntityNode]] = await asyncio.gather(
-            *[process_entity(e) for e in extracted_entities]
+            *[process_entity(i, e) for i, e in enumerate(extracted_entities)]
         )
 
         new_entities: list[EntityNode] = [
@@ -176,28 +188,39 @@ class Minerva:
             List of RELATES_TO relations extracted from facts
         """
         entity_map: dict[str, str] = {e.name: e.id for e in entities}
-        relations: list[RelatesToRelation] = []
 
         fact_extraction_result: FactExtractionResult = await extract_facts(
             context=context, entities=entities
         )
 
+        valid_facts: list = []
         for fact in fact_extraction_result.facts:
             from_id: str | None = entity_map.get(fact.from_entity)
             to_id: str | None = entity_map.get(fact.to_entity)
-
             if from_id and to_id and from_id != to_id:
-                relations.append(
-                    RelatesToRelation(
-                        from_id=from_id,
-                        to_id=to_id,
-                        relation_type=fact.relation_type,
-                        fact=fact.fact,
-                        fact_embedding=[1.0] * 10,
-                        sources=[source_node.id],
-                        contradictory_relations=[],
-                    )
+                valid_facts.append((fact, from_id, to_id))
+
+        if not valid_facts:
+            return []
+
+        fact_texts: list[str] = [fact.fact for fact, _, _ in valid_facts]
+        fact_embeddings: list[list[float]] = self.embedding_extractor.extract_batch(
+            fact_texts
+        )
+
+        relations: list[RelatesToRelation] = []
+        for (fact, from_id, to_id), fact_embedding in zip(valid_facts, fact_embeddings):
+            relations.append(
+                RelatesToRelation(
+                    from_id=from_id,
+                    to_id=to_id,
+                    relation_type=fact.relation_type,
+                    fact=fact.fact,
+                    fact_embedding=fact_embedding,
+                    sources=[source_node.id],
+                    contradictory_relations=[],
                 )
+            )
 
         return relations
 
@@ -226,11 +249,14 @@ class Minerva:
         async def process_relation(
             relation: RelatesToRelation,
         ) -> tuple[int, RelatesToRelation]:
-            similar_relations: list[RelatesToRelation] = (
-                await self.driver.find_similar_relations(
-                    fact_embedding=relation.fact_embedding
-                )
+            print("Main relation:",relation.fact)
+            similar_relations: list[
+                RelatesToRelation
+            ] = await self.driver.find_similar_relations(
+                fact_embedding=relation.fact_embedding
             )
+
+            print()
 
             if similar_relations:
                 resolution: FactResolution = await resolve_fact(
@@ -243,10 +269,6 @@ class Minerva:
                 if resolution.is_duplicate and resolution.existing_relation_id:
                     for candidate in similar_relations:
                         if candidate.id == resolution.existing_relation_id:
-                            print("Resolution:", resolution)
-                            print("Relation:", relation)
-                            print("Similar relation found:", candidate)
-                            print("--------------------------------\n")
                             updated_sources: list[str] = sorted(
                                 set(candidate.sources + relation.sources)
                             )
