@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING, Coroutine
+from typing import TYPE_CHECKING
 
 from minerva.api.base import BaseLLMClient, ChatCompletionResponse, Message
 from minerva.api.client import get_client
@@ -14,14 +13,14 @@ if TYPE_CHECKING:
 
 
 async def extract_entities(
-    text: str, model: str = "gemini-2.5-flash"
+    text: str, model: str = "gemini-2.5-flash-lite"
 ) -> EntityExtractionResult:
     """
     Extract key entities from text.
 
     Args:
         text: Source text to extract entities from
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         EntityExtractionResult with list of entities
@@ -57,7 +56,7 @@ async def resolve_entity(
     context: str,
     new_entity: str,
     existing_entities: list[EntityNode],
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-2.5-flash-lite",
 ) -> EntityResolution:
     """
     Resolve a new entity against existing entities.
@@ -66,7 +65,7 @@ async def resolve_entity(
         context: Source text to extract entities from
         new_entity: The new entity to resolve against existing entities
         existing_entities: List of existing entity names
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         EntityResolution with the resolution of the new entity
@@ -111,29 +110,3 @@ async def resolve_entity(
     )
 
     return response.parsed_object
-
-
-async def resolve_entities(
-    context: str,
-    new_entities: list[str],
-    existing_entities: list[EntityNode],
-    model: str = "gemini-2.5-flash",
-) -> list[EntityResolution]:
-    """
-    Resolve entities against existing entities.
-
-    Args:
-        context: Source text to extract entities from
-        new_entities: List of new entities to resolve
-        existing_entities: List of existing entity nodes
-        model: LLM model to use (default: gemini-2.5-flash)
-
-    Returns:
-        EntityResolutionResult with list of entity resolutions in the same order as new_entities
-    """
-    tasks: list[Coroutine] = [
-        resolve_entity(context, entity, existing_entities, model)
-        for entity in new_entities
-    ]
-    results: list[EntityResolution] = await asyncio.gather(*tasks)
-    return results

@@ -49,6 +49,24 @@ class FactExtractionResult(BaseModel):
     facts: list[Fact] = Field(description="List of facts extracted from the text.")
 
 
+class FactResolution(BaseModel):
+    """Result of resolving a single fact."""
+
+    reasoning: str = Field(description="A brief explanation of your decision.")
+    is_duplicate: bool = Field(
+        description="A boolean indicating if it is a duplicate of an existing relation."
+    )
+    fact: str = Field(description="The fact text.")
+    existing_relation_id: str | None = Field(
+        description="If it is a duplicate, the ID of the existing relation that it matches.",
+        default=None,
+    )
+    existing_relation_fact: str | None = Field(
+        description="If it is a duplicate, the fact text of the existing relation that it matches.",
+        default=None,
+    )
+
+
 class TopicSummary(BaseModel):
     """Result of topic summarization."""
 

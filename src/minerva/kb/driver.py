@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncResult
 
 from minerva.core.node import EntityNode, TopicNode
+from minerva.core.relation import RelatesToRelation
 from minerva.util.env import NEO4J_DATABASE, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 
 if TYPE_CHECKING:
@@ -214,6 +215,52 @@ class Neo4jDriver:
                     name=record["node"]["name"],
                     name_embedding=record["node"]["name_embedding"],
                     summary=record["node"]["summary"],
+                )
+                for record in records
+            ]
+
+    async def find_similar_relations(
+        self, fact_embedding: list[float], limit: int = 10, threshold: float = 0.9
+    ) -> list[RelatesToRelation]:
+        """
+        Find similar relations using vector similarity search.
+
+        Args:
+            fact_embedding: Vector embedding of the fact to search for
+            limit: Maximum number of results to return
+            threshold: Minimum similarity score threshold
+
+        Returns:
+            List of similar RelatesToRelation objects
+
+        TODO: Consider filtering by from_id/to_id nodes for better candidate selection (future optimization)
+        """
+        async with self.driver.session(database=self.database) as session:
+            result: AsyncResult = await session.run(
+                """
+                CALL db.index.vector.queryRelationships('fact_embedding', $limit, $embedding) YIELD relationship, score
+                WHERE score >= $threshold AND type(relationship) = 'RELATES_TO'
+                RETURN relationship, startNode(relationship).id as from_id, endNode(relationship).id as to_id, score
+                ORDER BY score DESC
+                """,
+                limit=limit,
+                embedding=fact_embedding,
+                threshold=threshold,
+            )
+            records: list[dict[str, Any]] = [dict(record) async for record in result]
+            return [
+                RelatesToRelation(
+                    id=record["relationship"]["id"],
+                    from_id=record["from_id"],
+                    to_id=record["to_id"],
+                    relation_type=record["relationship"]["relation_type"],
+                    fact=record["relationship"]["fact"],
+                    fact_embedding=record["relationship"]["fact_embedding"],
+                    sources=record["relationship"].get("sources", []),
+                    contradictory_relations=record["relationship"].get(
+                        "contradictory_relations", []
+                    ),
+                    topic_id=record["relationship"].get("topic_id"),
                 )
                 for record in records
             ]
