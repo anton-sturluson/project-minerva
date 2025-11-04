@@ -194,7 +194,7 @@ class Neo4jDriver:
         await self.driver.close()
 
     async def find_similar_entities(
-        self, name_embedding: list[float], limit: int = 10, threshold: float = 0.9
+        self, name_embedding: list[float], limit: int = 100, threshold: float = 0.95
     ) -> list[EntityNode]:
         """Find similar entities using vector similarity search."""
         async with self.driver.session(database=self.database) as session:
@@ -209,8 +209,6 @@ class Neo4jDriver:
                 threshold=threshold,
             )
             records: list[dict[str, Any]] = [dict(record) async for record in result]
-            for record in records:
-                print("\t-", record["node"]["name"], record["score"])
             return [
                 EntityNode(
                     id=record["node"]["id"],
@@ -221,7 +219,7 @@ class Neo4jDriver:
             ]
 
     async def find_similar_relations(
-        self, fact_embedding: list[float], limit: int = 10, threshold: float = 0.9
+        self, fact_embedding: list[float], limit: int = 100, threshold: float = 0.95
     ) -> list[RelatesToRelation]:
         """
         Find similar relations using vector similarity search.
@@ -249,8 +247,6 @@ class Neo4jDriver:
                 threshold=threshold,
             )
             records: list[dict[str, Any]] = [dict(record) async for record in result]
-            for record in records:
-                print("\t-", record["relationship"]["fact"], record["score"])
             return [
                 RelatesToRelation(
                     id=record["relationship"]["id"],

@@ -114,7 +114,6 @@ class Minerva:
 
         async def process_entity(i: int, entity_name: str) -> tuple[int, EntityNode]:
             name_embedding: list[float] = entity_embeddings[i]
-            print("Entity:", entity_name)
             similar_entities: list[
                 EntityNode
             ] = await self.driver.find_similar_entities(name_embedding=name_embedding)
@@ -249,7 +248,6 @@ class Minerva:
         async def process_relation(
             relation: RelatesToRelation,
         ) -> tuple[int, RelatesToRelation]:
-            print("Main relation:",relation.fact)
             similar_relations: list[
                 RelatesToRelation
             ] = await self.driver.find_similar_relations(
