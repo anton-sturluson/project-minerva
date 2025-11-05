@@ -6,14 +6,14 @@ from minerva.prompt.metric.model import MetricResult
 
 
 async def boilerplate_metric(
-    text: str, model: str = "gemini-2.5-flash"
+    text: str, model: str = "gemini-2.5-flash-lite"
 ) -> MetricResult:
     """
     Detect if text is generic boilerplate lacking substantive information.
 
     Args:
         text: The text to evaluate
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         MetricResult with decision (True if boilerplate) and gradient explanation
@@ -48,13 +48,13 @@ async def boilerplate_metric(
     return response.parsed_object
 
 
-async def forecast_metric(text: str, model: str = "gemini-2.5-flash") -> MetricResult:
+async def forecast_metric(text: str, model: str = "gemini-2.5-flash-lite") -> MetricResult:
     """
     Detect if text contains forecasts or forward-looking statements.
 
     Args:
         text: The text to evaluate
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         MetricResult with decision (True if contains forecast) and gradient explanation
@@ -90,13 +90,13 @@ async def forecast_metric(text: str, model: str = "gemini-2.5-flash") -> MetricR
     return response.parsed_object
 
 
-async def definition_metric(text: str, model: str = "gemini-2.5-flash") -> MetricResult:
+async def definition_metric(text: str, model: str = "gemini-2.5-flash-lite") -> MetricResult:
     """
     Detect if text defines a terminology or concept.
 
     Args:
         text: The text to evaluate
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         MetricResult with decision (True if is definition) and gradient explanation
@@ -118,6 +118,56 @@ async def definition_metric(text: str, model: str = "gemini-2.5-flash") -> Metri
             Evaluate the text and provide:
             - A binary decision (True if it IS a definition, False if it is NOT)
             - A brief gradient explaining what is being defined or why it's not a definition
+            """,
+        ),
+        Message(role="user", content=text),
+    ]
+
+    response: ChatCompletionResponse = await client.chat_completion(
+        messages=messages,
+        response_schema=MetricResult,
+        model=model,
+    )
+
+    return response.parsed_object
+
+
+async def operator_instruction_metric(
+    text: str, model: str = "gemini-2.5-flash-lite"
+) -> MetricResult:
+    """
+    Detect if operator text is instructing about the next investor question.
+
+    Args:
+        text: The operator's text to evaluate
+        model: LLM model to use
+
+    Returns:
+        MetricResult with decision (True if instructing about next question) and gradient explanation
+    """
+    client: BaseLLMClient = get_client(model)
+    messages: list[Message] = [
+        Message(
+            role="system",
+            content="""
+            You are an operator instruction detector for earnings call transcripts. Your task is to determine if the operator's statement is instructing about the next investor question.
+
+            Operator instructions typically:
+            - Announce the next questioner (e.g., "Our next question comes from...")
+            - Introduce the person asking the next question
+            - Provide the questioner's name and affiliation
+            - Signal transition to a new Q&A interaction
+            - May include phrases like "next question," "moving on," "we'll take a question from"
+
+            NOT operator instructions:
+            - General procedural announcements (e.g., "Press *1 to ask a question")
+            - Ending the call (e.g., "That concludes our Q&A session")
+            - Thanking participants
+            - Other administrative comments
+
+            Evaluate the text and provide:
+            - A binary decision (True if it IS instructing about next question, False if it is NOT)
+            - A brief gradient explaining your reasoning
             """,
         ),
         Message(role="user", content=text),
