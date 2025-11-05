@@ -6,7 +6,7 @@ from minerva.prompt.metric.model import MetricResult
 
 
 async def similarity_metric(
-    text1: str, text2: str, model: str = "gemini-2.5-flash"
+    text1: str, text2: str, model: str = "gemini-2.5-flash-lite"
 ) -> MetricResult:
     """
     Detect if two texts contain highly similar substance worth compressing into one.
@@ -14,7 +14,7 @@ async def similarity_metric(
     Args:
         text1: First text to compare
         text2: Second text to compare
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         MetricResult with decision (True if similar) and gradient explanation
@@ -51,7 +51,7 @@ async def similarity_metric(
 
 
 async def contradiction_metric(
-    text1: str, text2: str, model: str = "gemini-2.5-flash"
+    text1: str, text2: str, model: str = "gemini-2.5-flash-lite"
 ) -> MetricResult:
     """
     Detect if two texts contain contradictory information.
@@ -59,7 +59,7 @@ async def contradiction_metric(
     Args:
         text1: First text to compare
         text2: Second text to compare
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         MetricResult with decision (True if contradictory) and gradient explanation
@@ -96,7 +96,7 @@ async def contradiction_metric(
 
 
 async def subset_metric(
-    text1: str, text2: str, model: str = "gemini-2.5-flash"
+    text1: str, text2: str, model: str = "gemini-2.5-flash-lite"
 ) -> MetricResult:
     """
     Detect if first text is a strict subset of second text.
@@ -104,7 +104,7 @@ async def subset_metric(
     Args:
         text1: First text (to check if it's a subset)
         text2: Second text (to check if it contains text1)
-        model: LLM model to use (default: gemini-2.5-flash)
+        model: LLM model to use
 
     Returns:
         MetricResult with decision (True if text1 is subset of text2) and gradient explanation
