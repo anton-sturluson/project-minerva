@@ -1,0 +1,472 @@
+/* ===== JobWatch — 90s Retro Light Mode ===== */
+
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
+
+/* ---------- Cross-hatch background pattern ---------- */
+:root {
+    --bg-cream: #FFFFF0;
+    --bg-warm: #FFF8DC;
+    --teal: #008080;
+    --purple: #800080;
+    --navy: #000080;
+    --olive: #808000;
+    --maroon: #800000;
+    --silver: #C0C0C0;
+    --dark-silver: #A0A0A0;
+    --white: #FFFFFF;
+    --black: #000000;
+    --text: #333333;
+    --border-light: #DFDFDF;
+    --border-dark: #808080;
+    --highlight: #FFFFE0;
+    --font-heading: 'Press Start 2P', 'Courier New', monospace;
+    --font-body: 'VT323', 'Courier New', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-body);
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--text);
+    background-color: var(--bg-cream);
+    background-image:
+        linear-gradient(45deg, rgba(0,0,0,0.03) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(0,0,0,0.03) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(0,0,0,0.03) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(0,0,0,0.03) 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+
+/* ---------- Container ---------- */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
+/* ---------- Navigation ---------- */
+nav {
+    background: var(--silver);
+    border-bottom: 2px outset var(--border-light);
+    padding: 0;
+    margin-bottom: 24px;
+}
+
+nav .nav-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+}
+
+nav .nav-brand {
+    font-family: var(--font-heading);
+    font-size: 12px;
+    color: var(--navy);
+    padding: 10px 16px;
+    border-right: 2px outset var(--border-light);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+nav .nav-brand:hover {
+    background: var(--bg-warm);
+}
+
+nav a {
+    font-family: var(--font-body);
+    font-size: 18px;
+    color: var(--black);
+    text-decoration: none;
+    padding: 10px 16px;
+    border-right: 1px solid var(--border-dark);
+    display: inline-block;
+}
+
+nav a:hover {
+    background: var(--white);
+    color: var(--navy);
+}
+
+nav a.active {
+    background: var(--white);
+    border-bottom: 2px solid var(--teal);
+    font-weight: bold;
+}
+
+/* ---------- Page title ---------- */
+.page-title {
+    font-family: var(--font-heading);
+    font-size: 18px;
+    color: var(--navy);
+    margin: 24px 0 16px;
+    padding: 12px 16px;
+    background: var(--silver);
+    border: 2px outset var(--border-light);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.page-subtitle {
+    font-family: var(--font-body);
+    font-size: 20px;
+    color: var(--border-dark);
+    margin-bottom: 20px;
+}
+
+/* ---------- Cards grid ---------- */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.card {
+    background: var(--white);
+    border: 2px outset var(--border-light);
+    padding: 0;
+}
+
+.card-header {
+    font-family: var(--font-heading);
+    font-size: 10px;
+    padding: 8px 12px;
+    background: var(--silver);
+    border-bottom: 2px groove var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.card-header .company-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-family: var(--font-heading);
+    font-size: 9px;
+    color: var(--white);
+    border: 1px outset;
+}
+
+.card-body {
+    padding: 12px;
+}
+
+.big-number {
+    font-family: var(--font-heading);
+    font-size: 32px;
+    color: var(--teal);
+    text-align: center;
+    padding: 8px 0;
+}
+
+.big-number small {
+    display: block;
+    font-size: 10px;
+    color: var(--border-dark);
+    margin-top: 4px;
+}
+
+.trend-indicator {
+    font-size: 28px;
+    display: inline-block;
+    margin-left: 8px;
+}
+
+.trend-up { color: #006400; }
+.trend-down { color: #8B0000; }
+.trend-flat { color: var(--border-dark); }
+
+/* ---------- Department list in cards ---------- */
+.dept-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0;
+}
+
+.dept-list li {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    border-bottom: 1px dotted var(--border-light);
+    font-size: 18px;
+}
+
+.dept-list li:last-child {
+    border-bottom: none;
+}
+
+.dept-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    font-family: var(--font-body);
+    font-size: 16px;
+    color: var(--white);
+    border: 1px outset;
+}
+
+/* ---------- Tables ---------- */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 2px solid var(--black);
+    margin-bottom: 20px;
+    background: var(--white);
+}
+
+th {
+    font-family: var(--font-heading);
+    font-size: 10px;
+    background: var(--navy);
+    color: var(--white);
+    padding: 8px 10px;
+    text-align: left;
+    border: 2px solid var(--black);
+    text-transform: uppercase;
+}
+
+td {
+    padding: 6px 10px;
+    border: 1px solid var(--border-dark);
+    font-size: 18px;
+}
+
+tr:nth-child(even) {
+    background: var(--highlight);
+}
+
+tr:hover {
+    background: #E0FFFF;
+}
+
+/* ---------- Bars (CSS horizontal bar chart) ---------- */
+.bar-chart {
+    margin: 12px 0;
+}
+
+.bar-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+    gap: 8px;
+}
+
+.bar-label {
+    flex: 0 0 120px;
+    text-align: right;
+    font-size: 16px;
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bar-track {
+    flex: 1;
+    background: var(--bg-cream);
+    border: 2px inset var(--border-light);
+    height: 24px;
+    position: relative;
+}
+
+.bar-fill {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding-left: 6px;
+    color: var(--white);
+    font-size: 16px;
+    font-weight: bold;
+    min-width: 2px;
+    transition: width 0.3s;
+}
+
+.bar-count {
+    flex: 0 0 40px;
+    text-align: right;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+/* ---------- Heatmap ---------- */
+.heatmap-cell {
+    text-align: center;
+    font-weight: bold;
+    font-size: 18px;
+    min-width: 60px;
+    border: 2px solid var(--black);
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+    font-family: var(--font-body);
+    font-size: 18px;
+    padding: 6px 16px;
+    border: 2px outset var(--border-light);
+    background: var(--silver);
+    color: var(--black);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn:active {
+    border-style: inset;
+    padding: 8px 14px 4px 18px;
+}
+
+.btn:hover {
+    background: var(--white);
+}
+
+.btn-primary {
+    background: var(--teal);
+    color: var(--white);
+    border-color: #006060;
+}
+
+.btn-primary:hover {
+    background: #009090;
+}
+
+/* ---------- Status badges ---------- */
+.status-complete {
+    color: #006400;
+    font-weight: bold;
+}
+
+.status-partial {
+    color: #B8860B;
+    font-weight: bold;
+}
+
+.status-failed {
+    color: #8B0000;
+    font-weight: bold;
+}
+
+.status-running {
+    color: var(--navy);
+    font-weight: bold;
+}
+
+/* ---------- Sparkline ---------- */
+.sparkline {
+    font-size: 20px;
+    letter-spacing: 1px;
+    color: var(--teal);
+    font-family: monospace;
+}
+
+/* ---------- Section panels ---------- */
+.panel {
+    background: var(--white);
+    border: 2px outset var(--border-light);
+    margin-bottom: 20px;
+}
+
+.panel-header {
+    font-family: var(--font-heading);
+    font-size: 11px;
+    padding: 8px 12px;
+    background: var(--silver);
+    border-bottom: 2px groove var(--border-light);
+    color: var(--navy);
+}
+
+.panel-body {
+    padding: 12px;
+}
+
+/* ---------- Footer ---------- */
+footer {
+    text-align: center;
+    padding: 20px;
+    margin-top: 40px;
+    border-top: 2px inset var(--border-light);
+    background: var(--silver);
+    font-family: var(--font-heading);
+    font-size: 8px;
+    color: var(--border-dark);
+    letter-spacing: 1px;
+}
+
+/* ---------- Utility ---------- */
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.text-muted { color: var(--border-dark); }
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-16 { margin-bottom: 16px; }
+
+.last-crawl {
+    font-size: 14px;
+    color: var(--border-dark);
+    text-align: center;
+    padding: 4px;
+    border-top: 1px dotted var(--border-light);
+}
+
+.loading {
+    text-align: center;
+    padding: 20px;
+    color: var(--border-dark);
+    font-style: italic;
+}
+
+.loading::after {
+    content: '...';
+    animation: dots 1.5s steps(3, end) infinite;
+}
+
+@keyframes dots {
+    0% { content: ''; }
+    33% { content: '.'; }
+    66% { content: '..'; }
+    100% { content: '...'; }
+}
+
+/* ---------- Compare side-by-side ---------- */
+.compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.compare-card {
+    background: var(--white);
+    border: 2px outset var(--border-light);
+}
+
+.compare-card-header {
+    font-family: var(--font-heading);
+    font-size: 9px;
+    padding: 6px 10px;
+    background: var(--silver);
+    border-bottom: 1px solid var(--border-dark);
+    text-align: center;
+}
+
+.compare-card-body {
+    padding: 8px;
+}
+
+/* ---------- Link styling ---------- */
+a.company-link {
+    color: var(--navy);
+    text-decoration: underline;
+}
+
+a.company-link:hover {
+    color: var(--teal);
+}

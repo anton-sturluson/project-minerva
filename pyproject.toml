@@ -22,8 +22,15 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.optional-dependencies]
+jobwatch = ["httpx", "anthropic", "openai", "fastapi", "jinja2", "uvicorn"]
+
+[project.scripts]
+jobwatch-crawl = "jobwatch.crawler:main"
+jobwatch-dashboard = "dashboard.app:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/minerva"]
+packages = ["src/minerva", "src/jobwatch", "dashboard"]
 
 [dependency-groups]
 dev = [

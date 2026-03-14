@@ -1,0 +1,20 @@
+<div class="bar-chart">
+    {% for dept in dept_mix %}
+    {% set pct = (dept.count / max_count * 100) | int %}
+    {% set color = dept_colors.get(dept.department, '#808080') %}
+    <div class="bar-row" style="margin-bottom: 3px;">
+        <span class="bar-label" style="flex: 0 0 80px; font-size: 14px;">
+            {{ dept_labels.get(dept.department, dept.department) }}
+        </span>
+        <div class="bar-track" style="height: 18px;">
+            <div class="bar-fill" style="width: {{ pct }}%; background-color: {{ color }}; font-size: 13px;">
+                {% if pct > 20 %}{{ dept.count }}{% endif %}
+            </div>
+        </div>
+        <span class="bar-count" style="flex: 0 0 30px; font-size: 15px;">{{ dept.count }}</span>
+    </div>
+    {% endfor %}
+    {% if not dept_mix %}
+    <p class="text-center text-muted">No department data.</p>
+    {% endif %}
+</div>

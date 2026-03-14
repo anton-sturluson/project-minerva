@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% set active_page = "heatmap" %}
+
+{% block title %}JobWatch — Heatmap{% endblock %}
+
+{% block content %}
+<h1 class="page-title">COMPANY &times; DEPARTMENT HEATMAP</h1>
+<p class="page-subtitle">Cell intensity = relative headcount</p>
+
+<div class="panel">
+    <div class="panel-body" style="overflow-x: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    {% for dept in departments %}
+                    <th style="text-align: center; font-size: 8px;">{{ dept }}</th>
+                    {% endfor %}
+                    <th style="text-align: center;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in companies %}
+                <tr>
+                    <td><strong>{{ c.name }}</strong></td>
+                    {% set ns = namespace(total=0) %}
+                    {% for dept in departments %}
+                    {% set count = c.dept_map.get(dept, 0) %}
+                    {% set ns.total = ns.total + count %}
+                    {% if count > 0 %}
+                    {% set intensity = (count / global_max * 0.8 + 0.1) %}
+                    {% set bg_color = dept_colors.get(dept, '#808080') %}
+                    <td class="heatmap-cell" style="background-color: {{ bg_color }}; opacity: {{ intensity }}; color: #FFFFFF;">
+                        {{ count }}
+                    </td>
+                    {% else %}
+                    <td class="heatmap-cell" style="background-color: #F5F5DC; color: #C0C0C0;">
+                        0
+                    </td>
+                    {% endif %}
+                    {% endfor %}
+                    <td class="heatmap-cell text-right" style="background: var(--silver); font-weight: bold;">
+                        {{ ns.total }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-header">Legend</div>
+    <div class="panel-body">
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            {% for dept in departments %}
+            <span class="dept-tag" style="background-color: {{ dept_colors.get(dept, '#808080') }};">
+                {{ dept }} = {{ dept_labels.get(dept, dept) }}
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

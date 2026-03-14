@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% set active_page = "compare" %}
+
+{% block title %}JobWatch — Compare{% endblock %}
+
+{% block content %}
+<h1 class="page-title">CROSS-COMPANY COMPARISON</h1>
+
+<div class="panel">
+    <div class="panel-header">Summary Table</div>
+    <div class="panel-body">
+        <table>
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    <th>Total Roles</th>
+                    <th>Engineering</th>
+                    <th>Research</th>
+                    <th>ML Engineering</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in company_data %}
+                <tr>
+                    <td>
+                        <span class="company-badge" style="background-color: {{ c.color }};">{{ c.name }}</span>
+                    </td>
+                    <td class="text-right">{{ c.total }}</td>
+                    <td class="text-right">{{ c.eng }}</td>
+                    <td class="text-right">{{ c.res }}</td>
+                    <td class="text-right">{{ c.ml }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<h2 class="page-title" style="font-size: 14px;">Department Mix by Company</h2>
+
+<div class="compare-grid">
+    {% for c in company_data %}
+    <div class="compare-card">
+        <div class="compare-card-header" style="border-top: 3px solid {{ c.color }};">
+            {{ c.name }}
+        </div>
+        <div class="compare-card-body">
+            {% for dept in all_depts %}
+            {% set count = c.dept_map.get(dept, 0) %}
+            {% if count > 0 %}
+            {% set pct = (count / global_max * 100) | int %}
+            {% set color = dept_colors.get(dept, '#808080') %}
+            <div class="bar-row" style="margin-bottom: 3px;">
+                <span class="bar-label" style="flex: 0 0 60px; font-size: 13px;">{{ dept }}</span>
+                <div class="bar-track" style="height: 18px;">
+                    <div class="bar-fill" style="width: {{ pct }}%; background-color: {{ color }}; font-size: 13px;">
+                        {% if pct > 20 %}{{ count }}{% endif %}
+                    </div>
+                </div>
+                <span class="bar-count" style="flex: 0 0 30px; font-size: 15px;">{{ count }}</span>
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% if not c.dept_map %}
+            <p class="text-center text-muted">No data</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

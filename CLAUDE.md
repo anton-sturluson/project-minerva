@@ -4,7 +4,14 @@
 - **Package manager**: `uv` is the primary package manager
 - **Build backend**: hatchling
 - **Python version**: 3.12
-- **Project layout**: src layout (`src/minerva/`)
+- **Project layout**: src layout (`src/minerva/`, `src/jobwatch/`)
+
+### uv Commands
+- **Install all deps**: `uv sync --extra jobwatch`
+- **Run crawler**: `uv run jobwatch-crawl` (or `uv run python -m jobwatch.crawler`)
+- **Run dashboard**: `uv run jobwatch-dashboard` (or `uv run python -m dashboard.app`)
+- **Run tests**: `uv run pytest`
+- **Add a dependency**: `uv add <pkg>` (core) or `uv add --optional jobwatch <pkg>` (jobwatch-only)
 
 ## Data Handling
 - **Always convert downloaded XML files to YAML format** for readability and downstream use.
@@ -65,7 +72,11 @@ Each file must include:
 ## Directory Structure
 - **`hard-disk/`**: Main workspace for the coding agent — download files, take notes, and create one-time scripts here. Use this folder freely to save work.
 - **`hard-disk/knowledge/`**: Indexed knowledge base by topic. See [Knowledge Base](#knowledge-base).
-- **`src/`**: Library codebase. Code here supports future workflows and is meant to be reusable.
+- **`src/minerva/`**: Equity research library. Reusable modules for SEC filings, valuation, formatting.
+- **`src/jobwatch/`**: Job posting tracker. ATS crawlers, LLM classifier, SQLite storage. See [JobWatch](#jobwatch).
+- **`dashboard/`**: FastAPI + Jinja2/HTMX web dashboard for JobWatch.
+- **`data/jobwatch.db`**: SQLite database for JobWatch (gitignored).
+- **`tests/test_jobwatch/`**: JobWatch test suite with ATS fixtures.
 - **Research co-location**: All research source materials (downloaded filings, scraped articles, fetched transcripts) must be saved inside the report folder they support (e.g., `hard-disk/reports/{REPORT}/research/`), never in a separate top-level directory. Each report should be self-contained.
 
 ## Library Reference
@@ -119,6 +130,51 @@ Matplotlib chart utilities:
 - `axis_formatter_millions(x, pos)` — `"$95M"` tick formatter
 - `axis_formatter_billions(x, pos)` — `"$1.5B"` tick formatter
 - `axis_formatter_pct(x, pos)` — `"50%"` tick formatter
+
+## JobWatch
+
+Job posting tracker for AI startups. Crawls ATS APIs, classifies with LLM, stores in SQLite.
+
+**Target companies (v1):** Anthropic, xAI (Greenhouse); OpenAI (Ashby SSR); Cursor, Cognition (Ashby)
+
+### jobwatch.models
+Enums: `Department`, `RoleType`, `Seniority`, `ATSType`, `CrawlStatus`, `ReclassifyTrigger`, `WorkMode`, `EmploymentType`.
+Models: `RawPosting`, `FetchResult`, `JobClassification`.
+Constants: `TAXONOMY_VERSION`, `PROMPT_VERSION`.
+
+### jobwatch.config
+- `CompanyConfig` — frozen dataclass (id, name, ats_type, ats_board, website)
+- `COMPANY_REGISTRY` — list of 5 target companies
+- `Settings` — runtime settings (db_path, classifier_model, taxonomy/prompt versions)
+- `get_company(company_id)` — lookup by id
+
+### jobwatch.ats
+- `ATSClient` (ABC) — `fetch_all() -> FetchResult`
+- `GreenhouseClient` — Anthropic, xAI (boards-api.greenhouse.io)
+- `AshbyClient` — Cursor, Cognition (api.ashbyhq.com)
+- `AshbySSRClient` — OpenAI (SSR scrape of `window.__appData`, brittle)
+
+### jobwatch.db
+`JobWatchDB(db_path)` — SQLite wrapper. Key methods:
+- `init_db()`, `ensure_company()`, `create_crawl_run()`, `update_crawl_run()`
+- `upsert_posting()`, `close_posting()`, `insert_classification()`, `has_current_classification()`
+- `insert_snapshot()`, `get_snapshots()`, `get_department_mix()`, `get_role_type_counts()`
+- `get_low_confidence()`, `get_recent_crawl_runs()`, `get_all_active_postings_with_classifications()`
+
+### jobwatch.classifier
+- `ClassifierProvider` (ABC) — `classify(title, department_raw, description) -> JobClassification`
+- `AnthropicClassifier` — Claude Haiku (default `claude-haiku-4-5-20251001`)
+- `OpenAIClassifier` — GPT-4o-mini (default)
+- `classify_postings(provider, postings)` — batch sequential classification
+
+### jobwatch.crawler
+- `crawl_company(db, company, classifier, settings)` — full per-company pipeline
+- `crawl_all(db, classifier, settings, company_ids)` — serial crawl over registry
+- `main()` — CLI entry point (argparse: `--companies`, `--db-path`, `--classifier`, `--model`)
+
+### dashboard.app
+FastAPI + Jinja2/HTMX. Routes: `/`, `/company/{id}`, `/compare`, `/trends`, `/heatmap`, `/health`.
+HTMX partials: `/api/dept-mix/{id}`, `/api/trend-data/{id}`. 90s retro light-mode aesthetic.
 
 ### edgartools usage patterns
 `edgartools` is installed and provides comprehensive SEC EDGAR access. Use it directly for simple operations:

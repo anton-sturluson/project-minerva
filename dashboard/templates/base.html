@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}JobWatch{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+    <nav>
+        <div class="nav-inner">
+            <a href="/" class="nav-brand">&#128225; JobWatch</a>
+            <a href="/" {% if active_page == "overview" %}class="active"{% endif %}>Overview</a>
+            <a href="/compare" {% if active_page == "compare" %}class="active"{% endif %}>Compare</a>
+            <a href="/trends" {% if active_page == "trends" %}class="active"{% endif %}>Trends</a>
+            <a href="/heatmap" {% if active_page == "heatmap" %}class="active"{% endif %}>Heatmap</a>
+            <a href="/health" {% if active_page == "health" %}class="active"{% endif %}>Health</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer>
+        JobWatch v1 &mdash; powered by 56k modem
+    </footer>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "jobs": [
+    {
+      "id": 5678901,
+      "title": "Senior Software Engineer, API Platform",
+      "departments": [{"id": 1, "name": "Engineering"}],
+      "location": {"name": "San Francisco, CA"},
+      "absolute_url": "https://boards.greenhouse.io/anthropic/jobs/5678901",
+      "content": "<p>We are looking for a senior software engineer to build and scale our API platform.</p><ul><li>5+ years experience in backend systems</li><li>Proficiency in Python, Go, or Rust</li><li>Experience with distributed systems at scale</li></ul>"
+    },
+    {
+      "id": 5678902,
+      "title": "Research Scientist, Alignment",
+      "departments": [{"id": 2, "name": "Research"}],
+      "location": {"name": "San Francisco, CA | Remote"},
+      "absolute_url": "https://boards.greenhouse.io/anthropic/jobs/5678902",
+      "content": "<p>Join our alignment team to work on ensuring AI systems are safe, honest, and beneficial. You will conduct original research on scalable alignment techniques and publish findings.</p>"
+    },
+    {
+      "id": 5678903,
+      "title": "Product Manager, Enterprise",
+      "departments": [{"id": 3, "name": "Product"}],
+      "location": {"name": "New York, NY"},
+      "absolute_url": "https://boards.greenhouse.io/anthropic/jobs/5678903",
+      "content": "<p>Lead product strategy for enterprise customers. Define roadmaps, coordinate cross-functional teams, and drive adoption of Claude for business use cases.</p>"
+    }
+  ]
+}

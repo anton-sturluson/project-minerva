@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% set active_page = "health" %}
+
+{% block title %}JobWatch — Crawl Health{% endblock %}
+
+{% block content %}
+<h1 class="page-title">CRAWL HEALTH</h1>
+<p class="page-subtitle">Recent crawl runs and their status</p>
+
+<div class="panel">
+    <div class="panel-header">Recent Runs</div>
+    <div class="panel-body" style="overflow-x: auto;">
+        {% if runs %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    <th>Started</th>
+                    <th>Status</th>
+                    <th>Exhaustive</th>
+                    <th>Found</th>
+                    <th>New</th>
+                    <th>Closed</th>
+                    <th>Error</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr>
+                    <td>
+                        {% if run.company_id in companies %}
+                        {{ companies[run.company_id].name }}
+                        {% else %}
+                        {{ run.company_id }}
+                        {% endif %}
+                    </td>
+                    <td>{{ run.started_at }}</td>
+                    <td>
+                        <span class="status-{{ run.status }}">
+                            {{ run.status | upper }}
+                        </span>
+                    </td>
+                    <td class="text-center">
+                        {% if run.is_exhaustive %}
+                        <span style="color: #006400;">YES</span>
+                        {% else %}
+                        <span style="color: #B8860B;">NO</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">{{ run.postings_found if run.postings_found is not none else '—' }}</td>
+                    <td class="text-right">{{ run.postings_new if run.postings_new is not none else '—' }}</td>
+                    <td class="text-right">{{ run.postings_closed if run.postings_closed is not none else '—' }}</td>
+                    <td>
+                        {% if run.error_message %}
+                        <span style="color: #8B0000; font-size: 14px;" title="{{ run.error_message }}">
+                            {{ run.error_message[:80] }}{% if run.error_message | length > 80 %}...{% endif %}
+                        </span>
+                        {% else %}
+                        &mdash;
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-center text-muted">No crawl runs recorded yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

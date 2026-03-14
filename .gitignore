@@ -36,3 +36,4 @@ htmlcov/
 .env.local
 
 hard-disk
+data/

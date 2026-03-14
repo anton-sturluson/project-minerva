@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set active_page = "overview" %}
+
+{% block title %}JobWatch — Hiring Radar{% endblock %}
+
+{% block content %}
+<h1 class="page-title">HIRING RADAR</h1>
+<p class="page-subtitle">Total open roles per company &mdash; click a card for details</p>
+
+<div class="card-grid">
+    {% for card in cards %}
+    <div class="card">
+        <div class="card-header">
+            <span>{{ card.name }}</span>
+            <span class="company-badge" style="background-color: {{ card.color }};">{{ card.id | upper }}</span>
+        </div>
+        <div class="card-body">
+            <div class="big-number">
+                {{ card.total }}
+                <span class="trend-indicator {% if card.trend == '↑' %}trend-up{% elif card.trend == '↓' %}trend-down{% else %}trend-flat{% endif %}">{{ card.trend }}</span>
+                <small>active postings</small>
+            </div>
+
+            <ul class="dept-list">
+                {% for dept in card.top_depts %}
+                <li>
+                    <span class="dept-tag" style="background-color: {{ dept_colors.get(dept.department, '#808080') }};">{{ dept.department }}</span>
+                    <span>{{ dept_labels.get(dept.department, dept.department) }} &mdash; {{ dept.count }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+
+            <div
+                hx-get="/api/dept-mix/{{ card.id }}"
+                hx-trigger="revealed"
+                hx-swap="innerHTML"
+            >
+                <div class="loading">Loading departments</div>
+            </div>
+
+            {% if card.last_crawl %}
+            <div class="last-crawl">Last crawl: {{ card.last_crawl }}</div>
+            {% endif %}
+
+            <div class="text-center mt-8">
+                <a href="/company/{{ card.id }}" class="btn">View Details &raquo;</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if not cards %}
+<div class="panel">
+    <div class="panel-body text-center">
+        No company data found. Run a crawl first.
+    </div>
+</div>
+{% endif %}
+{% endblock %}

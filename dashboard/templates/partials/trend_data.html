@@ -1,0 +1,29 @@
+<div class="panel">
+    <div class="panel-header">Trend Data</div>
+    <div class="panel-body">
+        {% if snapshots %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Total Active</th>
+                    <th>New</th>
+                    <th>Closed</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in snapshots | reverse %}
+                <tr>
+                    <td>{{ s.crawl_date }}</td>
+                    <td class="text-right">{{ s.total_active }}</td>
+                    <td class="text-right trend-up">+{{ s.new_postings }}</td>
+                    <td class="text-right trend-down">-{{ s.closed_postings }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-center text-muted">No snapshot data yet.</p>
+        {% endif %}
+    </div>
+</div>

@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "id": "abc-123-def",
+      "title": "Full-Stack Engineer",
+      "departmentName": "Engineering",
+      "location": "San Francisco, CA",
+      "employmentType": "FullTime",
+      "descriptionPlain": "Build the future of AI-powered code editing. You will work across the stack to deliver features that help developers write better code faster. We use TypeScript, React, and Rust.",
+      "jobUrl": "https://jobs.ashbyhq.com/cursor/abc-123-def"
+    },
+    {
+      "id": "ghi-456-jkl",
+      "title": "ML Engineer, Code Generation",
+      "departmentName": "Engineering",
+      "location": "Remote",
+      "employmentType": "FullTime",
+      "descriptionPlain": "Work on large language models for code generation. Fine-tune and evaluate models, build inference infrastructure, and improve code completion quality across languages.",
+      "jobUrl": "https://jobs.ashbyhq.com/cursor/ghi-456-jkl"
+    }
+  ]
+}

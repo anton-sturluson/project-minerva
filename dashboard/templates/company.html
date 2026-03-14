@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% set active_page = "company" %}
+
+{% block title %}JobWatch — {{ company.name }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title" style="border-left: 6px solid {{ company_color }};">
+    {{ company.name }}
+</h1>
+
+<div class="panel">
+    <div class="panel-header">Department Breakdown</div>
+    <div class="panel-body">
+        <div class="bar-chart">
+            {% for dept in dept_mix %}
+            {% set pct = (dept.count / max_dept * 100) | int %}
+            {% set color = dept_colors.get(dept.department, '#808080') %}
+            <div class="bar-row">
+                <span class="bar-label">{{ dept_labels.get(dept.department, dept.department) }}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width: {{ pct }}%; background-color: {{ color }};">
+                        {% if pct > 15 %}{{ dept.count }}{% endif %}
+                    </div>
+                </div>
+                <span class="bar-count">{{ dept.count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-header">Seniority Distribution</div>
+    <div class="panel-body">
+        <div class="bar-chart">
+            {% for sen in seniority_list %}
+            {% set pct = (sen.count / max_sen * 100) | int %}
+            <div class="bar-row">
+                <span class="bar-label">{{ sen.seniority }}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width: {{ pct }}%; background-color: var(--purple);">
+                        {% if pct > 15 %}{{ sen.count }}{% endif %}
+                    </div>
+                </div>
+                <span class="bar-count">{{ sen.count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-header">Recent Postings (up to 50)</div>
+    <div class="panel-body">
+        {% if postings %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Dept</th>
+                    <th>Role Type</th>
+                    <th>Seniority</th>
+                    <th>First Seen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in postings %}
+                <tr>
+                    <td>
+                        {% if p.url %}
+                        <a href="{{ p.url }}" target="_blank" class="company-link">{{ p.title }}</a>
+                        {% else %}
+                        {{ p.title }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="dept-tag" style="background-color: {{ dept_colors.get(p.department, '#808080') }};">
+                            {{ p.department or '—' }}
+                        </span>
+                    </td>
+                    <td>{{ p.role_type or '—' }}</td>
+                    <td>{{ p.seniority or '—' }}</td>
+                    <td>{{ p.first_seen }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-center text-muted">No active postings found.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div
+    hx-get="/api/trend-data/{{ company.id }}"
+    hx-trigger="revealed"
+    hx-swap="innerHTML"
+>
+    <div class="panel">
+        <div class="panel-header">Trend Data</div>
+        <div class="panel-body">
+            <div class="loading">Loading trend data</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
