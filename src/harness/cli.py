@@ -12,22 +12,19 @@ from typing import Any
 import typer
 
 from harness.commands import register_commands
+from harness.commands import analyze as analyze_commands
+from harness.commands import codex as codex_commands
 from harness.commands import fs as fs_commands
+from harness.commands import knowledge as knowledge_commands
+from harness.commands import memory_cmd as memory_commands
+from harness.commands import plot as plot_commands
+from harness.commands import read as read_commands
+from harness.commands import report as report_commands
+from harness.commands import sec as sec_commands
+from harness.commands import valuation as valuation_commands
 from harness.commands import web as web_commands
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
-
-PLACEHOLDER_GROUPS: set[str] = {
-    "sec",
-    "valuation",
-    "analyze",
-    "knowledge",
-    "memory",
-    "plot",
-    "report",
-    "read",
-    "codex",
-}
 
 
 @dataclass(slots=True)
@@ -245,8 +242,26 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
         return fs_commands.remove_path(argv[1], settings=active_settings)
     if command == "web":
         return _dispatch_web(argv[1:], active_settings)
-    if command in PLACEHOLDER_GROUPS:
-        return CommandResult.from_text("Not yet implemented. Coming in Phase 2/3.")
+    if command == "sec":
+        return sec_commands.dispatch(argv[1:], active_settings)
+    if command == "valuation":
+        return valuation_commands.dispatch(argv[1:], active_settings)
+    if command == "analyze":
+        return analyze_commands.dispatch(argv[1:], active_settings)
+    if command == "knowledge":
+        return knowledge_commands.dispatch(argv[1:], active_settings)
+    if command == "memory":
+        return memory_commands.dispatch(argv[1:], active_settings)
+    if command == "plot":
+        return plot_commands.dispatch(argv[1:], active_settings)
+    if command == "report":
+        return report_commands.dispatch(argv[1:], active_settings)
+    if command == "read":
+        return read_commands.dispatch(argv[1:], active_settings)
+    if command == "read-many":
+        return read_commands.read_many_alias_dispatch(argv[1:], active_settings)
+    if command == "codex":
+        return codex_commands.dispatch(argv[1:], active_settings)
 
     return _run_external_command(argv, stdin=stdin, settings=active_settings)
 
