@@ -20,18 +20,6 @@ from harness.commands.common import (
 )
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
-from minerva.formatting import build_markdown_table, format_multiple, format_pct, format_usd
-from minerva.valuation import (
-    CompsAssumptions,
-    DCFAssumptions,
-    SOTPSegment,
-    dcf_sensitivity_matrix,
-    generate_valuation_report,
-    run_comps,
-    run_dcf,
-    run_reverse_dcf,
-    run_sotp,
-)
 
 VALUATION_HELP = (
     "Financial valuation models.\n\n"
@@ -174,6 +162,9 @@ def run_dcf_command(
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
+        from minerva.formatting import build_markdown_table, format_pct, format_usd
+        from minerva.valuation import DCFAssumptions, run_dcf
+
         growth_rates = parse_csv_floats(growth_rates_csv)
         margins = parse_csv_floats(margins_csv)
         base_fcf: float = fcf if fcf is not None else revenue * margins[0]
@@ -261,6 +252,9 @@ def run_comps_command(
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
+        from minerva.formatting import build_markdown_table, format_usd
+        from minerva.valuation import CompsAssumptions, run_comps
+
         assumptions = CompsAssumptions(
             ntm_revenue=ntm_revenue,
             ntm_ebitda=ntm_ebitda,
@@ -310,6 +304,9 @@ def run_reverse_dcf_command(
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
+        from minerva.formatting import format_pct, format_usd
+        from minerva.valuation import run_reverse_dcf
+
         result = run_reverse_dcf(
             current_price=price,
             shares_outstanding=shares,
@@ -354,6 +351,9 @@ def run_sotp_command(
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
+        from minerva.formatting import build_markdown_table, format_multiple, format_pct, format_usd
+        from minerva.valuation import SOTPSegment, run_sotp
+
         segments_payload = _load_segments_payload(segments_spec)
         total_revenue: float = sum(float(item["revenue"]) for item in segments_payload) or 1.0
         segments: list[SOTPSegment] = []
@@ -421,6 +421,18 @@ def run_report_command(
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
+        from minerva.valuation import (
+            CompsAssumptions,
+            DCFAssumptions,
+            SOTPSegment,
+            dcf_sensitivity_matrix,
+            generate_valuation_report,
+            run_comps,
+            run_dcf,
+            run_reverse_dcf,
+            run_sotp,
+        )
+
         config = json.loads(resolve_path(config_path).read_text(encoding="utf-8"))
         dcf_config = config["dcf"]
         comps_config = config["comps"]

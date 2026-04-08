@@ -12,8 +12,6 @@ import typer
 from harness.commands.common import abort_with_help, elapsed_ms, error_result, parse_flag_args, read_text_input
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
-from minerva.formatting import build_markdown_table
-from minerva.text_analysis import DEFAULT_FINANCIAL_STOPWORDS
 
 ANALYZE_HELP = (
     "Deterministic text analysis commands.\n\n"
@@ -88,6 +86,8 @@ def analyze_ngrams_command(
 ) -> CommandResult:
     start = time.perf_counter()
     try:
+        from minerva.formatting import build_markdown_table
+
         text = read_text_input(file_path=file_path, stdin=stdin)
     except Exception as exc:
         return error_result(
@@ -226,6 +226,8 @@ def _split_file_and_flags(args: list[str]) -> tuple[str | None, dict[str, str | 
 
 
 def _filtered_tokens(text: str) -> list[str]:
+    from minerva.text_analysis import DEFAULT_FINANCIAL_STOPWORDS
+
     return [
         token
         for token in (match.group(0).lower() for match in TOKEN_RE.finditer(text))

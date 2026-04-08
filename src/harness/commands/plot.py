@@ -5,10 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import pandas as pd
 import typer
-from wordcloud import STOPWORDS, WordCloud
 
 from harness.commands.common import (
     abort_with_help,
@@ -21,7 +18,6 @@ from harness.commands.common import (
 )
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
-from minerva.text_analysis import DEFAULT_FINANCIAL_STOPWORDS
 
 PLOT_HELP = (
     "Standardized chart generation.\n\n"
@@ -132,6 +128,9 @@ def create_plot(
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
+        import matplotlib.pyplot as plt
+        import pandas as pd
+
         palette = _theme(theme)
         csv_path = resolve_path(data_path)
         frame = pd.read_csv(csv_path)
@@ -174,6 +173,9 @@ def create_wordcloud(
     start = time.perf_counter()
     _ = settings or get_settings()
     try:
+        import matplotlib.pyplot as plt
+        from wordcloud import WordCloud
+
         text = read_text_input(file_path=file_path, stdin=stdin)
         palette = _theme(theme)
         target_path = resolve_path(output_path or "wordcloud.png")
@@ -291,6 +293,8 @@ def _theme(name: str) -> dict[str, str]:
 
 
 def _styled_figure(palette: dict[str, str]):
+    import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots(figsize=(10, 6), facecolor=palette["background"])
     ax.set_facecolor(palette["background"])
     ax.grid(True, color=palette["grid"], alpha=0.3 if palette["background"] == "#FFFFFF" else 0.6)
@@ -313,6 +317,9 @@ def _add_watermark(ax, palette: dict[str, str]) -> None:
 
 
 def _stopwords(mode: str) -> set[str]:
+    from minerva.text_analysis import DEFAULT_FINANCIAL_STOPWORDS
+    from wordcloud import STOPWORDS
+
     if mode == "financial":
         return set(STOPWORDS) | set(DEFAULT_FINANCIAL_STOPWORDS)
     if mode == "default":

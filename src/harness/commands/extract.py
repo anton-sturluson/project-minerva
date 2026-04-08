@@ -263,15 +263,12 @@ def extract_many_cli_command(
 
 def _generate_answer(*, question: str, document_text: str, model: str, max_tokens: int, api_key: str) -> str:
     try:
-        import google.generativeai as genai
+        from google import genai
     except ModuleNotFoundError as exc:
-        raise RuntimeError("google-generativeai is not installed") from exc
-    genai.configure(api_key=api_key)
-    client = genai.GenerativeModel(model)
-    response = client.generate_content(
-        f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nDocument:\n{document_text}",
-        generation_config={"max_output_tokens": max_tokens},
-    )
+        raise RuntimeError("google-genai is not installed") from exc
+    client = genai.Client(api_key=api_key)
+    prompt_text = f"{SYSTEM_PROMPT}\n\nQuestion: {question}\n\nDocument:\n{document_text}"
+    response = client.models.generate_content(model=model, contents=prompt_text, config={"max_output_tokens": max_tokens})
     text = getattr(response, "text", None)
     if not text:
         raise ValueError("Gemini returned an empty response")

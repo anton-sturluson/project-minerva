@@ -7,12 +7,9 @@ import time
 from pathlib import Path
 from typing import Awaitable, Callable, TypeVar
 
-import httpx
-import pandas as pd
 import typer
 
 from harness.output import CommandResult
-from minerva.formatting import build_markdown_table
 
 T = TypeVar("T")
 RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
@@ -79,12 +76,14 @@ def abort_with_help(
     raise typer.Exit(exit_code)
 
 
-def dataframe_to_markdown(df: pd.DataFrame, *, max_rows: int = 20) -> str:
+def dataframe_to_markdown(df, *, max_rows: int = 20) -> str:
     """Render a dataframe as a markdown table without extra dependencies."""
+    from minerva.formatting import build_markdown_table
+
     if df.empty:
         return "(no rows)"
 
-    preview: pd.DataFrame = df.head(max_rows).copy()
+    preview = df.head(max_rows).copy()
     headers: list[str] = [str(column) for column in preview.columns]
     rows: list[list[str]] = [[_format_cell(value) for value in row.tolist()] for _, row in preview.iterrows()]
     table: str = build_markdown_table(headers, rows, alignment=["l"] * len(headers))
@@ -211,6 +210,8 @@ async def async_retry_call(
 
 def should_retry_http_error(exc: Exception) -> bool:
     """Retry HTTP operations on timeout and transient status codes only."""
+    import httpx
+
     if isinstance(exc, httpx.TimeoutException):
         return True
     status_code: int | None = _extract_status_code(exc)

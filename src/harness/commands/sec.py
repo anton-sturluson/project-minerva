@@ -6,9 +6,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-import pandas as pd
 import typer
-from edgar import Company, set_identity
 
 from harness.commands.common import (
     abort_with_help,
@@ -24,7 +22,6 @@ from harness.commands.common import (
 )
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
-from minerva.sec import get_10k_items, get_13f_comparison
 
 SEC_HELP = (
     "SEC EDGAR filing tools.\n\n"
@@ -36,6 +33,30 @@ SEC_HELP = (
 )
 
 app = typer.Typer(help=SEC_HELP, no_args_is_help=True)
+
+
+def Company(*args, **kwargs):
+    from edgar import Company as EdgarCompany
+
+    return EdgarCompany(*args, **kwargs)
+
+
+def set_identity(*args, **kwargs) -> None:
+    from edgar import set_identity as edgar_set_identity
+
+    edgar_set_identity(*args, **kwargs)
+
+
+def get_10k_items(*args, **kwargs):
+    from minerva.sec import get_10k_items as minerva_get_10k_items
+
+    return minerva_get_10k_items(*args, **kwargs)
+
+
+def get_13f_comparison(*args, **kwargs):
+    from minerva.sec import get_13f_comparison as minerva_get_13f_comparison
+
+    return minerva_get_13f_comparison(*args, **kwargs)
 
 
 def dispatch(
@@ -416,8 +437,8 @@ def _parse_csv_values(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str) -> pd.DataFrame:
-    company: Company = Company(ticker)
+def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
+    company = Company(ticker)
     if statement_type == "income":
         return company.income_statement(periods=periods, period="annual", as_dataframe=True)
     if statement_type == "balance":
@@ -427,7 +448,7 @@ def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str) -
     raise ValueError(f"unknown financial statement type: {statement_type}")
 
 
-def _latest_filing(company: Company, *, form: str) -> Any:
+def _latest_filing(company: Any, *, form: str) -> Any:
     filings = company.get_filings(form=form).latest(1)
     if isinstance(filings, Iterable) and not hasattr(filings, "save") and not hasattr(filings, "markdown"):
         filing_list = list(filings)

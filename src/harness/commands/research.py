@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import time
 
-import httpx
 import typer
 
 from harness.commands.common import (
@@ -106,6 +105,8 @@ def research_cli_command(
 
 
 def _call_parallel(*, query: str, api_key: str) -> str:
+    import httpx
+
     with httpx.Client(timeout=120.0) as client:
         response = client.post(
             "https://api.parallel.ai/v1/tasks",
