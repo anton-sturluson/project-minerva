@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import typer
 
@@ -449,13 +449,10 @@ def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
 
 
 def _latest_filing(company: Any, *, form: str) -> Any:
-    filings = company.get_filings(form=form).latest(1)
-    if isinstance(filings, Iterable) and not hasattr(filings, "save") and not hasattr(filings, "markdown"):
-        filing_list = list(filings)
-        if not filing_list:
-            raise ValueError(f"no filings found for form {form}")
-        return filing_list[0]
-    return filings
+    filing_list = _list_filings(company, form=form, limit=1)
+    if not filing_list:
+        raise ValueError(f"no filings found for form {form}")
+    return filing_list[0]
 
 
 def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
@@ -474,8 +471,11 @@ def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
 
     markdown_method = getattr(filing, "markdown", None)
     if callable(markdown_method):
-        target.write_text(str(markdown_method()), encoding="utf-8")
-        return
+        try:
+            target.write_text(str(markdown_method()), encoding="utf-8")
+            return
+        except Exception:
+            pass
     text_method = getattr(filing, "text", None)
     if callable(text_method):
         target.write_text(str(text_method()), encoding="utf-8")
@@ -552,9 +552,10 @@ def _list_filings(company: Company, *, form: str, limit: int) -> list[Any]:
     if limit <= 0:
         return []
     filings = company.get_filings(form=form).latest(limit)
-    if isinstance(filings, Iterable) and not hasattr(filings, "save") and not hasattr(filings, "markdown"):
+    try:
         return list(filings)
-    return [filings]
+    except TypeError:
+        return [filings]
 
 
 def _filing_date(filing: Any) -> str:

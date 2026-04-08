@@ -23,8 +23,8 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
     current_filing = filing_list[0].obj()
     previous_filing = filing_list[1].obj()
 
-    current_df: pd.DataFrame = current_filing.holdings.to_dataframe()
-    previous_df: pd.DataFrame = previous_filing.holdings.to_dataframe()
+    current_df: pd.DataFrame = current_filing.holdings
+    previous_df: pd.DataFrame = previous_filing.holdings
 
     merged: pd.DataFrame = current_df.merge(
         previous_df,

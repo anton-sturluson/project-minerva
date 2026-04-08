@@ -675,9 +675,11 @@ def report_command(
 
 
 def _load_segments_payload(segments_spec: str) -> list[dict[str, Any]]:
-    candidate: Path = resolve_path(segments_spec)
-    payload: str = candidate.read_text(encoding="utf-8") if candidate.exists() and candidate.is_file() else segments_spec
-    parsed = json.loads(payload)
+    try:
+        parsed = json.loads(segments_spec)
+    except json.JSONDecodeError:
+        candidate: Path = resolve_path(segments_spec)
+        parsed = json.loads(candidate.read_text(encoding="utf-8"))
     if not isinstance(parsed, list):
         raise ValueError("segments JSON must decode to a list of objects")
     return parsed

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from harness.commands.valuation import (
+    _load_segments_payload,
     run_comps_command,
     run_dcf_command,
     run_report_command,
@@ -87,6 +88,14 @@ def test_sotp_command_returns_expected_summary_and_table(tmp_path: Path) -> None
     assert result.exit_code == 0
     assert "total_ev: $2.80K" in output
     assert "| Core | $300.00 | 75.0% | 8.0x | $2.40K | Core SaaS |" in output
+
+
+def test_load_segments_payload_prefers_inline_json_before_path_resolution() -> None:
+    payload = '[{"name":"Core","revenue":300,"ev_revenue_multiple":8.0}]'
+
+    parsed = _load_segments_payload(payload)
+
+    assert parsed == [{"name": "Core", "revenue": 300, "ev_revenue_multiple": 8.0}]
 
 
 def test_report_command_writes_markdown_report(tmp_path: Path) -> None:
