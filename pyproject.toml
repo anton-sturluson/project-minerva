@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=0.88.0",
+    "google-generativeai>=0.8.5",
     "matplotlib>=3.10.8",
     "numpy>=2.4.2",
     "pandas>=3.0.0",
@@ -13,13 +13,11 @@ dependencies = [
     "httpx>=0.28.1",
     "typer[all]>=0.16.0",
     "wordcloud>=1.9.6",
-    "beautifulsoup4>=4.12.0",
     "edgartools>=3.0.0",
     "lxml>=5.0.0",
     "requests>=2.31.0",
     "pyyaml>=6.0",
     "xmltodict>=0.13.0",
-    "pdfplumber>=0.11.9",
 ]
 
 [build-system]
@@ -33,7 +31,6 @@ jobwatch = ["openai", "fastapi", "jinja2", "uvicorn"]
 jobwatch-crawl = "jobwatch.crawler:main"
 jobwatch-dashboard = "dashboard.app:main"
 minerva = "harness.cli:app"
-minerva-loop = "harness.loop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/minerva", "src/jobwatch", "src/harness", "dashboard"]

@@ -14,7 +14,7 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
     plus filtered views: 'new', 'exited', 'increased', 'decreased'.
     """
     company: Company = Company(str(cik))
-    filings_13f = company.get_filings(form="13-F-HR").latest(2)
+    filings_13f = company.get_filings(form="13F-HR").latest(2)
 
     filing_list: list = list(filings_13f)
     if len(filing_list) < 2:

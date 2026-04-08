@@ -76,7 +76,7 @@ class OutputEnvelope:
             if is_binary(result.stdout):
                 parts.append(
                     "Binary output detected. Text preview skipped.\n"
-                    "What to do instead: use `stat <file>` to inspect file details or fetch a text export."
+                    "What to do instead: inspect the saved file with `minerva fileinfo <path>` or convert it to text first."
                 )
             else:
                 stdout_text: str = result.stdout.decode("utf-8", errors="replace")
@@ -87,14 +87,14 @@ class OutputEnvelope:
                     parts.append(
                         f"{preview}\n\n"
                         f"[truncated] Full output saved to {hint_path}\n"
-                        "Exploration hints: narrow with `grep <pattern>`, inspect a smaller file with `cat`, or fetch a subset."
+                        "Exploration hints: narrow the command scope, use `--export`, or pipe into `extract` for targeted analysis."
                     )
                 else:
                     parts.append(stdout_text)
 
         stderr_text: str = result.stderr.decode("utf-8", errors="replace").strip()
         if stderr_text and (result.exit_code != 0 or not parts):
-            parts.append(f"stderr:\n{stderr_text}")
+            parts.append(stderr_text)
 
         if not parts:
             parts.append("(no output)")
@@ -109,13 +109,8 @@ def _is_overflow(text: str) -> bool:
 
 
 def _write_overflow_artifact(text: str, workspace_root: Path | None) -> Path | None:
-    target_dir: Path
-    if workspace_root is None:
-        target_dir = Path(tempfile.gettempdir())
-    else:
-        target_dir = workspace_root / ".minerva-tmp"
-        target_dir.mkdir(parents=True, exist_ok=True)
-
+    target_dir: Path = Path(tempfile.gettempdir()) if workspace_root is None else workspace_root / ".minerva-tmp"
+    target_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",

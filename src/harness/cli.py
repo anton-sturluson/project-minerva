@@ -10,16 +10,12 @@ import typer
 
 from harness.commands import register_commands
 from harness.commands import analyze as analyze_commands
-from harness.commands import codex as codex_commands
-from harness.commands import fs as fs_commands
-from harness.commands import knowledge as knowledge_commands
-from harness.commands import memory_cmd as memory_commands
+from harness.commands import extract as extract_commands
+from harness.commands import fileinfo as fileinfo_commands
 from harness.commands import plot as plot_commands
-from harness.commands import read as read_commands
-from harness.commands import report as report_commands
+from harness.commands import research as research_commands
 from harness.commands import sec as sec_commands
 from harness.commands import valuation as valuation_commands
-from harness.commands import web as web_commands
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
 
@@ -37,69 +33,44 @@ app = typer.Typer(
     help=(
         "Minerva investment harness CLI.\n\n"
         "Examples:\n"
-        "  minerva cat notes.txt\n"
-        "  minerva web search \"hotel software benchmarks\"\n"
-        "  minerva run \"cat notes.txt | grep margin && stat notes.txt\""
+        "  minerva sec 10k AAPL --items 7\n"
+        "  minerva extract \"What are the key risks?\" --file apple-10k.md\n"
+        "  minerva run \"sec 10k AAPL --items 1A | extract 'What are the top 3 risk factors?'\"\n"
     ),
     add_completion=False,
     no_args_is_help=True,
 )
 
 
-@app.command("run")
+@app.command(
+    "run",
+    help=(
+        "Execute a chain of Minerva domain commands.\n\n"
+        "Examples:\n"
+        "  minerva run \"sec 10k AAPL --items 1A | extract 'Top risks'\"\n"
+        "  minerva run \"sec financials MSFT --type income && valuation comps --ntm-revenue 420e9 ...\"\n"
+    ),
+)
 def run_command(
-    command: str = typer.Argument(
-        ...,
-        help='Command chain to execute. Example: \'cat sample.txt | grep revenue && stat sample.txt\'',
-    )
+    ctx: typer.Context,
+    command: str | None = typer.Argument(
+        None,
+        help='Command chain to execute. Example: \'sec 10k AAPL --items 1A | extract "Top risks"\'',
+    ),
 ) -> None:
     """Execute a shell-style command chain with pipes and short-circuit operators."""
+    if not command:
+        typer.echo(
+            "What went wrong: no command chain was provided.\n"
+            "What to do instead: pass a quoted Minerva command chain.\n"
+            "Available alternatives: `minerva run \"sec 10k AAPL --items 7\"`, `minerva --help`\n\n"
+            f"{ctx.get_help()}"
+        )
+        raise typer.Exit(1)
     settings: HarnessSettings = get_settings()
     result: CommandResult = execute_chain(command, settings=settings)
     envelope = OutputEnvelope.from_result(result, workspace_root=settings.ensure_workspace_root())
     typer.echo(envelope.render())
-
-
-@app.command("cat")
-def cat_command(path: str = typer.Argument(..., help="Workspace-relative path. Example: reports/notes.txt")) -> None:
-    """Read a text file from the workspace."""
-    _print_envelope(fs_commands.cat_file(path))
-
-
-@app.command("ls")
-def ls_command(directory: str | None = typer.Argument(None, help="Directory to list. Defaults to workspace root.")) -> None:
-    """List files in the workspace."""
-    _print_envelope(fs_commands.list_files(directory))
-
-
-@app.command("write")
-def write_command(
-    path: str = typer.Argument(..., help="Workspace-relative output path. Example: notes/todo.txt"),
-    content: str = typer.Argument(..., help='Content to write. Example: "hello world"'),
-) -> None:
-    """Write a UTF-8 text file inside the workspace."""
-    _print_envelope(fs_commands.write_file(path, content))
-
-
-@app.command("stat")
-def stat_command(path: str = typer.Argument(..., help="Workspace-relative path to inspect.")) -> None:
-    """Show file metadata and reading guidance."""
-    _print_envelope(fs_commands.stat_path(path))
-
-
-@app.command("rm")
-def rm_command(path: str = typer.Argument(..., help="Workspace-relative path to remove.")) -> None:
-    """Remove a file or directory from the workspace."""
-    _print_envelope(fs_commands.remove_path(path))
-
-
-@app.command("grep")
-def grep_command(
-    pattern: str = typer.Argument(..., help="Substring to match."),
-    path: str | None = typer.Argument(None, help="Optional workspace-relative file path."),
-) -> None:
-    """Filter matching lines from a file."""
-    _print_envelope(fs_commands.grep_text(pattern, path=path))
 
 
 register_commands(app)
@@ -120,20 +91,17 @@ def parse_chain(command: str) -> list[ParsedCommand]:
             escape = False
             index += 1
             continue
-
         if char == "\\":
             buffer.append(char)
             escape = True
             index += 1
             continue
-
         if quote:
             buffer.append(char)
             if char == quote:
                 quote = None
             index += 1
             continue
-
         if char in {"'", '"'}:
             quote = char
             buffer.append(char)
@@ -158,7 +126,6 @@ def parse_chain(command: str) -> list[ParsedCommand]:
     tail: str = "".join(buffer).strip()
     if tail or not commands:
         commands.append(ParsedCommand(text=tail, operator=None))
-
     return [item for item in commands if item.text]
 
 
@@ -170,9 +137,9 @@ def execute_chain(command: str, settings: HarnessSettings | None = None) -> Comm
         return CommandResult.from_text(
             "",
             stderr=(
-                "No command to run.\n"
+                "What went wrong: no command was parsed from the chain.\n"
                 "What to do instead: pass a quoted command string to `minerva run`.\n"
-                "Available alternatives: `minerva --help`, `minerva run \"ls\"`"
+                "Available alternatives: `minerva --help`, `minerva run \"sec 10k AAPL --items 7\"`"
             ),
             exit_code=1,
         )
@@ -197,8 +164,7 @@ def execute_chain(command: str, settings: HarnessSettings | None = None) -> Comm
         result: CommandResult = _execute_pipeline(pipeline, pending_stdin, active_settings)
         previous_result = result
         pending_stdin = b""
-        last_operator: str | None = pipeline[-1].operator
-        should_run = _should_run_after(result.exit_code, last_operator)
+        should_run = _should_run_after(result.exit_code, pipeline[-1].operator)
         index += len(pipeline)
 
     return previous_result or CommandResult.from_text("")
@@ -218,36 +184,15 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
         return CommandResult.from_text(
             "",
             stderr=(
-                "Empty command.\n"
+                "What went wrong: an empty command segment was provided.\n"
                 "What to do instead: provide a command name before any arguments.\n"
-                "Available alternatives: `ls`, `cat <path>`, `web search <query>`"
+                "Available alternatives: sec, valuation, analyze, plot, extract, fileinfo, research"
             ),
             exit_code=1,
         )
 
     command: str = argv[0]
     dispatchers: dict[str, Callable[[list[str], HarnessSettings, bytes], CommandResult]] = {
-        "cat": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
-            full_argv, settings=current_settings, stdin=current_stdin
-        ),
-        "ls": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
-            full_argv, settings=current_settings, stdin=current_stdin
-        ),
-        "write": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
-            full_argv, settings=current_settings, stdin=current_stdin
-        ),
-        "stat": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
-            full_argv, settings=current_settings, stdin=current_stdin
-        ),
-        "rm": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
-            full_argv, settings=current_settings, stdin=current_stdin
-        ),
-        "grep": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
-            full_argv, settings=current_settings, stdin=current_stdin
-        ),
-        "web": lambda full_argv, current_settings, current_stdin: web_commands.dispatch(
-            full_argv[1:], settings=current_settings, stdin=current_stdin
-        ),
         "sec": lambda full_argv, current_settings, current_stdin: sec_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
@@ -257,25 +202,19 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
         "analyze": lambda full_argv, current_settings, current_stdin: analyze_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
-        "knowledge": lambda full_argv, current_settings, current_stdin: knowledge_commands.dispatch(
-            full_argv[1:], settings=current_settings, stdin=current_stdin
-        ),
-        "memory": lambda full_argv, current_settings, current_stdin: memory_commands.dispatch(
-            full_argv[1:], settings=current_settings, stdin=current_stdin
-        ),
         "plot": lambda full_argv, current_settings, current_stdin: plot_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
-        "report": lambda full_argv, current_settings, current_stdin: report_commands.dispatch(
+        "extract": lambda full_argv, current_settings, current_stdin: extract_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
-        "read": lambda full_argv, current_settings, current_stdin: read_commands.dispatch(
+        "extract-many": lambda full_argv, current_settings, current_stdin: extract_commands.dispatch_many(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
-        "read-many": lambda full_argv, current_settings, current_stdin: read_commands.read_many_alias_dispatch(
+        "fileinfo": lambda full_argv, current_settings, current_stdin: fileinfo_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
-        "codex": lambda full_argv, current_settings, current_stdin: codex_commands.dispatch(
+        "research": lambda full_argv, current_settings, current_stdin: research_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
     }
@@ -284,9 +223,9 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
         return CommandResult.from_text(
             "",
             stderr=(
-                f"Unknown command: {command}\n"
-                "What to do instead: use a registered Minerva command.\n"
-                f"Available commands: {', '.join(_available_root_commands())}"
+                f"What went wrong: unknown command `{command}`.\n"
+                "What to do instead: use a registered Minerva domain command.\n"
+                f"Available alternatives: {', '.join(_available_root_commands())}"
             ),
             exit_code=1,
         )
@@ -300,7 +239,6 @@ def _execute_pipeline(
 ) -> CommandResult:
     stdin: bytes = initial_stdin
     last_result: CommandResult = CommandResult.from_text("")
-
     for item in pipeline:
         try:
             argv: list[str] = shlex.split(item.text)
@@ -308,17 +246,14 @@ def _execute_pipeline(
             return CommandResult.from_text(
                 "",
                 stderr=(
-                    f"Failed to parse command: {item.text}\n"
-                    f"What went wrong: {exc}\n"
+                    f"What went wrong: failed to parse command `{item.text}` because {exc}.\n"
                     "What to do instead: fix the quoting and retry.\n"
-                    "Available alternatives: wrap arguments with spaces in quotes."
+                    "Available alternatives: wrap arguments with spaces in quotes"
                 ),
                 exit_code=1,
             )
-
         last_result = dispatch_command(argv, stdin=stdin, settings=settings)
         stdin = last_result.stdout
-
     return last_result
 
 
@@ -335,7 +270,6 @@ def _collect_command_catalog(typer_app: typer.Typer, prefix: list[str], lines: l
         name: str = command_info.name or command_info.callback.__name__.replace("_", "-")
         help_text: str = _first_line(command_info.help or (command_info.callback.__doc__ or ""))
         lines.append(f"{' '.join(prefix + [name])} - {help_text}")
-
     for group_info in typer_app.registered_groups:
         group_name: str = group_info.name or "group"
         group_help: str = _first_line(group_info.help or "")
@@ -355,11 +289,5 @@ def _available_root_commands() -> list[str]:
         names.add(command_info.name or command_info.callback.__name__.replace("_", "-"))
     for group_info in app.registered_groups:
         names.add(group_info.name or "group")
-    names.add("read-many")
+    names.add("extract-many")
     return sorted(names)
-
-
-def _print_envelope(result: CommandResult) -> None:
-    settings: HarnessSettings = get_settings()
-    envelope = OutputEnvelope.from_result(result, workspace_root=settings.ensure_workspace_root())
-    typer.echo(envelope.render())

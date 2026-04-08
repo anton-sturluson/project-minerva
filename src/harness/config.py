@@ -10,14 +10,13 @@ from pydantic import BaseModel, Field
 
 
 class HarnessSettings(BaseModel):
-    """Workspace and provider configuration loaded from environment variables."""
+    """Environment-backed settings for Minerva CLI commands."""
 
     workspace_root: Path = Field(default_factory=lambda: Path("hard-disk"))
-    llm_provider: str = "anthropic"
-    llm_model: str = "anthropic/claude-sonnet-4-20250514"
-    delegate_model: str = "anthropic/claude-haiku-4-5-20251001"
-    anthropic_api_key: str | None = None
-    brave_api_key: str | None = None
+    edgar_identity: str | None = None
+    parallel_api_key: str | None = None
+    gemini_api_key: str | None = None
+    minerva_plot_theme: str = "minerva-classic"
 
     @property
     def resolved_workspace_root(self) -> Path:
@@ -36,9 +35,8 @@ def get_settings() -> HarnessSettings:
     """Load settings from environment variables once per process."""
     return HarnessSettings(
         workspace_root=Path(os.getenv("MINERVA_WORKSPACE_ROOT", "hard-disk")),
-        llm_provider=os.getenv("MINERVA_LLM_PROVIDER", "anthropic"),
-        llm_model=os.getenv("MINERVA_LLM_MODEL", "anthropic/claude-sonnet-4-20250514"),
-        delegate_model=os.getenv("MINERVA_DELEGATE_MODEL", "anthropic/claude-haiku-4-5-20251001"),
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
-        brave_api_key=os.getenv("BRAVE_API_KEY"),
+        edgar_identity=os.getenv("EDGAR_IDENTITY"),
+        parallel_api_key=os.getenv("PARALLEL_API_KEY"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        minerva_plot_theme=os.getenv("MINERVA_PLOT_THEME", "minerva-classic"),
     )

@@ -5,25 +5,43 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import typer
 
-from harness.commands.common import elapsed_ms, error_result
-from harness.commands.fs import resolve_workspace_path
+from harness.commands.common import (
+    abort_with_help,
+    elapsed_ms,
+    error_result,
+    maybe_export_text,
+    parse_csv_floats,
+    parse_flag_args,
+    resolve_path,
+)
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
-from minerva.formatting import build_markdown_table, format_pct, format_usd
+from minerva.formatting import build_markdown_table, format_multiple, format_pct, format_usd
 from minerva.valuation import (
     CompsAssumptions,
     DCFAssumptions,
     SOTPSegment,
+    dcf_sensitivity_matrix,
+    generate_valuation_report,
     run_comps,
     run_dcf,
     run_reverse_dcf,
     run_sotp,
 )
 
-app = typer.Typer(help="Valuation commands.", no_args_is_help=True)
+VALUATION_HELP = (
+    "Financial valuation models.\n\n"
+    "Examples:\n"
+    "  minerva valuation dcf --revenue 394e9 --growth 0.06,0.05,0.04 --margins 0.28,0.29,0.30 --wacc 0.10 --terminal-growth 0.03 --shares 15.5e9 --net-cash 57e9\n"
+    "  minerva valuation comps --ntm-revenue 420e9 --ntm-ebitda 140e9 --ntm-fcf 110e9 --shares 15.5e9 --net-cash 57e9 --ev-rev 8.5 --ev-ebitda 25 --p-fcf 30\n"
+    "  minerva valuation report --ticker AAPL --config valuation.json --output valuation.md\n"
+)
+
+app = typer.Typer(help=VALUATION_HELP, no_args_is_help=True)
 
 
 def dispatch(
@@ -35,28 +53,32 @@ def dispatch(
     _ = stdin
     active_settings: HarnessSettings = settings or get_settings()
     if not args:
-        return _usage_error(
-            "valuation",
-            "Usage: valuation <dcf|comps|reverse-dcf|sotp> ...",
-            ["valuation dcf --revenue ...", "valuation comps --ntm-revenue ..."],
+        return CommandResult.from_text(
+            "",
+            stderr=_usage_error(
+                "no `valuation` subcommand was provided",
+                "choose one of the supported valuation subcommands",
+                ["`valuation dcf --revenue 394e9 ...`", "`valuation comps --ntm-revenue 420e9 ...`"],
+                VALUATION_HELP,
+            ),
+            exit_code=1,
         )
 
     subcommand: str = args[0]
     try:
-        parsed: dict[str, str] = _parse_flag_args(args[1:])
+        parsed = parse_flag_args(args[1:])
     except ValueError as exc:
         return CommandResult.from_text("", stderr=str(exc), exit_code=1)
 
     if subcommand == "dcf":
-        required = ["revenue", "fcf", "growth", "margins", "wacc", "terminal-growth", "shares", "net-cash"]
-        missing = [name for name in required if name not in parsed]
-        if missing:
-            return _usage_error("valuation dcf", "Usage: valuation dcf --revenue <f> --fcf <f> ...", ["valuation comps --ntm-revenue <f>"])
+        required = ["revenue", "growth", "margins", "wacc", "terminal-growth", "shares", "net-cash"]
+        if missing := [name for name in required if name not in parsed]:
+            return _dispatch_help("dcf", missing)
         return run_dcf_command(
             revenue=float(parsed["revenue"]),
-            fcf=float(parsed["fcf"]),
-            growth_rates_csv=parsed["growth"],
-            margins_csv=parsed["margins"],
+            fcf=float(parsed["fcf"]) if "fcf" in parsed else None,
+            growth_rates_csv=str(parsed["growth"]),
+            margins_csv=str(parsed["margins"]),
             wacc=float(parsed["wacc"]),
             terminal_growth=float(parsed["terminal-growth"]),
             shares=float(parsed["shares"]),
@@ -64,13 +86,13 @@ def dispatch(
             sbc=float(parsed.get("sbc", 0.0)),
             sbc_growth=float(parsed.get("sbc-growth", 0.0)),
             years=int(parsed.get("years", 5)),
+            export_path=str(parsed["export"]) if "export" in parsed else None,
             settings=active_settings,
         )
     if subcommand == "comps":
         required = ["ntm-revenue", "ntm-ebitda", "ntm-fcf", "shares", "net-cash", "ev-rev", "ev-ebitda", "p-fcf"]
-        missing = [name for name in required if name not in parsed]
-        if missing:
-            return _usage_error("valuation comps", "Usage: valuation comps --ntm-revenue <f> --ntm-ebitda <f> ...", ["valuation dcf --revenue <f>"])
+        if missing := [name for name in required if name not in parsed]:
+            return _dispatch_help("comps", missing)
         return run_comps_command(
             ntm_revenue=float(parsed["ntm-revenue"]),
             ntm_ebitda=float(parsed["ntm-ebitda"]),
@@ -80,42 +102,63 @@ def dispatch(
             ev_rev=float(parsed["ev-rev"]),
             ev_ebitda=float(parsed["ev-ebitda"]),
             p_fcf=float(parsed["p-fcf"]),
+            export_path=str(parsed["export"]) if "export" in parsed else None,
             settings=active_settings,
         )
     if subcommand == "reverse-dcf":
         required = ["price", "shares", "net-cash", "base-revenue", "margins", "wacc", "terminal-growth"]
-        missing = [name for name in required if name not in parsed]
-        if missing:
-            return _usage_error("valuation reverse-dcf", "Usage: valuation reverse-dcf --price <f> --shares <f> ...", ["valuation dcf --revenue <f>"])
+        if missing := [name for name in required if name not in parsed]:
+            return _dispatch_help("reverse-dcf", missing)
         return run_reverse_dcf_command(
             price=float(parsed["price"]),
             shares=float(parsed["shares"]),
             net_cash=float(parsed["net-cash"]),
             base_revenue=float(parsed["base-revenue"]),
-            margins_csv=parsed["margins"],
+            margins_csv=str(parsed["margins"]),
             wacc=float(parsed["wacc"]),
             terminal_growth=float(parsed["terminal-growth"]),
             years=int(parsed.get("years", 5)),
+            export_path=str(parsed["export"]) if "export" in parsed else None,
             settings=active_settings,
         )
     if subcommand == "sotp":
         required = ["segments", "net-cash", "shares"]
-        missing = [name for name in required if name not in parsed]
-        if missing:
-            return _usage_error("valuation sotp", "Usage: valuation sotp --segments <json> --net-cash <f> --shares <f>", ["valuation dcf --revenue <f>"])
+        if missing := [name for name in required if name not in parsed]:
+            return _dispatch_help("sotp", missing)
         return run_sotp_command(
-            segments_spec=parsed["segments"],
+            segments_spec=str(parsed["segments"]),
             net_cash=float(parsed["net-cash"]),
             shares=float(parsed["shares"]),
+            export_path=str(parsed["export"]) if "export" in parsed else None,
             settings=active_settings,
         )
-    return _usage_error("valuation", f"Unknown valuation subcommand: {subcommand}", ["valuation dcf --revenue <f>"])
+    if subcommand == "report":
+        required = ["ticker", "config", "output"]
+        if missing := [name for name in required if name not in parsed]:
+            return _dispatch_help("report", missing)
+        return run_report_command(
+            ticker=str(parsed["ticker"]),
+            config_path=str(parsed["config"]),
+            output_path=str(parsed["output"]),
+            settings=active_settings,
+        )
+
+    return CommandResult.from_text(
+        "",
+        stderr=_usage_error(
+            f"unknown `valuation` subcommand `{subcommand}`",
+            "choose one of the supported valuation subcommands",
+            ["`valuation dcf --revenue 394e9 ...`", "`valuation report --ticker AAPL --config valuation.json --output valuation.md`"],
+            VALUATION_HELP,
+        ),
+        exit_code=1,
+    )
 
 
 def run_dcf_command(
     *,
     revenue: float,
-    fcf: float,
+    fcf: float | None,
     growth_rates_csv: str,
     margins_csv: str,
     wacc: float,
@@ -125,16 +168,20 @@ def run_dcf_command(
     sbc: float = 0.0,
     sbc_growth: float = 0.0,
     years: int = 5,
+    export_path: str | None = None,
     settings: HarnessSettings | None = None,
 ) -> CommandResult:
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
+        growth_rates = parse_csv_floats(growth_rates_csv)
+        margins = parse_csv_floats(margins_csv)
+        base_fcf: float = fcf if fcf is not None else revenue * margins[0]
         assumptions = DCFAssumptions(
             base_revenue=revenue,
-            base_fcf=fcf,
-            revenue_growth_rates=_parse_float_csv(growth_rates_csv),
-            fcf_margins=_parse_float_csv(margins_csv),
+            base_fcf=base_fcf,
+            revenue_growth_rates=growth_rates,
+            fcf_margins=margins,
             wacc=wacc,
             terminal_growth_rate=terminal_growth,
             shares_outstanding=shares,
@@ -146,9 +193,9 @@ def run_dcf_command(
         result = run_dcf(assumptions)
     except Exception as exc:
         return error_result(
-            f"What went wrong: failed to run DCF: {exc}\n"
-            "What to do instead: provide numeric inputs and equal-length growth or margin trajectories when possible.\n"
-            "Available alternatives: `valuation comps ...`, `valuation reverse-dcf ...`",
+            f"failed to run DCF: {exc}",
+            "provide numeric inputs and a valid growth/margin trajectory",
+            ["`valuation comps --ntm-revenue ...`", "`valuation reverse-dcf --price ...`"],
             start,
         )
 
@@ -165,13 +212,27 @@ def run_dcf_command(
                 format_usd(projection.pv_fcf),
             ]
         )
-    table: str = build_markdown_table(
+    assumptions_block = "\n".join(
+        [
+            "## Assumptions",
+            "",
+            f"base_revenue: {format_usd(revenue)}",
+            f"base_fcf: {format_usd(assumptions.base_fcf)}",
+            f"wacc: {format_pct(wacc * 100)}",
+            f"terminal_growth: {format_pct(terminal_growth * 100)}",
+            f"shares: {shares:,.0f}",
+            f"net_cash: {format_usd(net_cash)}",
+        ]
+    )
+    projection_table: str = build_markdown_table(
         ["year", "revenue", "growth", "fcf", "fcf_margin", "discount_factor", "pv_fcf"],
         rows,
-        alignment=["r", "r", "r", "r", "r", "r", "r"],
+        alignment=["r"] * 7,
     )
-    summary: str = "\n".join(
+    summary = "\n".join(
         [
+            "## Valuation Bridge",
+            "",
             f"enterprise_value: {format_usd(result.enterprise_value)}",
             f"equity_value: {format_usd(result.equity_value)}",
             f"equity_value_ex_sbc: {format_usd(result.equity_value_ex_sbc)}",
@@ -179,7 +240,9 @@ def run_dcf_command(
             f"price_per_share_ex_sbc: {format_usd(result.price_per_share_ex_sbc, auto_scale=False)}",
         ]
     )
-    return CommandResult.from_text(f"{summary}\n\n{table}", duration_ms=elapsed_ms(start))
+    output = f"{assumptions_block}\n\n## Projections\n\n{projection_table}\n\n{summary}"
+    output += maybe_export_text(output, export_path)
+    return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
 
 
 def run_comps_command(
@@ -192,6 +255,7 @@ def run_comps_command(
     ev_rev: float,
     ev_ebitda: float,
     p_fcf: float,
+    export_path: str | None = None,
     settings: HarnessSettings | None = None,
 ) -> CommandResult:
     start: float = time.perf_counter()
@@ -210,9 +274,9 @@ def run_comps_command(
         result = run_comps(assumptions)
     except Exception as exc:
         return error_result(
-            f"What went wrong: failed to run comps valuation: {exc}\n"
-            "What to do instead: provide numeric NTM metrics, share count, net cash, and valuation multiples.\n"
-            "Available alternatives: `valuation dcf ...`, `valuation sotp ...`",
+            f"failed to run comps valuation: {exc}",
+            "provide numeric NTM metrics, share count, net cash, and valuation multiples",
+            ["`valuation dcf --revenue ...`", "`valuation sotp --segments ...`"],
             start,
         )
 
@@ -225,7 +289,9 @@ def run_comps_command(
         ],
         alignment=["l", "r", "r", "r"],
     )
-    return CommandResult.from_text(table, duration_ms=elapsed_ms(start))
+    output = f"## Comparable Company Valuation\n\n{table}"
+    output += maybe_export_text(output, export_path)
+    return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
 
 
 def run_reverse_dcf_command(
@@ -238,6 +304,7 @@ def run_reverse_dcf_command(
     wacc: float,
     terminal_growth: float,
     years: int = 5,
+    export_path: str | None = None,
     settings: HarnessSettings | None = None,
 ) -> CommandResult:
     start: float = time.perf_counter()
@@ -248,27 +315,32 @@ def run_reverse_dcf_command(
             shares_outstanding=shares,
             net_cash=net_cash,
             base_revenue=base_revenue,
-            fcf_margin_trajectory=_parse_float_csv(margins_csv),
+            fcf_margin_trajectory=parse_csv_floats(margins_csv),
             wacc=wacc,
             terminal_growth=terminal_growth,
             projection_years=years,
         )
     except Exception as exc:
         return error_result(
-            f"What went wrong: failed to run reverse DCF: {exc}\n"
-            "What to do instead: provide numeric inputs and a valid margin trajectory.\n"
-            "Available alternatives: `valuation dcf ...`, `valuation comps ...`",
+            f"failed to run reverse DCF: {exc}",
+            "provide numeric inputs and a valid margin trajectory",
+            ["`valuation dcf --revenue ...`", "`valuation comps --ntm-revenue ...`"],
             start,
         )
 
-    lines: list[str] = [
-        f"current_price: {format_usd(result.current_price, auto_scale=False)}",
-        f"implied_revenue_growth: {format_pct(result.implied_revenue_growth * 100)}",
-        f"implied_year5_revenue: {format_usd(result.implied_year5_revenue)}",
-        f"implied_year5_fcf: {format_usd(result.implied_year5_fcf)}",
-        f"assumptions_note: {result.assumptions_note}",
-    ]
-    return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
+    output = "\n".join(
+        [
+            "## Reverse DCF",
+            "",
+            f"current_price: {format_usd(result.current_price, auto_scale=False)}",
+            f"implied_revenue_growth: {format_pct(result.implied_revenue_growth * 100)}",
+            f"implied_year5_revenue: {format_usd(result.implied_year5_revenue)}",
+            f"implied_year5_fcf: {format_usd(result.implied_year5_fcf)}",
+            f"assumptions_note: {result.assumptions_note}",
+        ]
+    )
+    output += maybe_export_text(output, export_path)
+    return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
 
 
 def run_sotp_command(
@@ -276,35 +348,34 @@ def run_sotp_command(
     segments_spec: str,
     net_cash: float,
     shares: float,
+    export_path: str | None = None,
     settings: HarnessSettings | None = None,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    active_settings: HarnessSettings = settings or get_settings()
+    _ = settings or get_settings()
     try:
-        segments_payload = _load_segments_payload(segments_spec, active_settings)
+        segments_payload = _load_segments_payload(segments_spec)
         total_revenue: float = sum(float(item["revenue"]) for item in segments_payload) or 1.0
         segments: list[SOTPSegment] = []
         for item in segments_payload:
             revenue: float = float(item["revenue"])
             multiple: float = float(item["ev_revenue_multiple"])
-            implied_ev: float = float(item.get("implied_ev", revenue * multiple))
-            revenue_pct: float = float(item.get("revenue_pct", (revenue / total_revenue) * 100))
             segments.append(
                 SOTPSegment(
                     name=str(item["name"]),
                     revenue=revenue,
-                    revenue_pct=revenue_pct,
+                    revenue_pct=float(item.get("revenue_pct", (revenue / total_revenue) * 100)),
                     ev_revenue_multiple=multiple,
-                    implied_ev=implied_ev,
+                    implied_ev=float(item.get("implied_ev", revenue * multiple)),
                     notes=str(item.get("notes", "")),
                 )
             )
         result = run_sotp(segments, net_cash=net_cash, shares_outstanding=shares)
     except Exception as exc:
         return error_result(
-            f"What went wrong: failed to run SOTP valuation: {exc}\n"
-            "What to do instead: provide valid JSON inline or a JSON file with segment objects.\n"
-            "Available alternatives: `valuation dcf ...`, `valuation comps ...`",
+            f"failed to run SOTP valuation: {exc}",
+            "provide valid inline JSON or a JSON file with segment objects",
+            ["`valuation dcf --revenue ...`", "`valuation comps --ntm-revenue ...`"],
             start,
         )
 
@@ -315,7 +386,7 @@ def run_sotp_command(
                 segment.name,
                 format_usd(segment.revenue),
                 format_pct(segment.revenue_pct),
-                f"{segment.ev_revenue_multiple:.1f}x",
+                format_multiple(segment.ev_revenue_multiple),
                 format_usd(segment.implied_ev),
                 segment.notes,
             ]
@@ -325,152 +396,310 @@ def run_sotp_command(
         rows,
         alignment=["l", "r", "r", "r", "r", "l"],
     )
-    summary = "\n".join(
+    output = "\n".join(
         [
+            "## Sum-of-the-Parts Valuation",
+            "",
             f"total_ev: {format_usd(result.total_ev)}",
             f"equity_value: {format_usd(result.equity_value)}",
             f"price_per_share: {format_usd(result.price_per_share, auto_scale=False)}",
+            "",
+            table,
         ]
     )
-    return CommandResult.from_text(f"{summary}\n\n{table}", duration_ms=elapsed_ms(start))
+    output += maybe_export_text(output, export_path)
+    return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
 
 
-@app.command("dcf")
+def run_report_command(
+    *,
+    ticker: str,
+    config_path: str,
+    output_path: str,
+    settings: HarnessSettings | None = None,
+) -> CommandResult:
+    start: float = time.perf_counter()
+    _ = settings or get_settings()
+    try:
+        config = json.loads(resolve_path(config_path).read_text(encoding="utf-8"))
+        dcf_config = config["dcf"]
+        comps_config = config["comps"]
+        reverse_config = config["reverse_dcf"]
+        sotp_config = config["sotp"]
+
+        dcf_assumptions = DCFAssumptions(
+            base_revenue=float(dcf_config["revenue"]),
+            base_fcf=float(dcf_config.get("fcf", float(dcf_config["revenue"]) * parse_csv_floats(dcf_config["margins"])[0])),
+            revenue_growth_rates=parse_csv_floats(dcf_config["growth"]),
+            fcf_margins=parse_csv_floats(dcf_config["margins"]),
+            wacc=float(dcf_config["wacc"]),
+            terminal_growth_rate=float(dcf_config["terminal_growth"]),
+            shares_outstanding=float(dcf_config["shares"]),
+            net_cash=float(dcf_config["net_cash"]),
+            sbc_annual=float(dcf_config.get("sbc", 0.0)),
+            sbc_growth_rate=float(dcf_config.get("sbc_growth", 0.0)),
+            projection_years=int(dcf_config.get("years", 5)),
+        )
+        dcf_result = run_dcf(dcf_assumptions)
+
+        comps_assumptions = CompsAssumptions(
+            ntm_revenue=float(comps_config["ntm_revenue"]),
+            ntm_ebitda=float(comps_config["ntm_ebitda"]),
+            ntm_fcf=float(comps_config["ntm_fcf"]),
+            shares_outstanding=float(comps_config["shares"]),
+            net_cash=float(comps_config["net_cash"]),
+            ev_revenue_multiple=float(comps_config["ev_rev"]),
+            ev_ebitda_multiple=float(comps_config["ev_ebitda"]),
+            p_fcf_multiple=float(comps_config["p_fcf"]),
+        )
+        comps_result = run_comps(comps_assumptions)
+
+        reverse_result = run_reverse_dcf(
+            current_price=float(reverse_config["price"]),
+            shares_outstanding=float(reverse_config["shares"]),
+            net_cash=float(reverse_config["net_cash"]),
+            base_revenue=float(reverse_config["base_revenue"]),
+            fcf_margin_trajectory=parse_csv_floats(reverse_config["margins"]),
+            wacc=float(reverse_config["wacc"]),
+            terminal_growth=float(reverse_config["terminal_growth"]),
+            projection_years=int(reverse_config.get("years", 5)),
+        )
+
+        sotp_segments = [
+            SOTPSegment(
+                name=str(item["name"]),
+                revenue=float(item["revenue"]),
+                revenue_pct=float(item.get("revenue_pct", 0.0)),
+                ev_revenue_multiple=float(item["ev_revenue_multiple"]),
+                implied_ev=float(item.get("implied_ev", float(item["revenue"]) * float(item["ev_revenue_multiple"]))),
+                notes=str(item.get("notes", "")),
+            )
+            for item in sotp_config["segments"]
+        ]
+        sotp_result = run_sotp(
+            sotp_segments,
+            net_cash=float(sotp_config["net_cash"]),
+            shares_outstanding=float(sotp_config["shares"]),
+        )
+
+        sensitivity_wacc = [float(value) for value in config.get("sensitivity_wacc", [0.09, 0.10, 0.11])]
+        sensitivity_tgr = [float(value) for value in config.get("sensitivity_tgr", [0.02, 0.03, 0.04])]
+        sensitivity = dcf_sensitivity_matrix(dcf_assumptions, sensitivity_wacc, sensitivity_tgr)
+
+        report = generate_valuation_report(
+            ticker=ticker,
+            current_price=float(config["current_price"]),
+            dcf_result=dcf_result,
+            dcf_assumptions=dcf_assumptions,
+            comps_result=comps_result,
+            comps_assumptions=comps_assumptions,
+            reverse_dcf_result=reverse_result,
+            sotp_result=sotp_result,
+            sensitivity_wacc=sensitivity_wacc,
+            sensitivity_tgr=sensitivity_tgr,
+            sensitivity_matrix=sensitivity,
+        )
+        target = resolve_path(output_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(report, encoding="utf-8")
+    except Exception as exc:
+        return error_result(
+            f"failed to generate valuation report: {exc}",
+            "provide a valid JSON config file with dcf, comps, reverse_dcf, and sotp sections",
+            ["`valuation dcf --revenue ...`", "`valuation report --ticker AAPL --config valuation.json --output valuation.md`"],
+            start,
+        )
+
+    return CommandResult.from_text(
+        f"report_written_to: {str(target)}",
+        duration_ms=elapsed_ms(start),
+    )
+
+
+@app.command("dcf", help="Run a discounted cash flow valuation.\n\nExample:\n  minerva valuation dcf --revenue 394e9 --growth 0.06,0.05,0.04 --margins 0.28,0.29,0.30 --wacc 0.10 --terminal-growth 0.03 --shares 15.5e9 --net-cash 57e9")
 def dcf_command(
-    revenue: float = typer.Option(..., "--revenue"),
-    fcf: float = typer.Option(..., "--fcf"),
-    growth: str = typer.Option(..., "--growth"),
-    margins: str = typer.Option(..., "--margins"),
-    wacc: float = typer.Option(..., "--wacc"),
-    terminal_growth: float = typer.Option(..., "--terminal-growth"),
-    shares: float = typer.Option(..., "--shares"),
-    net_cash: float = typer.Option(..., "--net-cash"),
-    sbc: float = typer.Option(0.0, "--sbc"),
-    sbc_growth: float = typer.Option(0.0, "--sbc-growth"),
-    years: int = typer.Option(5, "--years"),
+    ctx: typer.Context,
+    revenue: float | None = typer.Option(None, "--revenue", help="Base year revenue in USD."),
+    growth: str | None = typer.Option(None, "--growth", help="Revenue growth rates as CSV decimals."),
+    margins: str | None = typer.Option(None, "--margins", help="FCF margin trajectory as CSV decimals."),
+    wacc: float | None = typer.Option(None, "--wacc", help="Weighted average cost of capital."),
+    terminal_growth: float | None = typer.Option(None, "--terminal-growth", help="Perpetuity growth rate."),
+    shares: float | None = typer.Option(None, "--shares", help="Diluted shares outstanding."),
+    net_cash: float | None = typer.Option(None, "--net-cash", help="Cash minus debt in USD."),
+    fcf: float | None = typer.Option(None, "--fcf", help="Base year FCF override."),
+    sbc: float = typer.Option(0.0, "--sbc", help="Annual stock-based compensation in USD."),
+    sbc_growth: float = typer.Option(0.0, "--sbc-growth", help="Annual SBC growth rate."),
+    years: int = typer.Option(5, "--years", help="Projection horizon."),
+    export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
-    """Run a discounted cash flow valuation."""
+    if None in {revenue, growth, margins, wacc, terminal_growth, shares, net_cash}:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required DCF inputs",
+            what_to_do="provide revenue, growth, margins, wacc, terminal growth, shares, and net cash",
+            alternatives=["`minerva valuation dcf --revenue 394e9 ...`", "`minerva valuation comps --ntm-revenue 420e9 ...`"],
+        )
     _print(
         run_dcf_command(
-            revenue=revenue,
+            revenue=float(revenue),
             fcf=fcf,
-            growth_rates_csv=growth,
-            margins_csv=margins,
-            wacc=wacc,
-            terminal_growth=terminal_growth,
-            shares=shares,
-            net_cash=net_cash,
+            growth_rates_csv=str(growth),
+            margins_csv=str(margins),
+            wacc=float(wacc),
+            terminal_growth=float(terminal_growth),
+            shares=float(shares),
+            net_cash=float(net_cash),
             sbc=sbc,
             sbc_growth=sbc_growth,
             years=years,
+            export_path=export,
         )
     )
 
 
-@app.command("comps")
+@app.command("comps", help="Run a comparable company valuation.\n\nExample:\n  minerva valuation comps --ntm-revenue 420e9 --ntm-ebitda 140e9 --ntm-fcf 110e9 --shares 15.5e9 --net-cash 57e9 --ev-rev 8.5 --ev-ebitda 25 --p-fcf 30")
 def comps_command(
-    ntm_revenue: float = typer.Option(..., "--ntm-revenue"),
-    ntm_ebitda: float = typer.Option(..., "--ntm-ebitda"),
-    ntm_fcf: float = typer.Option(..., "--ntm-fcf"),
-    shares: float = typer.Option(..., "--shares"),
-    net_cash: float = typer.Option(..., "--net-cash"),
-    ev_rev: float = typer.Option(..., "--ev-rev"),
-    ev_ebitda: float = typer.Option(..., "--ev-ebitda"),
-    p_fcf: float = typer.Option(..., "--p-fcf"),
+    ctx: typer.Context,
+    ntm_revenue: float | None = typer.Option(None, "--ntm-revenue", help="Next-twelve-months revenue estimate."),
+    ntm_ebitda: float | None = typer.Option(None, "--ntm-ebitda", help="NTM EBITDA estimate."),
+    ntm_fcf: float | None = typer.Option(None, "--ntm-fcf", help="NTM free cash flow estimate."),
+    shares: float | None = typer.Option(None, "--shares", help="Diluted shares outstanding."),
+    net_cash: float | None = typer.Option(None, "--net-cash", help="Cash minus debt."),
+    ev_rev: float | None = typer.Option(None, "--ev-rev", help="Peer median EV/Revenue multiple."),
+    ev_ebitda: float | None = typer.Option(None, "--ev-ebitda", help="Peer median EV/EBITDA multiple."),
+    p_fcf: float | None = typer.Option(None, "--p-fcf", help="Peer median P/FCF multiple."),
+    export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
-    """Run a comparable company valuation."""
+    if None in {ntm_revenue, ntm_ebitda, ntm_fcf, shares, net_cash, ev_rev, ev_ebitda, p_fcf}:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required comps inputs",
+            what_to_do="provide all NTM metrics, capital structure inputs, and peer multiples",
+            alternatives=["`minerva valuation comps --ntm-revenue 420e9 ...`", "`minerva valuation dcf --revenue 394e9 ...`"],
+        )
     _print(
         run_comps_command(
-            ntm_revenue=ntm_revenue,
-            ntm_ebitda=ntm_ebitda,
-            ntm_fcf=ntm_fcf,
-            shares=shares,
-            net_cash=net_cash,
-            ev_rev=ev_rev,
-            ev_ebitda=ev_ebitda,
-            p_fcf=p_fcf,
+            ntm_revenue=float(ntm_revenue),
+            ntm_ebitda=float(ntm_ebitda),
+            ntm_fcf=float(ntm_fcf),
+            shares=float(shares),
+            net_cash=float(net_cash),
+            ev_rev=float(ev_rev),
+            ev_ebitda=float(ev_ebitda),
+            p_fcf=float(p_fcf),
+            export_path=export,
         )
     )
 
 
-@app.command("reverse-dcf")
+@app.command("reverse-dcf", help="Infer the market-implied constant revenue growth rate.\n\nExample:\n  minerva valuation reverse-dcf --price 220 --shares 15.5e9 --net-cash 57e9 --base-revenue 394e9 --margins 0.28,0.29,0.30 --wacc 0.10 --terminal-growth 0.03")
 def reverse_dcf_command(
-    price: float = typer.Option(..., "--price"),
-    shares: float = typer.Option(..., "--shares"),
-    net_cash: float = typer.Option(..., "--net-cash"),
-    base_revenue: float = typer.Option(..., "--base-revenue"),
-    margins: str = typer.Option(..., "--margins"),
-    wacc: float = typer.Option(..., "--wacc"),
-    terminal_growth: float = typer.Option(..., "--terminal-growth"),
-    years: int = typer.Option(5, "--years"),
+    ctx: typer.Context,
+    price: float | None = typer.Option(None, "--price", help="Current share price."),
+    shares: float | None = typer.Option(None, "--shares", help="Diluted shares outstanding."),
+    net_cash: float | None = typer.Option(None, "--net-cash", help="Cash minus debt."),
+    base_revenue: float | None = typer.Option(None, "--base-revenue", help="Most recent annual revenue."),
+    margins: str | None = typer.Option(None, "--margins", help="FCF margin trajectory as CSV decimals."),
+    wacc: float | None = typer.Option(None, "--wacc", help="Weighted average cost of capital."),
+    terminal_growth: float | None = typer.Option(None, "--terminal-growth", help="Perpetuity growth rate."),
+    years: int = typer.Option(5, "--years", help="Projection horizon."),
+    export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
-    """Infer implied revenue growth from the current stock price."""
+    if None in {price, shares, net_cash, base_revenue, margins, wacc, terminal_growth}:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required reverse DCF inputs",
+            what_to_do="provide price, shares, net cash, base revenue, margins, wacc, and terminal growth",
+            alternatives=["`minerva valuation reverse-dcf --price 220 ...`", "`minerva valuation dcf --revenue 394e9 ...`"],
+        )
     _print(
         run_reverse_dcf_command(
-            price=price,
-            shares=shares,
-            net_cash=net_cash,
-            base_revenue=base_revenue,
-            margins_csv=margins,
-            wacc=wacc,
-            terminal_growth=terminal_growth,
+            price=float(price),
+            shares=float(shares),
+            net_cash=float(net_cash),
+            base_revenue=float(base_revenue),
+            margins_csv=str(margins),
+            wacc=float(wacc),
+            terminal_growth=float(terminal_growth),
             years=years,
+            export_path=export,
         )
     )
 
 
-@app.command("sotp")
+@app.command("sotp", help="Run a sum-of-the-parts valuation.\n\nExample:\n  minerva valuation sotp --segments segments.json --net-cash 57e9 --shares 15.5e9")
 def sotp_command(
-    segments: str = typer.Option(..., "--segments"),
-    net_cash: float = typer.Option(..., "--net-cash"),
-    shares: float = typer.Option(..., "--shares"),
+    ctx: typer.Context,
+    segments: str | None = typer.Option(None, "--segments", help="JSON array or path to a JSON file."),
+    net_cash: float | None = typer.Option(None, "--net-cash", help="Cash minus debt."),
+    shares: float | None = typer.Option(None, "--shares", help="Diluted shares outstanding."),
+    export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
-    """Run a sum-of-the-parts valuation."""
-    _print(run_sotp_command(segments_spec=segments, net_cash=net_cash, shares=shares))
+    if None in {segments, net_cash, shares}:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required SOTP inputs",
+            what_to_do="provide a segment payload, net cash, and share count",
+            alternatives=["`minerva valuation sotp --segments segments.json --net-cash 57e9 --shares 15.5e9`", "`minerva valuation comps --ntm-revenue 420e9 ...`"],
+        )
+    _print(run_sotp_command(segments_spec=str(segments), net_cash=float(net_cash), shares=float(shares), export_path=export))
 
 
-def _parse_flag_args(args: list[str]) -> dict[str, str]:
-    parsed: dict[str, str] = {}
-    index: int = 0
-    while index < len(args):
-        token: str = args[index]
-        if not token.startswith("--") or index + 1 >= len(args):
-            raise ValueError(
-                "Invalid valuation arguments.\n"
-                "What to do instead: pass values as `--name value` pairs.\n"
-                "Available alternatives: `valuation dcf --revenue ...`, `valuation comps --ntm-revenue ...`"
-            )
-        parsed[token.removeprefix("--")] = args[index + 1]
-        index += 2
-    return parsed
+@app.command("report", help="Generate a full markdown valuation report.\n\nExample:\n  minerva valuation report --ticker AAPL --config valuation.json --output valuation.md")
+def report_command(
+    ctx: typer.Context,
+    ticker: str | None = typer.Option(None, "--ticker", help="Company ticker."),
+    config: str | None = typer.Option(None, "--config", help="JSON file with valuation inputs."),
+    output: str | None = typer.Option(None, "--output", help="Output markdown file path."),
+) -> None:
+    if None in {ticker, config, output}:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required report inputs",
+            what_to_do="provide a ticker, JSON config path, and markdown output path",
+            alternatives=["`minerva valuation report --ticker AAPL --config valuation.json --output valuation.md`", "`minerva valuation dcf --revenue 394e9 ...`"],
+        )
+    _print(run_report_command(ticker=str(ticker), config_path=str(config), output_path=str(output)))
 
 
-def _parse_float_csv(raw: str) -> list[float]:
-    return [float(item.strip()) for item in raw.split(",") if item.strip()]
-
-
-def _load_segments_payload(segments_spec: str, settings: HarnessSettings) -> list[dict]:
-    candidate: Path = resolve_workspace_path(segments_spec, settings)
-    payload: str
-    if candidate.exists() and candidate.is_file():
-        payload = candidate.read_text(encoding="utf-8")
-    else:
-        payload = segments_spec
+def _load_segments_payload(segments_spec: str) -> list[dict[str, Any]]:
+    candidate: Path = resolve_path(segments_spec)
+    payload: str = candidate.read_text(encoding="utf-8") if candidate.exists() and candidate.is_file() else segments_spec
     parsed = json.loads(payload)
     if not isinstance(parsed, list):
         raise ValueError("segments JSON must decode to a list of objects")
     return parsed
 
 
-def _usage_error(command: str, usage: str, alternatives: list[str]) -> CommandResult:
+def _dispatch_help(subcommand: str, missing: list[str]) -> CommandResult:
+    usage: dict[str, str] = {
+        "dcf": "valuation dcf --revenue <float> --growth <csv> --margins <csv> --wacc <float> --terminal-growth <float> --shares <float> --net-cash <float> [--fcf <float>] [--export PATH]",
+        "comps": "valuation comps --ntm-revenue <float> --ntm-ebitda <float> --ntm-fcf <float> --shares <float> --net-cash <float> --ev-rev <float> --ev-ebitda <float> --p-fcf <float> [--export PATH]",
+        "reverse-dcf": "valuation reverse-dcf --price <float> --shares <float> --net-cash <float> --base-revenue <float> --margins <csv> --wacc <float> --terminal-growth <float> [--export PATH]",
+        "sotp": "valuation sotp --segments <json-or-path> --net-cash <float> --shares <float> [--export PATH]",
+        "report": "valuation report --ticker <ticker> --config <json-file> --output <markdown-file>",
+    }
     return CommandResult.from_text(
         "",
-        stderr=(
-            f"Invalid invocation for `{command}`.\n"
-            f"What to do instead: {usage}\n"
-            f"Available alternatives: {', '.join(alternatives)}"
+        stderr=_usage_error(
+            f"missing required arguments for `valuation {subcommand}`: {', '.join(missing)}",
+            usage[subcommand],
+            ["`valuation dcf --revenue 394e9 ...`", "`valuation report --ticker AAPL --config valuation.json --output valuation.md`"],
+            VALUATION_HELP,
         ),
         exit_code=1,
+    )
+
+
+def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
+    return "\n".join(
+        [
+            f"What went wrong: {what}",
+            f"What to do instead: {what_to_do}",
+            f"Available alternatives: {', '.join(alternatives)}",
+            "",
+            help_text.rstrip(),
+        ]
     )
 
 

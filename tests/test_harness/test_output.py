@@ -15,7 +15,6 @@ def test_output_envelope_includes_footer(tmp_path: Path) -> None:
 def test_output_envelope_attaches_stderr_on_failure(tmp_path: Path) -> None:
     result = CommandResult.from_text("", stderr="failed badly", exit_code=2, duration_ms=1)
     rendered: str = OutputEnvelope.from_result(result, workspace_root=tmp_path).render()
-    assert "stderr:" in rendered
     assert "failed badly" in rendered
     assert "[exit:2 | 1ms]" in rendered
 
