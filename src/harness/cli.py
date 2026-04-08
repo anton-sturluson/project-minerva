@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
-import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import Callable
 
 import typer
 
@@ -94,6 +91,15 @@ def stat_command(path: str = typer.Argument(..., help="Workspace-relative path t
 def rm_command(path: str = typer.Argument(..., help="Workspace-relative path to remove.")) -> None:
     """Remove a file or directory from the workspace."""
     _print_envelope(fs_commands.remove_path(path))
+
+
+@app.command("grep")
+def grep_command(
+    pattern: str = typer.Argument(..., help="Substring to match."),
+    path: str | None = typer.Argument(None, help="Optional workspace-relative file path."),
+) -> None:
+    """Filter matching lines from a file."""
+    _print_envelope(fs_commands.grep_text(pattern, path=path))
 
 
 register_commands(app)
@@ -206,7 +212,7 @@ def generate_command_catalog(typer_app: typer.Typer) -> str:
 
 
 def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSettings | None = None) -> CommandResult:
-    """Dispatch a command to an internal handler or external process."""
+    """Dispatch a command to a registered internal handler only."""
     active_settings: HarnessSettings = settings or get_settings()
     if not argv:
         return CommandResult.from_text(
@@ -220,50 +226,71 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
         )
 
     command: str = argv[0]
-    if command == "cat":
-        if len(argv) != 2:
-            return _usage_error("cat", "Usage: cat <path>", ["stat <path>", "ls"])
-        return fs_commands.cat_file(argv[1], settings=active_settings)
-    if command == "ls":
-        if len(argv) > 2:
-            return _usage_error("ls", "Usage: ls [dir]", ["stat <path>", "cat <file>"])
-        return fs_commands.list_files(argv[1] if len(argv) == 2 else None, settings=active_settings)
-    if command == "write":
-        if len(argv) < 3:
-            return _usage_error("write", "Usage: write <path> <content>", ["cat <path>", "ls"])
-        return fs_commands.write_file(argv[1], " ".join(argv[2:]), settings=active_settings)
-    if command == "stat":
-        if len(argv) != 2:
-            return _usage_error("stat", "Usage: stat <path>", ["ls", "cat <file>"])
-        return fs_commands.stat_path(argv[1], settings=active_settings)
-    if command == "rm":
-        if len(argv) != 2:
-            return _usage_error("rm", "Usage: rm <path>", ["ls", "stat <path>"])
-        return fs_commands.remove_path(argv[1], settings=active_settings)
-    if command == "web":
-        return _dispatch_web(argv[1:], active_settings)
-    if command == "sec":
-        return sec_commands.dispatch(argv[1:], active_settings)
-    if command == "valuation":
-        return valuation_commands.dispatch(argv[1:], active_settings)
-    if command == "analyze":
-        return analyze_commands.dispatch(argv[1:], active_settings)
-    if command == "knowledge":
-        return knowledge_commands.dispatch(argv[1:], active_settings)
-    if command == "memory":
-        return memory_commands.dispatch(argv[1:], active_settings)
-    if command == "plot":
-        return plot_commands.dispatch(argv[1:], active_settings)
-    if command == "report":
-        return report_commands.dispatch(argv[1:], active_settings)
-    if command == "read":
-        return read_commands.dispatch(argv[1:], active_settings)
-    if command == "read-many":
-        return read_commands.read_many_alias_dispatch(argv[1:], active_settings)
-    if command == "codex":
-        return codex_commands.dispatch(argv[1:], active_settings)
-
-    return _run_external_command(argv, stdin=stdin, settings=active_settings)
+    dispatchers: dict[str, Callable[[list[str], HarnessSettings, bytes], CommandResult]] = {
+        "cat": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
+            full_argv, settings=current_settings, stdin=current_stdin
+        ),
+        "ls": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
+            full_argv, settings=current_settings, stdin=current_stdin
+        ),
+        "write": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
+            full_argv, settings=current_settings, stdin=current_stdin
+        ),
+        "stat": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
+            full_argv, settings=current_settings, stdin=current_stdin
+        ),
+        "rm": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
+            full_argv, settings=current_settings, stdin=current_stdin
+        ),
+        "grep": lambda full_argv, current_settings, current_stdin: fs_commands.dispatch(
+            full_argv, settings=current_settings, stdin=current_stdin
+        ),
+        "web": lambda full_argv, current_settings, current_stdin: web_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "sec": lambda full_argv, current_settings, current_stdin: sec_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "valuation": lambda full_argv, current_settings, current_stdin: valuation_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "analyze": lambda full_argv, current_settings, current_stdin: analyze_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "knowledge": lambda full_argv, current_settings, current_stdin: knowledge_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "memory": lambda full_argv, current_settings, current_stdin: memory_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "plot": lambda full_argv, current_settings, current_stdin: plot_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "report": lambda full_argv, current_settings, current_stdin: report_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "read": lambda full_argv, current_settings, current_stdin: read_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "read-many": lambda full_argv, current_settings, current_stdin: read_commands.read_many_alias_dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "codex": lambda full_argv, current_settings, current_stdin: codex_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+    }
+    dispatcher = dispatchers.get(command)
+    if dispatcher is None:
+        return CommandResult.from_text(
+            "",
+            stderr=(
+                f"Unknown command: {command}\n"
+                "What to do instead: use a registered Minerva command.\n"
+                f"Available commands: {', '.join(_available_root_commands())}"
+            ),
+            exit_code=1,
+        )
+    return dispatcher(argv, active_settings, stdin)
 
 
 def _execute_pipeline(
@@ -295,69 +322,12 @@ def _execute_pipeline(
     return last_result
 
 
-def _dispatch_web(args: list[str], settings: HarnessSettings) -> CommandResult:
-    if not args:
-        return _usage_error("web", "Usage: web <search|fetch> <value>", ["web search <query>", "web fetch <url>"])
-    subcommand: str = args[0]
-    if subcommand == "search":
-        if len(args) < 2:
-            return _usage_error("web search", "Usage: web search <query>", ["web fetch <url>"])
-        return web_commands.search_web(" ".join(args[1:]), settings=settings)
-    if subcommand == "fetch":
-        if len(args) != 2:
-            return _usage_error("web fetch", "Usage: web fetch <url>", ["web search <query>"])
-        return web_commands.fetch_url(args[1])
-    return _usage_error("web", f"Unknown web subcommand: {subcommand}", ["web search <query>", "web fetch <url>"])
-
-
-def _run_external_command(argv: list[str], stdin: bytes, settings: HarnessSettings) -> CommandResult:
-    start: float = time.perf_counter()
-    try:
-        completed = subprocess.run(
-            argv,
-            input=stdin,
-            capture_output=True,
-            cwd=settings.ensure_workspace_root(),
-            check=False,
-        )
-    except FileNotFoundError:
-        return CommandResult.from_text(
-            "",
-            stderr=(
-                f"Unknown command: {' '.join(argv)}\n"
-                "What to do instead: use a registered Minerva command or an installed system command.\n"
-                "Available alternatives: `ls`, `cat <path>`, `web search <query>`"
-            ),
-            exit_code=127,
-            duration_ms=_elapsed_ms(start),
-        )
-
-    return CommandResult(
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-        exit_code=completed.returncode,
-        duration_ms=_elapsed_ms(start),
-    )
-
-
 def _should_run_after(exit_code: int, operator: str | None) -> bool:
     if operator == "&&":
         return exit_code == 0
     if operator == "||":
         return exit_code != 0
     return True
-
-
-def _usage_error(command: str, usage: str, alternatives: list[str]) -> CommandResult:
-    return CommandResult.from_text(
-        "",
-        stderr=(
-            f"Invalid invocation for `{command}`.\n"
-            f"What to do instead: {usage}\n"
-            f"Available alternatives: {', '.join(alternatives)}"
-        ),
-        exit_code=1,
-    )
 
 
 def _collect_command_catalog(typer_app: typer.Typer, prefix: list[str], lines: list[str]) -> None:
@@ -379,11 +349,17 @@ def _first_line(text: str) -> str:
     return stripped.splitlines()[0] if stripped else "No description."
 
 
+def _available_root_commands() -> list[str]:
+    names: set[str] = set()
+    for command_info in app.registered_commands:
+        names.add(command_info.name or command_info.callback.__name__.replace("_", "-"))
+    for group_info in app.registered_groups:
+        names.add(group_info.name or "group")
+    names.add("read-many")
+    return sorted(names)
+
+
 def _print_envelope(result: CommandResult) -> None:
     settings: HarnessSettings = get_settings()
     envelope = OutputEnvelope.from_result(result, workspace_root=settings.ensure_workspace_root())
     typer.echo(envelope.render())
-
-
-def _elapsed_ms(start: float) -> int:
-    return max(0, int((time.perf_counter() - start) * 1000))

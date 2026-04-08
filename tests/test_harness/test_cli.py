@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from harness.cli import execute_chain, parse_chain
+from harness.cli import dispatch_command, execute_chain, parse_chain
 from harness.config import HarnessSettings
 
 
@@ -39,3 +39,29 @@ def test_integration_cat_pipe_grep(tmp_path: Path) -> None:
     result = execute_chain("cat report.txt | grep margin", settings)
     assert result.exit_code == 0
     assert result.stdout.decode("utf-8").splitlines() == ["gross margin", "margin expansion"]
+
+
+def test_dispatch_command_rejects_unknown_commands_without_subprocess(tmp_path: Path) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path)
+
+    result = dispatch_command(["python3", "-c", "print('escape')"], settings=settings)
+
+    assert result.exit_code == 1
+    stderr = result.stderr.decode("utf-8")
+    assert "Unknown command: python3" in stderr
+    assert "Available commands:" in stderr
+
+
+def test_execute_chain_pipes_stdout_into_analyze_sentiment(tmp_path: Path) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path)
+    (tmp_path / "sample.txt").write_text(
+        "We see strong growth and momentum in demand.\n\nThere is regulatory risk and uncertainty.",
+        encoding="utf-8",
+    )
+
+    result = execute_chain("cat sample.txt | analyze sentiment", settings)
+
+    assert result.exit_code == 0
+    output = result.stdout.decode("utf-8")
+    assert "paragraph_count: 2" in output
+    assert "confidence_count:" in output

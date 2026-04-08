@@ -15,7 +15,13 @@ from harness.output import CommandResult, OutputEnvelope
 app = typer.Typer(help="Codex delegation command.", no_args_is_help=False)
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None) -> CommandResult:
+def dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
+    """Source-of-truth parser for `run` path codex commands."""
+    _ = stdin
     if not args:
         return _usage_error("codex", "Usage: codex <prompt>", ["codex \"Implement a new command group\""])
     return codex_prompt(" ".join(args), settings=settings)

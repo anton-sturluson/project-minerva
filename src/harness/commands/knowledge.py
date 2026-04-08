@@ -17,7 +17,13 @@ GLOBAL_KNOWLEDGE_ROOT: Path = Path("/Users/charlie-buffet/Documents/project-mine
 app = typer.Typer(help="Knowledge-base commands.", no_args_is_help=True)
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None) -> CommandResult:
+def dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
+    """Source-of-truth parser for `run` path knowledge commands."""
+    _ = stdin
     active_settings: HarnessSettings = settings or get_settings()
     if not args:
         return _usage_error(

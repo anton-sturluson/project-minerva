@@ -16,7 +16,13 @@ from harness.output import CommandResult, OutputEnvelope
 app = typer.Typer(help="Delegated document reads.", no_args_is_help=False)
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None) -> CommandResult:
+def dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
+    """Source-of-truth parser for `run` path delegated-read commands."""
+    _ = stdin
     active_settings: HarnessSettings = settings or get_settings()
     if not args:
         return _usage_error(
@@ -57,9 +63,13 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None) -> Comman
     return read_command_result(args[0], " ".join(args[1:]), settings=active_settings)
 
 
-def read_many_alias_dispatch(args: list[str], settings: HarnessSettings | None = None) -> CommandResult:
+def read_many_alias_dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
     """Support `read-many` as a shell alias for `read many`."""
-    return dispatch(["many", *args], settings=settings)
+    return dispatch(["many", *args], settings=settings, stdin=stdin)
 
 
 def read_command_result(file_path: str, question: str, *, settings: HarnessSettings | None = None) -> CommandResult:

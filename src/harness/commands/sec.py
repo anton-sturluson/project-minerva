@@ -7,7 +7,13 @@ import time
 import typer
 from edgar import Company
 
-from harness.commands.common import dataframe_to_markdown, elapsed_ms, error_result
+from harness.commands.common import (
+    dataframe_to_markdown,
+    elapsed_ms,
+    error_result,
+    retry_call,
+    should_retry_network_error,
+)
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
 from minerva.sec import get_10k_items, get_13f_comparison
@@ -15,8 +21,13 @@ from minerva.sec import get_10k_items, get_13f_comparison
 app = typer.Typer(help="SEC filing tools.", no_args_is_help=True)
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None) -> CommandResult:
-    """Dispatch SEC subcommands from the shell-style parser."""
+def dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
+    """Source-of-truth parser for `run` path SEC commands."""
+    _ = stdin
     active_settings: HarnessSettings = settings or get_settings()
     if not args:
         return _usage_error("sec", "Usage: sec <10k|13f|financials> ...", ["sec 10k MSFT", "sec 13f 1067983"])
@@ -79,7 +90,10 @@ def get_10k_command(
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
-        item_map: dict[str, str] = get_10k_items(ticker, items or ["1", "1A", "7"])
+        item_map: dict[str, str] = retry_call(
+            lambda: get_10k_items(ticker, items or ["1", "1A", "7"]),
+            should_retry=should_retry_network_error,
+        )
     except Exception as exc:
         return error_result(
             f"What went wrong: failed to fetch 10-K items for {ticker}: {exc}\n"
@@ -100,7 +114,10 @@ def get_13f_command(cik: str, *, settings: HarnessSettings | None = None) -> Com
     start: float = time.perf_counter()
     _ = settings or get_settings()
     try:
-        comparison = get_13f_comparison(cik)
+        comparison = retry_call(
+            lambda: get_13f_comparison(cik),
+            should_retry=should_retry_network_error,
+        )
     except Exception as exc:
         return error_result(
             f"What went wrong: failed to compare 13-F filings for {cik}: {exc}\n"
@@ -136,16 +153,10 @@ def get_financials_command(
     _ = settings or get_settings()
     statement_type = statement_type.lower()
     try:
-        company: Company = Company(ticker)
-        company.get_filings(form="10-K").latest(periods)
-        if statement_type == "income":
-            frame = company.income_statement(periods=periods, period="annual", as_dataframe=True)
-        elif statement_type == "balance":
-            frame = company.balance_sheet(periods=periods, period="annual", as_dataframe=True)
-        elif statement_type == "cash":
-            frame = company.cashflow_statement(periods=periods, period="annual", as_dataframe=True)
-        else:
-            raise ValueError(f"unknown financial statement type: {statement_type}")
+        frame = retry_call(
+            lambda: _fetch_financials_frame(ticker, periods=periods, statement_type=statement_type),
+            should_retry=should_retry_network_error,
+        )
     except Exception as exc:
         return error_result(
             f"What went wrong: failed to fetch {statement_type} financials for {ticker}: {exc}\n"
@@ -187,6 +198,18 @@ def financials_command(
 
 def _parse_csv_values(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
+    company: Company = Company(ticker)
+    company.get_filings(form="10-K").latest(periods)
+    if statement_type == "income":
+        return company.income_statement(periods=periods, period="annual", as_dataframe=True)
+    if statement_type == "balance":
+        return company.balance_sheet(periods=periods, period="annual", as_dataframe=True)
+    if statement_type == "cash":
+        return company.cashflow_statement(periods=periods, period="annual", as_dataframe=True)
+    raise ValueError(f"unknown financial statement type: {statement_type}")
 
 
 def _usage_error(command: str, usage: str, alternatives: list[str]) -> CommandResult:

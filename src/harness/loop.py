@@ -9,6 +9,7 @@ from typing import Any
 
 from anthropic import Anthropic
 
+from harness.commands.common import retry_call, should_retry_anthropic_error
 from harness.cli import app as cli_app
 from harness.cli import execute_chain, generate_command_catalog
 from harness.config import HarnessSettings, get_settings
@@ -76,12 +77,15 @@ def run_agent_loop(prompt: str, settings: HarnessSettings | None = None, max_loo
     ]
 
     for _ in range(max_loops):
-        response = client.messages.create(
-            model=_strip_provider_prefix(active_settings.llm_model),
-            system=system_prompt,
-            max_tokens=1_500,
-            messages=messages,
-            tools=tools,
+        response = retry_call(
+            lambda: client.messages.create(
+                model=_strip_provider_prefix(active_settings.llm_model),
+                system=system_prompt,
+                max_tokens=1_500,
+                messages=messages,
+                tools=tools,
+            ),
+            should_retry=should_retry_anthropic_error,
         )
         assistant_message: dict[str, Any] = {"role": "assistant", "content": response.content}
         messages.append(assistant_message)

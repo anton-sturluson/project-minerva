@@ -8,6 +8,7 @@ import httpx
 import typer
 from bs4 import BeautifulSoup
 
+from harness.commands.common import retry_call, should_retry_http_error
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
 
@@ -20,6 +21,29 @@ app = typer.Typer(
     ),
     no_args_is_help=True,
 )
+
+
+def dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
+    """Source-of-truth parser for `run` path web commands."""
+    _ = stdin
+    active_settings: HarnessSettings = settings or get_settings()
+    if not args:
+        return _usage_error("web", "Usage: web <search|fetch> <value>", ["web search <query>", "web fetch <url>"])
+
+    subcommand: str = args[0]
+    if subcommand == "search":
+        if len(args) < 2:
+            return _usage_error("web search", "Usage: web search <query>", ["web fetch <url>"])
+        return search_web(" ".join(args[1:]), settings=active_settings)
+    if subcommand == "fetch":
+        if len(args) != 2:
+            return _usage_error("web fetch", "Usage: web fetch <url>", ["web search <query>"])
+        return fetch_url(args[1])
+    return _usage_error("web", f"Unknown web subcommand: {subcommand}", ["web search <query>", "web fetch <url>"])
 
 
 def search_web(query: str, settings: HarnessSettings | None = None) -> CommandResult:
@@ -45,14 +69,11 @@ def search_web(query: str, settings: HarnessSettings | None = None) -> CommandRe
     params: dict[str, str | int] = {"q": query, "count": 5}
 
     try:
-        response = httpx.get(
-            "https://api.search.brave.com/res/v1/web/search",
-            headers=headers,
-            params=params,
-            timeout=15.0,
+        response = retry_call(
+            lambda: _search_request(headers=headers, params=params),
+            should_retry=should_retry_http_error,
         )
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         return CommandResult.from_text(
             "",
             stderr=(
@@ -83,9 +104,11 @@ def fetch_url(url: str) -> CommandResult:
     """Fetch a URL and extract readable content."""
     start: float = time.perf_counter()
     try:
-        response = httpx.get(url, timeout=20.0, follow_redirects=True)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
+        response = retry_call(
+            lambda: _fetch_request(url),
+            should_retry=should_retry_http_error,
+        )
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         return CommandResult.from_text(
             "",
             stderr=(
@@ -132,3 +155,32 @@ def fetch_command(url: str = typer.Argument(..., help="URL to fetch. Example: ht
 
 def _elapsed_ms(start: float) -> int:
     return max(0, int((time.perf_counter() - start) * 1000))
+
+
+def _search_request(*, headers: dict[str, str], params: dict[str, str | int]) -> httpx.Response:
+    response = httpx.get(
+        "https://api.search.brave.com/res/v1/web/search",
+        headers=headers,
+        params=params,
+        timeout=15.0,
+    )
+    response.raise_for_status()
+    return response
+
+
+def _fetch_request(url: str) -> httpx.Response:
+    response = httpx.get(url, timeout=20.0, follow_redirects=True)
+    response.raise_for_status()
+    return response
+
+
+def _usage_error(command: str, usage: str, alternatives: list[str]) -> CommandResult:
+    return CommandResult.from_text(
+        "",
+        stderr=(
+            f"Invalid invocation for `{command}`.\n"
+            f"What to do instead: {usage}\n"
+            f"Available alternatives: {', '.join(alternatives)}"
+        ),
+        exit_code=1,
+    )

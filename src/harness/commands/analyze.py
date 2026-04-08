@@ -28,28 +28,41 @@ DEFAULT_GROUPS: dict[str, list[str]] = {
 app = typer.Typer(help="Analysis commands.", no_args_is_help=True)
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None) -> CommandResult:
+def dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
+    """Source-of-truth parser for `run` path analysis commands."""
     active_settings: HarnessSettings = settings or get_settings()
     if not args:
         return _usage_error(
             "analyze",
             "Usage: analyze <sentiment|keywords> ...",
-            ["analyze sentiment <file>", "analyze keywords <file> --groups growth,risk"],
+            ["analyze sentiment <file>", "analyze sentiment", "analyze keywords <file> --groups growth,risk"],
         )
 
     subcommand: str = args[0]
     if subcommand == "sentiment":
-        if len(args) != 2:
-            return _usage_error("analyze sentiment", "Usage: analyze sentiment <file>", ["analyze keywords <file> --groups growth"])
-        return analyze_sentiment(args[1], settings=active_settings)
+        if len(args) == 2:
+            return analyze_sentiment(args[1], settings=active_settings)
+        if len(args) == 1 and stdin:
+            return analyze_sentiment_text(stdin.decode("utf-8", errors="replace"))
+        return _usage_error(
+            "analyze sentiment",
+            "Usage: analyze sentiment <file> or cat <file> | analyze sentiment",
+            ["analyze keywords <file> --groups growth", "cat <file> | analyze sentiment"],
+        )
     if subcommand == "keywords":
-        if len(args) != 4 or args[2] != "--groups":
-            return _usage_error(
-                "analyze keywords",
-                "Usage: analyze keywords <file> --groups growth,risk,competition",
-                ["analyze sentiment <file>"],
-            )
-        return analyze_keywords(args[1], args[3], settings=active_settings)
+        if len(args) == 4 and args[2] == "--groups":
+            return analyze_keywords(args[1], args[3], settings=active_settings)
+        if len(args) == 3 and args[1] == "--groups" and stdin:
+            return analyze_keywords_text(stdin.decode("utf-8", errors="replace"), args[2])
+        return _usage_error(
+            "analyze keywords",
+            "Usage: analyze keywords <file> --groups growth,risk,competition or cat <file> | analyze keywords --groups growth,risk",
+            ["analyze sentiment <file>"],
+        )
     return _usage_error("analyze", f"Unknown analyze subcommand: {subcommand}", ["analyze sentiment <file>"])
 
 
@@ -66,7 +79,11 @@ def analyze_sentiment(path: str, *, settings: HarnessSettings | None = None) -> 
             "Available alternatives: `stat <file>`, `cat <file>`",
             start,
         )
+    return analyze_sentiment_text(text, start=start)
 
+
+def analyze_sentiment_text(text: str, *, start: float | None = None) -> CommandResult:
+    started: float = time.perf_counter() if start is None else start
     paragraphs: list[str] = [part.strip() for part in text.split("\n\n") if part.strip()]
     result = score_sentiment(paragraphs)
     lines: list[str] = [
@@ -75,7 +92,7 @@ def analyze_sentiment(path: str, *, settings: HarnessSettings | None = None) -> 
         f"uncertainty_count: {result.uncertainty_count}",
         f"net_score: {result.net_score:.3f}",
     ]
-    return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
+    return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(started))
 
 
 def analyze_keywords(path: str, group_names_csv: str, *, settings: HarnessSettings | None = None) -> CommandResult:
@@ -91,7 +108,11 @@ def analyze_keywords(path: str, group_names_csv: str, *, settings: HarnessSettin
             "Available alternatives: `stat <file>`, `cat <file>`",
             start,
         )
+    return analyze_keywords_text(text, group_names_csv, start=start)
 
+
+def analyze_keywords_text(text: str, group_names_csv: str, *, start: float | None = None) -> CommandResult:
+    started: float = time.perf_counter() if start is None else start
     requested_names: list[str] = [name.strip().lower() for name in group_names_csv.split(",") if name.strip()]
     unknown: list[str] = [name for name in requested_names if name not in DEFAULT_GROUPS]
     if unknown:
@@ -99,7 +120,7 @@ def analyze_keywords(path: str, group_names_csv: str, *, settings: HarnessSettin
             f"What went wrong: unknown keyword groups: {', '.join(unknown)}\n"
             f"What to do instead: choose from {', '.join(sorted(DEFAULT_GROUPS))}.\n"
             "Available alternatives: `analyze sentiment <file>`, `analyze keywords <file> --groups growth,risk`",
-            start,
+            started,
         )
 
     groups: list[KeywordGroup] = [KeywordGroup(name=name, keywords=DEFAULT_GROUPS[name]) for name in requested_names]
@@ -118,7 +139,7 @@ def analyze_keywords(path: str, group_names_csv: str, *, settings: HarnessSettin
         rows,
         alignment=["l", "r", "r", "r"],
     )
-    return CommandResult.from_text(table, duration_ms=elapsed_ms(start))
+    return CommandResult.from_text(table, duration_ms=elapsed_ms(started))
 
 
 @app.command("sentiment")

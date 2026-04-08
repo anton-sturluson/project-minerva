@@ -11,6 +11,57 @@ from harness.context import estimate_tokens, is_binary
 from harness.output import CommandResult
 
 
+def dispatch(
+    args: list[str],
+    settings: HarnessSettings | None = None,
+    stdin: bytes = b"",
+) -> CommandResult:
+    """Source-of-truth parser for `run` path filesystem commands."""
+    active_settings: HarnessSettings = settings or get_settings()
+    if not args:
+        return _usage_error(
+            "fs",
+            "Usage: <cat|ls|write|stat|rm|grep> ...",
+            ["ls", "cat <path>", "grep <pattern> [file]"],
+        )
+
+    command: str = args[0]
+    if command == "cat":
+        if len(args) != 2:
+            return _usage_error("cat", "Usage: cat <path>", ["stat <path>", "ls"])
+        return cat_file(args[1], settings=active_settings)
+    if command == "ls":
+        if len(args) > 2:
+            return _usage_error("ls", "Usage: ls [dir]", ["stat <path>", "cat <file>"])
+        return list_files(args[1] if len(args) == 2 else None, settings=active_settings)
+    if command == "write":
+        if len(args) < 3:
+            return _usage_error("write", "Usage: write <path> <content>", ["cat <path>", "ls"])
+        return write_file(args[1], " ".join(args[2:]), settings=active_settings)
+    if command == "stat":
+        if len(args) != 2:
+            return _usage_error("stat", "Usage: stat <path>", ["ls", "cat <file>"])
+        return stat_path(args[1], settings=active_settings)
+    if command == "rm":
+        if len(args) != 2:
+            return _usage_error("rm", "Usage: rm <path>", ["ls", "stat <path>"])
+        return remove_path(args[1], settings=active_settings)
+    if command == "grep":
+        if len(args) not in {2, 3}:
+            return _usage_error(
+                "grep",
+                "Usage: grep <pattern> [file]",
+                ["cat <file> | grep <pattern>", "grep <pattern> <file>"],
+            )
+        return grep_text(args[1], path=args[2] if len(args) == 3 else None, stdin=stdin, settings=active_settings)
+
+    return _usage_error(
+        "fs",
+        f"Unknown filesystem command: {command}",
+        ["cat <path>", "ls", "write <path> <content>", "grep <pattern> [file]"],
+    )
+
+
 def resolve_workspace_path(raw_path: str, settings: HarnessSettings | None = None) -> Path:
     """Resolve a path under the configured workspace root and reject escapes."""
     active_settings: HarnessSettings = settings or get_settings()
@@ -194,9 +245,62 @@ def remove_path(path: str, settings: HarnessSettings | None = None) -> CommandRe
     return CommandResult.from_text(f"Removed {relative_path}", duration_ms=_elapsed_ms(start))
 
 
+def grep_text(
+    pattern: str,
+    *,
+    path: str | None = None,
+    stdin: bytes = b"",
+    settings: HarnessSettings | None = None,
+) -> CommandResult:
+    """Filter matching lines from a workspace file or piped stdin."""
+    start: float = time.perf_counter()
+    active_settings: HarnessSettings = settings or get_settings()
+    try:
+        text: str = _read_grep_input(path, stdin=stdin, settings=active_settings)
+    except Exception as exc:
+        return _error_result(str(exc), start)
+
+    matches: list[str] = [line for line in text.splitlines() if pattern in line]
+    if not matches:
+        return CommandResult.from_text(
+            "",
+            stderr=f"No matches for pattern: {pattern}",
+            exit_code=1,
+            duration_ms=_elapsed_ms(start),
+        )
+    return CommandResult.from_text("\n".join(matches), duration_ms=_elapsed_ms(start))
+
+
 def _error_result(message: str, start: float) -> CommandResult:
     return CommandResult.from_text("", stderr=message, exit_code=1, duration_ms=_elapsed_ms(start))
 
 
 def _elapsed_ms(start: float) -> int:
     return max(0, int((time.perf_counter() - start) * 1000))
+
+
+def _read_grep_input(path: str | None, *, stdin: bytes, settings: HarnessSettings) -> str:
+    if path:
+        result: CommandResult = cat_file(path, settings=settings)
+        if result.exit_code != 0:
+            raise ValueError(result.stderr.decode("utf-8", errors="replace") or f"Failed to read {path}")
+        return result.stdout.decode("utf-8", errors="replace")
+    if stdin:
+        return stdin.decode("utf-8", errors="replace")
+    raise ValueError(
+        "What went wrong: grep needs a file path or piped stdin.\n"
+        "What to do instead: pass `grep <pattern> <file>` or pipe text into `grep <pattern>`.\n"
+        "Available alternatives: `cat <file> | grep <pattern>`, `grep <pattern> <file>`"
+    )
+
+
+def _usage_error(command: str, usage: str, alternatives: list[str]) -> CommandResult:
+    return CommandResult.from_text(
+        "",
+        stderr=(
+            f"Invalid invocation for `{command}`.\n"
+            f"What to do instead: {usage}\n"
+            f"Available alternatives: {', '.join(alternatives)}"
+        ),
+        exit_code=1,
+    )

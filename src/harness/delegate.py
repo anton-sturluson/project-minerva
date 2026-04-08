@@ -11,6 +11,7 @@ import pdfplumber
 from anthropic import AsyncAnthropic
 from bs4 import BeautifulSoup
 
+from harness.commands.common import async_retry_call, should_retry_anthropic_error
 from harness.context import estimate_tokens
 
 MAX_DELEGATE_TOKENS: int = 100_000
@@ -74,24 +75,27 @@ async def delegate_read(
 
     client = AsyncAnthropic(api_key=resolved_api_key)
     context: str = build_delegate_context(document_text, question)
-    response = await client.messages.create(
-        model=model,
-        max_tokens=1_000,
-        system=(
-            f"Extract information relevant to: {question}. "
-            "Be concise and specific. Cite page/section numbers when possible."
+    response = await async_retry_call(
+        lambda: client.messages.create(
+            model=model,
+            max_tokens=1_000,
+            system=(
+                f"Extract information relevant to: {question}. "
+                "Be concise and specific. Cite page/section numbers when possible."
+            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Question:\n"
+                        f"{question}\n\n"
+                        "Document:\n"
+                        f"{context}"
+                    ),
+                }
+            ],
         ),
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Question:\n"
-                    f"{question}\n\n"
-                    "Document:\n"
-                    f"{context}"
-                ),
-            }
-        ],
+        should_retry=should_retry_anthropic_error,
     )
     text_blocks: list[str] = [block.text for block in response.content if getattr(block, "type", "") == "text"]
     return "\n".join(part.strip() for part in text_blocks if part.strip()).strip()
