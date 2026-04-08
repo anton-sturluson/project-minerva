@@ -14,7 +14,7 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
     plus filtered views: 'new', 'exited', 'increased', 'decreased'.
     """
     company: Company = Company(str(cik))
-    filings_13f = company.get_filings(form="13-F-HR").latest(2)
+    filings_13f = company.get_filings(form="13F-HR").latest(2)
 
     filing_list: list = list(filings_13f)
     if len(filing_list) < 2:
@@ -23,12 +23,16 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
     current_filing = filing_list[0].obj()
     previous_filing = filing_list[1].obj()
 
-    current_df: pd.DataFrame = current_filing.holdings.to_dataframe()
-    previous_df: pd.DataFrame = previous_filing.holdings.to_dataframe()
+    current_df: pd.DataFrame = current_filing.holdings
+    previous_df: pd.DataFrame = previous_filing.holdings
+
+    # edgartools uses capitalized column names: Cusip, Value, Issuer, etc.
+    merge_key: str = "Cusip" if "Cusip" in current_df.columns else "cusip"
+    value_col: str = "Value" if "Value" in current_df.columns else "value"
 
     merged: pd.DataFrame = current_df.merge(
         previous_df,
-        on=["cusip"],
+        on=[merge_key],
         how="outer",
         suffixes=("_current", "_previous"),
         indicator=True,
@@ -38,8 +42,10 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
     exited_positions: pd.DataFrame = merged[merged["_merge"] == "right_only"].copy()
 
     both: pd.DataFrame = merged[merged["_merge"] == "both"].copy()
-    increased: pd.DataFrame = both[both["value_current"] > both["value_previous"]].copy()
-    decreased: pd.DataFrame = both[both["value_current"] < both["value_previous"]].copy()
+    val_current: str = f"{value_col}_current"
+    val_previous: str = f"{value_col}_previous"
+    increased: pd.DataFrame = both[both[val_current] > both[val_previous]].copy()
+    decreased: pd.DataFrame = both[both[val_current] < both[val_previous]].copy()
 
     return {
         "current": current_df,
