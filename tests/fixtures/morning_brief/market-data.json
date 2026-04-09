@@ -1,0 +1,34 @@
+{
+  "earnings": [
+    {
+      "headline": "NVDA earnings scheduled after the close",
+      "status": "scheduled",
+      "ticker": "NVDA",
+      "timing": "after-close",
+      "url": "https://example.com/nvda-earnings"
+    },
+    {
+      "headline": "TSM reported stronger AI packaging demand",
+      "status": "reported",
+      "ticker": "TSM",
+      "timing": "before-open",
+      "url": "https://example.com/tsm-earnings"
+    }
+  ],
+  "indexes": [
+    {
+      "change_pct": -1.4,
+      "headline": "S&P 500 sold off after tariff headlines",
+      "material": true,
+      "symbol": "SPY"
+    }
+  ],
+  "rates": [
+    {
+      "change_pct": 0.12,
+      "headline": "US 10Y yield rose 12 bps",
+      "material": true,
+      "name": "US10Y"
+    }
+  ]
+}
