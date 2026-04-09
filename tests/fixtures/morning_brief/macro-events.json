@@ -1,0 +1,10 @@
+[
+  {
+    "category": "macro",
+    "event_name": "CPI release",
+    "importance": "high",
+    "release_time": "08:30 ET",
+    "source_url": "https://example.com/cpi-calendar",
+    "date": "2026-04-08"
+  }
+]

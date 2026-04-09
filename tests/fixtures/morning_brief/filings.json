@@ -1,0 +1,16 @@
+[
+  {
+    "description": "Investor presentation",
+    "filing_date": "2026-04-08",
+    "form": "8-K",
+    "ticker": "NVDA",
+    "url": "https://example.com/nvda-8k"
+  },
+  {
+    "description": "Quarterly report",
+    "filing_date": "2026-04-08",
+    "form": "10-Q",
+    "ticker": "MSFT",
+    "url": "https://example.com/msft-10q"
+  }
+]

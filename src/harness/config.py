@@ -16,6 +16,7 @@ class HarnessSettings(BaseModel):
     edgar_identity: str | None = None
     parallel_api_key: str | None = None
     gemini_api_key: str | None = None
+    finnhub_api_key: str | None = None
     minerva_plot_theme: str = "minerva-classic"
 
     @property
@@ -38,5 +39,6 @@ def get_settings() -> HarnessSettings:
         edgar_identity=os.getenv("EDGAR_IDENTITY"),
         parallel_api_key=os.getenv("PARALLEL_API_KEY"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        finnhub_api_key=os.getenv("FINNHUB_API_KEY"),
         minerva_plot_theme=os.getenv("MINERVA_PLOT_THEME", "minerva-classic"),
     )
