@@ -314,7 +314,7 @@ def test_evidence_extract_coverage_status_and_context_round_trip(tmp_path: Path,
         ),
     )
 
-    coverage_result = evidence.coverage_command(root=str(root), profile="default")
+    coverage_result = evidence.coverage_command(root=str(root), profile="test-minimal")
     status_before_extract = analysis.status_command(root=str(root))
     extract_result = evidence.extract_command(
         root=str(root),

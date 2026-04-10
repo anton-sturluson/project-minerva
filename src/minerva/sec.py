@@ -1,5 +1,10 @@
 """SEC EDGAR helpers that aggregate multi-step edgartools workflows."""
 
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any
+
 import pandas as pd
 from edgar import Company
 
@@ -85,3 +90,66 @@ def get_10k_items(
             result[item_num] = ""
 
     return result
+
+
+def get_recent_filings(
+    ticker_or_cik: str,
+    *,
+    forms: list[str] | None = None,
+    since: date | str | None = None,
+    until: date | str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """List recent filings for a company in a date window.
+
+    Returns a normalized list of small filing records so higher-level CLI
+    orchestration can filter and persist SEC activity without duplicating
+    edgartools traversal logic.
+    """
+    normalized_since: date | None = _coerce_date(since)
+    normalized_until: date | None = _coerce_date(until)
+    company: Company = Company(ticker_or_cik)
+    filings = company.get_filings(form=forms or ["8-K", "10-K", "10-Q"]).latest(limit)
+
+    records: list[dict[str, Any]] = []
+    for filing in _iter_filings(filings):
+        filing_date: date | None = _coerce_date(getattr(filing, "filing_date", getattr(filing, "date", None)))
+        if normalized_since and filing_date and filing_date < normalized_since:
+            continue
+        if normalized_until and filing_date and filing_date > normalized_until:
+            continue
+        records.append(
+            {
+                "ticker_or_cik": str(ticker_or_cik),
+                "form": str(getattr(filing, "form", getattr(filing, "form_type", "")) or ""),
+                "filing_date": filing_date.isoformat() if filing_date else "",
+                "accession_number": str(getattr(filing, "accession_number", "") or ""),
+                "primary_document": str(getattr(filing, "primary_document", "") or ""),
+                "description": str(getattr(filing, "description", getattr(filing, "title", "")) or ""),
+                "url": str(
+                    getattr(filing, "filing_url", getattr(filing, "url", getattr(filing, "homepage_url", ""))) or ""
+                ),
+            }
+        )
+    return records
+
+
+def _iter_filings(filings: Any) -> list[Any]:
+    if filings is None:
+        return []
+    if isinstance(filings, list):
+        return filings
+    try:
+        return list(filings)
+    except TypeError:
+        return [filings]
+
+
+def _coerce_date(value: date | str | None) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    return datetime.fromisoformat(str(value)).date()

@@ -1,0 +1,12 @@
+[
+  {
+    "company": "Advanced Micro Devices",
+    "notes": "GPU read-through watchlist",
+    "ticker": "AMD"
+  },
+  {
+    "company": "Snowflake",
+    "notes": "Data infra watchlist",
+    "ticker": "SNOW"
+  }
+]

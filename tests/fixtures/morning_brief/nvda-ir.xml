@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>NVIDIA IR</title>
+    <item>
+      <title>NVIDIA Announces AI Factory Networking Update</title>
+      <link>https://example.com/nvda-ir-update</link>
+      <pubDate>Wed, 08 Apr 2026 08:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>
