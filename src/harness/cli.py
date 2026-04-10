@@ -10,9 +10,11 @@ import typer
 
 from harness.commands import register_commands
 from harness.commands import analyze as analyze_commands
+from harness.commands import brief as brief_commands
 from harness.commands import extract as extract_commands
 from harness.commands import fileinfo as fileinfo_commands
 from harness.commands import plot as plot_commands
+from harness.commands import portfolio as portfolio_commands
 from harness.commands import research as research_commands
 from harness.commands import sec as sec_commands
 from harness.commands import valuation as valuation_commands
@@ -186,7 +188,7 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
             stderr=(
                 "What went wrong: an empty command segment was provided.\n"
                 "What to do instead: provide a command name before any arguments.\n"
-                "Available alternatives: sec, valuation, analyze, plot, extract, fileinfo, research"
+                "Available alternatives: sec, portfolio, brief, valuation, analyze, plot, extract, fileinfo, research"
             ),
             exit_code=1,
         )
@@ -194,6 +196,12 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
     command: str = argv[0]
     dispatchers: dict[str, Callable[[list[str], HarnessSettings, bytes], CommandResult]] = {
         "sec": lambda full_argv, current_settings, current_stdin: sec_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "portfolio": lambda full_argv, current_settings, current_stdin: portfolio_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "brief": lambda full_argv, current_settings, current_stdin: brief_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
         "valuation": lambda full_argv, current_settings, current_stdin: valuation_commands.dispatch(
