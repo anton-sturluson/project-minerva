@@ -107,24 +107,39 @@ def research_cli_command(
 def _call_parallel(*, query: str, api_key: str) -> str:
     import httpx
 
-    with httpx.Client(timeout=120.0) as client:
-        response = client.post(
-            "https://api.parallel.ai/v1/tasks",
-            headers={"x-api-key": api_key},
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+
+    with httpx.Client(timeout=600.0) as client:
+        # 1. Create task run (async – returns 202 with run_id)
+        create_resp = client.post(
+            "https://api.parallel.ai/v1/tasks/runs",
+            headers=headers,
             json={
                 "input": query,
-                "processor": "pro",
-                "features": ["deep_research"],
+                "processor": "core",
             },
         )
-        response.raise_for_status()
-        payload = response.json()
+        create_resp.raise_for_status()
+        run_id = create_resp.json()["run_id"]
 
-    if isinstance(payload, dict):
-        for key in ("output", "result", "text"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
+        # 2. Block until complete via the result endpoint (server-side long-poll)
+        result_resp = client.get(
+            f"https://api.parallel.ai/v1/tasks/runs/{run_id}/result",
+            headers=headers,
+            params={"timeout": 600},
+        )
+        result_resp.raise_for_status()
+        payload = result_resp.json()
+
+    # Extract output text from the new response structure
+    output = payload.get("output", {})
+    content = output.get("content", {})
+    if isinstance(content, dict):
+        text = content.get("output", "")
+        if isinstance(text, str) and text.strip():
+            return text
+    if isinstance(content, str) and content.strip():
+        return content
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
