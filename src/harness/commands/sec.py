@@ -483,6 +483,15 @@ def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
     raise ValueError("the filing object does not support markdown export")
 
 
+def _attachment_markdown(attachment: Any) -> str:
+    markdown_value = getattr(attachment, "markdown", None)
+    if callable(markdown_value):
+        markdown_value = markdown_value()
+    if markdown_value is None:
+        raise ValueError("the attachment does not support markdown export")
+    return str(markdown_value)
+
+
 def _bulk_download_one(
     *,
     ticker: str,
@@ -491,9 +500,11 @@ def _bulk_download_one(
     quarters: int,
     earnings: int,
     include_financials: bool,
+    include_html: bool = True,
+    nest_ticker: bool = True,
 ) -> list[str]:
     company = Company(ticker)
-    company_root = base_output / ticker.upper()
+    company_root = base_output / ticker.upper() if nest_ticker else base_output
     company_root.mkdir(parents=True, exist_ok=True)
 
     downloaded = {"10-K": 0, "10-Q": 0, "earnings": 0}
@@ -503,23 +514,46 @@ def _bulk_download_one(
         target_dir = company_root / folder_name
         target_dir.mkdir(parents=True, exist_ok=True)
         for filing in _list_filings(company, form=form, limit=count):
-            target = target_dir / f"{_filing_date(filing)}.md"
-            if target.exists():
+            date_str = _filing_date(filing)
+            markdown_target = target_dir / f"{date_str}.md"
+            html_target = target_dir / f"{date_str}.html"
+            if markdown_target.exists() and (not include_html or html_target.exists()):
                 skipped += 1
                 continue
-            _save_filing(filing, target, file_format="markdown")
-            downloaded[form] += 1
+            wrote_any = False
+            if not markdown_target.exists():
+                _save_filing(filing, markdown_target, file_format="markdown")
+                wrote_any = True
+            if include_html and not html_target.exists():
+                _save_filing(filing, html_target, file_format="html")
+                wrote_any = True
+            if wrote_any:
+                downloaded[form] += 1
 
     earnings_dir = company_root / "earnings"
     earnings_dir.mkdir(parents=True, exist_ok=True)
     for filing in _list_filings(company, form="8-K", limit=earnings):
-        target = earnings_dir / f"{_filing_date(filing)}.md"
-        if target.exists():
+        date_str = _filing_date(filing)
+        markdown_target = earnings_dir / f"{date_str}.md"
+        html_target = earnings_dir / f"{date_str}.html"
+        if markdown_target.exists() and (not include_html or html_target.exists()):
             skipped += 1
             continue
         try:
-            _save_filing(filing, target, file_format="markdown")
-            downloaded["earnings"] += 1
+            wrote_any = False
+            if not markdown_target.exists():
+                exhibits = getattr(filing, "exhibits", []) or []
+                exhibit_99_1 = next((ex for ex in exhibits if getattr(ex, "document_type", None) == "EX-99.1"), None)
+                if exhibit_99_1 is not None:
+                    markdown_target.write_text(_attachment_markdown(exhibit_99_1), encoding="utf-8")
+                else:
+                    _save_filing(filing, markdown_target, file_format="markdown")
+                wrote_any = True
+            if include_html and not html_target.exists():
+                _save_filing(filing, html_target, file_format="html")
+                wrote_any = True
+            if wrote_any:
+                downloaded["earnings"] += 1
         except Exception:
             continue
 
@@ -527,15 +561,19 @@ def _bulk_download_one(
         financials_dir = company_root / "financials"
         financials_dir.mkdir(parents=True, exist_ok=True)
         for statement_type in ["income", "balance", "cash"]:
-            target = financials_dir / f"{statement_type}.md"
-            if target.exists():
+            markdown_target = financials_dir / f"{statement_type}.md"
+            csv_target = financials_dir / f"{statement_type}.csv"
+            if markdown_target.exists() and csv_target.exists():
                 skipped += 1
                 continue
             frame = _fetch_financials_frame(ticker, periods=5, statement_type=statement_type).reset_index()
-            target.write_text(
-                f"# {ticker.upper()} {statement_type.title()} Financials\n\n{dataframe_to_markdown(frame, max_rows=40)}",
-                encoding="utf-8",
-            )
+            if not markdown_target.exists():
+                markdown_target.write_text(
+                    f"# {ticker.upper()} {statement_type.title()} Financials\n\n{dataframe_to_markdown(frame, max_rows=40)}",
+                    encoding="utf-8",
+                )
+            if not csv_target.exists():
+                frame.to_csv(csv_target, index=False)
 
     return [
         f"{ticker.upper()} bulk download to {relative_display_path(company_root)}",
