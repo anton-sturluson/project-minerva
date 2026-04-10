@@ -9,7 +9,9 @@ from typing import Callable
 import typer
 
 from harness.commands import register_commands
+from harness.commands import analysis as analysis_commands
 from harness.commands import analyze as analyze_commands
+from harness.commands import evidence as evidence_commands
 from harness.commands import extract as extract_commands
 from harness.commands import fileinfo as fileinfo_commands
 from harness.commands import plot as plot_commands
@@ -186,7 +188,7 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
             stderr=(
                 "What went wrong: an empty command segment was provided.\n"
                 "What to do instead: provide a command name before any arguments.\n"
-                "Available alternatives: sec, valuation, analyze, plot, extract, fileinfo, research"
+                "Available alternatives: sec, evidence, valuation, analyze, analysis, plot, extract, fileinfo, research"
             ),
             exit_code=1,
         )
@@ -196,10 +198,16 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
         "sec": lambda full_argv, current_settings, current_stdin: sec_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
+        "evidence": lambda full_argv, current_settings, current_stdin: evidence_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
         "valuation": lambda full_argv, current_settings, current_stdin: valuation_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
         "analyze": lambda full_argv, current_settings, current_stdin: analyze_commands.dispatch(
+            full_argv[1:], settings=current_settings, stdin=current_stdin
+        ),
+        "analysis": lambda full_argv, current_settings, current_stdin: analysis_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
         "plot": lambda full_argv, current_settings, current_stdin: plot_commands.dispatch(
