@@ -2,16 +2,16 @@ name: default
 targets:
   - bucket: sec-filings-annual
     label: Annual SEC filings (10-K)
-    target_count: 3
+    target_count: 5
   - bucket: sec-filings-quarterly
     label: Quarterly SEC filings (10-Q)
     target_count: 4
   - bucket: sec-earnings
     label: Earnings press releases
-    target_count: 4
+    target_count: 20
   - bucket: sec-financial-statements
     label: Structured SEC financial statements
-    target_count: 3
+    target_count: 5
   - bucket: external-research
     label: External industry or competitive evidence
-    target_count: 1
+    target_count: 20
