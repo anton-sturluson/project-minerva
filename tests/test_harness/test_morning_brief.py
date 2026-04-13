@@ -14,6 +14,8 @@ from unittest.mock import patch
 from harness.commands import brief
 from harness.config import HarnessSettings
 from harness.morning_brief import (
+    _parse_ir_feed,
+    _parse_ir_html,
     append_review_log,
     audit_evidence,
     collect_earnings,
@@ -187,6 +189,82 @@ class MorningBriefTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("event_count: 2", result.stdout.decode("utf-8"))
+
+    def test_collect_market_keeps_non_material_index_quotes(self) -> None:
+        quiet_market = self.workspace / "quiet-market.json"
+        quiet_market.write_text(
+            json.dumps(
+                {
+                    "indexes": [
+                        {
+                            "symbol": "SPY",
+                            "change_pct": 0.42,
+                            "headline": "S&P 500 was little changed",
+                            "material": False,
+                        }
+                    ],
+                    "rates": [
+                        {
+                            "name": "US10Y",
+                            "change_pct": -0.05,
+                            "headline": "US 10Y yield edged lower",
+                            "material": False,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        summary = collect_market(self.workspace, run_date=RUN_DATE, source=str(quiet_market))
+        payload = load_json(Path(summary["raw_path"]), default={})
+        events = payload.get("events", [])
+
+        self.assertEqual(summary["status"], "success")
+        self.assertEqual(summary["event_count"], 2)
+        self.assertEqual([event["headline"] for event in events], ["S&P 500 was little changed", "US 10Y yield edged lower"])
+        self.assertTrue(all(event["material"] is False for event in events))
+
+    def test_parse_ir_html_filters_navigation_links(self) -> None:
+        raw_html = """
+        <html>
+          <body>
+            <nav>
+              <a href="/home">Home</a>
+              <a href="/contact">Contact</a>
+              <a href="/buy">Buy Now</a>
+              <a href="#main">Skip to main content</a>
+            </nav>
+            <main>
+              <a href="/news/q1-2026-results">Acme Corp Announces First Quarter 2026 Financial Results</a>
+              <a href="/newsroom">Newsroom</a>
+            </main>
+          </body>
+        </html>
+        """
+
+        events = _parse_ir_html(raw_html, RUN_DATE, "ACME", "https://investors.example.com/releases")
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["headline"], "Acme Corp Announces First Quarter 2026 Financial Results")
+        self.assertEqual(events[0]["reference_url"], "https://investors.example.com/news/q1-2026-results")
+
+    def test_parse_ir_feed_xml_falls_back_to_filtered_html(self) -> None:
+        raw_html = """
+        <html>
+          <body>
+            <a href="/home">Home</a>
+            <a href="/news/april-2026-dividend">Acme Declares April 2026 Quarterly Dividend</a>
+          </body>
+        </html>
+        """
+
+        with patch("harness.morning_brief.read_text_source", return_value=(raw_html, None)):
+            events = _parse_ir_feed("https://investors.example.com/feed.xml", "xml", RUN_DATE, "ACME", {})
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["headline"], "Acme Declares April 2026 Quarterly Dividend")
+        self.assertEqual(events[0]["reference_url"], "https://investors.example.com/news/april-2026-dividend")
 
     def test_macro_collect_builds_normalized_events_from_registry_sources(self) -> None:
         sync_portfolio(

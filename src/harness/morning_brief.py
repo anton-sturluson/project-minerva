@@ -31,6 +31,42 @@ from minerva.sec import get_recent_filings
 
 DEFAULT_FILING_FORMS = ["8-K", "10-K", "10-Q", "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"]
 DEFAULT_INDEX_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM"]
+IR_HTML_NAV_PATTERNS = (
+    r"home",
+    r"about(?: us)?",
+    r"contact(?: us)?",
+    r"skip to(?: main content| content)?",
+    r"go to(?: footer| main content| content)?",
+    r"buy(?: now)?",
+    r"log(?:in| on)",
+    r"sign in",
+    r"sign up",
+    r"register",
+    r"subscribe",
+    r"menu",
+    r"search",
+    r"learn more",
+    r"read more",
+    r"investor relations",
+    r"press releases?",
+    r"news(?:room)?",
+    r"events?",
+)
+IR_HTML_MATERIAL_TITLE_PATTERN = re.compile(
+    r"\b(?:"
+    r"announces?|reports?|reported|files?|filed|completes?|completed|declares?|launches?|publishes?|"
+    r"prices?|priced|acquires?|acquired|acquisition|merger|appoints?|expands?|partners?|partnership|"
+    r"enters?|entered|closes?|closed|closing|commences?|receives?|received|approves?|approved|"
+    r"results?|earnings|revenue|guidance|outlook|quarter|fiscal|annual|investor day|conference call|"
+    r"webcast|presentation|dividend|buyback|repurchase|offering|notes|debt|equity|sec|8-k|10-k|10-q|"
+    r"shareholders?|board|trial|study|data|fda|phase\s+[1234]|agreement"
+    r")\b"
+    r"|"
+    r"\b(?:q[1-4]|fy)\s*(?:20)?\d{2}\b"
+    r"|"
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,\s*\d{4})?\b",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -1483,8 +1519,6 @@ def _normalize_market_event(
 ) -> dict[str, Any] | None:
     change_pct = _to_float(row.get("change_pct") or row.get("percent_change") or row.get("pct"))
     material = bool(row.get("material")) or (change_pct is not None and abs(change_pct) >= 1.0)
-    if not material:
-        return None
     symbol = str(row.get("symbol") or row.get("name") or row.get("pair") or "").strip()
     headline = str(row.get("headline") or f"{symbol} moved {change_pct:.2f}%").strip() if change_pct is not None else str(row.get("headline") or symbol)
     return {
@@ -1496,6 +1530,7 @@ def _normalize_market_event(
         "headline": headline,
         "category": category or str(row.get("category") or "indexes"),
         "change_pct": change_pct,
+        "material": material,
         "reference_url": str(row.get("url") or "").strip(),
         "metadata": row,
     }
@@ -1510,6 +1545,8 @@ def _parse_ir_feed(
 ) -> list[dict[str, Any]]:
     raw_text, _ = read_text_source(feed_url)
     if feed_format in {"rss", "atom", "xml"}:
+        if _looks_like_html_document(raw_text):
+            return _parse_ir_html(raw_text, run_date, security_id, feed_url)
         return _parse_ir_xml(raw_text, run_date, security_id, entry)
     if feed_format == "json":
         payload = json.loads(raw_text)
@@ -1529,7 +1566,7 @@ def _parse_ir_feed(
             if _event_date(item, run_date) == run_date.isoformat() and str(item.get("title") or item.get("headline") or "").strip()
         ]
     if feed_format == "html":
-        return _parse_ir_html(raw_text, run_date, security_id)
+        return _parse_ir_html(raw_text, run_date, security_id, feed_url)
     raise ValueError(f"unsupported IR feed format: {feed_format}")
 
 
@@ -1565,12 +1602,19 @@ def _parse_ir_xml(raw_text: str, run_date: date, security_id: str, entry: dict[s
     return events
 
 
-def _parse_ir_html(raw_text: str, run_date: date, security_id: str) -> list[dict[str, Any]]:
+def _parse_ir_html(raw_text: str, run_date: date, security_id: str, base_url: str = "") -> list[dict[str, Any]]:
+    document = lxml_html.fromstring(raw_text)
     events: list[dict[str, Any]] = []
-    for match in re.finditer(r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", raw_text, flags=re.IGNORECASE | re.DOTALL):
-        title = re.sub(r"<[^>]+>", " ", match.group(2)).strip()
-        if not title:
+    seen: set[tuple[str, str]] = set()
+    for node in document.xpath("//a[@href]"):
+        title = _normalize_whitespace(" ".join(node.itertext()))
+        href = urljoin(base_url, str(node.get("href") or "").strip())
+        if not _looks_like_ir_press_release(title):
             continue
+        dedupe_key = (title.casefold(), href)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         events.append(
             {
                 "source": "ir",
@@ -1579,11 +1623,30 @@ def _parse_ir_html(raw_text: str, run_date: date, security_id: str) -> list[dict
                 "security_id": security_id,
                 "relationship": "monitored",
                 "headline": title,
-                "reference_url": match.group(1),
+                "reference_url": href,
                 "metadata": {},
             }
         )
     return events[:10]
+
+
+def _looks_like_html_document(raw_text: str) -> bool:
+    snippet = raw_text.lstrip()[:500]
+    return bool(re.search(r"<!doctype\s+html|<html\b|<body\b|<head\b", snippet, flags=re.IGNORECASE))
+
+
+def _looks_like_ir_press_release(title: str) -> bool:
+    normalized = _normalize_whitespace(title)
+    if len(normalized) < 10:
+        return False
+    if not re.search(r"[A-Za-z]", normalized):
+        return False
+    lowered = normalized.casefold()
+    if any(re.fullmatch(pattern, lowered) for pattern in IR_HTML_NAV_PATTERNS):
+        return False
+    if any(lowered.startswith(prefix) for prefix in ("skip to", "go to", "buy ", "log in", "sign in", "sign up")):
+        return False
+    return bool(IR_HTML_MATERIAL_TITLE_PATTERN.search(normalized))
 
 
 def _load_finnhub_payload(run_date: date, api_key: str) -> dict[str, Any]:
