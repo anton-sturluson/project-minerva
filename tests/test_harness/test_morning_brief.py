@@ -20,6 +20,7 @@ from harness.morning_brief import (
     collect_filings,
     collect_ir,
     collect_macro,
+    collect_macro_registry_events,
     collect_market,
     ensure_daily_run_layout,
     load_manifest,
@@ -76,9 +77,9 @@ class MorningBriefTests(unittest.TestCase):
         self.assertEqual(adjacency["adjacent"], "TSM")
         self.assertEqual(thesis["security_id"], "NVDA")
 
-        rendered = (self.workspace / "data" / "portfolio" / "current" / "rendered.md").read_text(encoding="utf-8")
-        history = (self.workspace / "data" / "portfolio" / "history" / "rendered-history.md").read_text(encoding="utf-8")
-        universe = load_json(self.workspace / "data" / "portfolio" / "current" / "universe.json", default=[])
+        rendered = (self.workspace / "data" / "01-portfolio" / "current" / "rendered.md").read_text(encoding="utf-8")
+        history = (self.workspace / "data" / "01-portfolio" / "history" / "rendered-history.md").read_text(encoding="utf-8")
+        universe = load_json(self.workspace / "data" / "01-portfolio" / "current" / "universe.json", default=[])
 
         self.assertIn("## Holdings", rendered)
         self.assertIn("`NVDA` | NVIDIA Corp", rendered)
@@ -187,6 +188,139 @@ class MorningBriefTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("event_count: 2", result.stdout.decode("utf-8"))
 
+    def test_macro_collect_builds_normalized_events_from_registry_sources(self) -> None:
+        sync_portfolio(
+            self.workspace,
+            as_of=RUN_DATE,
+            holdings_source=str(FIXTURE_DIR / "holdings.csv"),
+            transactions_source=str(FIXTURE_DIR / "transactions.csv"),
+            watchlist_source=str(FIXTURE_DIR / "watchlist.json"),
+        )
+        bls_page = self.workspace / "bls.html"
+        bls_page.write_text(
+            """
+            <html>
+              <body>
+                <table>
+                  <tr><th>Date</th><th>Time</th><th>Release</th></tr>
+                  <tr>
+                    <td>April 8, 2026</td>
+                    <td>8:30 AM ET</td>
+                    <td><a href="https://www.bls.gov/schedule/cpi">Consumer Price Index</a></td>
+                  </tr>
+                  <tr>
+                    <td>April 9, 2026</td>
+                    <td>8:30 AM ET</td>
+                    <td><a href="https://www.bls.gov/schedule/ppi">Producer Price Index</a></td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+            """,
+            encoding="utf-8",
+        )
+        fed_page = self.workspace / "fed.html"
+        fed_page.write_text(
+            """
+            <html>
+              <body>
+                <article>
+                  <time datetime="2026-04-08">April 8, 2026</time>
+                  <a href="https://www.federalreserve.gov/newsevents/pressreleases/monetary20260408a.htm">
+                    FOMC Minutes Release
+                  </a>
+                </article>
+              </body>
+            </html>
+            """,
+            encoding="utf-8",
+        )
+        registry = self.workspace / "macro-registry.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "sources": [
+                        {
+                            "name": "BLS",
+                            "category": "macro",
+                            "importance": "high",
+                            "parser": "bls_schedule",
+                            "url": str(bls_page),
+                        },
+                        {
+                            "name": "Federal Reserve",
+                            "category": "policy",
+                            "importance": "high",
+                            "parser": "federal_reserve_events",
+                            "url": str(fed_page),
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        summary = collect_macro_registry_events(
+            self.workspace,
+            run_date=RUN_DATE,
+            registry_path=registry,
+        )
+
+        payload = load_json(Path(summary["output_path"]), default={})
+        events = payload.get("events", [])
+        events_by_source = {event["source_name"]: event for event in events}
+        self.assertEqual(summary["status"], "success")
+        self.assertEqual(summary["event_count"], 2)
+        self.assertEqual(sorted(event["event_name"] for event in events), ["Consumer Price Index", "FOMC Minutes Release"])
+        self.assertEqual(events_by_source["BLS"]["release_time"], "8:30 AM ET")
+        self.assertEqual(events_by_source["BLS"]["source_url"], "https://www.bls.gov/schedule/cpi")
+
+    def test_macro_collect_output_can_feed_macro_brief_and_preserve_degraded_reasons(self) -> None:
+        sync_portfolio(
+            self.workspace,
+            as_of=RUN_DATE,
+            holdings_source=str(FIXTURE_DIR / "holdings.csv"),
+            transactions_source=str(FIXTURE_DIR / "transactions.csv"),
+            watchlist_source=str(FIXTURE_DIR / "watchlist.json"),
+        )
+        registry = self.workspace / "macro-registry.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "sources": [
+                        {
+                            "name": "BLS",
+                            "category": "macro",
+                            "importance": "high",
+                            "parser": "normalized_json",
+                            "url": str(FIXTURE_DIR / "macro-events.json"),
+                        },
+                        {
+                            "name": "Broken source",
+                            "parser": "not-supported",
+                            "url": str(FIXTURE_DIR / "macro-events.json"),
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        collect_summary = collect_macro_registry_events(self.workspace, run_date=RUN_DATE, registry_path=registry)
+        macro_summary = collect_macro(
+            self.workspace,
+            run_date=RUN_DATE,
+            source=str(collect_summary["output_path"]),
+            registry_path=registry,
+        )
+
+        run_paths = ensure_daily_run_layout(self.workspace, RUN_DATE)
+        macro_payload = load_json(run_paths.raw_dir / "macro.json", default={})
+
+        self.assertEqual(macro_summary["status"], "degraded")
+        self.assertEqual(macro_summary["event_count"], 1)
+        self.assertTrue(any("Broken source" in reason for reason in macro_payload["degraded_reasons"]))
+
     def test_wrapper_orchestrates_command_sequence_with_optional_sources(self) -> None:
         workspace_root = self.workspace / "workspace"
         call_log = self.workspace / "calls.log"
@@ -229,27 +363,74 @@ class MorningBriefTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            f"prepared_evidence: {workspace_root}/reports/daily-news/{RUN_DATE.isoformat()}/data/structured/prepared-evidence.json",
+            f"prepared_evidence: {workspace_root}/reports/03-daily-news/{RUN_DATE.isoformat()}/data/structured/prepared-evidence.json",
             result.stdout,
         )
         self.assertIn(
-            f"manifest: {workspace_root}/reports/daily-news/{RUN_DATE.isoformat()}/data/raw/manifest.json",
+            f"manifest: {workspace_root}/reports/03-daily-news/{RUN_DATE.isoformat()}/data/raw/manifest.json",
             result.stdout,
         )
-        self.assertTrue((workspace_root / "reports" / "daily-news" / RUN_DATE.isoformat()).is_dir())
+        self.assertTrue((workspace_root / "reports" / "03-daily-news" / RUN_DATE.isoformat()).is_dir())
         self.assertEqual(
             call_log.read_text(encoding="utf-8").splitlines(),
             [
                 f"portfolio sync --date {RUN_DATE.isoformat()} --holdings-source {FIXTURE_DIR / 'holdings.csv'} --transactions-source {FIXTURE_DIR / 'transactions.csv'} --watchlist-source {FIXTURE_DIR / 'watchlist.json'}",
                 f"brief filings --date {RUN_DATE.isoformat()} --source {FIXTURE_DIR / 'filings.json'}",
                 f"brief earnings --date {RUN_DATE.isoformat()} --provider auto --source {FIXTURE_DIR / 'market-data.json'}",
-                f"brief macro --date {RUN_DATE.isoformat()} --source {FIXTURE_DIR / 'macro-events.json'}",
+                f"brief macro --date {RUN_DATE.isoformat()} --registry {workspace_root / 'data' / '01-portfolio' / 'current' / 'macro-registry.json'} --source {FIXTURE_DIR / 'macro-events.json'}",
                 f"brief ir --date {RUN_DATE.isoformat()} --registry {self.workspace / 'ir-registry.json'}",
                 f"brief market --date {RUN_DATE.isoformat()} --provider auto --source {FIXTURE_DIR / 'market-data.json'}",
                 f"brief prep --date {RUN_DATE.isoformat()}",
                 f"brief audit --date {RUN_DATE.isoformat()}",
                 f"brief review-log --date {RUN_DATE.isoformat()}",
             ],
+        )
+
+    def test_wrapper_runs_macro_collect_when_no_macro_source_is_provided(self) -> None:
+        workspace_root = self.workspace / "workspace"
+        call_log = self.workspace / "calls.log"
+        fake_minerva = self.workspace / "fake-minerva.sh"
+        fake_minerva.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' \"$*\" >> \"$MINERVA_CALL_LOG\"\n",
+            encoding="utf-8",
+        )
+        fake_minerva.chmod(0o755)
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "MINERVA_CALL_LOG": str(call_log),
+                "MINERVA_RUNNER": str(fake_minerva),
+                "MINERVA_SKIP_STATUS_CHECK": "1",
+                "MINERVA_WORKSPACE_ROOT": str(workspace_root),
+                "MINERVA_PORTFOLIO_HOLDINGS_SOURCE": str(FIXTURE_DIR / "holdings.csv"),
+                "MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE": str(FIXTURE_DIR / "transactions.csv"),
+                "MINERVA_PORTFOLIO_WATCHLIST_SOURCE": str(FIXTURE_DIR / "watchlist.json"),
+                "MINERVA_BRIEF_FILINGS_SOURCE": str(FIXTURE_DIR / "filings.json"),
+                "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
+                "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
+            }
+        )
+
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief_v1.sh"), RUN_DATE.isoformat()],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        generated_source = workspace_root / "reports" / "03-daily-news" / RUN_DATE.isoformat() / "data" / "raw" / "macro-events.json"
+        self.assertIn(
+            f"brief macro-collect --date {RUN_DATE.isoformat()} --registry {workspace_root / 'data' / '01-portfolio' / 'current' / 'macro-registry.json'} --output {generated_source}",
+            call_log.read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            f"brief macro --date {RUN_DATE.isoformat()} --registry {workspace_root / 'data' / '01-portfolio' / 'current' / 'macro-registry.json'} --source {generated_source}",
+            call_log.read_text(encoding="utf-8"),
         )
 
 

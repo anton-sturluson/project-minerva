@@ -28,7 +28,7 @@ class PortfolioPaths:
 
     @property
     def root(self) -> Path:
-        return self.workspace_root / "data" / "portfolio"
+        return self.workspace_root / "data" / "01-portfolio"
 
     @property
     def current(self) -> Path:

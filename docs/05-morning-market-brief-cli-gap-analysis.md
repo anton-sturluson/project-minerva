@@ -19,12 +19,11 @@ Implement these commands in v1:
 - `minerva portfolio thesis`
 - `minerva brief filings`
 - `minerva brief earnings`
+- `minerva brief macro-collect`
 - `minerva brief macro`
 - `minerva brief ir`
 - `minerva brief market`
 - `minerva brief prep`
-- `minerva brief audit`
-- `minerva brief review-log`
 
 V1 also includes:
 - manifest writing
@@ -62,7 +61,7 @@ So the remaining functional gap is not collection. It is the final write stage t
 ### Portfolio state
 
 ```text
-hard-disk/data/portfolio/
+hard-disk/data/01-portfolio/
 ├── INDEX.md
 ├── current/
 │   ├── INDEX.md
@@ -91,7 +90,7 @@ Notes:
 ### Daily morning run artifacts
 
 ```text
-hard-disk/reports/daily-news/
+hard-disk/reports/03-daily-news/
 ├── INDEX.md
 ├── 2026-04-08/
 │   ├── notes/
@@ -141,6 +140,9 @@ Purpose:
 - append compact history entries
 - render a markdown summary
 
+Uses LLM:
+- no
+
 Inputs:
 - sheet identifier / config
 - holdings tab
@@ -156,6 +158,12 @@ Writes:
 - history log files under `history/`
 - `current/rendered.md`
 
+Exact behavior:
+- read the latest portfolio inputs
+- normalize identifiers and merge holdings plus watchlist into the current universe
+- persist the current state and append compact history records
+- render a human-readable current portfolio summary
+
 Implementation details:
 - watchlist is local-only for v1; start with an empty file if needed
 - normalize each security to a canonical identifier
@@ -167,6 +175,9 @@ Implementation details:
 Purpose:
 - manage the curated adjacent-company map stored locally
 
+Uses LLM:
+- no in v1
+
 Subcommands:
 - `list` — show all stored adjacency mappings
 - `add` — add one adjacency relationship
@@ -177,6 +188,11 @@ Writes:
 - `current/adjacent-map.json`
 - optional history entry
 - rendered adjacency markdown
+
+Exact behavior:
+- persist the locally curated read-through map for monitored names
+- let operators add, remove, inspect, and render adjacency relationships
+- make that map available to the brief pipeline for relationship tagging
 
 Implementation details:
 - store adjacency locally for now
@@ -191,6 +207,9 @@ Implementation details:
 Purpose:
 - manage compact thesis cards per monitored security
 
+Uses LLM:
+- no for storage and rendering; thesis content itself may be human-written or model-assisted upstream, but this command is just the persistence layer
+
 Subcommands:
 - `list` — list securities with thesis cards
 - `show` — show one thesis card
@@ -201,6 +220,11 @@ Writes:
 - `current/thesis-cards.json`
 - optional history entry
 - rendered thesis markdown
+
+Exact behavior:
+- store, replace, inspect, and render compact thesis cards for the monitored universe
+- make those cards available to the writing and prep stages as lightweight context
+- avoid turning thesis storage into a report-generation step
 
 Implementation details:
 - thesis cards should be compact, not full reports
@@ -219,6 +243,9 @@ Purpose:
 - filter to material forms
 - normalize them into event rows
 
+Uses LLM:
+- no
+
 Inputs:
 - `universe.json`
 - form allowlist / denylist
@@ -228,6 +255,12 @@ Writes:
 - raw filings JSON
 - normalized filings event JSON
 - optional rendered markdown list
+
+Exact behavior:
+- read the monitored universe
+- fetch qualifying filings, or load them from a supplied source file
+- write one normalized event row per relevant filing with date, form, issuer, headline, and URL
+- update manifest status for the filings source
 
 Implementation details:
 - this must reuse existing `sec` primitives
@@ -240,6 +273,9 @@ Purpose:
 - collect reported and upcoming earnings for monitored names
 - include adjacent names with strong read-through value
 - include non-adjacent names only when clearly market-relevant
+
+Uses LLM:
+- no
 
 Inputs:
 - `universe.json`
@@ -254,6 +290,12 @@ Writes:
 - normalized earnings events JSON
 - optional rendered schedule/results markdown
 
+Exact behavior:
+- read earnings metadata from the chosen provider or a supplied source file
+- normalize timing and relationship tags
+- keep metadata and references only, without attempting deeper earnings analysis
+- update manifest status for the earnings source
+
 Implementation details:
 - normalize:
   - reported vs scheduled
@@ -261,12 +303,44 @@ Implementation details:
   - monitored vs adjacent vs non-adjacent market-relevant
 - this command collects metadata and references only; it does not do deep earnings analysis
 
-### `minerva brief macro`
+### `minerva brief macro-collect`
 Purpose:
-- collect the day’s macro / policy schedule in normalized form
+- build the normalized macro source file from the local macro registry
+
+Uses LLM:
+- no
 
 Inputs:
 - `--date` or run window
+- `macro-registry.json`
+- optional explicit output path
+
+Writes:
+- generated `macro-events.json`
+- source-level status metadata for the manifest
+
+Exact behavior:
+- read the curated official-source list from the macro registry
+- fetch and parse those sources deterministically
+- emit one normalized `macro-events.json` payload for the run date
+- record per-source success/degraded status for the manifest
+
+Implementation details:
+- this is the missing bridge between the registry and the existing macro ingestion step
+- it reads the curated official-source list, parses those sources, and writes one normalized payload the rest of the pipeline can consume
+- if no macro source file is supplied to the wrapper, this command should run first and generate one deterministically
+- this command does *not* replace `brief macro`; it feeds it
+
+### `minerva brief macro`
+Purpose:
+- ingest the day’s macro / policy schedule in normalized form
+
+Uses LLM:
+- no
+
+Inputs:
+- `--date` or run window
+- a prepared `macro-events.json` source, either passed directly or generated by `brief macro-collect`
 
 Proposed v1 sources:
 - small curated list of official calendars/pages
@@ -277,6 +351,13 @@ Writes:
 - normalized macro events JSON
 - optional rendered calendar markdown
 
+Exact behavior:
+- read the prepared macro events payload
+- keep the events that match the run date
+- normalize them into the shared brief-event schema
+- write raw, normalized, and rendered macro outputs
+- update manifest status for the macro source
+
 Implementation details:
 - keep the schema simple:
   - event name
@@ -285,11 +366,19 @@ Implementation details:
   - category
   - importance tag
 - maintain the tracked macro-source list in a small local registry/config file
+- important distinction:
+  - `brief macro-collect` is the *builder*
+  - `brief macro` is the *consumer / ingester*
+  - before this change, the pipeline could only use a macro source file if one already existed
+  - after this change, the harness can generate that file itself from the registry and then ingest it
 
 ### `minerva brief ir`
 Purpose:
 - scan known IR / press-release pages for monitored names
 - capture overnight releases and normalize them
+
+Uses LLM:
+- no in v1
 
 Inputs:
 - `universe.json`
@@ -297,12 +386,18 @@ Inputs:
 - `--date` or time window
 
 Registry location:
-- `hard-disk/data/portfolio/current/ir-registry.json`
+- `hard-disk/data/01-portfolio/current/ir-registry.json`
 
 Writes:
 - raw IR scan JSON
 - normalized IR release events JSON
 - optional rendered markdown list
+
+Exact behavior:
+- read the locally curated IR registry
+- fetch each configured feed or page
+- extract overnight titles, URLs, dates, and issuer mapping into normalized events
+- update manifest status for the IR source
 
 Implementation details:
 - store IR URLs locally in v1
@@ -314,6 +409,9 @@ Implementation details:
 Purpose:
 - collect only the market context that is large or explanatory enough to matter
 
+Uses LLM:
+- no
+
 Inputs:
 - `--date` or run window
 
@@ -324,6 +422,12 @@ Writes:
 - raw market snapshot JSON
 - normalized market-context JSON
 - optional rendered markdown summary
+
+Exact behavior:
+- read market context from the chosen provider or a supplied source file
+- keep only material index, rates, FX, or other explanatory moves
+- normalize those into the shared brief-event schema
+- update manifest status for the market source
 
 Implementation details:
 - keep this intentionally narrow
@@ -337,6 +441,9 @@ Implementation details:
 Purpose:
 - prepare a cleaner agent-ready evidence pack from collected raw inputs
 
+Uses LLM:
+- no
+
 Inputs:
 - filings / earnings / macro / IR / market JSON
 - `universe.json`
@@ -349,6 +456,12 @@ Writes:
 - `source-status.md`
 - optional suppression log
 
+Exact behavior:
+- combine all collected source events into one evidence pack
+- deduplicate, relationship-tag, and group them for the writing step
+- suppress stale, empty, or duplicate events
+- produce the compact writer-facing artifacts without making final editorial judgments
+
 Implementation details:
 - this is evidence hygiene, not final judgment
 - do:
@@ -357,46 +470,58 @@ Implementation details:
   - event-type tagging
   - stale/empty suppression
   - candidate section grouping
+- `grouped-events.md` and `source-status.md` should be Charlie’s default entry point; raw source files are for drill-down, not first read
 - do not try to replace the main agent’s prioritization
 
-### `minerva brief audit`
+---
+
+## Charlie's Autonomous Planning & Writing
+
+After the deterministic pipeline finishes at `brief prep`, Charlie takes the driver's seat.
+
 Purpose:
-- run a bounded cross-check for misses after prep
+- decide which events require deep dives
+- extract answers from raw sources without blowing up the context window
+- write the final reports
+
+Uses LLM:
+- yes (this is Charlie himself, operating autonomously)
 
 Inputs:
-- prepared evidence
-- manifest
-- optional broader scan inputs
+- `grouped-events.md`
+- `source-status.md`
+- `prepared-evidence.json` (as reference)
 
 Writes:
-- `audit.json`
-- optional rendered audit markdown
+- `reports/03-daily-news/<date>/notes/execution-plan.md`
+- `reports/03-daily-news/<date>/notes/morning-brief-report.md`
+- `reports/03-daily-news/<date>/notes/slack-brief.md`
+
+Exact behavior:
+1. **Audit & Plan**: Charlie reads the collected headlines and the source status, decides whether the evidence is sufficient, and writes an `execution-plan.md` containing targeted questions or angles needed for the specific events that actually matter.
+2. **Targeted Extraction**: Charlie uses `minerva extract` / `extract-many` (e.g. `--model openai/gpt-5.4`) against massive raw SEC/IR files to answer his planned questions. This keeps his working context strictly focused on signal instead of noise.
+3. **Synthesis**: Charlie writes the final reports based on the extracted answers.
 
 Implementation details:
-- keep this bounded
-- this is a miss-check, not a second full brief pipeline
+- this completely replaces the old idea of having `brief audit` or `brief plan` as rigid CLI pipeline commands
+- the pipeline's job ends at `brief prep`, and Charlie's job begins by reading the summary artifacts
 
-### `minerva brief review-log`
-Purpose:
-- append one structured review entry per daily-news run
+---
 
-Inputs:
-- manifest from the just-completed run
-- audit output from that same run, if present
-- optional operator notes
+## LLM boundary and context management
 
-Writes:
-- `hard-disk/reports/daily-news/review-log.jsonl`
+The intended boundary in v1 is:
+- `portfolio ...` commands are deterministic state management
+- `brief filings`, `earnings`, `macro-collect`, `macro`, `ir`, `market`, and `prep` are strictly deterministic evidence collection and preparation
+- the pipeline halts at `brief prep`, handing off to Charlie
+- Charlie takes the driver's seat: he audits the evidence, creates a plan, reads deep sources via targeted extraction, and writes the brief
 
-Implementation details:
-- write one entry after each daily-news session
-- this command mainly reads the current run’s manifest + audit output and appends one structured record
-- capture:
-  - run id/date
-  - source failures
-  - degraded modes used
-  - misses found later
-  - recurring collection pain points
+In practice, that means:
+- zero LLM usage happens during the automated collection phase itself
+- `brief prep` compresses and groups the collected evidence before Charlie sees it
+- Charlie wakes up and starts from `grouped-events.md` and `source-status.md`
+- Charlie determines his own audit verdict and reading plan
+- to read the full text of SEC filings or press releases, Charlie uses `minerva extract` or `minerva extract-many` (e.g. `--model openai/gpt-5.4`) to ask targeted questions, rather than pulling the entire document into context. This prevents context bloat and keeps his working session strictly focused on signal instead of noise.
 
 ---
 
@@ -407,110 +532,45 @@ The daily run should work like this:
 1. `minerva portfolio sync`
 2. `minerva brief filings`
 3. `minerva brief earnings`
-4. `minerva brief macro`
-5. `minerva brief ir`
-6. `minerva brief market`
-7. `minerva brief prep`
-8. Charlie reads the evidence pack and writes:
-   - `notes/morning-brief-report.md`
-   - `notes/slack-brief.md`
-9. `minerva brief audit`
-10. `minerva brief review-log`
-11. OpenClaw posts the Slack brief
+4. `minerva brief macro-collect`
+5. `minerva brief macro`
+6. `minerva brief ir`
+7. `minerva brief market`
+8. `minerva brief prep`
+9. Charlie wakes up, reads `grouped-events.md` and `source-status.md`, and takes over as the autonomous intelligence layer:
+   - he decides whether to audit the evidence pack or request more data
+   - he builds his own execution plan
+   - he uses `minerva extract` / `extract-many` to deep dive on the full sources without blowing up his context window
+   - he runs `minerva brief audit` to validate the evidence pack before writing; if the audit fails, he loops back to collect or extract more data until the evidence passes
+   - once the audit passes, he writes `notes/morning-brief-report.md` and `notes/slack-brief.md`
+10. OpenClaw posts the Slack brief
 
 The important boundary is:
-- CLI collects and prepares evidence
-- Charlie writes the actual analysis
-
-Current implementation note:
-- steps 1 through 7, plus 9 and 10, are implemented in the harness
-- step 8 is still an orchestration gap, which is why the current note files are placeholders instead of a finished brief
+- CLI deterministically collects and prepares the initial evidence pack (steps 1-8)
+- Charlie is in the driver's seat for everything else: auditing, planning, targeted extraction, and writing (step 9)
 
 ---
 
 ## Cron / scheduler update
 
-The existing scheduled job should be updated so it no longer tries to do the entire morning brief in one agent prompt.
+The wrapper script (`scripts/run_morning_brief_v1.sh`) runs steps 1-8 deterministically.
 
-Instead, it should:
-1. run the deterministic CLI commands first
-2. hand the resulting evidence pack to Charlie
-3. have Charlie write the morning brief and Slack brief
-4. optionally run audit + review-log after that
+Expected command sequence inside the wrapper:
 
-## Recommended implementation pattern
-
-Do **not** put a giant chain directly into the cron line.
-
-Instead, create one thin wrapper script, for example:
-- `scripts/run_morning_brief_v1.sh`
-
-That script should:
-1. derive the run date
-2. create the daily run folder if needed
-3. call the CLI commands in order
-4. invoke the main-agent step using the prepared evidence path
-5. append review logs
-6. exit non-zero if the deterministic collection phase failed in a way that should block delivery
-
-## Expected command sequence inside the wrapper
-
-```bash
+```
 minerva portfolio sync --date "$RUN_DATE"
 minerva brief filings --date "$RUN_DATE"
 minerva brief earnings --date "$RUN_DATE"
+minerva brief macro-collect --date "$RUN_DATE"
 minerva brief macro --date "$RUN_DATE"
 minerva brief ir --date "$RUN_DATE"
 minerva brief market --date "$RUN_DATE"
 minerva brief prep --date "$RUN_DATE"
-# main-agent writeup step happens here
-minerva brief audit --date "$RUN_DATE"
-minerva brief review-log --date "$RUN_DATE"
+# The deterministic pipeline ends here.
+# Charlie wakes up, reads the prepared evidence, and takes the driver's seat.
 ```
 
-## Scheduler behavior change
-
-Today’s job logic is effectively:
-- scheduled prompt -> agent tries to do everything
-
-V1 should become:
-- scheduled trigger -> wrapper script / orchestrator -> deterministic CLI collection -> main-agent writeup -> Slack delivery
-
-That is the key operational change.
-
-## Concrete cron migration plan
-
-Because the schedule mechanism itself appears to live outside this repo, the safest migration is to change only the execution target, not to rebuild the schedule logic from scratch.
-
-Recommended change:
-1. keep the existing trigger time the same
-2. replace the old one-shot prompt entrypoint with a call to `scripts/run_morning_brief_v1.sh`
-3. pass any required source/registry environment variables in the cron environment or a sourced env file
-4. have the scheduled orchestration layer wait for `prepared_evidence` + `manifest` from the wrapper, then invoke Charlie for the write step
-5. only after the write step succeeds, run `brief audit` and `brief review-log` if they are not already folded into the orchestration wrapper
-
-Recommended cron-owned responsibilities:
-- set a stable working directory
-- export `UV_CACHE_DIR`
-- export `MINERVA_WORKSPACE_ROOT`
-- export any provider/source/registry env vars
-- call the wrapper script with the run date
-- capture stdout/stderr to a dated log file
-- alert on non-zero exit
-
-Recommended wrapper-owned responsibilities:
-- portfolio sync
-- deterministic evidence collection
-- manifest status gating
-- printing the exact `prepared_evidence` and `manifest` paths for the next orchestrator step
-
-Recommended agent/orchestrator responsibilities:
-- read `prepared-evidence.json`
-- write `notes/morning-brief-report.md`
-- write `notes/slack-brief.md`
-- deliver the Slack brief
-
-In other words, cron should trigger the harness, not impersonate the analyst.
+After the wrapper completes, the scheduler should wake Charlie to take over.
 
 ---
 
@@ -523,13 +583,13 @@ Recommended implementation order:
 3. `portfolio thesis`
 4. `brief filings`
 5. `brief earnings`
-6. `brief macro`
-7. `brief ir`
-8. `brief market`
-9. `brief prep`
-10. manifest writing + rendered evidence files
-11. `brief audit`
-12. `brief review-log`
-13. scheduler/wrapper update
+6. `brief macro-collect`
+7. `brief macro`
+8. `brief ir`
+9. `brief market`
+10. `brief prep`
+11. manifest writing + rendered evidence files
+12. scheduler/wrapper update
+13. Charlie autonomous prompt/wake configuration
 
 This order gets the evidence pipeline working before the cron integration depends on it.
