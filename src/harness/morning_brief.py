@@ -1631,7 +1631,12 @@ def _parse_ir_feed(
     security_id: str,
     entry: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    raw_text, _ = read_text_source(feed_url)
+    accept_hint = (
+        "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8"
+        if feed_format in {"rss", "atom", "xml"}
+        else "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
+    )
+    raw_text, _ = read_text_source(feed_url, accept=accept_hint)
     if feed_format in {"rss", "atom", "xml"}:
         if _looks_like_html_document(raw_text):
             return _parse_ir_html(raw_text, run_date, security_id, feed_url)

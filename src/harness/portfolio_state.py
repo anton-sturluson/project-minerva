@@ -773,11 +773,42 @@ def load_payload(source: str) -> tuple[Any, str]:
     return json.loads(raw_text), normalized_suffix
 
 
-def read_text_source(source: str) -> tuple[str, str]:
+_BROWSER_HEADERS: dict[str, str] = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+_shared_session: requests.Session | None = None
+
+
+def _http_session() -> requests.Session:
+    """Return a shared requests session with browser-like headers."""
+    global _shared_session  # noqa: PLW0603
+    if _shared_session is None:
+        _shared_session = requests.Session()
+        _shared_session.headers.update(_BROWSER_HEADERS)
+    return _shared_session
+
+
+def read_text_source(source: str, *, accept: str | None = None) -> tuple[str, str]:
     """Read text from a local path or HTTP URL."""
     parsed = urlparse(source)
     if parsed.scheme in {"http", "https"}:
-        response = requests.get(source, timeout=30)
+        headers: dict[str, str] = {}
+        if accept:
+            headers["Accept"] = accept
+        response = _http_session().get(source, timeout=30, headers=headers if headers else None)
+        # Retry once on 429 (rate limit)
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", "2"))
+            import time as _time_mod
+            _time_mod.sleep(min(retry_after, 10))
+            response = _http_session().get(source, timeout=30, headers=headers if headers else None)
         response.raise_for_status()
         suffix = Path(parsed.path).suffix or _suffix_from_content_type(response.headers.get("content-type", ""))
         return response.text, suffix or ".json"
