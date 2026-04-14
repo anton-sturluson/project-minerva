@@ -23,6 +23,38 @@ logger = logging.getLogger(__name__)
 EMPTY_JSON_ARRAY = "[]\n"
 EMPTY_JSONL = ""
 
+# Section-header rows in Google Sheet that are not real securities.
+NON_SECURITY_TICKERS = frozenset({
+    "CASH", "TOTAL", "CURRENT ASSET", "INVESTABLE",
+    "NON-INVESTABLE", "INVESTABLE CURRENT ASSET",
+})
+
+# Explicit mapping from normalized-lowercase CSV headers to canonical keys.
+_CSV_HEADER_MAP: dict[str, str] = {
+    "ticker": "ticker",
+    "category": "category",
+    "year of purcase": "year_of_purchase",
+    "cost": "cost",
+    "# shares": "shares",
+    "total cost": "total_cost",
+    "price": "price",
+    "market value": "market_value",
+    "% change": "pct_change",
+    "net": "net",
+    "cagr": "cagr",
+    "% portfolio\n(value-based)": "weight",
+    "% portfolio (value-based)": "weight",
+    "% portfolio\n(cost-based)": "cost_weight",
+    "% portfolio (cost-based)": "cost_weight",
+    "target %\n(value-based)": "target_weight",
+    "target % (value-based)": "target_weight",
+    "target diff": "target_diff",
+    "cagr target": "cagr_target",
+    "price target": "price_target",
+    "target year": "target_year",
+    "exchange": "exchange",
+}
+
 
 @dataclass(slots=True)
 class PortfolioPaths:
@@ -186,6 +218,12 @@ def sync_portfolio(
 
     holdings = _dedupe_records(normalize_holdings(holdings_rows))
     watchlist = _dedupe_records(normalize_watchlist(watchlist_rows))
+
+    # Carry forward enrichment fields from previous holdings so a re-sync
+    # from the Google Sheet does not lose country/sec_registered/finnhub_symbol.
+    previous_holdings = load_json(paths.holdings, default=[])
+    _carry_forward_enrichment(holdings, previous_holdings)
+
     universe = build_universe(holdings, watchlist)
     transactions = normalize_transactions(transactions_rows)
 
@@ -441,12 +479,7 @@ def enrich_portfolio(
                 skipped.append(ticker)
                 continue
 
-            # Skip non-security rows (section headers from Google Sheet)
-            _NON_SECURITY_TICKERS = {
-                "CASH", "TOTAL", "CURRENT ASSET", "INVESTABLE",
-                "NON-INVESTABLE", "INVESTABLE CURRENT ASSET",
-            }
-            if ticker in _NON_SECURITY_TICKERS:
+            if ticker in NON_SECURITY_TICKERS:
                 skipped.append(ticker)
                 continue
 
@@ -650,8 +683,11 @@ def normalize_holdings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for row in rows:
         record = _normalize_security_row(row, source_kind="holding")
-        if record["security_id"]:
-            normalized.append(record)
+        if not record["security_id"]:
+            continue
+        if record["security_id"] in NON_SECURITY_TICKERS:
+            continue
+        normalized.append(record)
     return normalized
 
 
@@ -691,20 +727,36 @@ def normalize_transactions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _normalize_csv_key(raw: str) -> str:
+    """Normalize a single CSV header to a canonical snake_case key."""
+    lowered = raw.strip().lower()
+    if lowered in _CSV_HEADER_MAP:
+        return _CSV_HEADER_MAP[lowered]
+    # Generic fallback: replace spaces and special chars with underscores.
+    return re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+
+
+def _normalize_csv_headers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Re-key a list of CSV row dicts using canonical snake_case headers."""
+    return [{_normalize_csv_key(k): v for k, v in row.items()} for row in rows]
+
+
 def load_tabular_rows(source: str | None) -> list[dict[str, Any]]:
     """Load list-like data from JSON, YAML, or CSV."""
     if not source:
         return []
     payload, suffix = load_payload(source)
     if isinstance(payload, list):
-        return [dict(item) for item in payload if isinstance(item, dict)]
+        rows = [dict(item) for item in payload if isinstance(item, dict)]
+        return _normalize_csv_headers(rows) if suffix == ".csv" else rows
     if isinstance(payload, dict):
         for key in ("rows", "items", "holdings", "transactions", "watchlist", "events"):
             value = payload.get(key)
             if isinstance(value, list):
                 return [dict(item) for item in value if isinstance(item, dict)]
     if suffix == ".csv" and isinstance(payload, str):
-        return list(csv.DictReader(StringIO(payload)))
+        rows = list(csv.DictReader(StringIO(payload)))
+        return _normalize_csv_headers(rows)
     raise ValueError(f"unsupported tabular source: {source}")
 
 
@@ -808,6 +860,39 @@ def parse_iso_date(raw: str | None) -> date:
     if not raw:
         return date.today()
     return date.fromisoformat(raw)
+
+
+_ENRICHMENT_FIELDS = ("exchange", "country", "sec_registered", "finnhub_symbol")
+
+
+def _carry_forward_enrichment(
+    current: list[dict[str, Any]],
+    previous: list[dict[str, Any]],
+) -> None:
+    """Merge enrichment fields from *previous* holdings into *current* in-place.
+
+    For ``exchange``, the new (sheet) value wins when present; for all other
+    enrichment fields the previous value is restored when the new record lacks it.
+    """
+    prev_by_id: dict[str, dict[str, Any]] = {
+        str(r.get("security_id", "")): r for r in previous if r.get("security_id")
+    }
+    for record in current:
+        sid = str(record.get("security_id", ""))
+        prev = prev_by_id.get(sid)
+        if not prev:
+            continue
+        for field in _ENRICHMENT_FIELDS:
+            prev_val = prev.get(field)
+            new_val = record.get(field)
+            if field == "exchange":
+                # Prefer the new (sheet) value if present, else keep previous.
+                if not (new_val and str(new_val).strip()):
+                    if prev_val is not None:
+                        record[field] = prev_val
+            else:
+                if new_val is None and prev_val is not None:
+                    record[field] = prev_val
 
 
 def _normalize_security_row(row: dict[str, Any], *, source_kind: str) -> dict[str, Any]:

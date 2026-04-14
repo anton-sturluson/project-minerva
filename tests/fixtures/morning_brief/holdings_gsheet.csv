@@ -1,0 +1,10 @@
+Ticker,Category,Year of Purcase,Cost,# Shares,Total Cost,Price,Market Value,% Change,Net,CAGR,"% Portfolio
+(Value-based)","% Portfolio
+(Cost-based)","Target %
+(Value-based)",Target diff,CAGR Target,Price Target,Target Year,Exchange
+NVDA,Tech,2023,200,100,20000,950,95000,375%,75000,50%,55.0,,,,,,,
+MSFT,Tech,2022,250,80,20000,410,32800,64%,12800,20%,19.0,,,,,,,
+CASH,,,,,,,,,,,,,,,,,,
+TOTAL,,,40000,,,,127800,,,,,,,,,,,
+KPG,Equities,2024,1.50,5000,7500,2.10,10500,40%,3000,15%,6.0,,,,,,,ASX
+TOI,Equities,2023,3.00,2000,6000,4.50,9000,50%,3000,20%,5.2,,,,,,,TSXV

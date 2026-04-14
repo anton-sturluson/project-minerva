@@ -19,6 +19,7 @@ from lxml import html as lxml_html
 logger = logging.getLogger(__name__)
 
 from harness.portfolio_state import (
+    NON_SECURITY_TICKERS,
     append_jsonl,
     canonical_security_id,
     ensure_portfolio_layout,
@@ -185,6 +186,8 @@ def collect_filings(
         for security in universe:
             ticker = str(security.get("ticker") or security.get("security_id") or "").strip()
             if not ticker:
+                continue
+            if ticker.upper() in NON_SECURITY_TICKERS:
                 continue
             if security.get("sec_registered") is False:
                 logger.info("skipping %s: not SEC-registered", ticker)
