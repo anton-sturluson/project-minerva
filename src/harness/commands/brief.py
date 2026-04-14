@@ -17,6 +17,7 @@ from harness.morning_brief import (
     collect_filings,
     collect_ir,
     collect_macro,
+    collect_macro_registry_events,
     collect_market,
     prepare_evidence,
 )
@@ -27,6 +28,7 @@ BRIEF_HELP = (
     "Morning brief evidence collection commands.\n\n"
     "Examples:\n"
     "  minerva brief filings --date 2026-04-08\n"
+    "  minerva brief macro-collect --date 2026-04-08\n"
     "  minerva brief earnings --date 2026-04-08 --source ./market-data.json\n"
     "  minerva brief prep --date 2026-04-08\n"
 )
@@ -68,6 +70,14 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: by
                 run_date=parse_iso_date(str(parsed.get("date") or "")),
                 source=str(parsed["source"]) if "source" in parsed else None,
                 registry=str(parsed["registry"]) if "registry" in parsed else None,
+                settings=active_settings,
+            )
+        if subcommand == "macro-collect":
+            parsed = parse_flag_args(args[1:])
+            return macro_collect_command(
+                run_date=parse_iso_date(str(parsed.get("date") or "")),
+                registry=str(parsed["registry"]) if "registry" in parsed else None,
+                output=str(parsed["output"]) if "output" in parsed else None,
                 settings=active_settings,
             )
         if subcommand == "ir":
@@ -194,8 +204,35 @@ def macro_command(
     except Exception as exc:
         return error_result(
             f"failed to collect macro events: {exc}",
-            "provide a macro events source or update the local registry",
-            ["`brief macro --date 2026-04-08 --source ./macro-events.json`"],
+            "provide a macro events source or run `brief macro-collect` against the local registry",
+            ["`brief macro-collect --date 2026-04-08`", "`brief macro --date 2026-04-08 --source ./macro-events.json`"],
+            start,
+        )
+    return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
+
+def macro_collect_command(
+    *,
+    run_date,
+    registry: str | None,
+    output: str | None,
+    settings: HarnessSettings | None = None,
+) -> CommandResult:
+    """Build a deterministic macro-events payload from the configured registry."""
+    start = time.perf_counter()
+    active_settings = settings or get_settings()
+    try:
+        summary = collect_macro_registry_events(
+            active_settings.ensure_workspace_root(),
+            run_date=run_date,
+            registry_path=Path(registry) if registry else None,
+            output_path=Path(output) if output else None,
+        )
+    except Exception as exc:
+        return error_result(
+            f"failed to build macro events source: {exc}",
+            "verify the macro registry entries and output path, then retry",
+            ["`brief macro-collect --date 2026-04-08`"],
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
@@ -341,6 +378,15 @@ def macro_cli(
     _print(macro_command(run_date=parse_iso_date(date_arg), source=source, registry=registry))
 
 
+@app.command("macro-collect", help="Build a normalized macro-events source from the local registry.")
+def macro_collect_cli(
+    date_arg: str | None = typer.Option(None, "--date", help="Run date."),
+    registry: str | None = typer.Option(None, "--registry", help="Optional macro registry path."),
+    output: str | None = typer.Option(None, "--output", help="Output file for the generated macro events payload."),
+) -> None:
+    _print(macro_collect_command(run_date=parse_iso_date(date_arg), registry=registry, output=output))
+
+
 @app.command("ir", help="Scan configured IR feeds for overnight releases.")
 def ir_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -381,7 +427,7 @@ def _usage_error(message: str) -> str:
         [
             f"What went wrong: {message}",
             "What to do instead: use one of the supported brief commands",
-            "Available alternatives: `brief filings`, `brief prep`, `brief review-log --notes ...`",
+            "Available alternatives: `brief filings`, `brief macro-collect`, `brief prep`, `brief review-log --notes ...`",
             "",
             BRIEF_HELP.rstrip(),
         ]

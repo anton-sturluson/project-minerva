@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from io import StringIO
@@ -14,6 +16,8 @@ from urllib.parse import urlparse
 
 import requests
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 EMPTY_JSON_ARRAY = "[]\n"
@@ -28,7 +32,7 @@ class PortfolioPaths:
 
     @property
     def root(self) -> Path:
-        return self.workspace_root / "data" / "portfolio"
+        return self.workspace_root / "data" / "01-portfolio"
 
     @property
     def current(self) -> Path:
@@ -392,6 +396,139 @@ def set_thesis_card(
     return replacement
 
 
+FINNHUB_SYMBOL_TABLE: dict[str, dict[str, Any]] = {
+    "ACFN": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "ACFN"},
+    "AIM": {"exchange": "NYSE MKT", "country": "US", "sec_registered": True, "finnhub_symbol": "AIM"},
+    "AVGO": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "AVGO"},
+    "BEPC": {"exchange": "NYSE", "country": "US", "sec_registered": True, "finnhub_symbol": "BEPC"},
+    "DUOL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "DUOL"},
+    "GOOGL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "GOOGL"},
+    "IMVT": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "IMVT"},
+    "KPG": {"exchange": "ASX", "country": "AU", "sec_registered": False, "finnhub_symbol": "KPG.AX"},
+    "LGCY": {"exchange": "NYSE MKT", "country": "US", "sec_registered": True, "finnhub_symbol": "LGCY"},
+    "OSCR": {"exchange": "NYSE", "country": "US", "sec_registered": True, "finnhub_symbol": "OSCR"},
+    "SPOT": {"exchange": "NYSE", "country": "LU", "sec_registered": True, "finnhub_symbol": "SPOT"},
+    "TOI": {"exchange": "TSXV", "country": "CA", "sec_registered": False, "finnhub_symbol": "TOI.V"},
+    "TSLA": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "TSLA"},
+    "TSM": {"exchange": "TWSE / NYSE ADR", "country": "TW", "sec_registered": True, "finnhub_symbol": "TSM"},
+    "VCSH": {"exchange": "NYSE Arca", "country": "US", "sec_registered": True, "finnhub_symbol": "VCSH"},
+    "ZDC": {"exchange": "TSXV", "country": "CA", "sec_registered": False, "finnhub_symbol": "ZDC.V"},
+}
+
+
+def enrich_portfolio(
+    workspace_root: Path,
+    *,
+    finnhub_api_key: str | None = None,
+    delay_seconds: float = 0.1,
+) -> dict[str, Any]:
+    """Enrich portfolio records with exchange, country, sec_registered, and finnhub_symbol."""
+    paths = ensure_portfolio_layout(workspace_root)
+    holdings = load_json(paths.holdings, default=[])
+    watchlist = load_json(paths.watchlist, default=[])
+
+    enriched_count = 0
+    skipped: list[str] = []
+    errors: list[dict[str, str]] = []
+
+    for record_list in (holdings, watchlist):
+        for record in record_list:
+            ticker = str(record.get("ticker") or record.get("security_id") or "").strip().upper()
+            if not ticker:
+                continue
+
+            if record.get("exchange") and record.get("finnhub_symbol") and "sec_registered" in record:
+                skipped.append(ticker)
+                continue
+
+            metadata = _resolve_enrichment_metadata(ticker, record, finnhub_api_key, delay_seconds)
+            if metadata:
+                record.update(metadata)
+                enriched_count += 1
+            else:
+                errors.append({"ticker": ticker, "error": "could not resolve metadata"})
+
+    write_json(paths.holdings, holdings)
+    write_json(paths.watchlist, watchlist)
+
+    universe = build_universe(holdings, watchlist)
+    write_json(paths.universe, universe)
+
+    return {
+        "enriched_count": enriched_count,
+        "skipped_count": len(skipped),
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+def _resolve_enrichment_metadata(
+    ticker: str,
+    record: dict[str, Any],
+    finnhub_api_key: str | None,
+    delay_seconds: float,
+) -> dict[str, Any] | None:
+    if ticker in FINNHUB_SYMBOL_TABLE:
+        return dict(FINNHUB_SYMBOL_TABLE[ticker])
+
+    if not finnhub_api_key:
+        return None
+
+    base_url = "https://finnhub.io/api/v1"
+    session = requests.Session()
+
+    try:
+        time.sleep(delay_seconds)
+        profile_resp = session.get(
+            f"{base_url}/stock/profile2",
+            params={"symbol": ticker, "token": finnhub_api_key},
+            timeout=30,
+        )
+        profile_resp.raise_for_status()
+        profile = profile_resp.json()
+
+        if profile.get("ticker"):
+            return {
+                "exchange": str(profile.get("exchange") or "").strip(),
+                "country": str(profile.get("country") or "").strip(),
+                "sec_registered": str(profile.get("country") or "").strip() == "US",
+                "finnhub_symbol": str(profile.get("ticker") or ticker).strip(),
+            }
+
+        company_name = str(record.get("company_name") or "").strip()
+        if company_name:
+            time.sleep(delay_seconds)
+            search_resp = session.get(
+                f"{base_url}/search",
+                params={"q": company_name, "token": finnhub_api_key},
+                timeout=30,
+            )
+            search_resp.raise_for_status()
+            results = search_resp.json().get("result", [])
+            if results:
+                best = results[0]
+                finnhub_sym = str(best.get("symbol") or ticker).strip()
+                time.sleep(delay_seconds)
+                profile_resp2 = session.get(
+                    f"{base_url}/stock/profile2",
+                    params={"symbol": finnhub_sym, "token": finnhub_api_key},
+                    timeout=30,
+                )
+                profile_resp2.raise_for_status()
+                profile2 = profile_resp2.json()
+                if profile2.get("ticker"):
+                    return {
+                        "exchange": str(profile2.get("exchange") or "").strip(),
+                        "country": str(profile2.get("country") or "").strip(),
+                        "sec_registered": str(profile2.get("country") or "").strip() == "US",
+                        "finnhub_symbol": str(profile2.get("ticker") or finnhub_sym).strip(),
+                    }
+    except Exception as exc:
+        logger.warning("enrichment failed for %s: %s", ticker, exc)
+
+    return None
+
+
 def render_portfolio_summary(
     *,
     as_of: date,
@@ -663,7 +800,7 @@ def _normalize_security_row(row: dict[str, Any], *, source_kind: str) -> dict[st
     ticker = _clean_ticker(row.get("ticker") or row.get("symbol"))
     company_name = _clean_name(row.get("company") or row.get("name") or row.get("security"))
     security_id = canonical_security_id(row.get("security_id") or ticker or company_name or row.get("cusip"))
-    return {
+    record: dict[str, Any] = {
         "security_id": security_id,
         "ticker": ticker,
         "company_name": company_name,
@@ -673,6 +810,19 @@ def _normalize_security_row(row: dict[str, Any], *, source_kind: str) -> dict[st
         "notes": str(row.get("notes") or "").strip(),
         "source_kind": source_kind,
     }
+    for field in ("exchange", "country", "finnhub_symbol"):
+        value = row.get(field)
+        if value is not None and str(value).strip():
+            record[field] = str(value).strip()
+    if "sec_registered" in row:
+        raw = row["sec_registered"]
+        if isinstance(raw, bool):
+            record["sec_registered"] = raw
+        elif str(raw).strip().lower() in {"true", "1", "yes"}:
+            record["sec_registered"] = True
+        elif str(raw).strip().lower() in {"false", "0", "no"}:
+            record["sec_registered"] = False
+    return record
 
 
 def _dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

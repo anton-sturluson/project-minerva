@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time as time_mod
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 from xml.etree import ElementTree
 
 import requests
+from lxml import html as lxml_html
+
+logger = logging.getLogger(__name__)
 
 from harness.portfolio_state import (
     append_jsonl,
@@ -28,7 +34,48 @@ from minerva.sec import get_recent_filings
 
 
 DEFAULT_FILING_FORMS = ["8-K", "10-K", "10-Q", "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"]
-DEFAULT_INDEX_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM"]
+DEFAULT_QUOTE_SYMBOLS = [
+    "SPY", "QQQ", "DIA", "IWM",
+    "VIXY", "TLT", "UUP", "USO", "GLD",
+    "XLK", "XLF", "XLE", "XLV",
+]
+FINNHUB_CALL_DELAY_SECONDS = 0.1
+IR_HTML_NAV_PATTERNS = (
+    r"home",
+    r"about(?: us)?",
+    r"contact(?: us)?",
+    r"skip to(?: main content| content)?",
+    r"go to(?: footer| main content| content)?",
+    r"buy(?: now)?",
+    r"log(?:in| on)",
+    r"sign in",
+    r"sign up",
+    r"register",
+    r"subscribe",
+    r"menu",
+    r"search",
+    r"learn more",
+    r"read more",
+    r"investor relations",
+    r"press releases?",
+    r"news(?:room)?",
+    r"events?",
+)
+IR_HTML_MATERIAL_TITLE_PATTERN = re.compile(
+    r"\b(?:"
+    r"announces?|reports?|reported|files?|filed|completes?|completed|declares?|launches?|publishes?|"
+    r"prices?|priced|acquires?|acquired|acquisition|merger|appoints?|expands?|partners?|partnership|"
+    r"enters?|entered|closes?|closed|closing|commences?|receives?|received|approves?|approved|"
+    r"results?|earnings|revenue|guidance|outlook|quarter|fiscal|annual|investor day|conference call|"
+    r"webcast|presentation|dividend|buyback|repurchase|offering|notes|debt|equity|sec|8-k|10-k|10-q|"
+    r"shareholders?|board|trial|study|data|fda|phase\s+[1234]|agreement"
+    r")\b"
+    r"|"
+    r"\b(?:q[1-4]|fy)\s*(?:20)?\d{2}\b"
+    r"|"
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,\s*\d{4})?\b",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -40,7 +87,7 @@ class RunPaths:
 
     @property
     def root(self) -> Path:
-        return self.workspace_root / "reports" / "daily-news" / self.run_date.isoformat()
+        return self.workspace_root / "reports" / "03-daily-news" / self.run_date.isoformat()
 
     @property
     def notes_dir(self) -> Path:
@@ -68,13 +115,13 @@ class RunPaths:
 
     @property
     def review_log(self) -> Path:
-        return self.workspace_root / "reports" / "daily-news" / "review-log.jsonl"
+        return self.workspace_root / "reports" / "03-daily-news" / "review-log.jsonl"
 
 
 def ensure_daily_run_layout(workspace_root: Path, run_date: date) -> RunPaths:
     """Create the run folder layout and starter files."""
     paths = RunPaths(workspace_root=workspace_root.resolve(), run_date=run_date)
-    root = paths.workspace_root / "reports" / "daily-news"
+    root = paths.workspace_root / "reports" / "03-daily-news"
     root.mkdir(parents=True, exist_ok=True)
     paths.notes_dir.mkdir(parents=True, exist_ok=True)
     paths.raw_dir.mkdir(parents=True, exist_ok=True)
@@ -138,6 +185,9 @@ def collect_filings(
         for security in universe:
             ticker = str(security.get("ticker") or security.get("security_id") or "").strip()
             if not ticker:
+                continue
+            if security.get("sec_registered") is False:
+                logger.info("skipping %s: not SEC-registered", ticker)
                 continue
             try:
                 filings = get_recent_filings(
@@ -273,6 +323,15 @@ def collect_macro(
             source_rows = [dict(item) for item in loaded_payload if isinstance(item, dict)]
         elif isinstance(loaded_payload, dict):
             source_rows = [dict(item) for item in loaded_payload.get("events", []) if isinstance(item, dict)]
+            degraded_reasons.extend(
+                sorted(
+                    {
+                        str(reason).strip()
+                        for reason in loaded_payload.get("degraded_reasons", [])
+                        if str(reason).strip()
+                    }
+                )
+            )
     else:
         degraded_reasons.append("no macro events source configured")
 
@@ -306,6 +365,66 @@ def collect_macro(
         },
     )
     return {"status": status, "event_count": len(sorted_events), "raw_path": raw_path}
+
+
+def collect_macro_registry_events(
+    workspace_root: Path,
+    *,
+    run_date: date,
+    registry_path: Path | None = None,
+    output_path: Path | None = None,
+) -> dict[str, Any]:
+    """Build a normalized macro-events payload from configured official registry sources."""
+    ensure_portfolio_layout(workspace_root)
+    run_paths = ensure_daily_run_layout(workspace_root, run_date)
+    paths = portfolio_paths(workspace_root)
+    registry_file = registry_path or paths.macro_registry
+    registry = load_json(registry_file, default={"sources": []})
+    sources = [dict(item) for item in registry.get("sources", []) if isinstance(item, dict)]
+    destination = (output_path or (run_paths.raw_dir / "macro-events.json")).resolve()
+
+    events: list[dict[str, Any]] = []
+    source_summaries: list[dict[str, Any]] = []
+    degraded_reasons: list[str] = []
+    if not sources:
+        degraded_reasons.append("no macro registry sources configured")
+
+    for source_entry in sources:
+        summary, collected_events = _collect_macro_registry_source(source_entry, run_date)
+        source_summaries.append(summary)
+        events.extend(collected_events)
+        degraded_reasons.extend(summary.get("degraded_reasons", []))
+
+    deduped_events = _dedupe_macro_source_rows(events)
+    payload = {
+        "date": run_date.isoformat(),
+        "generated_at": now_utc_iso(),
+        "registry_path": str(Path(registry_file).resolve()),
+        "events": deduped_events,
+        "sources": source_summaries,
+        "degraded_reasons": sorted({reason for reason in degraded_reasons if reason}),
+    }
+    write_json(destination, payload)
+
+    status = "degraded" if payload["degraded_reasons"] else "success"
+    update_manifest_source(
+        run_paths,
+        "macro-collect",
+        {
+            "status": status,
+            "event_count": len(deduped_events),
+            "source_count": len(source_summaries),
+            "output_path": str(destination),
+            "registry_path": str(Path(registry_file).resolve()),
+            "degraded_reasons": payload["degraded_reasons"],
+        },
+    )
+    return {
+        "status": status,
+        "event_count": len(deduped_events),
+        "source_count": len(source_summaries),
+        "output_path": destination,
+    }
 
 
 def collect_ir(
@@ -386,10 +505,12 @@ def collect_market(
 ) -> dict[str, Any]:
     """Collect a narrow market context snapshot."""
     run_paths = ensure_daily_run_layout(workspace_root, run_date)
+    universe = load_json(portfolio_paths(workspace_root).universe, default=[])
     payload, degraded_reasons = load_market_provider_payload(
         source=source,
         provider=provider,
         finnhub_api_key=finnhub_api_key,
+        universe=universe,
         run_date=run_date,
     )
     events = normalize_market_events(payload, run_date)
@@ -442,6 +563,7 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
     all_events: list[dict[str, Any]] = []
     suppressed: list[dict[str, Any]] = []
     seen: set[str] = set()
+    seen_news_urls: set[str] = set()
     for source_name, events in source_events.items():
         for event in events:
             enriched = enrich_event_relationships(dict(event), universe, adjacency_map)
@@ -449,6 +571,13 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
             if dedupe_key in seen:
                 suppressed.append({"reason": "duplicate", "event": enriched})
                 continue
+            news_url = str(enriched.get("reference_url") or "").strip()
+            event_type = str(enriched.get("event_type") or "").lower()
+            if event_type in {"market-news", "company-news"} and news_url:
+                if news_url in seen_news_urls:
+                    suppressed.append({"reason": "duplicate-url", "event": enriched})
+                    continue
+                seen_news_urls.add(news_url)
             if enriched.get("event_date") not in {"", run_date.isoformat()}:
                 suppressed.append({"reason": "stale", "event": enriched})
                 continue
@@ -736,6 +865,7 @@ def load_market_provider_payload(
     provider: str,
     finnhub_api_key: str | None,
     run_date: date,
+    universe: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Load shared market-data payloads for earnings and market commands."""
     degraded_reasons: list[str] = []
@@ -751,10 +881,10 @@ def load_market_provider_payload(
     if provider == "auto":
         effective_provider = "finnhub" if finnhub_api_key else "file"
     if effective_provider == "finnhub" and finnhub_api_key:
-        return _load_finnhub_payload(run_date, finnhub_api_key), degraded_reasons
+        return _load_finnhub_payload(run_date, finnhub_api_key, universe=universe), degraded_reasons
 
     degraded_reasons.append("no market data source configured")
-    return {"earnings": [], "market": [], "indexes": [], "rates": [], "fx": []}, degraded_reasons
+    return {"earnings": [], "market": [], "indexes": [], "rates": [], "fx": [], "news": [], "company_news": []}, degraded_reasons
 
 
 def normalize_market_events(payload: dict[str, Any], run_date: date) -> list[dict[str, Any]]:
@@ -764,22 +894,24 @@ def normalize_market_events(payload: dict[str, Any], run_date: date) -> list[dic
         event = _normalize_market_event(row, run_date)
         if event is not None:
             events.append(event)
-    if events:
-        return sorted(events, key=lambda item: item["headline"])
+    if not events:
+        for row in payload.get("indexes", []):
+            event = _normalize_market_event(row, run_date)
+            if event is not None:
+                events.append(event)
+        for row in payload.get("rates", []):
+            event = _normalize_market_event(row, run_date, category="rates")
+            if event is not None:
+                events.append(event)
+        for row in payload.get("fx", []):
+            event = _normalize_market_event(row, run_date, category="fx")
+            if event is not None:
+                events.append(event)
 
-    for row in payload.get("indexes", []):
-        event = _normalize_market_event(row, run_date)
-        if event is not None:
-            events.append(event)
-    for row in payload.get("rates", []):
-        event = _normalize_market_event(row, run_date, category="rates")
-        if event is not None:
-            events.append(event)
-    for row in payload.get("fx", []):
-        event = _normalize_market_event(row, run_date, category="fx")
-        if event is not None:
-            events.append(event)
-    return sorted(events, key=lambda item: item["headline"])
+    events.extend(normalize_news_events(payload.get("news", []), run_date))
+    events.extend(normalize_company_news_events(payload.get("company_news", []), run_date))
+
+    return sorted(events, key=lambda item: (item.get("event_type", ""), item["headline"]))
 
 
 def enrich_event_relationships(
@@ -843,9 +975,14 @@ def relationship_for_security(
 def group_for_event(event: dict[str, Any]) -> str:
     """Assign an event to a prep section."""
     source_name = str(event.get("source_name") or event.get("source", "")).lower()
+    event_type = str(event.get("event_type", "")).lower()
     relationship = str(event.get("relationship", "")).lower()
     if source_name in {"macro"}:
         return "macro-policy"
+    if event_type == "market-news":
+        return "market-context"
+    if event_type == "company-news":
+        return "company-specific"
     if source_name in {"market"}:
         return "market-context"
     if relationship == "adjacent":
@@ -1086,6 +1223,324 @@ def _normalize_macro_event(row: dict[str, Any], run_date: date) -> dict[str, Any
     }
 
 
+def _collect_macro_registry_source(source_entry: dict[str, Any], run_date: date) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    source_name = str(source_entry.get("name") or "macro-source").strip()
+    source_url = str(source_entry.get("url") or "").strip()
+    parser = str(source_entry.get("parser") or _default_macro_parser(source_entry)).strip().lower()
+    degraded_reasons: list[str] = []
+
+    if not source_url:
+        degraded_reasons.append(f"{source_name}: missing source URL")
+        return {
+            "name": source_name,
+            "url": source_url,
+            "parser": parser,
+            "status": "degraded",
+            "event_count": 0,
+            "degraded_reasons": degraded_reasons,
+        }, []
+
+    try:
+        if parser in {"normalized_json", "json"}:
+            payload, _ = load_payload(source_url)
+            events = _parse_normalized_macro_payload(payload, source_entry, run_date)
+        else:
+            raw_text, _ = read_text_source(source_url)
+            events = _parse_macro_registry_payload(parser, raw_text, source_url, source_entry, run_date)
+    except Exception as exc:
+        degraded_reasons.append(f"{source_name}: {exc}")
+        return {
+            "name": source_name,
+            "url": source_url,
+            "parser": parser,
+            "status": "degraded",
+            "event_count": 0,
+            "degraded_reasons": degraded_reasons,
+        }, []
+
+    return {
+        "name": source_name,
+        "url": source_url,
+        "parser": parser,
+        "status": "degraded" if degraded_reasons else "success",
+        "event_count": len(events),
+        "degraded_reasons": degraded_reasons,
+    }, events
+
+
+def _default_macro_parser(source_entry: dict[str, Any]) -> str:
+    source_name = str(source_entry.get("name") or "").strip().lower()
+    if "bls" in source_name:
+        return "bls_schedule"
+    if "bea" in source_name:
+        return "bea_schedule"
+    if "federal reserve" in source_name or "fomc" in source_name:
+        return "federal_reserve_events"
+    if "treasury" in source_name:
+        return "treasury_press_releases"
+    return "dated_list"
+
+
+def _parse_macro_registry_payload(
+    parser: str,
+    raw_text: str,
+    source_url: str,
+    source_entry: dict[str, Any],
+    run_date: date,
+) -> list[dict[str, Any]]:
+    if parser in {"bls_schedule", "bea_schedule", "table_schedule"}:
+        return _parse_macro_table_schedule(raw_text, source_url, source_entry, run_date)
+    if parser in {"federal_reserve_events", "treasury_press_releases", "dated_list"}:
+        return _parse_macro_dated_list(raw_text, source_url, source_entry, run_date)
+    raise ValueError(f"unsupported macro parser `{parser}`")
+
+
+def _parse_normalized_macro_payload(payload: Any, source_entry: dict[str, Any], run_date: date) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]]
+    if isinstance(payload, list):
+        rows = [dict(item) for item in payload if isinstance(item, dict)]
+    elif isinstance(payload, dict):
+        rows = [dict(item) for item in payload.get("events", []) if isinstance(item, dict)]
+    else:
+        raise ValueError("unsupported normalized macro payload")
+
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        if _event_date(row, run_date) != run_date.isoformat():
+            continue
+        headline = str(row.get("event_name") or row.get("title") or row.get("headline") or "").strip()
+        if not headline:
+            continue
+        events.append(_macro_source_row(headline, source_entry, run_date, row.get("source_url") or row.get("url"), row.get("release_time") or row.get("time")))
+    return events
+
+
+def _parse_macro_table_schedule(
+    raw_text: str,
+    source_url: str,
+    source_entry: dict[str, Any],
+    run_date: date,
+) -> list[dict[str, Any]]:
+    document = lxml_html.fromstring(raw_text)
+    events: list[dict[str, Any]] = []
+    for row in document.xpath("//tr"):
+        cell_texts = [_normalize_whitespace(" ".join(cell.itertext())) for cell in row.xpath("./th|./td")]
+        cell_texts = [text for text in cell_texts if text]
+        if len(cell_texts) < 2:
+            continue
+
+        row_date = None
+        date_text = ""
+        for cell_text in cell_texts:
+            row_date = _extract_date(cell_text, run_date.year)
+            if row_date is not None:
+                date_text = cell_text
+                break
+        if row_date != run_date:
+            continue
+
+        release_time = ""
+        for cell_text in cell_texts:
+            matched_time = _extract_time(cell_text)
+            if matched_time:
+                release_time = matched_time
+                break
+
+        headline_candidates = [
+            text
+            for text in cell_texts
+            if text != date_text and text != release_time and not _looks_like_date_or_time(text, run_date.year)
+        ]
+        headline = max(headline_candidates, key=len, default="")
+        if not headline:
+            headline = _first_link_text(row)
+        if not headline:
+            continue
+
+        event_url = _first_link_url(row, source_url)
+        events.append(_macro_source_row(headline, source_entry, run_date, event_url, release_time))
+    return events
+
+
+def _parse_macro_dated_list(
+    raw_text: str,
+    source_url: str,
+    source_entry: dict[str, Any],
+    run_date: date,
+) -> list[dict[str, Any]]:
+    document = lxml_html.fromstring(raw_text)
+    candidates = document.xpath(
+        "//article"
+        " | //li"
+        " | //tr"
+        " | //div[contains(translate(@class, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'event')]"
+        " | //div[contains(translate(@class, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'release')]"
+        " | //div[contains(translate(@class, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'press')]"
+    )
+
+    events: list[dict[str, Any]] = []
+    seen_nodes: set[int] = set()
+    for node in candidates:
+        if id(node) in seen_nodes:
+            continue
+        seen_nodes.add(id(node))
+
+        text = _normalize_whitespace(" ".join(node.itertext()))
+        node_date = _extract_date(text, run_date.year)
+        if node_date is None:
+            datetimes = [value for value in node.xpath(".//@datetime") if isinstance(value, str)]
+            for value in datetimes:
+                node_date = _extract_date(value, run_date.year)
+                if node_date is not None:
+                    break
+        if node_date != run_date:
+            continue
+
+        release_time = _extract_time(text)
+        headline = _first_link_text(node)
+        if not headline:
+            headline = _best_headline_from_text(text, run_date.year, release_time)
+        if not headline:
+            continue
+
+        event_url = _first_link_url(node, source_url)
+        events.append(_macro_source_row(headline, source_entry, run_date, event_url, release_time))
+    return events
+
+
+def _macro_source_row(
+    headline: Any,
+    source_entry: dict[str, Any],
+    run_date: date,
+    source_url: Any,
+    release_time: Any,
+) -> dict[str, Any]:
+    return {
+        "date": run_date.isoformat(),
+        "event_name": str(headline).strip(),
+        "release_time": str(release_time or source_entry.get("release_time") or "").strip(),
+        "category": str(source_entry.get("category") or "macro").strip() or "macro",
+        "importance": str(source_entry.get("importance") or "standard").strip() or "standard",
+        "source_url": str(source_url or source_entry.get("url") or "").strip(),
+        "source_name": str(source_entry.get("name") or "").strip(),
+    }
+
+
+def _dedupe_macro_source_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        headline = str(row.get("event_name") or "").strip()
+        if not headline:
+            continue
+        key = "|".join(
+            [
+                str(row.get("date") or ""),
+                str(row.get("source_name") or ""),
+                str(row.get("release_time") or ""),
+                headline,
+            ]
+        )
+        deduped.setdefault(key, row)
+    return sorted(
+        deduped.values(),
+        key=lambda item: (
+            str(item.get("date") or ""),
+            str(item.get("release_time") or ""),
+            str(item.get("source_name") or ""),
+            str(item.get("event_name") or ""),
+        ),
+    )
+
+
+def _normalize_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _extract_date(text: str, fallback_year: int) -> date | None:
+    normalized = _normalize_whitespace(text).replace("Sept ", "Sep ").replace("Sept.", "Sep.")
+    candidate_patterns = (
+        r"\b\d{4}-\d{2}-\d{2}\b",
+        r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+        (
+            r"\b(?:(?:Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:day)?\,?\s+)?"
+            r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|"
+            r"Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2}(?:,\s*\d{4})?\b"
+        ),
+    )
+    for pattern in candidate_patterns:
+        for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+            parsed = _parse_date_candidate(match.group(0), fallback_year)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _parse_date_candidate(raw_value: str, fallback_year: int) -> date | None:
+    candidate = _normalize_whitespace(raw_value)
+    candidate = re.sub(
+        r"^(?:Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)(?:day)?\,?\s+",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    candidate = candidate.replace(".", "").replace("Sept ", "Sep ")
+    formats = ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%B %d, %Y", "%b %d, %Y", "%B %d", "%b %d")
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(candidate, fmt).date()
+        except ValueError:
+            continue
+        if "%Y" not in fmt and "%y" not in fmt:
+            parsed = parsed.replace(year=fallback_year)
+        return parsed
+    return None
+
+
+def _extract_time(text: str) -> str:
+    normalized = _normalize_whitespace(text)
+    match = re.search(
+        r"\b(?:\d{1,2}:\d{2}(?:\s*(?:a\.?m\.?|p\.?m\.?|AM|PM))?|\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?|AM|PM))(?:\s*(?:ET|EST|EDT))?\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return ""
+    token = match.group(0).strip()
+    if not re.search(r"\d", token):
+        return ""
+    return token
+
+
+def _looks_like_date_or_time(text: str, fallback_year: int) -> bool:
+    return _extract_date(text, fallback_year) is not None or bool(_extract_time(text))
+
+
+def _first_link_text(node: Any) -> str:
+    for value in node.xpath(".//a[normalize-space()]"):
+        text = _normalize_whitespace(" ".join(value.itertext()))
+        if text:
+            return text
+    return ""
+
+
+def _first_link_url(node: Any, base_url: str) -> str:
+    for value in node.xpath(".//a[@href]"):
+        href = str(value.get("href") or "").strip()
+        if href:
+            return urljoin(base_url, href)
+    return str(base_url)
+
+
+def _best_headline_from_text(text: str, fallback_year: int, release_time: str) -> str:
+    fragments = [fragment.strip(" -|") for fragment in re.split(r"[|]", _normalize_whitespace(text)) if fragment.strip(" -|")]
+    candidates = [
+        fragment
+        for fragment in fragments
+        if fragment != release_time and not _looks_like_date_or_time(fragment, fallback_year)
+    ]
+    return max(candidates, key=len, default="")
+
+
 def _normalize_market_event(
     row: dict[str, Any],
     run_date: date,
@@ -1094,8 +1549,6 @@ def _normalize_market_event(
 ) -> dict[str, Any] | None:
     change_pct = _to_float(row.get("change_pct") or row.get("percent_change") or row.get("pct"))
     material = bool(row.get("material")) or (change_pct is not None and abs(change_pct) >= 1.0)
-    if not material:
-        return None
     symbol = str(row.get("symbol") or row.get("name") or row.get("pair") or "").strip()
     headline = str(row.get("headline") or f"{symbol} moved {change_pct:.2f}%").strip() if change_pct is not None else str(row.get("headline") or symbol)
     return {
@@ -1107,9 +1560,65 @@ def _normalize_market_event(
         "headline": headline,
         "category": category or str(row.get("category") or "indexes"),
         "change_pct": change_pct,
+        "material": material,
         "reference_url": str(row.get("url") or "").strip(),
         "metadata": row,
     }
+
+
+def normalize_news_events(news_items: list[dict[str, Any]], run_date: date) -> list[dict[str, Any]]:
+    """Convert Finnhub general news items into shared event schema."""
+    events: list[dict[str, Any]] = []
+    cutoff_ts = datetime.combine(run_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() - 18 * 3600
+    for item in news_items:
+        ts = item.get("datetime", 0)
+        if isinstance(ts, (int, float)) and ts < cutoff_ts:
+            continue
+        headline = str(item.get("headline") or "").strip()
+        if not headline:
+            continue
+        events.append({
+            "source": "market",
+            "event_type": "market-news",
+            "event_date": run_date.isoformat(),
+            "security_id": "",
+            "relationship": "market",
+            "headline": headline,
+            "category": "news",
+            "summary": str(item.get("summary") or "").strip(),
+            "news_source": str(item.get("source") or "").strip(),
+            "reference_url": str(item.get("url") or "").strip(),
+            "metadata": item,
+        })
+    return events
+
+
+def normalize_company_news_events(news_items: list[dict[str, Any]], run_date: date) -> list[dict[str, Any]]:
+    """Convert Finnhub company news items into shared event schema."""
+    events: list[dict[str, Any]] = []
+    cutoff_ts = datetime.combine(run_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() - 18 * 3600
+    for item in news_items:
+        ts = item.get("datetime", 0)
+        if isinstance(ts, (int, float)) and ts < cutoff_ts:
+            continue
+        headline = str(item.get("headline") or "").strip()
+        if not headline:
+            continue
+        security_id = str(item.get("_security_id") or "").strip()
+        events.append({
+            "source": "market",
+            "event_type": "company-news",
+            "event_date": run_date.isoformat(),
+            "security_id": security_id,
+            "relationship": "monitored" if security_id else "market",
+            "headline": headline,
+            "category": "company-news",
+            "summary": str(item.get("summary") or "").strip(),
+            "news_source": str(item.get("source") or "").strip(),
+            "reference_url": str(item.get("url") or "").strip(),
+            "metadata": item,
+        })
+    return events
 
 
 def _parse_ir_feed(
@@ -1121,6 +1630,8 @@ def _parse_ir_feed(
 ) -> list[dict[str, Any]]:
     raw_text, _ = read_text_source(feed_url)
     if feed_format in {"rss", "atom", "xml"}:
+        if _looks_like_html_document(raw_text):
+            return _parse_ir_html(raw_text, run_date, security_id, feed_url)
         return _parse_ir_xml(raw_text, run_date, security_id, entry)
     if feed_format == "json":
         payload = json.loads(raw_text)
@@ -1140,7 +1651,7 @@ def _parse_ir_feed(
             if _event_date(item, run_date) == run_date.isoformat() and str(item.get("title") or item.get("headline") or "").strip()
         ]
     if feed_format == "html":
-        return _parse_ir_html(raw_text, run_date, security_id)
+        return _parse_ir_html(raw_text, run_date, security_id, feed_url)
     raise ValueError(f"unsupported IR feed format: {feed_format}")
 
 
@@ -1176,12 +1687,19 @@ def _parse_ir_xml(raw_text: str, run_date: date, security_id: str, entry: dict[s
     return events
 
 
-def _parse_ir_html(raw_text: str, run_date: date, security_id: str) -> list[dict[str, Any]]:
+def _parse_ir_html(raw_text: str, run_date: date, security_id: str, base_url: str = "") -> list[dict[str, Any]]:
+    document = lxml_html.fromstring(raw_text)
     events: list[dict[str, Any]] = []
-    for match in re.finditer(r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", raw_text, flags=re.IGNORECASE | re.DOTALL):
-        title = re.sub(r"<[^>]+>", " ", match.group(2)).strip()
-        if not title:
+    seen: set[tuple[str, str]] = set()
+    for node in document.xpath("//a[@href]"):
+        title = _normalize_whitespace(" ".join(node.itertext()))
+        href = urljoin(base_url, str(node.get("href") or "").strip())
+        if not _looks_like_ir_press_release(title):
             continue
+        dedupe_key = (title.casefold(), href)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         events.append(
             {
                 "source": "ir",
@@ -1190,14 +1708,39 @@ def _parse_ir_html(raw_text: str, run_date: date, security_id: str) -> list[dict
                 "security_id": security_id,
                 "relationship": "monitored",
                 "headline": title,
-                "reference_url": match.group(1),
+                "reference_url": href,
                 "metadata": {},
             }
         )
     return events[:10]
 
 
-def _load_finnhub_payload(run_date: date, api_key: str) -> dict[str, Any]:
+def _looks_like_html_document(raw_text: str) -> bool:
+    snippet = raw_text.lstrip()[:500]
+    return bool(re.search(r"<!doctype\s+html|<html\b|<body\b|<head\b", snippet, flags=re.IGNORECASE))
+
+
+def _looks_like_ir_press_release(title: str) -> bool:
+    normalized = _normalize_whitespace(title)
+    if len(normalized) < 10:
+        return False
+    if not re.search(r"[A-Za-z]", normalized):
+        return False
+    lowered = normalized.casefold()
+    if any(re.fullmatch(pattern, lowered) for pattern in IR_HTML_NAV_PATTERNS):
+        return False
+    if any(lowered.startswith(prefix) for prefix in ("skip to", "go to", "buy ", "log in", "sign in", "sign up")):
+        return False
+    return bool(IR_HTML_MATERIAL_TITLE_PATTERN.search(normalized))
+
+
+def _load_finnhub_payload(
+    run_date: date,
+    api_key: str,
+    *,
+    universe: list[dict[str, Any]] | None = None,
+    delay: float = FINNHUB_CALL_DELAY_SECONDS,
+) -> dict[str, Any]:
     base_url = "https://finnhub.io/api/v1"
     session = requests.Session()
     earnings_response = session.get(
@@ -1209,7 +1752,8 @@ def _load_finnhub_payload(run_date: date, api_key: str) -> dict[str, Any]:
     earnings_payload = earnings_response.json()
 
     indexes: list[dict[str, Any]] = []
-    for symbol in DEFAULT_INDEX_SYMBOLS:
+    for symbol in DEFAULT_QUOTE_SYMBOLS:
+        time_mod.sleep(delay)
         response = session.get(f"{base_url}/quote", params={"symbol": symbol, "token": api_key}, timeout=30)
         response.raise_for_status()
         quote = response.json()
@@ -1221,11 +1765,54 @@ def _load_finnhub_payload(run_date: date, api_key: str) -> dict[str, Any]:
                 "material": abs(float(quote.get("dp", 0) or 0)) >= 1.0,
             }
         )
+
+    # General market news
+    news: list[dict[str, Any]] = []
+    try:
+        time_mod.sleep(delay)
+        news_response = session.get(
+            f"{base_url}/news",
+            params={"category": "general", "token": api_key},
+            timeout=30,
+        )
+        news_response.raise_for_status()
+        news = news_response.json() if isinstance(news_response.json(), list) else []
+    except Exception as exc:
+        logger.warning("failed to fetch general market news: %s", exc)
+
+    # Company-specific news
+    company_news: list[dict[str, Any]] = []
+    if universe:
+        date_str = run_date.isoformat()
+        for security in universe:
+            finnhub_sym = str(
+                security.get("finnhub_symbol") or security.get("ticker") or security.get("security_id") or ""
+            ).strip()
+            if not finnhub_sym:
+                continue
+            try:
+                time_mod.sleep(delay)
+                cn_response = session.get(
+                    f"{base_url}/company-news",
+                    params={"symbol": finnhub_sym, "from": date_str, "to": date_str, "token": api_key},
+                    timeout=30,
+                )
+                cn_response.raise_for_status()
+                items = cn_response.json() if isinstance(cn_response.json(), list) else []
+                for item in items:
+                    item["_security_id"] = str(security.get("security_id") or finnhub_sym).strip()
+                    item["_finnhub_symbol"] = finnhub_sym
+                company_news.extend(items)
+            except Exception as exc:
+                logger.warning("failed to fetch company news for %s: %s", finnhub_sym, exc)
+
     return {
         "earnings": earnings_payload.get("earningsCalendar", earnings_payload.get("earnings", [])),
         "indexes": indexes,
         "rates": [],
         "fx": [],
+        "news": news,
+        "company_news": company_news,
     }
 
 

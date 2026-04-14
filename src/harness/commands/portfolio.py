@@ -14,6 +14,7 @@ from harness.output import CommandResult, OutputEnvelope
 from harness.portfolio_state import (
     add_adjacency_entry,
     canonical_security_id,
+    enrich_portfolio,
     ensure_portfolio_layout,
     load_json,
     parse_iso_date,
@@ -65,6 +66,8 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: by
                 transactions_gid=str(parsed["transactions-gid"]) if "transactions-gid" in parsed else None,
                 settings=active_settings,
             )
+        if subcommand == "enrich":
+            return enrich_command(settings=active_settings)
         if subcommand == "adjacency":
             return _dispatch_adjacency(args[1:], active_settings)
         if subcommand == "thesis":
@@ -115,6 +118,30 @@ def sync_command(
         f"universe: {summary['universe_count']}",
         f"transactions: {summary['transactions_count']}",
         f"rendered_to: {summary['rendered_path']}",
+    ]
+    return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
+
+
+def enrich_command(*, settings: HarnessSettings | None = None) -> CommandResult:
+    """Enrich portfolio records with exchange, country, sec_registered, and finnhub_symbol."""
+    start = time.perf_counter()
+    active_settings = settings or get_settings()
+    try:
+        summary = enrich_portfolio(
+            active_settings.ensure_workspace_root(),
+            finnhub_api_key=active_settings.finnhub_api_key,
+        )
+    except Exception as exc:
+        return error_result(
+            f"failed to enrich portfolio: {exc}",
+            "ensure holdings exist and optionally set FINNHUB_API_KEY for live enrichment",
+            ["`portfolio enrich`"],
+            start,
+        )
+    lines = [
+        f"enriched: {summary['enriched_count']}",
+        f"skipped: {summary['skipped_count']}",
+        f"errors: {summary['error_count']}",
     ]
     return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
 
@@ -286,6 +313,11 @@ def sync_cli(
             transactions_gid=transactions_gid,
         )
     )
+
+
+@app.command("enrich", help="Enrich portfolio records with exchange, country, and Finnhub metadata.")
+def enrich_cli() -> None:
+    _print(enrich_command())
 
 
 @adjacency_app.command("list", help="List stored adjacency mappings.")

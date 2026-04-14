@@ -11,10 +11,14 @@ MINERVA_RUNNER="${MINERVA_RUNNER:-uv run minerva}"
 MINERVA_SKIP_STATUS_CHECK="${MINERVA_SKIP_STATUS_CHECK:-0}"
 MINERVA_BRIEF_EARNINGS_PROVIDER="${MINERVA_BRIEF_EARNINGS_PROVIDER:-auto}"
 MINERVA_BRIEF_MARKET_PROVIDER="${MINERVA_BRIEF_MARKET_PROVIDER:-auto}"
+PORTFOLIO_CURRENT_DIR="${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current"
+MACRO_REGISTRY_PATH="${MINERVA_BRIEF_MACRO_REGISTRY:-${PORTFOLIO_CURRENT_DIR}/macro-registry.json}"
+IR_REGISTRY_PATH="${MINERVA_BRIEF_IR_REGISTRY:-${PORTFOLIO_CURRENT_DIR}/ir-registry.json}"
+GENERATED_MACRO_SOURCE="${MINERVA_WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}/data/raw/macro-events.json"
 
 IFS=' ' read -r -a MINERVA_RUNNER_ARR <<< "${MINERVA_RUNNER}"
 
-mkdir -p "${MINERVA_WORKSPACE_ROOT}/reports/daily-news/${RUN_DATE}"
+mkdir -p "${MINERVA_WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}"
 
 run() {
   "${MINERVA_RUNNER_ARR[@]}" "$@"
@@ -44,19 +48,15 @@ if [[ -n "${MINERVA_BRIEF_EARNINGS_SOURCE:-}" ]]; then
 fi
 run "${earnings_args[@]}"
 
-macro_args=(brief macro --date "${RUN_DATE}")
-if [[ -n "${MINERVA_BRIEF_MACRO_SOURCE:-}" ]]; then
-  macro_args+=(--source "${MINERVA_BRIEF_MACRO_SOURCE}")
+MACRO_SOURCE_PATH="${MINERVA_BRIEF_MACRO_SOURCE:-${GENERATED_MACRO_SOURCE}}"
+if [[ -z "${MINERVA_BRIEF_MACRO_SOURCE:-}" ]]; then
+  run brief macro-collect --date "${RUN_DATE}" --registry "${MACRO_REGISTRY_PATH}" --output "${MACRO_SOURCE_PATH}"
 fi
-if [[ -n "${MINERVA_BRIEF_MACRO_REGISTRY:-}" ]]; then
-  macro_args+=(--registry "${MINERVA_BRIEF_MACRO_REGISTRY}")
-fi
+
+macro_args=(brief macro --date "${RUN_DATE}" --registry "${MACRO_REGISTRY_PATH}" --source "${MACRO_SOURCE_PATH}")
 run "${macro_args[@]}"
 
-ir_args=(brief ir --date "${RUN_DATE}")
-if [[ -n "${MINERVA_BRIEF_IR_REGISTRY:-}" ]]; then
-  ir_args+=(--registry "${MINERVA_BRIEF_IR_REGISTRY}")
-fi
+ir_args=(brief ir --date "${RUN_DATE}" --registry "${IR_REGISTRY_PATH}")
 run "${ir_args[@]}"
 
 market_args=(brief market --date "${RUN_DATE}" --provider "${MINERVA_BRIEF_MARKET_PROVIDER}")
@@ -67,8 +67,8 @@ run "${market_args[@]}"
 
 run brief prep --date "${RUN_DATE}"
 
-PREPARED_PATH="${MINERVA_WORKSPACE_ROOT:-hard-disk}/reports/daily-news/${RUN_DATE}/data/structured/prepared-evidence.json"
-MANIFEST_PATH="${MINERVA_WORKSPACE_ROOT:-hard-disk}/reports/daily-news/${RUN_DATE}/data/raw/manifest.json"
+PREPARED_PATH="${MINERVA_WORKSPACE_ROOT:-hard-disk}/reports/03-daily-news/${RUN_DATE}/data/structured/prepared-evidence.json"
+MANIFEST_PATH="${MINERVA_WORKSPACE_ROOT:-hard-disk}/reports/03-daily-news/${RUN_DATE}/data/raw/manifest.json"
 
 if [[ "${MINERVA_SKIP_STATUS_CHECK}" != "1" ]]; then
   uv run python - "${MANIFEST_PATH}" <<'PY'
