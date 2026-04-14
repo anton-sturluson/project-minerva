@@ -593,3 +593,72 @@ Recommended implementation order:
 13. Charlie autonomous prompt/wake configuration
 
 This order gets the evidence pipeline working before the cron integration depends on it.
+
+---
+
+## Portfolio Sync — CSV Header Normalization & Exchange Column
+
+Date added: 2026-04-14
+
+### Problem
+
+The Google Sheet CSV headers use mixed case and human-readable names (e.g. `Ticker`, `# Shares`, `Year of Purcase`, `% Change`). When `portfolio sync` loads holdings from the Google Sheet via CSV export, `csv.DictReader` uses these exact headers as dict keys. But `_normalize_security_row` expects lowercase snake_case keys (`ticker`, `shares`, `exchange`). This means:
+
+- Fresh syncs from the sheet silently produce empty records (all fields blank) because no keys match
+- The pipeline has been working only because it falls back to loading the already-processed `holdings.json` with lowercase keys when `--sheet-id` is not passed
+- The new `Exchange` column will not flow through to enrichment or downstream consumers without a header normalization step
+
+### Current Google Sheet headers
+
+| CSV Header | Target key | Notes |
+|-----------|-----------|-------|
+| `Ticker` | `ticker` | Primary identifier |
+| `Category` | `category` | Sector/type label |
+| `Year of Purcase` | `year_of_purchase` | Typo in sheet; normalize anyway |
+| `Cost` | `cost` | Per-share cost |
+| `# Shares` | `shares` | Position size |
+| `Total Cost` | `total_cost` | |
+| `Price` | `price` | Current price |
+| `Market Value` | `market_value` | |
+| `% Change` | `pct_change` | |
+| `Net` | `net` | |
+| `CAGR` | `cagr` | |
+| `% Portfolio (Value-based)` | `weight` | Map to existing weight field |
+| `% Portfolio (Cost-based)` | `cost_weight` | |
+| `Target % (Value-based)` | `target_weight` | |
+| `Target diff` | `target_diff` | |
+| `CAGR Target` | `cagr_target` | |
+| `Price Target` | `price_target` | |
+| `Target Year` | `target_year` | |
+| `Exchange` | `exchange` | *New column* — ASX, TSXV, etc. Blank for US tickers |
+
+### Implementation steps
+
+1. **Add `_normalize_csv_headers` function** in `portfolio_state.py`:
+   - Accept a list of dicts (CSV rows) and return a new list with normalized keys
+   - Normalize: strip whitespace, lowercase, replace spaces/special chars with underscores
+   - Apply explicit mappings for known columns:
+     - `ticker` → `ticker`
+     - `# shares` → `shares`
+     - `% portfolio\n(value-based)` or `% portfolio (value-based)` → `weight`
+     - `year of purcase` → `year_of_purchase` (handle typo)
+     - `exchange` → `exchange`
+   - For any unmapped header, apply the generic normalize (lowercase + underscore)
+
+2. **Call `_normalize_csv_headers` in `load_tabular_rows`**:
+   - After loading CSV rows via `DictReader`, normalize the header keys before returning
+   - Only apply to CSV sources (not JSON, which already has correct keys)
+
+3. **Carry forward enrichment data during sync**:
+   - When `portfolio sync` runs with a sheet source, the CSV will have the Exchange column but NOT `country`, `sec_registered`, or `finnhub_symbol` (those come from enrichment)
+   - After normalizing and creating new records, merge any existing enrichment fields from the previous `holdings.json` so they aren't lost
+   - Fields to carry forward: `exchange` (prefer sheet value if present, else keep existing), `country`, `sec_registered`, `finnhub_symbol`
+
+4. **Update filings collector**:
+   - Also skip non-security rows (CASH, TOTAL, CURRENT ASSET, etc.) in the filings collector, same as we already do in enrichment
+
+5. **Tests**:
+   - Test CSV header normalization with the exact Google Sheet headers
+   - Test that Exchange column flows through sync → universe → enrichment
+   - Test that enrichment data is preserved across re-syncs
+   - Test filings collector skips non-security rows
