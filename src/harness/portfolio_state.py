@@ -441,6 +441,15 @@ def enrich_portfolio(
                 skipped.append(ticker)
                 continue
 
+            # Skip non-security rows (section headers from Google Sheet)
+            _NON_SECURITY_TICKERS = {
+                "CASH", "TOTAL", "CURRENT ASSET", "INVESTABLE",
+                "NON-INVESTABLE", "INVESTABLE CURRENT ASSET",
+            }
+            if ticker in _NON_SECURITY_TICKERS:
+                skipped.append(ticker)
+                continue
+
             metadata = _resolve_enrichment_metadata(ticker, record, finnhub_api_key, delay_seconds)
             if metadata:
                 record.update(metadata)
@@ -470,6 +479,11 @@ def _resolve_enrichment_metadata(
 ) -> dict[str, Any] | None:
     if ticker in FINNHUB_SYMBOL_TABLE:
         return dict(FINNHUB_SYMBOL_TABLE[ticker])
+
+    # Try base ticker without exchange suffix (e.g. KPG.AX -> KPG, TOI.V -> TOI)
+    base_ticker = ticker.split(".")[0] if "." in ticker else None
+    if base_ticker and base_ticker in FINNHUB_SYMBOL_TABLE:
+        return dict(FINNHUB_SYMBOL_TABLE[base_ticker])
 
     if not finnhub_api_key:
         return None
