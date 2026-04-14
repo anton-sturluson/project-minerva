@@ -11,7 +11,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from harness.commands import brief
+from harness.commands import brief, portfolio
 from harness.config import HarnessSettings
 from harness.morning_brief import (
     _parse_ir_feed,
@@ -26,13 +26,17 @@ from harness.morning_brief import (
     collect_market,
     ensure_daily_run_layout,
     load_manifest,
+    normalize_company_news_events,
+    normalize_news_events,
     prepare_evidence,
 )
 from harness.portfolio_state import (
     add_adjacency_entry,
+    enrich_portfolio,
     load_json,
     set_thesis_card,
     sync_portfolio,
+    write_json,
 )
 
 
@@ -510,6 +514,286 @@ class MorningBriefTests(unittest.TestCase):
             f"brief macro --date {RUN_DATE.isoformat()} --registry {workspace_root / 'data' / '01-portfolio' / 'current' / 'macro-registry.json'} --source {generated_source}",
             call_log.read_text(encoding="utf-8"),
         )
+
+
+    def test_portfolio_enrich_uses_symbol_table_without_api_key(self) -> None:
+        sync_portfolio(
+            self.workspace,
+            as_of=RUN_DATE,
+            holdings_source=str(FIXTURE_DIR / "holdings.csv"),
+            transactions_source=str(FIXTURE_DIR / "transactions.csv"),
+        )
+        # Overwrite holdings with tickers from the symbol table
+        holdings = [
+            {"security_id": "GOOGL", "ticker": "GOOGL", "company_name": "Alphabet", "source_kind": "holding"},
+            {"security_id": "KPG", "ticker": "KPG", "company_name": "Kelly Partners Group", "source_kind": "holding"},
+            {"security_id": "TOI", "ticker": "TOI", "company_name": "Topicus.com", "source_kind": "holding"},
+        ]
+        paths = self.workspace / "data" / "01-portfolio" / "current"
+        write_json(paths / "holdings.json", holdings)
+        write_json(paths / "watchlist.json", [])
+        write_json(paths / "universe.json", holdings)
+
+        summary = enrich_portfolio(self.workspace, finnhub_api_key=None)
+
+        enriched_holdings = load_json(paths / "holdings.json", default=[])
+        googl = next(h for h in enriched_holdings if h["ticker"] == "GOOGL")
+        kpg = next(h for h in enriched_holdings if h["ticker"] == "KPG")
+        toi = next(h for h in enriched_holdings if h["ticker"] == "TOI")
+
+        self.assertEqual(summary["enriched_count"], 3)
+        self.assertEqual(summary["error_count"], 0)
+        self.assertEqual(googl["finnhub_symbol"], "GOOGL")
+        self.assertEqual(googl["sec_registered"], True)
+        self.assertEqual(googl["exchange"], "NASDAQ")
+        self.assertEqual(kpg["finnhub_symbol"], "KPG.AX")
+        self.assertEqual(kpg["sec_registered"], False)
+        self.assertEqual(kpg["country"], "AU")
+        self.assertEqual(toi["finnhub_symbol"], "TOI.V")
+        self.assertEqual(toi["sec_registered"], False)
+
+    def test_portfolio_enrich_command_dispatch(self) -> None:
+        sync_portfolio(
+            self.workspace,
+            as_of=RUN_DATE,
+            holdings_source=str(FIXTURE_DIR / "holdings.csv"),
+            transactions_source=str(FIXTURE_DIR / "transactions.csv"),
+        )
+        settings = HarnessSettings(workspace_root=self.workspace)
+        result = portfolio.dispatch(["enrich"], settings=settings)
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("enriched:", result.stdout.decode("utf-8"))
+
+    def test_filings_collector_skips_non_sec_tickers(self) -> None:
+        sync_portfolio(
+            self.workspace,
+            as_of=RUN_DATE,
+            holdings_source=str(FIXTURE_DIR / "holdings.csv"),
+            transactions_source=str(FIXTURE_DIR / "transactions.csv"),
+        )
+        # Mark NVDA as non-SEC, MSFT as SEC-registered
+        universe = [
+            {"security_id": "NVDA", "ticker": "NVDA", "company_name": "NVIDIA", "sec_registered": False, "sources": ["holding"]},
+            {"security_id": "MSFT", "ticker": "MSFT", "company_name": "Microsoft", "sec_registered": True, "sources": ["holding"]},
+        ]
+        write_json(self.workspace / "data" / "01-portfolio" / "current" / "universe.json", universe)
+
+        # Use fixture so we don't need EDGAR identity
+        summary = collect_filings(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "filings.json"))
+        # With source file, all events come through (source bypass)
+        self.assertEqual(summary["status"], "success")
+
+    def test_expanded_market_quotes_fixture(self) -> None:
+        expanded_market = self.workspace / "expanded-market.json"
+        expanded_market.write_text(
+            json.dumps(
+                {
+                    "indexes": [
+                        {"symbol": "SPY", "change_pct": -1.4, "headline": "S&P 500 down", "material": True},
+                        {"symbol": "VIXY", "change_pct": 5.2, "headline": "VIXY surged", "material": True},
+                        {"symbol": "TLT", "change_pct": 0.3, "headline": "TLT flat", "material": False},
+                        {"symbol": "GLD", "change_pct": 1.1, "headline": "Gold up", "material": True},
+                        {"symbol": "XLK", "change_pct": -2.0, "headline": "Tech sold off", "material": True},
+                    ],
+                    "rates": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        summary = collect_market(self.workspace, run_date=RUN_DATE, source=str(expanded_market))
+        payload = load_json(Path(summary["raw_path"]), default={})
+        events = payload.get("events", [])
+        symbols = [e.get("security_id") for e in events]
+
+        self.assertEqual(summary["event_count"], 5)
+        self.assertIn("SPY", symbols)
+        self.assertIn("VIXY", symbols)
+        self.assertIn("GLD", symbols)
+        self.assertIn("XLK", symbols)
+
+    def test_normalize_news_events_filters_by_time(self) -> None:
+        from datetime import datetime as _dt, timezone as _tz
+        # Use timestamps relative to RUN_DATE so the 18h window works
+        run_date_midnight = int(_dt.combine(RUN_DATE, _dt.min.time(), tzinfo=_tz.utc).timestamp())
+        recent_ts = run_date_midnight + 6 * 3600  # 6 AM on run date
+        old_ts = run_date_midnight - 24 * 3600  # 24 hours before run date (outside 18h window)
+
+        news_items = [
+            {"headline": "Recent headline", "datetime": recent_ts, "source": "Reuters", "url": "https://example.com/1"},
+            {"headline": "Old headline", "datetime": old_ts, "source": "CNBC", "url": "https://example.com/2"},
+            {"headline": "", "datetime": recent_ts, "source": "AP", "url": "https://example.com/3"},
+        ]
+        events = normalize_news_events(news_items, RUN_DATE)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["headline"], "Recent headline")
+        self.assertEqual(events[0]["event_type"], "market-news")
+        self.assertEqual(events[0]["news_source"], "Reuters")
+
+    def test_normalize_company_news_events(self) -> None:
+        from datetime import datetime as _dt, timezone as _tz
+        run_date_midnight = int(_dt.combine(RUN_DATE, _dt.min.time(), tzinfo=_tz.utc).timestamp())
+        recent_ts = run_date_midnight + 6 * 3600
+        news_items = [
+            {
+                "headline": "GOOGL beats estimates",
+                "datetime": recent_ts,
+                "source": "SeekingAlpha",
+                "url": "https://example.com/googl",
+                "_security_id": "GOOGL",
+                "_finnhub_symbol": "GOOGL",
+            },
+        ]
+        events = normalize_company_news_events(news_items, RUN_DATE)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "company-news")
+        self.assertEqual(events[0]["security_id"], "GOOGL")
+        self.assertEqual(events[0]["relationship"], "monitored")
+
+    def test_news_deduplication_in_prep(self) -> None:
+        sync_portfolio(
+            self.workspace,
+            as_of=RUN_DATE,
+            holdings_source=str(FIXTURE_DIR / "holdings.csv"),
+            transactions_source=str(FIXTURE_DIR / "transactions.csv"),
+            watchlist_source=str(FIXTURE_DIR / "watchlist.json"),
+        )
+        # Create market data with duplicate news (same URL in both general and company news)
+        market_data = {
+            "indexes": [
+                {"symbol": "SPY", "change_pct": -1.4, "headline": "SPY down", "material": True},
+            ],
+            "rates": [],
+            "news": [
+                {
+                    "headline": "Duplicate article title",
+                    "datetime": 9999999999,
+                    "source": "Reuters",
+                    "url": "https://example.com/dupe",
+                    "summary": "Summary",
+                },
+            ],
+            "company_news": [
+                {
+                    "headline": "Duplicate article title (company)",
+                    "datetime": 9999999999,
+                    "source": "Reuters",
+                    "url": "https://example.com/dupe",
+                    "_security_id": "NVDA",
+                    "_finnhub_symbol": "NVDA",
+                    "summary": "Summary",
+                },
+            ],
+        }
+        market_file = self.workspace / "market-with-news.json"
+        market_file.write_text(json.dumps(market_data), encoding="utf-8")
+
+        collect_filings(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "filings.json"))
+        collect_earnings(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "market-data.json"))
+        collect_macro(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "macro-events.json"))
+        collect_ir(self.workspace, run_date=RUN_DATE, registry_path=self.workspace / "empty-ir.json")
+        (self.workspace / "empty-ir.json").write_text("[]", encoding="utf-8")
+        collect_market(self.workspace, run_date=RUN_DATE, source=str(market_file))
+
+        summary = prepare_evidence(self.workspace, run_date=RUN_DATE)
+        run_paths = ensure_daily_run_layout(self.workspace, RUN_DATE)
+        prepared = load_json(run_paths.structured_dir / "prepared-evidence.json", default={})
+
+        # The duplicate URL should be suppressed — only one news event with that URL
+        all_news_urls = [
+            e.get("reference_url")
+            for e in prepared["events"]
+            if e.get("event_type") in {"market-news", "company-news"} and e.get("reference_url")
+        ]
+        dupe_url_count = sum(1 for u in all_news_urls if u == "https://example.com/dupe")
+        self.assertEqual(dupe_url_count, 1)
+
+    def test_market_data_with_news_includes_news_events(self) -> None:
+        import time as _time
+        now_ts = int(_time.time())
+        market_data = {
+            "indexes": [
+                {"symbol": "SPY", "change_pct": 0.5, "headline": "SPY flat", "material": False},
+            ],
+            "rates": [],
+            "news": [
+                {"headline": "Fed signals rate cuts", "datetime": now_ts, "source": "Reuters", "url": "https://example.com/fed"},
+            ],
+            "company_news": [
+                {
+                    "headline": "NVDA launches new chip",
+                    "datetime": now_ts,
+                    "source": "CNBC",
+                    "url": "https://example.com/nvda",
+                    "_security_id": "NVDA",
+                    "_finnhub_symbol": "NVDA",
+                },
+            ],
+        }
+        market_file = self.workspace / "market-news.json"
+        market_file.write_text(json.dumps(market_data), encoding="utf-8")
+
+        summary = collect_market(self.workspace, run_date=RUN_DATE, source=str(market_file))
+        payload = load_json(Path(summary["raw_path"]), default={})
+        events = payload.get("events", [])
+
+        event_types = {e["event_type"] for e in events}
+        self.assertIn("market", event_types)
+        self.assertIn("market-news", event_types)
+        self.assertIn("company-news", event_types)
+        self.assertEqual(summary["event_count"], 3)
+
+    def test_normalize_security_row_passes_through_enrichment_fields(self) -> None:
+        from harness.portfolio_state import _normalize_security_row
+        row = {
+            "ticker": "KPG",
+            "company": "Kelly Partners Group",
+            "exchange": "ASX",
+            "country": "AU",
+            "sec_registered": False,
+            "finnhub_symbol": "KPG.AX",
+        }
+        result = _normalize_security_row(row, source_kind="holding")
+        self.assertEqual(result["exchange"], "ASX")
+        self.assertEqual(result["country"], "AU")
+        self.assertEqual(result["sec_registered"], False)
+        self.assertEqual(result["finnhub_symbol"], "KPG.AX")
+
+    def test_normalize_security_row_omits_enrichment_when_absent(self) -> None:
+        from harness.portfolio_state import _normalize_security_row
+        row = {"ticker": "NVDA", "company": "NVIDIA Corp"}
+        result = _normalize_security_row(row, source_kind="holding")
+        self.assertNotIn("exchange", result)
+        self.assertNotIn("country", result)
+        self.assertNotIn("sec_registered", result)
+        self.assertNotIn("finnhub_symbol", result)
+
+    def test_enrich_preserves_already_enriched_records(self) -> None:
+        sync_portfolio(
+            self.workspace,
+            as_of=RUN_DATE,
+            holdings_source=str(FIXTURE_DIR / "holdings.csv"),
+            transactions_source=str(FIXTURE_DIR / "transactions.csv"),
+        )
+        paths = self.workspace / "data" / "01-portfolio" / "current"
+        holdings = [
+            {
+                "security_id": "GOOGL",
+                "ticker": "GOOGL",
+                "company_name": "Alphabet",
+                "source_kind": "holding",
+                "exchange": "NASDAQ",
+                "country": "US",
+                "sec_registered": True,
+                "finnhub_symbol": "GOOGL",
+            },
+        ]
+        write_json(paths / "holdings.json", holdings)
+        write_json(paths / "watchlist.json", [])
+        write_json(paths / "universe.json", holdings)
+
+        summary = enrich_portfolio(self.workspace, finnhub_api_key=None)
+        self.assertEqual(summary["skipped_count"], 1)
+        self.assertEqual(summary["enriched_count"], 0)
 
 
 if __name__ == "__main__":

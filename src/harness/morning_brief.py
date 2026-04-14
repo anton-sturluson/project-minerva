@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time as time_mod
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -13,6 +15,8 @@ from xml.etree import ElementTree
 
 import requests
 from lxml import html as lxml_html
+
+logger = logging.getLogger(__name__)
 
 from harness.portfolio_state import (
     append_jsonl,
@@ -30,7 +34,12 @@ from minerva.sec import get_recent_filings
 
 
 DEFAULT_FILING_FORMS = ["8-K", "10-K", "10-Q", "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"]
-DEFAULT_INDEX_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM"]
+DEFAULT_QUOTE_SYMBOLS = [
+    "SPY", "QQQ", "DIA", "IWM",
+    "VIXY", "TLT", "UUP", "USO", "GLD",
+    "XLK", "XLF", "XLE", "XLV",
+]
+FINNHUB_CALL_DELAY_SECONDS = 0.1
 IR_HTML_NAV_PATTERNS = (
     r"home",
     r"about(?: us)?",
@@ -176,6 +185,9 @@ def collect_filings(
         for security in universe:
             ticker = str(security.get("ticker") or security.get("security_id") or "").strip()
             if not ticker:
+                continue
+            if security.get("sec_registered") is False:
+                logger.info("skipping %s: not SEC-registered", ticker)
                 continue
             try:
                 filings = get_recent_filings(
@@ -493,10 +505,12 @@ def collect_market(
 ) -> dict[str, Any]:
     """Collect a narrow market context snapshot."""
     run_paths = ensure_daily_run_layout(workspace_root, run_date)
+    universe = load_json(portfolio_paths(workspace_root).universe, default=[])
     payload, degraded_reasons = load_market_provider_payload(
         source=source,
         provider=provider,
         finnhub_api_key=finnhub_api_key,
+        universe=universe,
         run_date=run_date,
     )
     events = normalize_market_events(payload, run_date)
@@ -549,6 +563,7 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
     all_events: list[dict[str, Any]] = []
     suppressed: list[dict[str, Any]] = []
     seen: set[str] = set()
+    seen_news_urls: set[str] = set()
     for source_name, events in source_events.items():
         for event in events:
             enriched = enrich_event_relationships(dict(event), universe, adjacency_map)
@@ -556,6 +571,13 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
             if dedupe_key in seen:
                 suppressed.append({"reason": "duplicate", "event": enriched})
                 continue
+            news_url = str(enriched.get("reference_url") or "").strip()
+            event_type = str(enriched.get("event_type") or "").lower()
+            if event_type in {"market-news", "company-news"} and news_url:
+                if news_url in seen_news_urls:
+                    suppressed.append({"reason": "duplicate-url", "event": enriched})
+                    continue
+                seen_news_urls.add(news_url)
             if enriched.get("event_date") not in {"", run_date.isoformat()}:
                 suppressed.append({"reason": "stale", "event": enriched})
                 continue
@@ -843,6 +865,7 @@ def load_market_provider_payload(
     provider: str,
     finnhub_api_key: str | None,
     run_date: date,
+    universe: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Load shared market-data payloads for earnings and market commands."""
     degraded_reasons: list[str] = []
@@ -858,10 +881,10 @@ def load_market_provider_payload(
     if provider == "auto":
         effective_provider = "finnhub" if finnhub_api_key else "file"
     if effective_provider == "finnhub" and finnhub_api_key:
-        return _load_finnhub_payload(run_date, finnhub_api_key), degraded_reasons
+        return _load_finnhub_payload(run_date, finnhub_api_key, universe=universe), degraded_reasons
 
     degraded_reasons.append("no market data source configured")
-    return {"earnings": [], "market": [], "indexes": [], "rates": [], "fx": []}, degraded_reasons
+    return {"earnings": [], "market": [], "indexes": [], "rates": [], "fx": [], "news": [], "company_news": []}, degraded_reasons
 
 
 def normalize_market_events(payload: dict[str, Any], run_date: date) -> list[dict[str, Any]]:
@@ -871,22 +894,24 @@ def normalize_market_events(payload: dict[str, Any], run_date: date) -> list[dic
         event = _normalize_market_event(row, run_date)
         if event is not None:
             events.append(event)
-    if events:
-        return sorted(events, key=lambda item: item["headline"])
+    if not events:
+        for row in payload.get("indexes", []):
+            event = _normalize_market_event(row, run_date)
+            if event is not None:
+                events.append(event)
+        for row in payload.get("rates", []):
+            event = _normalize_market_event(row, run_date, category="rates")
+            if event is not None:
+                events.append(event)
+        for row in payload.get("fx", []):
+            event = _normalize_market_event(row, run_date, category="fx")
+            if event is not None:
+                events.append(event)
 
-    for row in payload.get("indexes", []):
-        event = _normalize_market_event(row, run_date)
-        if event is not None:
-            events.append(event)
-    for row in payload.get("rates", []):
-        event = _normalize_market_event(row, run_date, category="rates")
-        if event is not None:
-            events.append(event)
-    for row in payload.get("fx", []):
-        event = _normalize_market_event(row, run_date, category="fx")
-        if event is not None:
-            events.append(event)
-    return sorted(events, key=lambda item: item["headline"])
+    events.extend(normalize_news_events(payload.get("news", []), run_date))
+    events.extend(normalize_company_news_events(payload.get("company_news", []), run_date))
+
+    return sorted(events, key=lambda item: (item.get("event_type", ""), item["headline"]))
 
 
 def enrich_event_relationships(
@@ -950,9 +975,14 @@ def relationship_for_security(
 def group_for_event(event: dict[str, Any]) -> str:
     """Assign an event to a prep section."""
     source_name = str(event.get("source_name") or event.get("source", "")).lower()
+    event_type = str(event.get("event_type", "")).lower()
     relationship = str(event.get("relationship", "")).lower()
     if source_name in {"macro"}:
         return "macro-policy"
+    if event_type == "market-news":
+        return "market-context"
+    if event_type == "company-news":
+        return "company-specific"
     if source_name in {"market"}:
         return "market-context"
     if relationship == "adjacent":
@@ -1536,6 +1566,61 @@ def _normalize_market_event(
     }
 
 
+def normalize_news_events(news_items: list[dict[str, Any]], run_date: date) -> list[dict[str, Any]]:
+    """Convert Finnhub general news items into shared event schema."""
+    events: list[dict[str, Any]] = []
+    cutoff_ts = datetime.combine(run_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() - 18 * 3600
+    for item in news_items:
+        ts = item.get("datetime", 0)
+        if isinstance(ts, (int, float)) and ts < cutoff_ts:
+            continue
+        headline = str(item.get("headline") or "").strip()
+        if not headline:
+            continue
+        events.append({
+            "source": "market",
+            "event_type": "market-news",
+            "event_date": run_date.isoformat(),
+            "security_id": "",
+            "relationship": "market",
+            "headline": headline,
+            "category": "news",
+            "summary": str(item.get("summary") or "").strip(),
+            "news_source": str(item.get("source") or "").strip(),
+            "reference_url": str(item.get("url") or "").strip(),
+            "metadata": item,
+        })
+    return events
+
+
+def normalize_company_news_events(news_items: list[dict[str, Any]], run_date: date) -> list[dict[str, Any]]:
+    """Convert Finnhub company news items into shared event schema."""
+    events: list[dict[str, Any]] = []
+    cutoff_ts = datetime.combine(run_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() - 18 * 3600
+    for item in news_items:
+        ts = item.get("datetime", 0)
+        if isinstance(ts, (int, float)) and ts < cutoff_ts:
+            continue
+        headline = str(item.get("headline") or "").strip()
+        if not headline:
+            continue
+        security_id = str(item.get("_security_id") or "").strip()
+        events.append({
+            "source": "market",
+            "event_type": "company-news",
+            "event_date": run_date.isoformat(),
+            "security_id": security_id,
+            "relationship": "monitored" if security_id else "market",
+            "headline": headline,
+            "category": "company-news",
+            "summary": str(item.get("summary") or "").strip(),
+            "news_source": str(item.get("source") or "").strip(),
+            "reference_url": str(item.get("url") or "").strip(),
+            "metadata": item,
+        })
+    return events
+
+
 def _parse_ir_feed(
     feed_url: str,
     feed_format: str,
@@ -1649,7 +1734,13 @@ def _looks_like_ir_press_release(title: str) -> bool:
     return bool(IR_HTML_MATERIAL_TITLE_PATTERN.search(normalized))
 
 
-def _load_finnhub_payload(run_date: date, api_key: str) -> dict[str, Any]:
+def _load_finnhub_payload(
+    run_date: date,
+    api_key: str,
+    *,
+    universe: list[dict[str, Any]] | None = None,
+    delay: float = FINNHUB_CALL_DELAY_SECONDS,
+) -> dict[str, Any]:
     base_url = "https://finnhub.io/api/v1"
     session = requests.Session()
     earnings_response = session.get(
@@ -1661,7 +1752,8 @@ def _load_finnhub_payload(run_date: date, api_key: str) -> dict[str, Any]:
     earnings_payload = earnings_response.json()
 
     indexes: list[dict[str, Any]] = []
-    for symbol in DEFAULT_INDEX_SYMBOLS:
+    for symbol in DEFAULT_QUOTE_SYMBOLS:
+        time_mod.sleep(delay)
         response = session.get(f"{base_url}/quote", params={"symbol": symbol, "token": api_key}, timeout=30)
         response.raise_for_status()
         quote = response.json()
@@ -1673,11 +1765,54 @@ def _load_finnhub_payload(run_date: date, api_key: str) -> dict[str, Any]:
                 "material": abs(float(quote.get("dp", 0) or 0)) >= 1.0,
             }
         )
+
+    # General market news
+    news: list[dict[str, Any]] = []
+    try:
+        time_mod.sleep(delay)
+        news_response = session.get(
+            f"{base_url}/news",
+            params={"category": "general", "token": api_key},
+            timeout=30,
+        )
+        news_response.raise_for_status()
+        news = news_response.json() if isinstance(news_response.json(), list) else []
+    except Exception as exc:
+        logger.warning("failed to fetch general market news: %s", exc)
+
+    # Company-specific news
+    company_news: list[dict[str, Any]] = []
+    if universe:
+        date_str = run_date.isoformat()
+        for security in universe:
+            finnhub_sym = str(
+                security.get("finnhub_symbol") or security.get("ticker") or security.get("security_id") or ""
+            ).strip()
+            if not finnhub_sym:
+                continue
+            try:
+                time_mod.sleep(delay)
+                cn_response = session.get(
+                    f"{base_url}/company-news",
+                    params={"symbol": finnhub_sym, "from": date_str, "to": date_str, "token": api_key},
+                    timeout=30,
+                )
+                cn_response.raise_for_status()
+                items = cn_response.json() if isinstance(cn_response.json(), list) else []
+                for item in items:
+                    item["_security_id"] = str(security.get("security_id") or finnhub_sym).strip()
+                    item["_finnhub_symbol"] = finnhub_sym
+                company_news.extend(items)
+            except Exception as exc:
+                logger.warning("failed to fetch company news for %s: %s", finnhub_sym, exc)
+
     return {
         "earnings": earnings_payload.get("earningsCalendar", earnings_payload.get("earnings", [])),
         "indexes": indexes,
         "rates": [],
         "fx": [],
+        "news": news,
+        "company_news": company_news,
     }
 
 
