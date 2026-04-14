@@ -662,3 +662,24 @@ The Google Sheet CSV headers use mixed case and human-readable names (e.g. `Tick
    - Test that Exchange column flows through sync → universe → enrichment
    - Test that enrichment data is preserved across re-syncs
    - Test filings collector skips non-security rows
+
+---
+
+## HTTP Fetcher — Browser Headers & 429 Retry
+
+Date added: 2026-04-14
+
+### Problem
+
+`read_text_source()` uses bare `requests.get()` with the default `python-requests` User-Agent. Many IR sites and government pages (BLS) block this with 403. AIM's IR page returns 429 (rate limit).
+
+As of 2026-04-14, 7 of 14 IR feeds and the BLS macro source are blocked.
+
+### Fix
+
+1. Add a module-level `_http_session()` returning a `requests.Session` with browser-like headers (`User-Agent`, `Accept`, `Accept-Language`).
+2. Update `read_text_source()` to use `_http_session().get()` instead of bare `requests.get()`.
+3. On HTTP 429, retry once after the `Retry-After` header value (default 2s). No retry on 403.
+4. In `_parse_ir_feed()`, pass an `Accept` header hint matching the feed format (RSS/XML vs HTML).
+
+Files: `portfolio_state.py` (session + read_text_source), `morning_brief.py` (Accept hint + 429 retry in IR/macro).
