@@ -39,3 +39,4 @@ hard-disk
 data/
 .worktrees/
 .tmp/
+.obsidian/
