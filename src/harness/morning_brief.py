@@ -1144,7 +1144,18 @@ def _default_manifest_outputs(run_paths: RunPaths) -> dict[str, Any]:
 
 def _load_raw_source(run_paths: RunPaths, name: str) -> dict[str, Any]:
     path = run_paths.raw_dir / f"{name}.json"
-    return load_json(path, default={})
+    payload = load_json(path, default={})
+    # Merge browser-fallback sidecar if it exists (e.g., ir-browser.json)
+    browser_path = run_paths.raw_dir / f"{name}-browser.json"
+    if browser_path.exists():
+        browser_payload = load_json(browser_path, default={})
+        browser_events = browser_payload.get("events", [])
+        if browser_events:
+            existing_events = payload.get("events", [])
+            existing_events.extend(browser_events)
+            payload["events"] = existing_events
+            logger.info("merged %d browser-fallback events into %s", len(browser_events), name)
+    return payload
 
 
 def _read_review_log(path: Path) -> list[dict[str, Any]]:
