@@ -65,6 +65,86 @@ if [[ -n "${MINERVA_BRIEF_MARKET_SOURCE:-}" ]]; then
 fi
 run "${market_args[@]}"
 
+# ── Browser fallback for blocked IR/macro sources ──
+MINERVA_SKIP_BROWSER_FALLBACK="${MINERVA_SKIP_BROWSER_FALLBACK:-0}"
+MANIFEST_PATH_CHECK="${MINERVA_WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}/data/raw/manifest.json"
+BROWSER_OUTPUT_DIR="${MINERVA_WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}/data/raw"
+
+if [[ "${MINERVA_SKIP_BROWSER_FALLBACK}" != "1" ]]; then
+  FAILED_TICKERS=$(uv run python - "${MANIFEST_PATH_CHECK}" "${IR_REGISTRY_PATH}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+registry_path = Path(sys.argv[2])
+
+if not manifest_path.exists():
+    sys.exit(0)
+
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+ir_source = manifest.get("sources", {}).get("ir", {})
+
+if ir_source.get("error_count", 0) == 0:
+    sys.exit(0)
+
+ir_raw_path = ir_source.get("raw_path", "")
+if not ir_raw_path or not Path(ir_raw_path).exists():
+    sys.exit(0)
+
+ir_raw = json.loads(Path(ir_raw_path).read_text(encoding="utf-8"))
+errors = ir_raw.get("errors", [])
+if not errors:
+    sys.exit(0)
+
+registry = json.loads(registry_path.read_text(encoding="utf-8")) if registry_path.exists() else []
+reg_lookup = {}
+for entry in registry:
+    sid = entry.get("security_id", "")
+    feeds = entry.get("feeds", [])
+    if sid and feeds:
+        reg_lookup[sid] = feeds[0].get("url", "")
+
+lines = []
+for err in errors:
+    sid = err.get("security_id", "")
+    url = reg_lookup.get(sid, err.get("url", ""))
+    if sid and url:
+        lines.append(f"- {sid}: {url}")
+
+if lines:
+    print("\n".join(lines))
+PY
+  ) || true
+
+  if [[ -n "${FAILED_TICKERS}" ]]; then
+    echo "browser_fallback: found blocked IR sources, spawning browser agent..."
+    echo "${FAILED_TICKERS}"
+    BROWSER_OUTPUT="${BROWSER_OUTPUT_DIR}/ir-browser.json"
+    openclaw agent \
+      --agent main \
+      --timeout 1200 \
+      --thinking medium \
+      --json \
+      --message "Browser IR fallback for ${RUN_DATE}.
+
+The following IR pages were blocked during HTTP collection (Cloudflare, bot protection, or timeouts). Use the browser skill to visit each page, find press releases or news items published on ${RUN_DATE}, and extract: headline, date, URL, and a brief summary of the content if visible.
+
+Write the results as a JSON file to: ${BROWSER_OUTPUT}
+
+The JSON should have this structure:
+{\"date\": \"${RUN_DATE}\", \"collected_at\": \"<ISO timestamp>\", \"fetch_method\": \"browser\", \"events\": [{\"source\": \"ir\", \"event_type\": \"ir\", \"event_date\": \"${RUN_DATE}\", \"security_id\": \"<TICKER>\", \"relationship\": \"monitored\", \"headline\": \"<title>\", \"reference_url\": \"<link>\", \"metadata\": {}}]}
+
+If a page has no press releases for ${RUN_DATE}, include an empty events array for that ticker. If you cannot access a page even with the browser, note it in the metadata.
+
+Failed tickers:
+${FAILED_TICKERS}" 2>&1 || echo "browser_fallback: openclaw agent failed (non-fatal), continuing without browser results"
+    echo "browser_fallback: done"
+  else
+    echo "browser_fallback: no blocked IR sources detected"
+  fi
+fi
+
 run brief prep --date "${RUN_DATE}"
 
 PREPARED_PATH="${MINERVA_WORKSPACE_ROOT:-hard-disk}/reports/03-daily-news/${RUN_DATE}/data/structured/prepared-evidence.json"
