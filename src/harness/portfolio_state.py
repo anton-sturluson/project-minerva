@@ -435,22 +435,24 @@ def set_thesis_card(
 
 
 FINNHUB_SYMBOL_TABLE: dict[str, dict[str, Any]] = {
-    "ACFN": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "ACFN"},
-    "AIM": {"exchange": "NYSE MKT", "country": "US", "sec_registered": True, "finnhub_symbol": "AIM"},
-    "AVGO": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "AVGO"},
-    "BEPC": {"exchange": "NYSE", "country": "US", "sec_registered": True, "finnhub_symbol": "BEPC"},
-    "DUOL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "DUOL"},
-    "GOOGL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "GOOGL"},
-    "IMVT": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "IMVT"},
-    "KPG": {"exchange": "ASX", "country": "AU", "sec_registered": False, "finnhub_symbol": "KPG.AX"},
-    "LGCY": {"exchange": "NYSE MKT", "country": "US", "sec_registered": True, "finnhub_symbol": "LGCY"},
-    "OSCR": {"exchange": "NYSE", "country": "US", "sec_registered": True, "finnhub_symbol": "OSCR"},
-    "SPOT": {"exchange": "NYSE", "country": "LU", "sec_registered": True, "finnhub_symbol": "SPOT"},
-    "TOI": {"exchange": "TSXV", "country": "CA", "sec_registered": False, "finnhub_symbol": "TOI.V"},
-    "TSLA": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "TSLA"},
-    "TSM": {"exchange": "TWSE / NYSE ADR", "country": "TW", "sec_registered": True, "finnhub_symbol": "TSM"},
-    "VCSH": {"exchange": "NYSE Arca", "country": "US", "sec_registered": True, "finnhub_symbol": "VCSH"},
-    "ZDC": {"exchange": "TSXV", "country": "CA", "sec_registered": False, "finnhub_symbol": "ZDC.V"},
+    "ACFN": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "ACFN", "company_name": "Acorn Energy Inc"},
+    "AIM": {"exchange": "ASX", "country": "AU", "sec_registered": False, "finnhub_symbol": "AIM.AX", "company_name": "Ai-Media Technologies Ltd"},
+    "AVGO": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "AVGO", "company_name": "Broadcom Inc"},
+    "BEPC": {"exchange": "NYSE", "country": "US", "sec_registered": True, "finnhub_symbol": "BEPC", "company_name": "Brookfield Renewable Corp"},
+    "COIN": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "COIN", "company_name": "Coinbase Global Inc"},
+    "DUOL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "DUOL", "company_name": "Duolingo Inc"},
+    "GOOGL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "GOOGL", "company_name": "Alphabet Inc"},
+    "HOOD": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "HOOD", "company_name": "Robinhood Markets Inc"},
+    "IMVT": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "IMVT", "company_name": "Immunovant Inc"},
+    "KPG": {"exchange": "ASX", "country": "AU", "sec_registered": False, "finnhub_symbol": "KPG.AX", "company_name": "Kelly Partners Group Holdings Ltd"},
+    "LGCY": {"exchange": "NYSE MKT", "country": "US", "sec_registered": True, "finnhub_symbol": "LGCY", "company_name": "Legacy Housing Corp"},
+    "OSCR": {"exchange": "NYSE", "country": "US", "sec_registered": True, "finnhub_symbol": "OSCR", "company_name": "Oscar Health Inc"},
+    "SPOT": {"exchange": "NYSE", "country": "LU", "sec_registered": True, "finnhub_symbol": "SPOT", "company_name": "Spotify Technology SA"},
+    "TOI": {"exchange": "TSXV", "country": "CA", "sec_registered": False, "finnhub_symbol": "TOI.V", "company_name": "Topicus.com Inc"},
+    "TSLA": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "TSLA", "company_name": "Tesla Inc"},
+    "TSM": {"exchange": "TWSE / NYSE ADR", "country": "TW", "sec_registered": True, "finnhub_symbol": "TSM", "company_name": "Taiwan Semiconductor Manufacturing Co Ltd"},
+    "VCSH": {"exchange": "NYSE Arca", "country": "US", "sec_registered": True, "finnhub_symbol": "VCSH", "company_name": "Vanguard Short-Term Corporate Bond ETF"},
+    "ZDC": {"exchange": "TSXV", "country": "CA", "sec_registered": False, "finnhub_symbol": "ZDC.V", "company_name": "Zedcor Inc"},
 }
 
 
@@ -475,7 +477,12 @@ def enrich_portfolio(
             if not ticker:
                 continue
 
-            if record.get("exchange") and record.get("finnhub_symbol") and "sec_registered" in record:
+            if (
+                record.get("exchange")
+                and record.get("finnhub_symbol")
+                and "sec_registered" in record
+                and record.get("company_name")
+            ):
                 skipped.append(ticker)
                 continue
 
@@ -536,6 +543,7 @@ def _resolve_enrichment_metadata(
 
         if profile.get("ticker"):
             return {
+                "company_name": str(profile.get("name") or "").strip(),
                 "exchange": str(profile.get("exchange") or "").strip(),
                 "country": str(profile.get("country") or "").strip(),
                 "sec_registered": str(profile.get("country") or "").strip() == "US",
@@ -565,6 +573,7 @@ def _resolve_enrichment_metadata(
                 profile2 = profile_resp2.json()
                 if profile2.get("ticker"):
                     return {
+                        "company_name": str(profile2.get("name") or "").strip(),
                         "exchange": str(profile2.get("exchange") or "").strip(),
                         "country": str(profile2.get("country") or "").strip(),
                         "sec_registered": str(profile2.get("country") or "").strip() == "US",
