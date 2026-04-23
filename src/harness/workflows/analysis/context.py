@@ -8,7 +8,7 @@ from typing import Any
 from harness.workflows.evidence.extraction import structured_output_base
 from harness.workflows.evidence.paths import CompanyPaths
 from harness.workflows.evidence.profiles import load_context_profile
-from harness.workflows.evidence.registry import list_sources, utc_now
+from harness.workflows.evidence.ledger import load_ledger, utc_now
 from harness.workflows.evidence.render import refresh_indexes, render_context_manifest_markdown, write_json
 
 
@@ -19,7 +19,7 @@ def run_context(paths: CompanyPaths, *, profile_name: str) -> dict[str, Any]:
     if not isinstance(bundles_config, list) or not bundles_config:
         raise ValueError(f"context profile `{profile_name}` has no bundles")
 
-    all_sources = list_sources(paths)
+    all_sources = load_ledger(paths)
     manifest_bundles: list[dict[str, Any]] = []
     included_artifacts: list[dict[str, Any]] = []
     total_tokens = 0
@@ -42,8 +42,7 @@ def run_context(paths: CompanyPaths, *, profile_name: str) -> dict[str, Any]:
                     f"## Artifact: {entry['title']}",
                     "",
                     f"- source_id: {entry['id']}",
-                    f"- bucket: {entry['bucket']}",
-                    f"- source_kind: {entry['source_kind']}",
+                    f"- category: {entry['category']}",
                     f"- structured_path: {markdown_path.relative_to(paths.root)}",
                     "",
                     body,
@@ -112,15 +111,12 @@ def estimate_tokens(text: str) -> int:
 
 
 def _select_sources(all_sources: list[dict[str, Any]], bundle: dict[str, Any]) -> list[dict[str, Any]]:
-    buckets = set(bundle.get("buckets", []))
-    source_kinds = set(bundle.get("source_kinds", []))
+    categories = set(bundle.get("categories", []))
     selected = []
     for entry in all_sources:
         if entry["status"] != "downloaded":
             continue
-        if buckets and entry["bucket"] not in buckets:
-            continue
-        if source_kinds and entry["source_kind"] not in source_kinds:
+        if categories and entry.get("category") not in categories:
             continue
         selected.append(entry)
-    return sorted(selected, key=lambda item: (item["bucket"], item["source_kind"], item["title"]))
+    return sorted(selected, key=lambda item: (item.get("category", ""), item.get("title", "")))

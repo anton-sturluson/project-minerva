@@ -186,6 +186,37 @@ def render_context_manifest_markdown(manifest: dict[str, Any]) -> str:
     )
 
 
+def render_evidence_ledger_markdown(entries: list[dict[str, Any]]) -> str:
+    """Render the V2 ledger as a compact markdown summary."""
+    rows: list[list[str]] = []
+    for entry in sorted(entries, key=lambda item: (item.get("category") or "", item.get("date") or "", item["id"])):
+        rows.append(
+            [
+                entry["id"],
+                entry.get("status", ""),
+                entry.get("category", ""),
+                entry.get("title", ""),
+                entry.get("date") or "",
+                entry.get("local_path") or "",
+                entry.get("url") or "",
+            ]
+        )
+    table = build_markdown_table(
+        ["id", "status", "category", "title", "date", "local_path", "url"],
+        rows or [["(none)", "", "", "", "", "", ""]],
+        alignment=["l", "l", "l", "l", "l", "l", "l"],
+    )
+    return "\n".join(
+        [
+            "# Evidence Ledger (V2)",
+            "",
+            f"- source_count: {len(entries)}",
+            "",
+            table,
+        ]
+    )
+
+
 def refresh_indexes(root: Path) -> None:
     """Write a simple directory listing index for every non-hidden directory under root."""
     for directory in sorted(_iter_directories(root)):

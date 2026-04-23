@@ -27,6 +27,8 @@ def ensure_company_tree(paths: CompanyPaths) -> None:
         paths.analysis_dir,
         paths.bundles_dir,
         paths.provenance_dir,
+        paths.audits_dir,
+        paths.plans_dir,
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 

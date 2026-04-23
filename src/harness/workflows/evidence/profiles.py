@@ -9,8 +9,10 @@ import yaml
 
 
 def load_extract_profile(name: str) -> dict[str, Any]:
-    """Load an evidence extraction profile by name."""
-    return _load_yaml(("evidence", "extract"), name)
+    """Load extraction profile. Reads from constants.py instead of YAML."""
+    from harness.workflows.evidence.constants import EXTRACTION_QUESTIONS
+
+    return {"name": name, "categories": {cat: {"questions": qs} for cat, qs in EXTRACTION_QUESTIONS.items()}}
 
 
 def load_coverage_profile(name: str) -> dict[str, Any]:
@@ -19,8 +21,10 @@ def load_coverage_profile(name: str) -> dict[str, Any]:
 
 
 def load_context_profile(name: str) -> dict[str, Any]:
-    """Load an analysis context profile by name."""
-    return _load_yaml(("analysis", "context"), name)
+    """Load context profile. Reads from constants.py instead of YAML."""
+    from harness.workflows.evidence.constants import CONTEXT_BUNDLES
+
+    return {"name": name, "bundles": list(CONTEXT_BUNDLES)}
 
 
 def _load_yaml(segments: tuple[str, ...], name: str) -> dict[str, Any]:

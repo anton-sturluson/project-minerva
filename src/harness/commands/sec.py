@@ -22,6 +22,12 @@ from harness.commands.common import (
 )
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
+from harness.workflows.evidence.constants import (
+    DEFAULT_10K_ITEMS,
+    DEFAULT_10Q_ITEMS,
+    SECTION_MAP_10K,
+    SECTION_MAP_10Q,
+)
 
 SEC_HELP = (
     "SEC EDGAR filing tools.\n\n"
@@ -426,6 +432,72 @@ def bulk_download_cli_command(
     )
 
 
+def _download_filing_sections(
+    *,
+    filing: Any,
+    form: str,
+    out_dir: Path,
+) -> dict[str, Any]:
+    """Download individual sections from a filing using edgartools structured access.
+
+    Falls back to single-file download when structured access fails.
+    Returns {"mode": "split"|"single", "sections": [...]}.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    section_map = SECTION_MAP_10K if form.upper() == "10-K" else SECTION_MAP_10Q
+    items = DEFAULT_10K_ITEMS if form.upper() == "10-K" else DEFAULT_10Q_ITEMS
+
+    try:
+        filing_obj = filing.obj()
+    except Exception:
+        return _fallback_single_file(filing, out_dir)
+
+    sections: list[dict[str, str]] = []
+    idx = 0
+    for item_num in items:
+        if item_num not in section_map:
+            continue
+        slug, display_name = section_map[item_num]
+        try:
+            text = str(filing_obj[f"Item {item_num}"])
+            if not text or text.strip() == "":
+                continue
+        except (KeyError, IndexError, TypeError):
+            continue
+        idx += 1
+        filename = f"{idx:02d}-{slug}.md"
+        (out_dir / filename).write_text(
+            f"## ITEM {item_num}. {display_name.upper()}\n\n{text}\n",
+            encoding="utf-8",
+        )
+        sections.append({"filename": filename, "title": f"ITEM {item_num}. {display_name}"})
+
+    if not sections:
+        return _fallback_single_file(filing, out_dir)
+
+    _write_sections_index(out_dir, sections)
+    return {"mode": "split", "sections": sections}
+
+
+def _fallback_single_file(filing: Any, out_dir: Path) -> dict[str, Any]:
+    """Fall back to downloading the full filing as a single markdown file."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        text = filing.markdown() if hasattr(filing, "markdown") else str(filing)
+    except Exception:
+        text = str(filing)
+    (out_dir / "filing.md").write_text(text, encoding="utf-8")
+    _write_sections_index(out_dir, [{"filename": "filing.md", "title": "Full filing"}])
+    return {"mode": "single", "sections": [{"filename": "filing.md", "title": "Full filing"}]}
+
+
+def _write_sections_index(out_dir: Path, sections: list[dict[str, str]]) -> None:
+    lines = ["# Sections", ""]
+    for item in sections:
+        lines.append(f"- [{item['title']}](./{item['filename']})")
+    (out_dir / "_sections.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _configure_edgar(settings: HarnessSettings) -> str | None:
     if not settings.edgar_identity:
         return "EDGAR_IDENTITY is required for SEC commands"
@@ -515,20 +587,12 @@ def _bulk_download_one(
         target_dir.mkdir(parents=True, exist_ok=True)
         for filing in _list_filings(company, form=form, limit=count):
             date_str = _filing_date(filing)
-            markdown_target = target_dir / f"{date_str}.md"
-            html_target = target_dir / f"{date_str}.html"
-            if markdown_target.exists() and (not include_html or html_target.exists()):
+            section_dir = target_dir / date_str
+            if section_dir.exists():
                 skipped += 1
                 continue
-            wrote_any = False
-            if not markdown_target.exists():
-                _save_filing(filing, markdown_target, file_format="markdown")
-                wrote_any = True
-            if include_html and not html_target.exists():
-                _save_filing(filing, html_target, file_format="html")
-                wrote_any = True
-            if wrote_any:
-                downloaded[form] += 1
+            _download_filing_sections(filing=filing, form=form, out_dir=section_dir)
+            downloaded[form] += 1
 
     earnings_dir = company_root / "earnings"
     earnings_dir.mkdir(parents=True, exist_ok=True)

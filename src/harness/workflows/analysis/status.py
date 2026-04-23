@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
+from harness.workflows.evidence.ledger import load_ledger, utc_now
 from harness.workflows.evidence.paths import CompanyPaths
-from harness.workflows.evidence.registry import load_registry, utc_now
 from harness.workflows.evidence.render import render_analysis_status_markdown, write_json
 
 FOLDER_INDEX_STEMS: frozenset[str] = frozenset({"index", "readme"})
@@ -15,17 +16,16 @@ FOLDER_INDEX_STEMS: frozenset[str] = frozenset({"index", "readme"})
 
 def run_status(paths: CompanyPaths) -> dict[str, Any]:
     """Compute and persist the current analysis workflow status."""
-    registry = load_registry(paths)
+    ledger = load_ledger(paths)
     inventory = _load_json(paths.inventory_json)
-    coverage = _load_json(paths.coverage_json)
     context_manifest = _load_json(paths.context_manifest_json)
 
     notes = _list_stage_artifacts(paths.notes_dir, suffixes={".md"})
     provenance = _list_stage_artifacts(paths.provenance_dir)
     bundles = _list_stage_artifacts(paths.bundles_dir, suffixes={".md"})
     extracted_count = inventory.get("counts", {}).get("extracted_files", 0) if inventory else 0
-    coverage_ready = bool(coverage.get("ready_for_analysis")) if coverage else False
-    source_count = len(registry.get("sources", []))
+    audit_ready = _audit_says_ready(paths)
+    source_count = len(ledger)
 
     if provenance:
         stage = "complete"
@@ -33,9 +33,9 @@ def run_status(paths: CompanyPaths) -> dict[str, Any]:
         stage = "memo-in-progress"
     elif bundles or context_manifest:
         stage = "analysis-in-progress"
-    elif coverage_ready and extracted_count > 0:
+    elif audit_ready and extracted_count > 0:
         stage = "analysis-ready"
-    elif coverage_ready:
+    elif audit_ready:
         stage = "extracting"
     elif source_count > 0:
         stage = "collecting"
@@ -44,11 +44,11 @@ def run_status(paths: CompanyPaths) -> dict[str, Any]:
 
     payload = {
         "stage": stage,
-        "next_step": _next_step(paths, registry=registry, inventory=inventory, coverage=coverage, extracted_count=extracted_count, bundles=bundles),
+        "next_step": _next_step(paths, ledger=ledger, inventory=inventory, audit_ready=audit_ready, extracted_count=extracted_count, bundles=bundles),
         "milestones": [
-            {"name": "registry", "status": "done" if paths.source_registry_json.exists() else "missing", "detail": str(paths.source_registry_json.relative_to(paths.root))},
+            {"name": "ledger", "status": "done" if paths.evidence_jsonl.exists() else "missing", "detail": str(paths.evidence_jsonl.relative_to(paths.root))},
             {"name": "inventory", "status": "done" if paths.inventory_json.exists() else "missing", "detail": str(paths.inventory_json.relative_to(paths.root))},
-            {"name": "coverage", "status": "done" if paths.coverage_json.exists() else "missing", "detail": str(paths.coverage_json.relative_to(paths.root))},
+            {"name": "audit", "status": "done" if audit_ready else "missing", "detail": "audit memo with Readiness: ready" if audit_ready else "run: minerva evidence audit"},
             {"name": "structured-extraction", "status": "done" if extracted_count > 0 else "missing", "detail": f"extracted_files={extracted_count}"},
             {"name": "analysis-context", "status": "done" if bundles else "missing", "detail": f"bundle_count={len(bundles)}"},
             {"name": "notes", "status": "done" if notes else "missing", "detail": f"note_count={len(notes)}"},
@@ -61,27 +61,34 @@ def run_status(paths: CompanyPaths) -> dict[str, Any]:
     return payload
 
 
+def _audit_says_ready(paths: CompanyPaths) -> bool:
+    """Return True if any audit-*.md in audits_dir contains 'Readiness: ready'."""
+    if not paths.audits_dir.exists():
+        return False
+    pattern = re.compile(r"readiness\s*:\s*ready", re.IGNORECASE)
+    for audit_file in paths.audits_dir.glob("audit-*.md"):
+        text = audit_file.read_text(encoding="utf-8")
+        if pattern.search(text):
+            return True
+    return False
+
+
 def _next_step(
     paths: CompanyPaths,
     *,
-    registry: dict[str, Any],
+    ledger: list[dict[str, Any]],
     inventory: dict[str, Any] | None,
-    coverage: dict[str, Any] | None,
+    audit_ready: bool,
     extracted_count: int,
     bundles: list[Path],
 ) -> str:
-    ticker = registry.get("ticker") or paths.root.name.upper()
-    if not registry.get("sources"):
-        return f"minerva evidence collect sec --root {paths.root} --ticker {ticker}"
+    ticker = (ledger[0].get("ticker") if ledger else None) or paths.root.name.upper()
+    if not ledger:
+        return f"minerva evidence add-source --root {paths.root} --ticker {ticker} --category sec-annual --title \"Add source\""
+    if not audit_ready:
+        return f"minerva evidence audit --root {paths.root}"
     if not inventory:
         return f"minerva evidence inventory --root {paths.root}"
-    if not coverage:
-        return f"minerva evidence coverage --root {paths.root} --profile default"
-    if not coverage.get("ready_for_analysis"):
-        missing = next((item["bucket"] for item in coverage.get("bucket_results", []) if item["status"] != "good"), "missing-bucket")
-        if missing.startswith("sec-"):
-            return f"minerva evidence collect sec --root {paths.root} --ticker {ticker}"
-        return f"minerva evidence register --root {paths.root} --status discovered --bucket {missing} --source-kind external-research --title \"Add source\""
     if extracted_count == 0:
         return f"minerva evidence extract --root {paths.root} --profile default"
     if not bundles:
