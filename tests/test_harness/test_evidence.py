@@ -135,31 +135,6 @@ def test_bulk_download_one_saves_html_csv_and_exhibit_99_1_markdown(tmp_path: Pa
 
 
 
-@pytest.mark.xfail(reason="V1 coverage_json stage gates removed in V2; test uses paths.coverage_json which is no longer a stage gate", strict=False)
-def test_analysis_status_ignores_generated_indexes_when_advancing_stages(tmp_path: Path) -> None:
-    root = tmp_path / "reports" / "00-companies" / "12-robinhood"
-    evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
-    paths = resolve_company_root(root)
-
-    paths.inventory_json.write_text(json.dumps({"counts": {"extracted_files": 3}}), encoding="utf-8")
-    paths.coverage_json.write_text(json.dumps({"ready_for_analysis": True, "bucket_results": []}), encoding="utf-8")
-
-    ready_payload = run_status(paths)
-    ready_milestones = {item["name"]: item for item in ready_payload["milestones"]}
-
-    assert ready_payload["stage"] == "analysis-ready"
-    assert ready_milestones["analysis-context"]["detail"] == "bundle_count=0"
-    assert ready_milestones["notes"]["detail"] == "note_count=0"
-    assert ready_milestones["provenance"]["detail"] == "record_count=0"
-
-    (paths.bundles_dir / "competition.md").write_text("# Competition\n\nReal bundle.", encoding="utf-8")
-    assert run_status(paths)["stage"] == "analysis-in-progress"
-
-    (paths.notes_dir / "2026-04-09-robinhood-deep-dive-v1.md").write_text("# Deep Dive\n\nReal note.", encoding="utf-8")
-    assert run_status(paths)["stage"] == "memo-in-progress"
-
-    (paths.provenance_dir / "2026-04-09-robinhood-deep-dive-v1.json").write_text("{}", encoding="utf-8")
-    assert run_status(paths)["stage"] == "complete"
 
 
 def test_evidence_collect_sec_v2_writes_ledger_and_per_section_files(tmp_path: Path, monkeypatch) -> None:
