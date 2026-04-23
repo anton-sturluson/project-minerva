@@ -16,6 +16,7 @@ from harness.workflows.evidence.constants import RECOGNIZED_CATEGORIES
 from harness.workflows.evidence.extraction import run_extraction
 from harness.workflows.evidence.inventory import run_inventory
 from harness.workflows.evidence.ledger import load_ledger, upsert_evidence
+from harness.workflows.evidence.migration import migrate_v1_to_v2
 from harness.workflows.evidence.paths import resolve_company_root
 from harness.workflows.evidence.registry import initialize_registry
 
@@ -117,6 +118,9 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: by
                 model=str(parsed.get("model", DEFAULT_AUDIT_MODEL)),
                 api_key=api_key,
             )
+        if subcommand == "migrate":
+            parsed = parse_flag_args(args[1:])
+            return migrate_command(root=str(parsed["root"]))
     except KeyError as exc:
         return CommandResult.from_text("", stderr=f"missing required flag: {exc}", exit_code=1)
     except ValueError as exc:
@@ -496,6 +500,44 @@ def audit_cli_command(
     api_key = os.environ.get(api_key_env_var) or os.environ.get("GEMINI_API_KEY")
     categories_list = [c.strip() for c in categories.split(",") if c.strip()] if categories else None
     _print(audit_command(root=root, categories=categories_list, model=model, api_key=api_key))
+
+
+def migrate_command(*, root: str) -> CommandResult:
+    """Migrate V1 source-registry.json to the V2 evidence.jsonl ledger."""
+    start = time.perf_counter()
+    try:
+        paths = resolve_company_root(root)
+        result = migrate_v1_to_v2(paths)
+    except Exception as exc:
+        return error_result(
+            f"migration failed: {exc}",
+            "verify the root path contains a source-registry.json, then retry",
+            ["`minerva evidence migrate --root hard-disk/reports/00-companies/12-robinhood`"],
+            start,
+        )
+    body = "\n".join(
+        [
+            f"migrated_count: {result['migrated_count']}",
+            f"dropped_count: {result['dropped_count']}",
+            f"evidence_jsonl: {paths.evidence_jsonl.relative_to(paths.root)}",
+        ]
+    )
+    return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
+
+
+@app.command("migrate", help="Migrate V1 source-registry.json to the V2 evidence.jsonl ledger.")
+def migrate_cli_command(
+    ctx: typer.Context,
+    root: str | None = typer.Option(None, "--root", help="Company evidence root."),
+) -> None:
+    if not root:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required arguments for `evidence migrate`",
+            what_to_do="pass `--root`",
+            alternatives=["`minerva evidence migrate --root hard-disk/reports/00-companies/12-robinhood`"],
+        )
+    _print(migrate_command(root=root))
 
 
 def _ticker_from_root(paths) -> str:
