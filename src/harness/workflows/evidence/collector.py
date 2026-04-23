@@ -7,10 +7,14 @@ from typing import Any
 
 import harness.commands.sec as sec
 from harness.config import HarnessSettings
-from harness.workflows.evidence.inventory import run_inventory
+from harness.workflows.evidence.ledger import upsert_evidence, utc_now
 from harness.workflows.evidence.paths import CompanyPaths
-from harness.workflows.evidence.registry import ensure_company_tree, normalize_local_path, upsert_source, utc_now
-from harness.workflows.evidence.render import refresh_indexes, write_json
+from harness.workflows.evidence.registry import ensure_company_tree
+
+_FORM_TO_CATEGORY: dict[str, str] = {
+    "10-K": "sec-annual",
+    "10-Q": "sec-quarterly",
+}
 
 
 def collect_sec_sources(
@@ -24,7 +28,7 @@ def collect_sec_sources(
     include_html: bool,
     settings: HarnessSettings,
 ) -> dict[str, Any]:
-    """Collect SEC materials into the evidence tree and refresh metadata."""
+    """Collect SEC materials into the evidence tree and register ledger entries."""
     ensure_company_tree(paths)
     identity_error = sec._configure_edgar(settings)
     if identity_error:
@@ -42,94 +46,113 @@ def collect_sec_sources(
     )
 
     registered: list[dict[str, Any]] = []
-    for file_path in sorted(item for item in paths.sources_dir.rglob("*") if _is_registered_source_file(item)):
-        registered.append(_register_downloaded_file(paths, ticker=ticker, file_path=file_path))
 
-    inventory = run_inventory(paths)
+    # Register 10-K and 10-Q per-section directories.
+    for form_folder in ["10-K", "10-Q"]:
+        registered.extend(_register_filings(paths, ticker=ticker, form_folder=form_folder))
+
+    # Register earnings releases (flat .md files).
+    earnings_folder = paths.sources_dir / "earnings"
+    if earnings_folder.exists():
+        for entry in sorted(earnings_folder.iterdir()):
+            if entry.name.startswith(".") or entry.name.startswith("_"):
+                continue
+            if entry.suffix == ".html":
+                continue
+            if entry.suffix == ".md":
+                date_stem = entry.stem
+                ledger_entry = upsert_evidence(
+                    paths,
+                    ticker=ticker,
+                    category="sec-earnings",
+                    status="downloaded",
+                    title=f"{ticker.upper()} earnings {date_stem}",
+                    local_path=str(entry.relative_to(paths.root)),
+                    url=None,
+                    date=date_stem,
+                    notes="Earnings release (8-K EX-99.1)",
+                    collector="sec",
+                )
+                registered.append(ledger_entry)
+
+    # Register financial statement files.
+    financials_folder = paths.sources_dir / "financials"
+    if financials_folder.exists():
+        for entry in sorted(financials_folder.iterdir()):
+            if entry.name.startswith(".") or entry.name.startswith("_"):
+                continue
+            if entry.suffix not in {".md", ".csv"}:
+                continue
+            ledger_entry = upsert_evidence(
+                paths,
+                ticker=ticker,
+                category="sec-financials",
+                status="downloaded",
+                title=f"{ticker.upper()} financials {entry.stem}",
+                local_path=str(entry.relative_to(paths.root)),
+                url=None,
+                date=None,
+                notes=f"{entry.stem} financial statement",
+                collector="sec",
+            )
+            registered.append(ledger_entry)
+
+    now = utc_now()
     summary = {
         "ticker": ticker.upper(),
         "root": str(paths.root),
         "collected_count": len(registered),
-        "annual_count": len([item for item in registered if item["source_kind"] == "sec-10k"]),
-        "quarterly_count": len([item for item in registered if item["source_kind"] == "sec-10q"]),
-        "earnings_count": len([item for item in registered if item["source_kind"] == "sec-8k-earnings"]),
-        "financials_count": len([item for item in registered if item["source_kind"].startswith("sec-financials-")]),
-        "inventory_path": str(paths.inventory_json),
-        "registered_source_ids": [item["id"] for item in registered],
-        "last_updated": utc_now(),
+        "annual_count": len([item for item in registered if item["category"] == "sec-annual"]),
+        "quarterly_count": len([item for item in registered if item["category"] == "sec-quarterly"]),
+        "earnings_count": len([item for item in registered if item["category"] == "sec-earnings"]),
+        "financials_count": len([item for item in registered if item["category"] == "sec-financials"]),
+        "last_updated": now,
     }
-    write_json(paths.sec_collection_summary_json, summary)
-    paths.sec_collection_summary_md.write_text(_render_summary_markdown(summary, inventory) + "\n", encoding="utf-8")
-    refresh_indexes(paths.root)
     return summary
 
 
-def _register_downloaded_file(paths: CompanyPaths, *, ticker: str, file_path: Path) -> dict[str, Any]:
-    folder = file_path.parent.name
-    if folder == "10-K":
-        bucket = "sec-filings-annual"
-        if file_path.suffix == ".html":
-            source_kind = "sec-10k-html"
-            title = f"{ticker.upper()} 10-K {file_path.stem} (HTML)"
-        else:
-            source_kind = "sec-10k"
-            title = f"{ticker.upper()} 10-K {file_path.stem}"
-    elif folder == "10-Q":
-        bucket = "sec-filings-quarterly"
-        if file_path.suffix == ".html":
-            source_kind = "sec-10q-html"
-            title = f"{ticker.upper()} 10-Q {file_path.stem} (HTML)"
-        else:
-            source_kind = "sec-10q"
-            title = f"{ticker.upper()} 10-Q {file_path.stem}"
-    elif folder == "earnings":
-        bucket = "sec-earnings"
-        if file_path.suffix == ".html":
-            source_kind = "sec-8k-earnings-html"
-            title = f"{ticker.upper()} earnings release {file_path.stem} (HTML)"
-        else:
-            source_kind = "sec-8k-earnings"
-            title = f"{ticker.upper()} earnings release {file_path.stem}"
-    elif folder == "financials":
-        bucket = "sec-financial-statements"
-        if file_path.suffix == ".csv":
-            source_kind = f"sec-financials-{file_path.stem}-csv"
-            title = f"{ticker.upper()} {file_path.stem} financials (CSV)"
-        else:
-            source_kind = f"sec-financials-{file_path.stem}"
-            title = f"{ticker.upper()} {file_path.stem} financials"
-    else:
-        bucket = "sec-other"
-        source_kind = "sec-other"
-        title = f"{ticker.upper()} SEC source {file_path.name}"
-    return upsert_source(
-        paths,
-        ticker=ticker,
-        bucket=bucket,
-        source_kind=source_kind,
-        status="downloaded",
-        title=title,
-        local_path=normalize_local_path(paths, file_path),
-        notes="Collected via minerva evidence collect sec.",
-    )
-
-
-def _render_summary_markdown(summary: dict[str, Any], inventory: dict[str, Any]) -> str:
-    return "\n".join(
-        [
-            "# SEC Collection Summary",
-            "",
-            f"- ticker: {summary['ticker']}",
-            f"- collected_count: {summary['collected_count']}",
-            f"- annual_count: {summary['annual_count']}",
-            f"- quarterly_count: {summary['quarterly_count']}",
-            f"- earnings_count: {summary['earnings_count']}",
-            f"- financials_count: {summary['financials_count']}",
-            f"- inventory_downloaded: {inventory['counts']['downloaded']}",
-            f"- last_updated: {summary['last_updated']}",
-        ]
-    )
-
-
-def _is_registered_source_file(path: Path) -> bool:
-    return path.is_file() and not path.name.startswith(".") and path.name != "INDEX.md"
+def _register_filings(paths: CompanyPaths, *, ticker: str, form_folder: str) -> list[dict[str, Any]]:
+    """Register 10-K or 10-Q filings. Expects per-section directories."""
+    out: list[dict[str, Any]] = []
+    folder = paths.sources_dir / form_folder
+    if not folder.exists():
+        return out
+    category = _FORM_TO_CATEGORY[form_folder]
+    for entry in sorted(folder.iterdir()):
+        if entry.name.startswith(".") or entry.name.startswith("_"):
+            continue
+        if entry.is_dir():
+            # Per-section directory
+            date_stem = entry.name
+            section_count = len([f for f in entry.glob("*.md") if f.name != "_sections.md"])
+            notes = f"{section_count} sections" if section_count > 1 else "single-file filing"
+            ledger_entry = upsert_evidence(
+                paths,
+                ticker=ticker,
+                category=category,
+                status="downloaded",
+                title=f"{ticker.upper()} {form_folder} {date_stem}",
+                local_path=str(entry.relative_to(paths.root)),
+                url=None,
+                date=date_stem,
+                notes=notes,
+                collector="sec",
+            )
+            out.append(ledger_entry)
+        elif entry.suffix == ".md":
+            # Legacy monolithic file — register as-is, pointing to the file
+            date_stem = entry.stem
+            ledger_entry = upsert_evidence(
+                paths,
+                ticker=ticker,
+                category=category,
+                status="downloaded",
+                title=f"{ticker.upper()} {form_folder} {date_stem}",
+                local_path=str(entry.relative_to(paths.root)),
+                url=None,
+                date=date_stem,
+                notes="monolithic filing (legacy)",
+                collector="sec",
+            )
+            out.append(ledger_entry)
+    return out
