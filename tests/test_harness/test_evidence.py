@@ -458,6 +458,40 @@ def test_company_paths_exposes_v2_paths(tmp_path: Path) -> None:
     assert paths.ledger_md == paths.root / "LEDGER.md"
 
 
+def test_inventory_v2_reads_ledger(tmp_path: Path) -> None:
+    from harness.workflows.evidence.ledger import upsert_evidence
+    from harness.workflows.evidence.inventory import run_inventory
+    from harness.workflows.evidence.paths import resolve_company_root
+
+    root = tmp_path / "reports" / "00-companies" / "12-robinhood"
+    evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
+    paths = resolve_company_root(root)
+
+    target = paths.sources_dir / "10-K" / "2025-02-18"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "01-business.md").write_text("x", encoding="utf-8")
+
+    upsert_evidence(
+        paths, ticker="HOOD", category="sec-annual", status="downloaded",
+        title="HOOD 10-K 2025", local_path=str(target.relative_to(paths.root)),
+        url=None, date="2025-02-18", notes=None, collector="sec",
+    )
+    upsert_evidence(
+        paths, ticker="HOOD", category="industry-report", status="discovered",
+        title="Market report", local_path=None, url="https://example.com", date=None, notes=None, collector="web_fetch",
+    )
+    upsert_evidence(
+        paths, ticker="HOOD", category="news", status="blocked",
+        title="Paywalled news", local_path=None, url="https://paywall.example.com", date=None, notes="paywall", collector="web_fetch",
+    )
+
+    inv = run_inventory(paths)
+    assert inv["counts"]["downloaded"] == 1
+    assert inv["counts"]["discovered"] == 1
+    assert inv["counts"]["blocked"] == 1
+    assert inv["counts"]["downloaded_missing_on_disk"] == 0
+
+
 def test_run_dispatch_supports_evidence_and_analysis_workflow_commands(tmp_path: Path) -> None:
     root = tmp_path / "reports" / "00-companies" / "12-robinhood"
     init_result = dispatch_command(

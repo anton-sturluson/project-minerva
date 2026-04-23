@@ -5,21 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from harness.workflows.evidence.ledger import load_ledger, utc_now
 from harness.workflows.evidence.paths import CompanyPaths
-from harness.workflows.evidence.registry import ensure_company_tree, list_sources, utc_now
+from harness.workflows.evidence.registry import ensure_company_tree
 from harness.workflows.evidence.render import refresh_indexes, render_inventory_markdown, write_json
 
 
 def build_inventory(paths: CompanyPaths) -> dict[str, Any]:
-    """Compute deterministic inventory counts from the registry and filesystem."""
+    """Compute deterministic inventory counts from the V2 ledger and filesystem."""
     ensure_company_tree(paths)
-    sources = list_sources(paths)
+    entries = load_ledger(paths)
     downloaded_missing_on_disk: list[str] = []
     downloaded_count = 0
     discovered_count = 0
     blocked_count = 0
 
-    for entry in sources:
+    for entry in entries:
         if entry["status"] == "downloaded":
             downloaded_count += 1
             if not _source_exists(paths, entry.get("local_path")):
@@ -42,7 +43,7 @@ def build_inventory(paths: CompanyPaths) -> dict[str, Any]:
     return {
         "root": str(paths.root),
         "counts": {
-            "registry_total": len(sources),
+            "ledger_total": len(entries),
             "downloaded": downloaded_count,
             "discovered": discovered_count,
             "blocked": blocked_count,
