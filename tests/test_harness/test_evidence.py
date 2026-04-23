@@ -386,6 +386,14 @@ def test_analysis_status_ignores_generated_indexes_when_advancing_stages(tmp_pat
     assert run_status(paths)["stage"] == "complete"
 
 
+def test_evidence_init_creates_v2_dirs(tmp_path: Path) -> None:
+    root = tmp_path / "reports" / "00-companies" / "12-robinhood"
+    evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
+    assert (root / "audits").exists()
+    assert (root / "plans").exists()
+    assert (root / "research").exists()
+
+
 def test_company_paths_exposes_v2_paths(tmp_path: Path) -> None:
     from harness.workflows.evidence.paths import resolve_company_root
 
