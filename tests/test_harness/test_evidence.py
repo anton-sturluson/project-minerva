@@ -386,6 +386,18 @@ def test_analysis_status_ignores_generated_indexes_when_advancing_stages(tmp_pat
     assert run_status(paths)["stage"] == "complete"
 
 
+def test_company_paths_exposes_v2_paths(tmp_path: Path) -> None:
+    from harness.workflows.evidence.paths import resolve_company_root
+
+    paths = resolve_company_root(tmp_path / "reports" / "00-companies" / "12-robinhood")
+
+    assert paths.evidence_jsonl == paths.data_dir / "evidence.jsonl"
+    assert paths.evidence_md == paths.data_dir / "evidence.md"
+    assert paths.audits_dir == paths.root / "audits"
+    assert paths.plans_dir == paths.root / "plans"
+    assert paths.ledger_md == paths.root / "LEDGER.md"
+
+
 def test_run_dispatch_supports_evidence_and_analysis_workflow_commands(tmp_path: Path) -> None:
     root = tmp_path / "reports" / "00-companies" / "12-robinhood"
     init_result = dispatch_command(

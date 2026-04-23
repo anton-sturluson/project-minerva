@@ -105,6 +105,26 @@ class CompanyPaths:
         return self.meta_dir / "sec-collection-summary.md"
 
     @property
+    def evidence_jsonl(self) -> Path:
+        return self.data_dir / "evidence.jsonl"
+
+    @property
+    def evidence_md(self) -> Path:
+        return self.data_dir / "evidence.md"
+
+    @property
+    def audits_dir(self) -> Path:
+        return self.root / "audits"
+
+    @property
+    def plans_dir(self) -> Path:
+        return self.root / "plans"
+
+    @property
+    def ledger_md(self) -> Path:
+        return self.root / "LEDGER.md"
+
+    @property
     def status_json(self) -> Path:
         return self.analysis_dir / "status.json"
 
