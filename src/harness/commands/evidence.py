@@ -10,10 +10,12 @@ from harness.commands.common import abort_with_help, elapsed_ms, error_result, p
 from harness.commands.extract import DEFAULT_MODEL
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
+from harness.workflows.evidence.audit import DEFAULT_AUDIT_MODEL, default_audit_llm, run_audit
 from harness.workflows.evidence.collector import collect_sec_sources
-from harness.workflows.evidence.coverage import run_coverage
+from harness.workflows.evidence.constants import RECOGNIZED_CATEGORIES
 from harness.workflows.evidence.extraction import run_extraction
 from harness.workflows.evidence.inventory import run_inventory
+from harness.workflows.evidence.ledger import load_ledger, upsert_evidence
 from harness.workflows.evidence.paths import resolve_company_root
 from harness.workflows.evidence.registry import (
     SOURCE_STATUSES,
@@ -27,6 +29,8 @@ EVIDENCE_HELP = (
     "Examples:\n"
     "  minerva evidence init --root hard-disk/reports/00-companies/12-robinhood --ticker HOOD --name Robinhood --slug robinhood\n"
     "  minerva evidence collect sec --root hard-disk/reports/00-companies/12-robinhood --ticker HOOD --annual 3 --quarters 4\n"
+    "  minerva evidence add-source --root hard-disk/reports/00-companies/12-robinhood --title 'Market Report' --category industry-report --status downloaded --path ./report.md\n"
+    "  minerva evidence audit --root hard-disk/reports/00-companies/12-robinhood\n"
     "  minerva evidence extract --root hard-disk/reports/00-companies/12-robinhood --profile default\n"
 )
 
@@ -108,6 +112,31 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: by
         if subcommand == "coverage":
             parsed = parse_flag_args(args[1:])
             return coverage_command(root=str(parsed["root"]), profile=str(parsed.get("profile", "default")))
+        if subcommand == "add-source":
+            parsed = parse_flag_args(args[1:])
+            return add_source_command(
+                root=str(parsed["root"]),
+                title=str(parsed["title"]),
+                category=str(parsed["category"]),
+                status=str(parsed["status"]),
+                path=str(parsed["path"]) if "path" in parsed else None,
+                url=str(parsed["url"]) if "url" in parsed else None,
+                date=str(parsed["date"]) if "date" in parsed else None,
+                notes=str(parsed["notes"]) if "notes" in parsed else None,
+                collector=str(parsed["collector"]) if "collector" in parsed else None,
+            )
+        if subcommand == "audit":
+            parsed = parse_flag_args(args[1:])
+            import os
+            api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            categories_raw = str(parsed["categories"]) if "categories" in parsed else None
+            categories = [c.strip() for c in categories_raw.split(",") if c.strip()] if categories_raw else None
+            return audit_command(
+                root=str(parsed["root"]),
+                categories=categories,
+                model=str(parsed.get("model", DEFAULT_AUDIT_MODEL)),
+                api_key=api_key,
+            )
     except KeyError as exc:
         return CommandResult.from_text("", stderr=f"missing required flag: {exc}", exit_code=1)
     except ValueError as exc:
@@ -304,6 +333,110 @@ def extract_command(
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
 
 
+def add_source_command(
+    *,
+    root: str,
+    title: str,
+    category: str,
+    status: str,
+    path: str | None,
+    url: str | None,
+    date: str | None,
+    notes: str | None,
+    collector: str | None,
+) -> CommandResult:
+    """Add an external or manual evidence source to the V2 ledger."""
+    start = time.perf_counter()
+
+    # Validate: downloaded requires a path.
+    if status == "downloaded" and not path:
+        return CommandResult.from_text(
+            "",
+            stderr="status=downloaded requires --path; pass a local file path for downloaded sources",
+            exit_code=1,
+        )
+
+    try:
+        paths = resolve_company_root(root)
+
+        # Warn on unrecognized category (but still write the entry).
+        warn_stderr: str = ""
+        if category.lower() not in RECOGNIZED_CATEGORIES:
+            warn_stderr = f"warning: unrecognized category '{category}' — not in RECOGNIZED_CATEGORIES; entry will be written anyway\n"
+
+        # Resolve ticker: check existing ledger → source-registry.json → infer from root.
+        ticker: str | None = None
+        entries = load_ledger(paths)
+        if entries:
+            ticker = entries[0].get("ticker")
+        if not ticker:
+            ticker = _ticker_from_root(paths)
+
+        # Compute relative local_path if a path is provided.
+        local_path: str | None = None
+        if path:
+            abs_path = paths.root.parent if False else paths.root  # anchor
+            try:
+                local_path = str(paths.root.__class__(path).relative_to(paths.root))
+            except ValueError:
+                # Path is not under root — store absolute as-is.
+                local_path = path
+
+        entry = upsert_evidence(
+            paths,
+            ticker=ticker,
+            category=category,
+            status=status,
+            title=title,
+            local_path=local_path,
+            url=url,
+            date=date,
+            notes=notes,
+            collector=collector,
+        )
+    except Exception as exc:
+        return error_result(
+            f"failed to add source: {exc}",
+            "verify the root path and source metadata, then retry",
+            ["`minerva evidence add-source --root ... --title 'Report' --category industry-report --status discovered --url https://...`"],
+            start,
+        )
+
+    body = "\n".join(
+        [
+            f"added_source_id: {entry['id']}",
+            f"category: {entry['category']}",
+            f"status: {entry['status']}",
+            f"evidence_jsonl: {paths.evidence_jsonl.relative_to(paths.root)}",
+        ]
+    )
+    return CommandResult.from_text(body, stderr=warn_stderr, duration_ms=elapsed_ms(start))
+
+
+def audit_command(
+    *,
+    root: str,
+    categories: list[str] | None,
+    model: str,
+    api_key: str | None,
+) -> CommandResult:
+    """Run the evidence audit workflow and write a memo."""
+    start = time.perf_counter()
+    try:
+        paths = resolve_company_root(root)
+        llm = default_audit_llm(api_key=api_key)
+        result = run_audit(paths, categories=categories, model=model, llm=llm)
+    except Exception as exc:
+        return error_result(
+            f"evidence audit failed: {exc}",
+            "verify the root path, API key, and evidence ledger, then retry",
+            ["`minerva evidence audit --root ...`"],
+            start,
+        )
+    body = f"memo_path: {result['memo_path']}"
+    return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
+
+
 def coverage_command(*, root: str, profile: str) -> CommandResult:
     """Compute coverage against a workflow profile."""
     start = time.perf_counter()
@@ -458,6 +591,51 @@ def coverage_cli_command(
             alternatives=["`minerva evidence coverage --root hard-disk/reports/00-companies/12-robinhood --profile default`"],
         )
     _print(coverage_command(root=root, profile=profile))
+
+
+@app.command("add-source", help="Add an external or manual evidence source to the V2 ledger.")
+def add_source_cli_command(
+    ctx: typer.Context,
+    root: str | None = typer.Option(None, "--root", help="Company evidence root."),
+    title: str | None = typer.Option(None, "--title", help="Human-readable source title."),
+    category: str | None = typer.Option(None, "--category", help="Evidence category (e.g. industry-report, news)."),
+    status: str | None = typer.Option(None, "--status", help="downloaded, discovered, or blocked."),
+    path: str | None = typer.Option(None, "--path", help="Optional local file path (required when status=downloaded)."),
+    url: str | None = typer.Option(None, "--url", help="Optional source URL."),
+    date: str | None = typer.Option(None, "--date", help="Optional publication date (YYYY-MM-DD)."),
+    notes: str | None = typer.Option(None, "--notes", help="Optional notes."),
+    collector: str | None = typer.Option(None, "--collector", help="Optional collector identifier."),
+) -> None:
+    if not all([root, title, category, status]):
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required arguments for `evidence add-source`",
+            what_to_do="pass `--root`, `--title`, `--category`, and `--status`",
+            alternatives=["`minerva evidence add-source --root ... --title 'Report' --category industry-report --status discovered --url https://...`"],
+        )
+    _print(add_source_command(root=root, title=title, category=category, status=status, path=path, url=url, date=date, notes=notes, collector=collector))
+
+
+@app.command("audit", help="Run the evidence audit workflow and write a memo.")
+def audit_cli_command(
+    ctx: typer.Context,
+    root: str | None = typer.Option(None, "--root", help="Company evidence root."),
+    categories: str | None = typer.Option(None, "--categories", help="Comma-separated list of categories to audit (default: all)."),
+    model: str = typer.Option(DEFAULT_AUDIT_MODEL, "--model", help="LLM model to use for the audit."),
+    api_key_env_var: str = typer.Option("OPENAI_API_KEY", "--api-key-env-var", help="Environment variable containing the API key."),
+) -> None:
+    import os
+
+    if not root:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required arguments for `evidence audit`",
+            what_to_do="pass `--root`",
+            alternatives=["`minerva evidence audit --root hard-disk/reports/00-companies/12-robinhood`"],
+        )
+    api_key = os.environ.get(api_key_env_var) or os.environ.get("GEMINI_API_KEY")
+    categories_list = [c.strip() for c in categories.split(",") if c.strip()] if categories else None
+    _print(audit_command(root=root, categories=categories_list, model=model, api_key=api_key))
 
 
 def _ticker_from_root(paths) -> str:
