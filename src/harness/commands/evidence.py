@@ -17,12 +17,7 @@ from harness.workflows.evidence.extraction import run_extraction
 from harness.workflows.evidence.inventory import run_inventory
 from harness.workflows.evidence.ledger import load_ledger, upsert_evidence
 from harness.workflows.evidence.paths import resolve_company_root
-from harness.workflows.evidence.registry import (
-    SOURCE_STATUSES,
-    initialize_registry,
-    normalize_local_path,
-    upsert_source,
-)
+from harness.workflows.evidence.registry import initialize_registry
 
 EVIDENCE_HELP = (
     "Evidence collection and workflow state commands.\n\n"
@@ -82,18 +77,6 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: by
                 include_html=include_html,
                 settings=active_settings,
             )
-        if subcommand == "register":
-            parsed = parse_flag_args(args[1:])
-            return register_command(
-                root=str(parsed["root"]),
-                status=str(parsed["status"]),
-                bucket=str(parsed["bucket"]),
-                source_kind=str(parsed["source-kind"]),
-                title=str(parsed["title"]),
-                path=str(parsed["path"]) if "path" in parsed else None,
-                url=str(parsed["url"]) if "url" in parsed else None,
-                notes=str(parsed["notes"]) if "notes" in parsed else None,
-            )
         if subcommand == "inventory":
             parsed = parse_flag_args(args[1:], allow_flags_without_values={"write-index", "no-write-index"})
             write_index = "no-write-index" not in parsed
@@ -109,9 +92,6 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: by
                 model=str(parsed.get("model", DEFAULT_MODEL)),
                 settings=active_settings,
             )
-        if subcommand == "coverage":
-            parsed = parse_flag_args(args[1:])
-            return coverage_command(root=str(parsed["root"]), profile=str(parsed.get("profile", "default")))
         if subcommand == "add-source":
             parsed = parse_flag_args(args[1:])
             return add_source_command(
@@ -205,65 +185,6 @@ def collect_sec_command(
             f"collected_count: {summary['collected_count']}",
             f"summary_json: {paths.sec_collection_summary_json.relative_to(paths.root)}",
             f"inventory_json: {paths.inventory_json.relative_to(paths.root)}",
-        ]
-    )
-    return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
-
-
-def register_command(
-    *,
-    root: str,
-    status: str,
-    bucket: str,
-    source_kind: str,
-    title: str,
-    path: str | None,
-    url: str | None,
-    notes: str | None,
-) -> CommandResult:
-    """Register an external, discovered, or blocked source."""
-    start = time.perf_counter()
-    if status not in SOURCE_STATUSES:
-        return error_result(
-            f"`--status` must be one of {', '.join(sorted(SOURCE_STATUSES))}",
-            "retry with a supported status",
-            ["`minerva evidence register --root ... --status discovered --bucket external-research --source-kind expert-call --title 'Channel check' --url https://...`"],
-            start,
-        )
-    if status == "downloaded" and not path:
-        return error_result(
-            "downloaded sources require `--path`",
-            "pass a local file path for downloaded sources",
-            ["`minerva evidence register --root ... --status downloaded --bucket external-research --source-kind industry-report --title 'Market report' --path ./report.pdf`"],
-            start,
-        )
-    try:
-        paths = resolve_company_root(root)
-        normalized_path = normalize_local_path(paths, path) if path else None
-        ticker = _ticker_from_root(paths)
-        entry = upsert_source(
-            paths,
-            ticker=ticker,
-            bucket=bucket,
-            source_kind=source_kind,
-            status=status,
-            title=title,
-            local_path=normalized_path,
-            url=url,
-            notes=notes,
-        )
-    except Exception as exc:
-        return error_result(
-            f"failed to register source: {exc}",
-            "verify the registry root, bucket, and source metadata, then retry",
-            ["`minerva evidence register --root ... --status discovered --bucket external-research --source-kind industry-report --title 'Market report' --url https://...`"],
-            start,
-        )
-    body = "\n".join(
-        [
-            f"registered_source_id: {entry['id']}",
-            f"status: {entry['status']}",
-            f"source_registry: {paths.source_registry_json.relative_to(paths.root)}",
         ]
     )
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
@@ -375,7 +296,6 @@ def add_source_command(
         # Compute relative local_path if a path is provided.
         local_path: str | None = None
         if path:
-            abs_path = paths.root.parent if False else paths.root  # anchor
             try:
                 local_path = str(paths.root.__class__(path).relative_to(paths.root))
             except ValueError:
@@ -437,28 +357,6 @@ def audit_command(
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
 
 
-def coverage_command(*, root: str, profile: str) -> CommandResult:
-    """Compute coverage against a workflow profile."""
-    start = time.perf_counter()
-    try:
-        paths = resolve_company_root(root)
-        coverage = run_coverage(paths, profile_name=profile)
-    except Exception as exc:
-        return error_result(
-            f"failed to compute evidence coverage: {exc}",
-            "verify the root path and coverage profile, then retry",
-            ["`minerva evidence coverage --root ... --profile default`"],
-            start,
-        )
-    body = "\n".join(
-        [
-            f"ready_for_analysis: {coverage['ready_for_analysis']}",
-            f"coverage_json: {paths.coverage_json.relative_to(paths.root)}",
-        ]
-    )
-    return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
-
-
 @app.command("init", help="Create or reuse the standard company evidence tree.")
 def init_cli_command(
     ctx: typer.Context,
@@ -509,28 +407,6 @@ def collect_sec_cli_command(
     )
 
 
-@app.command("register", help="Register a downloaded, discovered, or blocked source.")
-def register_cli_command(
-    ctx: typer.Context,
-    root: str | None = typer.Option(None, "--root", help="Company evidence root."),
-    status: str | None = typer.Option(None, "--status", help="downloaded, discovered, or blocked."),
-    bucket: str | None = typer.Option(None, "--bucket", help="Explicit coverage bucket."),
-    source_kind: str | None = typer.Option(None, "--source-kind", help="Explicit source kind."),
-    title: str | None = typer.Option(None, "--title", help="Human-readable source title."),
-    path: str | None = typer.Option(None, "--path", help="Optional local file path."),
-    url: str | None = typer.Option(None, "--url", help="Optional source URL."),
-    notes: str | None = typer.Option(None, "--notes", help="Optional notes."),
-) -> None:
-    if not all([root, status, bucket, source_kind, title]):
-        abort_with_help(
-            ctx,
-            what_went_wrong="missing required arguments for `evidence register`",
-            what_to_do="pass `--root`, `--status`, `--bucket`, `--source-kind`, and `--title`",
-            alternatives=["`minerva evidence register --root ... --status discovered --bucket external-research --source-kind industry-report --title 'Market report' --url https://...`"],
-        )
-    _print(register_command(root=root, status=status, bucket=bucket, source_kind=source_kind, title=title, path=path, url=url, notes=notes))
-
-
 @app.command("inventory", help="Compute current evidence inventory from disk and registry state.")
 def inventory_cli_command(
     ctx: typer.Context,
@@ -575,22 +451,6 @@ def extract_cli_command(
             settings=get_settings(),
         )
     )
-
-
-@app.command("coverage", help="Compare current evidence state against a coverage profile.")
-def coverage_cli_command(
-    ctx: typer.Context,
-    root: str | None = typer.Option(None, "--root", help="Company evidence root."),
-    profile: str = typer.Option("default", "--profile", help="Coverage profile name."),
-) -> None:
-    if not root:
-        abort_with_help(
-            ctx,
-            what_went_wrong="missing required arguments for `evidence coverage`",
-            what_to_do="pass `--root`",
-            alternatives=["`minerva evidence coverage --root hard-disk/reports/00-companies/12-robinhood --profile default`"],
-        )
-    _print(coverage_command(root=root, profile=profile))
 
 
 @app.command("add-source", help="Add an external or manual evidence source to the V2 ledger.")
