@@ -14,6 +14,7 @@
 | `10-llm-wiki-zettelkasten-design.md` | file | Design synthesis: merging Karpathy's LLM Wiki pattern with the Zettelkasten method into a unified knowledge-base skill. |
 | `11-minerva-evidence-starter-live-tested-guide.md` | file | Live-tested starter walkthrough of the current `minerva evidence` workflow, including real command behavior, workflow design, and measurement gaps. |
 | `12-minerva-evidence-v2-zero-based-redesign.md` | file | Zero-based redesign for a smaller, more agentic evidence workflow built around `init`, `add-source`, `review`, and `analysis context`. |
+| `14-evidence-v2-quickstart.md` | file | Quickstart guide for the V2 evidence workflow: commands, workspace layout, migration, and SEC per-section file notes. |
 
 ## Notes
 - Docs hold higher-level designs, reports, and durable reference writeups.
