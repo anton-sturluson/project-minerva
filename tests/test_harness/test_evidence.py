@@ -492,6 +492,55 @@ def test_inventory_v2_reads_ledger(tmp_path: Path) -> None:
     assert inv["counts"]["downloaded_missing_on_disk"] == 0
 
 
+def test_extract_v2_uses_ledger_and_categories(tmp_path: Path, monkeypatch) -> None:
+    from harness.workflows.evidence.ledger import upsert_evidence
+    from harness.workflows.evidence.extraction import run_extraction
+    from harness.workflows.evidence.paths import resolve_company_root
+
+    root = tmp_path / "reports" / "00-companies" / "12-robinhood"
+    evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
+    paths = resolve_company_root(root)
+    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="fake-key")
+
+    filing_dir = paths.sources_dir / "10-K" / "2025-02-18"
+    filing_dir.mkdir(parents=True, exist_ok=True)
+    (filing_dir / "01-business.md").write_text("# Business\nProse", encoding="utf-8")
+    (filing_dir / "02-risk-factors.md").write_text("# Risks", encoding="utf-8")
+
+    upsert_evidence(
+        paths, ticker="HOOD", category="sec-annual", status="downloaded",
+        title="HOOD 10-K 2025", local_path=str(filing_dir.relative_to(paths.root)),
+        url=None, date="2025-02-18", notes=None, collector="sec",
+    )
+
+    monkeypatch.setattr(
+        "harness.commands.extract._generate_answer",
+        lambda **kwargs: "## business-overview\nA\n## financial-highlights\nB\n## growth-drivers\nC\n## competition\nD\n## management\nE\n## risks\nF",
+    )
+
+    run = run_extraction(
+        paths, profile_name="default", source_prefix=None, match=None, force=True, model="fake", settings=settings,
+    )
+    assert run["processed_count"] == 1
+
+
+def test_structured_output_base_with_directory_backed_local_path(tmp_path: Path) -> None:
+    root = tmp_path / "reports" / "00-companies" / "12-robinhood"
+    evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
+    paths = resolve_company_root(root)
+
+    target = structured_output_base(
+        paths,
+        {
+            "id": "abc123",
+            "local_path": "data/sources/10-K/2025-02-18",
+        },
+    )
+
+    # Directory-backed path: no suffix to strip, so output is structured/10-K/2025-02-18
+    assert target == paths.structured_dir / "10-K" / "2025-02-18"
+
+
 def test_run_dispatch_supports_evidence_and_analysis_workflow_commands(tmp_path: Path) -> None:
     root = tmp_path / "reports" / "00-companies" / "12-robinhood"
     init_result = dispatch_command(

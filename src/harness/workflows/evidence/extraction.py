@@ -10,7 +10,7 @@ from harness.config import HarnessSettings
 from harness.workflows.evidence.inventory import run_inventory
 from harness.workflows.evidence.paths import CompanyPaths
 from harness.workflows.evidence.profiles import load_extract_profile
-from harness.workflows.evidence.registry import list_sources, utc_now
+from harness.workflows.evidence.ledger import load_ledger, utc_now
 from harness.workflows.evidence.render import refresh_indexes, render_extraction_run_markdown, write_json
 
 
@@ -28,15 +28,15 @@ def run_extraction(
     if not settings.gemini_api_key:
         raise ValueError("GEMINI_API_KEY is not set")
     profile = load_extract_profile(profile_name)
-    source_kinds = profile.get("source_kinds", {})
-    if not isinstance(source_kinds, dict) or not source_kinds:
-        raise ValueError(f"extract profile `{profile_name}` has no source_kinds")
+    categories = profile.get("categories", {})
+    if not isinstance(categories, dict) or not categories:
+        raise ValueError(f"extract profile `{profile_name}` has no categories")
 
     matches: list[dict[str, Any]] = []
-    for entry in list_sources(paths):
+    for entry in load_ledger(paths):
         if entry["status"] != "downloaded" or not entry.get("local_path"):
             continue
-        if entry["source_kind"] not in source_kinds:
+        if entry["category"] not in categories:
             continue
         if source_prefix and not str(entry["local_path"]).startswith(source_prefix):
             continue
@@ -68,8 +68,8 @@ def run_extraction(
             )
             continue
 
-        file_text = _resolve_local_file(paths, entry["local_path"]).read_text(encoding="utf-8")
-        qa_items = source_kinds[entry["source_kind"]].get("questions", [])
+        file_text = _read_source_text(paths, entry["local_path"])
+        qa_items = categories[entry["category"]].get("questions", [])
         if not qa_items:
             continue
         answers = _extract_answers(
@@ -84,8 +84,7 @@ def run_extraction(
                 "id": entry["id"],
                 "title": entry["title"],
                 "ticker": entry["ticker"],
-                "bucket": entry["bucket"],
-                "source_kind": entry["source_kind"],
+                "category": entry["category"],
                 "local_path": entry["local_path"],
                 "url": entry.get("url"),
             },
@@ -201,8 +200,7 @@ def _render_extracted_markdown(payload: dict[str, Any]) -> str:
         f"- profile: {payload['profile']}",
         f"- model: {payload['model']}",
         f"- source_id: {payload['source']['id']}",
-        f"- bucket: {payload['source']['bucket']}",
-        f"- source_kind: {payload['source']['source_kind']}",
+        f"- category: {payload['source']['category']}",
         f"- local_path: {payload['source']['local_path']}",
         f"- created_at: {payload['created_at']}",
         "",
@@ -213,7 +211,20 @@ def _render_extracted_markdown(payload: dict[str, Any]) -> str:
 
 
 def _match_text(entry: dict[str, Any]) -> str:
-    return " ".join(str(entry.get(key) or "") for key in ["title", "bucket", "source_kind", "local_path", "notes"])
+    return " ".join(str(entry.get(key) or "") for key in ["title", "category", "local_path", "notes"])
+
+
+def _read_source_text(paths: CompanyPaths, local_path: str) -> str:
+    """Read source text from a file or directory of section files."""
+    path = _resolve_local_file(paths, local_path)
+    if path.is_dir():
+        parts: list[str] = []
+        for item in sorted(path.glob("*.md")):
+            if item.name == "_sections.md":
+                continue
+            parts.append(item.read_text(encoding="utf-8"))
+        return "\n\n".join(parts)
+    return path.read_text(encoding="utf-8")
 
 
 def _resolve_local_file(paths: CompanyPaths, local_path: str) -> Path:
