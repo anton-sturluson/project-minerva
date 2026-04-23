@@ -60,5 +60,79 @@ def upsert_evidence(
     notes: str | None,
     collector: str | None,
 ) -> dict[str, Any]:
-    """Placeholder — implemented in Task 1.3."""
-    raise NotImplementedError("upsert_evidence not yet implemented")
+    """Insert-or-update an evidence record. Writes JSONL atomically + evidence.md."""
+    if status not in EVIDENCE_STATUSES:
+        raise ValueError(f"unsupported evidence status: {status}")
+    if status == "downloaded" and not local_path:
+        raise ValueError("status=downloaded requires local_path")
+
+    paths.data_dir.mkdir(parents=True, exist_ok=True)
+    entries = load_ledger(paths)
+    entry_id = make_evidence_id(
+        ticker=ticker,
+        category=category,
+        title=title,
+        local_path=local_path,
+        url=url,
+    )
+    now = utc_now()
+    existing = next((item for item in entries if item["id"] == entry_id), None)
+    if existing is None:
+        entry = {
+            "id": entry_id,
+            "version": LEDGER_VERSION,
+            "title": title,
+            "ticker": ticker.upper(),
+            "category": category,
+            "status": status,
+            "local_path": local_path,
+            "url": url,
+            "date": date,
+            "notes": notes,
+            "collector": collector,
+            "created_at": now,
+            "updated_at": now,
+        }
+        entries.append(entry)
+    else:
+        existing.update(
+            {
+                "title": title,
+                "ticker": ticker.upper(),
+                "category": category,
+                "status": status,
+                "local_path": local_path,
+                "url": url,
+                "date": date,
+                "notes": notes,
+                "collector": collector,
+                "updated_at": now,
+            }
+        )
+        entry = existing
+
+    _write_ledger_atomic(paths, entries)
+    from harness.workflows.evidence.render import render_evidence_ledger_markdown
+
+    paths.evidence_md.write_text(render_evidence_ledger_markdown(entries) + "\n", encoding="utf-8")
+    return entry
+
+
+def _write_ledger_atomic(paths: CompanyPaths, entries: list[dict[str, Any]]) -> None:
+    paths.evidence_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    serialized = "\n".join(
+        json.dumps(entry, sort_keys=True, ensure_ascii=False) for entry in sorted(entries, key=lambda item: item["id"])
+    )
+    fd, tmp_name = tempfile.mkstemp(prefix="evidence-", suffix=".jsonl", dir=str(paths.evidence_jsonl.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(serialized)
+            if serialized:
+                handle.write("\n")
+        os.replace(tmp_name, paths.evidence_jsonl)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
