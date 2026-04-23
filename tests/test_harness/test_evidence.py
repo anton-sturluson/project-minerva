@@ -188,9 +188,13 @@ def test_bulk_download_one_saves_html_csv_and_exhibit_99_1_markdown(tmp_path: Pa
         nest_ticker=False,
     )
 
-    assert (tmp_path / "10-K" / "2025-12-31.md").read_text(encoding="utf-8") == "# 10-K wrapper"
-    assert (tmp_path / "10-K" / "2025-12-31.html").read_text(encoding="utf-8") == "<html><body>10-K html</body></html>"
-    assert (tmp_path / "10-Q" / "2025-09-30.html").read_text(encoding="utf-8") == "<html><body>10-Q html</body></html>"
+    # 10-K/10-Q are now per-section directories (fallback mode since FakeFiling has no obj()).
+    assert (tmp_path / "10-K" / "2025-12-31").is_dir()
+    assert (tmp_path / "10-K" / "2025-12-31" / "filing.md").read_text(encoding="utf-8") == "# 10-K wrapper"
+    assert (tmp_path / "10-K" / "2025-12-31" / "_sections.md").exists()
+    assert (tmp_path / "10-Q" / "2025-09-30").is_dir()
+    assert (tmp_path / "10-Q" / "2025-09-30" / "filing.md").exists()
+    # Earnings and financials remain unchanged (flat files).
     assert (tmp_path / "earnings" / "2025-11-05.md").read_text(encoding="utf-8") == "# Press release\nRevenue grew 20%."
     assert "Fallback filing content." in (tmp_path / "earnings" / "2025-08-07.md").read_text(encoding="utf-8")
     assert (tmp_path / "earnings" / "2025-11-05.html").read_text(encoding="utf-8") == "<html><body>8-K html</body></html>"

@@ -587,20 +587,12 @@ def _bulk_download_one(
         target_dir.mkdir(parents=True, exist_ok=True)
         for filing in _list_filings(company, form=form, limit=count):
             date_str = _filing_date(filing)
-            markdown_target = target_dir / f"{date_str}.md"
-            html_target = target_dir / f"{date_str}.html"
-            if markdown_target.exists() and (not include_html or html_target.exists()):
+            section_dir = target_dir / date_str
+            if section_dir.exists():
                 skipped += 1
                 continue
-            wrote_any = False
-            if not markdown_target.exists():
-                _save_filing(filing, markdown_target, file_format="markdown")
-                wrote_any = True
-            if include_html and not html_target.exists():
-                _save_filing(filing, html_target, file_format="html")
-                wrote_any = True
-            if wrote_any:
-                downloaded[form] += 1
+            _download_filing_sections(filing=filing, form=form, out_dir=section_dir)
+            downloaded[form] += 1
 
     earnings_dir = company_root / "earnings"
     earnings_dir.mkdir(parents=True, exist_ok=True)
