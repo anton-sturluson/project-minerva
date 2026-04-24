@@ -15,6 +15,7 @@
 | `11-minerva-evidence-starter-live-tested-guide.md` | file | Live-tested starter walkthrough of the current `minerva evidence` workflow, including real command behavior, workflow design, and measurement gaps. |
 | `12-minerva-evidence-v2-zero-based-redesign.md` | file | Zero-based redesign for a smaller, more agentic evidence workflow built around `init`, `add-source`, `review`, and `analysis context`. |
 | `14-evidence-v2-quickstart.md` | file | Quickstart guide for the V2 evidence workflow: commands, workspace layout, migration, and SEC per-section file notes. |
+| `15-collect-evidence-research-upgrade-plan.md` | file | Upgrade plan: rename collect-evidence → research-and-collect, add shared deep-dive checklist, 10 research dimensions, competitive mapping, parallel execution, and structured data build. |
 
 ## Notes
 - Docs hold higher-level designs, reports, and durable reference writeups.
