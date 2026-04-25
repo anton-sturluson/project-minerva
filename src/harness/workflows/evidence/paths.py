@@ -89,14 +89,6 @@ class CompanyPaths:
         return self.meta_dir / "inventory.md"
 
     @property
-    def coverage_json(self) -> Path:
-        return self.meta_dir / "coverage.json"
-
-    @property
-    def coverage_md(self) -> Path:
-        return self.meta_dir / "coverage.md"
-
-    @property
     def sec_collection_summary_json(self) -> Path:
         return self.meta_dir / "sec-collection-summary.json"
 
@@ -123,22 +115,6 @@ class CompanyPaths:
     @property
     def ledger_md(self) -> Path:
         return self.root / "LEDGER.md"
-
-    @property
-    def status_json(self) -> Path:
-        return self.analysis_dir / "status.json"
-
-    @property
-    def status_md(self) -> Path:
-        return self.analysis_dir / "status.md"
-
-    @property
-    def context_manifest_json(self) -> Path:
-        return self.analysis_dir / "context-manifest.json"
-
-    @property
-    def context_manifest_md(self) -> Path:
-        return self.analysis_dir / "context-manifest.md"
 
 
 def resolve_company_root(raw_root: str | Path) -> CompanyPaths:

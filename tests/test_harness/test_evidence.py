@@ -9,7 +9,7 @@ import pytest
 from harness.cli import dispatch_command
 from harness.commands import evidence, sec as sec_commands
 from harness.config import HarnessSettings
-from harness.workflows.analysis.status import run_status
+from harness.workflows.evidence.collector import collect_sec_sources
 from harness.workflows.evidence.extraction import structured_output_base
 from harness.workflows.evidence.paths import resolve_company_root
 
@@ -142,6 +142,7 @@ def test_evidence_collect_sec_v2_writes_ledger_and_per_section_files(tmp_path: P
     root = tmp_path / "reports" / "00-companies" / "12-robinhood"
     evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
     settings = HarnessSettings(workspace_root=tmp_path, edgar_identity="x x@y.com")
+    paths = resolve_company_root(root)
 
     monkeypatch.setattr("harness.commands.sec._configure_edgar", lambda s: None)
 
@@ -159,8 +160,8 @@ def test_evidence_collect_sec_v2_writes_ledger_and_per_section_files(tmp_path: P
 
     monkeypatch.setattr("harness.commands.sec._bulk_download_one", fake_bulk_download_one)
 
-    result = evidence.collect_sec_command(
-        root=str(root),
+    summary = collect_sec_sources(
+        paths,
         ticker="HOOD",
         annual=1,
         quarters=0,
@@ -170,7 +171,7 @@ def test_evidence_collect_sec_v2_writes_ledger_and_per_section_files(tmp_path: P
         settings=settings,
     )
 
-    assert result.exit_code == 0
+    assert summary["collected_count"] > 0
 
     ledger_path = root / "data" / "evidence.jsonl"
     lines = [_json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -285,7 +286,7 @@ def test_structured_output_base_with_directory_backed_local_path(tmp_path: Path)
     assert target == paths.structured_dir / "10-K" / "2025-02-18"
 
 
-def test_run_dispatch_supports_evidence_and_analysis_workflow_commands(tmp_path: Path) -> None:
+def test_run_dispatch_supports_evidence_workflow_commands(tmp_path: Path) -> None:
     root = tmp_path / "reports" / "00-companies" / "12-robinhood"
     init_result = dispatch_command(
         [
@@ -301,8 +302,5 @@ def test_run_dispatch_supports_evidence_and_analysis_workflow_commands(tmp_path:
             "robinhood",
         ]
     )
-    status_result = dispatch_command(["analysis", "status", "--root", str(root)])
 
     assert init_result.exit_code == 0
-    assert status_result.exit_code == 0
-    assert "stage: initialized" in status_result.stdout.decode("utf-8")

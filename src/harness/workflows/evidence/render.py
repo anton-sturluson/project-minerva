@@ -75,38 +75,6 @@ def render_inventory_markdown(inventory: dict[str, Any]) -> str:
     )
 
 
-def render_coverage_markdown(coverage: dict[str, Any]) -> str:
-    """Render coverage status by bucket."""
-    rows: list[list[str]] = []
-    for result in coverage.get("bucket_results", []):
-        rows.append(
-            [
-                result["bucket"],
-                result["status"],
-                str(result["target_count"]),
-                str(result["downloaded_count"]),
-                str(result["discovered_count"]),
-                str(result["blocked_count"]),
-                result.get("notes") or "",
-            ]
-        )
-    return "\n".join(
-        [
-            "# Evidence Coverage",
-            "",
-            f"- profile: {coverage.get('profile')}",
-            f"- ready_for_analysis: {coverage.get('ready_for_analysis')}",
-            f"- last_updated: {coverage.get('last_updated')}",
-            "",
-            build_markdown_table(
-                ["bucket", "status", "target", "downloaded", "discovered", "blocked", "notes"],
-                rows or [["(none)", "missing", "0", "0", "0", "0", ""]],
-                alignment=["l", "l", "r", "r", "r", "r", "l"],
-            ),
-        ]
-    )
-
-
 def render_extraction_run_markdown(run: dict[str, Any]) -> str:
     """Render an extraction run manifest."""
     rows = [
@@ -133,54 +101,6 @@ def render_extraction_run_markdown(run: dict[str, Any]) -> str:
                 ["source_id", "status", "structured_json", "structured_markdown"],
                 rows or [["(none)", "skipped", "", ""]],
                 alignment=["l", "l", "l", "l"],
-            ),
-        ]
-    )
-
-
-def render_analysis_status_markdown(status_payload: dict[str, Any]) -> str:
-    """Render analysis workflow status."""
-    rows = [[item["name"], item["status"], item.get("detail") or ""] for item in status_payload.get("milestones", [])]
-    return "\n".join(
-        [
-            "# Analysis Status",
-            "",
-            f"- stage: {status_payload.get('stage')}",
-            f"- next_step: {status_payload.get('next_step')}",
-            f"- last_updated: {status_payload.get('last_updated')}",
-            "",
-            build_markdown_table(
-                ["milestone", "status", "detail"],
-                rows or [["(none)", "pending", ""]],
-                alignment=["l", "l", "l"],
-            ),
-        ]
-    )
-
-
-def render_context_manifest_markdown(manifest: dict[str, Any]) -> str:
-    """Render analysis context manifest summary."""
-    rows = [
-        [
-            bundle["name"],
-            bundle["path"],
-            str(bundle["artifact_count"]),
-            str(bundle["estimated_tokens"]),
-        ]
-        for bundle in manifest.get("bundles", [])
-    ]
-    return "\n".join(
-        [
-            "# Analysis Context Manifest",
-            "",
-            f"- profile: {manifest.get('profile')}",
-            f"- estimated_tokens: {manifest.get('estimated_tokens')}",
-            f"- last_updated: {manifest.get('last_updated')}",
-            "",
-            build_markdown_table(
-                ["bundle", "path", "artifact_count", "estimated_tokens"],
-                rows or [["(none)", "", "0", "0"]],
-                alignment=["l", "l", "r", "r"],
             ),
         ]
     )

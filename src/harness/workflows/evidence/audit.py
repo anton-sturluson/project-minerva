@@ -127,11 +127,19 @@ def default_audit_llm(api_key: str | None = None, *, prefer_openai: bool = True)
             pass  # Fall through to Gemini
 
     # Gemini fallback via harness.commands.extract._generate_answer
+    import os
+
     from harness.commands.extract import _generate_answer
     from harness.config import get_settings
 
     settings = get_settings()
-    gemini_api_key = api_key or (settings.gemini_api_key if settings.gemini_api_key else None)
+    # Prefer explicit Gemini key over the generic api_key parameter,
+    # which may hold an OpenAI key when OpenAI is not installed.
+    gemini_api_key = (
+        os.environ.get("GEMINI_API_KEY")
+        or (settings.gemini_api_key if settings.gemini_api_key else None)
+        or api_key
+    )
 
     def _gemini_llm(*, prompt: str, model: str) -> str:
         if not gemini_api_key:

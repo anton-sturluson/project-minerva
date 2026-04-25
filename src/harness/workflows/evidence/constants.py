@@ -82,33 +82,6 @@ EXTRACTION_QUESTIONS: dict[str, list[dict[str, str]]] = {
     ],
 }
 
-# --- Context bundle definitions ---
-# Each bundle specifies which evidence categories feed into it.
-
-CONTEXT_BUNDLES: list[dict] = [
-    {
-        "name": "business-overview",
-        "categories": ["sec-annual", "sec-quarterly", "industry-report", "company-ir"],
-    },
-    {
-        "name": "competition",
-        "categories": ["sec-annual", "industry-report", "competitor-data"],
-    },
-    {
-        "name": "management",
-        "categories": ["sec-annual", "sec-earnings"],
-    },
-    {
-        "name": "risks",
-        "categories": ["sec-annual", "sec-quarterly", "news", "regulatory"],
-    },
-    {
-        "name": "valuation",
-        "categories": ["sec-financials", "sec-earnings"],
-        "extra_globs": ["analysis/valuation/**/*.md"],
-    },
-]
-
 # --- 10-K / 10-Q section maps ---
 # Maps item number → (slug, display_name) for per-section file naming.
 
