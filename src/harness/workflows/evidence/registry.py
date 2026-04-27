@@ -18,12 +18,9 @@ def ensure_company_tree(paths: CompanyPaths) -> None:
         paths.notes_dir,
         paths.sources_dir,
         paths.references_dir,
-        paths.structured_dir,
         paths.meta_dir,
-        paths.extraction_runs_dir,
         paths.research_dir,
         paths.analysis_dir,
-        paths.bundles_dir,
         paths.audits_dir,
         paths.plans_dir,
     ]:

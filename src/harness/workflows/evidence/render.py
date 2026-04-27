@@ -52,60 +52,6 @@ def render_source_registry_markdown(registry: dict[str, Any]) -> str:
     )
 
 
-def render_inventory_markdown(inventory: dict[str, Any]) -> str:
-    """Render inventory counts and disk-health summary."""
-    counts = inventory.get("counts", {})
-    rows = [[key, str(value)] for key, value in sorted(counts.items())]
-    missing_rows = [[path] for path in inventory.get("downloaded_missing_on_disk", [])]
-    return "\n".join(
-        [
-            "# Evidence Inventory",
-            "",
-            f"- root: {inventory.get('root')}",
-            f"- last_updated: {inventory.get('last_updated')}",
-            "",
-            "## Counts",
-            "",
-            build_markdown_table(["metric", "value"], rows or [["(none)", "0"]], alignment=["l", "r"]),
-            "",
-            "## Downloaded Missing On Disk",
-            "",
-            build_markdown_table(["path"], missing_rows or [["(none)"]], alignment=["l"]),
-        ]
-    )
-
-
-def render_extraction_run_markdown(run: dict[str, Any]) -> str:
-    """Render an extraction run manifest."""
-    rows = [
-        [
-            item["source_id"],
-            item["status"],
-            item.get("structured_json") or "",
-            item.get("structured_markdown") or "",
-        ]
-        for item in run.get("artifacts", [])
-    ]
-    return "\n".join(
-        [
-            "# Extraction Run",
-            "",
-            f"- profile: {run.get('profile')}",
-            f"- model: {run.get('model')}",
-            f"- processed: {run.get('processed_count', 0)}",
-            f"- skipped_existing: {run.get('skipped_existing_count', 0)}",
-            f"- total_matches: {run.get('matched_count', 0)}",
-            f"- created_at: {run.get('created_at')}",
-            "",
-            build_markdown_table(
-                ["source_id", "status", "structured_json", "structured_markdown"],
-                rows or [["(none)", "skipped", "", ""]],
-                alignment=["l", "l", "l", "l"],
-            ),
-        ]
-    )
-
-
 def render_evidence_ledger_markdown(entries: list[dict[str, Any]]) -> str:
     """Render the V2 ledger as a compact markdown summary."""
     rows: list[list[str]] = []
