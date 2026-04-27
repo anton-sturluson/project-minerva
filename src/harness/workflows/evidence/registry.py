@@ -8,8 +8,6 @@ from typing import Any
 from harness.workflows.evidence.paths import CompanyPaths
 from harness.workflows.evidence.render import refresh_indexes, render_source_registry_markdown, write_json
 
-SOURCE_STATUSES: frozenset[str] = frozenset({"downloaded", "discovered", "blocked"})
-
 
 def ensure_company_tree(paths: CompanyPaths) -> None:
     """Create the canonical company evidence tree."""

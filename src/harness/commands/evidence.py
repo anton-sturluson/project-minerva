@@ -261,7 +261,7 @@ def audit_cli_command(
             what_to_do="pass `--root`",
             alternatives=["`minerva evidence audit --root hard-disk/reports/00-companies/12-robinhood`"],
         )
-    api_key = os.environ.get(api_key_env_var) or os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get(api_key_env_var)
     categories_list = [c.strip() for c in categories.split(",") if c.strip()] if categories else None
     _print(audit_command(root=root, categories=categories_list, model=model, api_key=api_key))
 
