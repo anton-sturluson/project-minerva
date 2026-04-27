@@ -1,8 +1,4 @@
-"""V2 evidence constants — categories, extraction questions, context bundles.
-
-These replace the YAML profile files under profiles/. All evidence
-and analysis config is defined here as Python constants.
-"""
+"""V2 evidence constants — categories and SEC section maps."""
 
 from __future__ import annotations
 
@@ -35,79 +31,6 @@ SEC_CATEGORIES: frozenset[str] = frozenset({
     "sec-proxy",
     "sec-other",
 })
-
-# --- Extraction questions by category ---
-# Each key maps to a list of {"id": ..., "question": ...} dicts.
-
-EXTRACTION_QUESTIONS: dict[str, list[dict[str, str]]] = {
-    "sec-annual": [
-        {"id": "business-overview", "question": "Summarize the business model, operating segments, and primary revenue drivers."},
-        {"id": "financial-highlights", "question": "Extract the key financial metrics as a markdown table with columns: Metric, Current Period, Prior Period, YoY Change. Include revenue, operating income, net income, EPS, and any segment-level breakdowns."},
-        {"id": "growth-drivers", "question": "What is actually driving growth or decline? Identify the specific products, segments, geographies, or initiatives management credits for changes in revenue and profitability. Include numbers."},
-        {"id": "competition", "question": "Summarize the competitive positioning, moats, and management's framing of competition."},
-        {"id": "management", "question": "Summarize management priorities, strategic initiatives, and capital allocation signals."},
-        {"id": "risks", "question": "Summarize the most important business and operating risks."},
-    ],
-    "sec-quarterly": [
-        {"id": "recent-update", "question": "Summarize the most important quarter-to-date operating changes and management commentary."},
-        {"id": "financial-update", "question": "Extract the key quarter financial metrics as a markdown table: Metric, Current Quarter, Prior Year Quarter, YoY Change. Include revenue, operating income, net income, and EPS."},
-        {"id": "risks", "question": "Summarize the most important new or changed risks mentioned in the filing."},
-    ],
-    "sec-earnings": [
-        {"id": "earnings-takeaways", "question": "Summarize the most important earnings takeaways, KPIs, and guidance changes."},
-        {"id": "kpi-summary", "question": "Extract the key reported KPIs as a markdown table: KPI, Value, Prior Period Value, Change. Include user/customer metrics, engagement metrics, and unit economics."},
-        {"id": "guidance", "question": "Extract any forward guidance, targets, or outlook statements. Quote management directly where possible. If no guidance was provided, state that explicitly."},
-        {"id": "management", "question": "Summarize management's near-term priorities and tone from the earnings material."},
-    ],
-    "sec-financials": [
-        {"id": "statement-summary", "question": "Summarize the key trends and material year-over-year changes."},
-    ],
-    "industry-report": [
-        {"id": "external-evidence", "question": "Summarize the most important third-party evidence and how it changes the business view."},
-    ],
-    "competitor-data": [
-        {"id": "external-evidence", "question": "Summarize competitor positioning and what it implies for the target company."},
-    ],
-    "customer-evidence": [
-        {"id": "external-evidence", "question": "Summarize what customers say and what it implies for the business."},
-    ],
-    "news": [
-        {"id": "external-evidence", "question": "Summarize newsworthy developments and their implications."},
-    ],
-    "company-ir": [
-        {"id": "external-evidence", "question": "Summarize IR content and how it changes the business view."},
-    ],
-    "expert-input": [
-        {"id": "external-evidence", "question": "Summarize expert input and its implications."},
-    ],
-}
-
-# --- Context bundle definitions ---
-# Each bundle specifies which evidence categories feed into it.
-
-CONTEXT_BUNDLES: list[dict] = [
-    {
-        "name": "business-overview",
-        "categories": ["sec-annual", "sec-quarterly", "industry-report", "company-ir"],
-    },
-    {
-        "name": "competition",
-        "categories": ["sec-annual", "industry-report", "competitor-data"],
-    },
-    {
-        "name": "management",
-        "categories": ["sec-annual", "sec-earnings"],
-    },
-    {
-        "name": "risks",
-        "categories": ["sec-annual", "sec-quarterly", "news", "regulatory"],
-    },
-    {
-        "name": "valuation",
-        "categories": ["sec-financials", "sec-earnings"],
-        "extra_globs": ["analysis/valuation/**/*.md"],
-    },
-]
 
 # --- 10-K / 10-Q section maps ---
 # Maps item number → (slug, display_name) for per-section file naming.

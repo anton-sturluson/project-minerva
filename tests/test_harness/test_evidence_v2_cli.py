@@ -70,62 +70,11 @@ def test_add_source_warns_on_unknown_category(tmp_path: Path) -> None:
     assert "unrecognized category" in result.stderr.decode("utf-8").lower()
 
 
-def test_migrate_cli_command(tmp_path: Path) -> None:
-    root = tmp_path / "reports" / "00-companies" / "12-robinhood"
-    evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
+def test_v2_init_and_audit_smoke(tmp_path: Path, monkeypatch) -> None:
+    """End-to-end smoke test: init → add-source → audit.
 
-    # Seed a minimal source-registry.json under data/meta/.
-    registry_path = root / "data" / "meta" / "source-registry.json"
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-    registry_path.write_text(
-        json.dumps({
-            "root": str(root),
-            "ticker": "HOOD",
-            "company_name": "Robinhood",
-            "slug": "robinhood",
-            "sources": [
-                {
-                    "id": "aaa",
-                    "title": "HOOD 10-K 2025-02-18",
-                    "ticker": "HOOD",
-                    "bucket": "sec-filings-annual",
-                    "source_kind": "sec-10k",
-                    "status": "downloaded",
-                    "local_path": "data/sources/10-K/2025-02-18.md",
-                    "url": None,
-                    "notes": None,
-                    "created_at": "2025-01-01T00:00:00+00:00",
-                    "updated_at": "2025-01-01T00:00:00+00:00",
-                },
-            ],
-            "last_updated": "2025-01-01T00:00:00+00:00",
-        }),
-        encoding="utf-8",
-    )
-
-    # Create the monolithic file so upsert_evidence doesn't reject it.
-    md_path = root / "data" / "sources" / "10-K" / "2025-02-18.md"
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text("# 10-K content", encoding="utf-8")
-
-    result = dispatch_command(["evidence", "migrate", "--root", str(root)])
-    assert result.exit_code == 0, result.stderr.decode("utf-8")
-
-    # evidence.jsonl must exist with the migrated entry.
-    assert (root / "data" / "evidence.jsonl").exists()
-
-    # source-registry.json must be archived.
-    assert not registry_path.exists()
-    assert (registry_path.parent / "source-registry.archive.json").exists()
-
-
-def test_v2_full_flow_smoke(tmp_path: Path, monkeypatch) -> None:
-    """End-to-end smoke test: init → collect sec → audit → status.
-
-    Uses monkeypatches to avoid real network calls and real LLM calls.
-    Asserts that the readiness stage transitions correctly across the workflow.
+    Uses monkeypatches to avoid real LLM calls.
     """
-    from harness.commands import analysis as analysis_cmd
     from harness.workflows.evidence.paths import resolve_company_root
 
     root = tmp_path / "reports" / "00-companies" / "42-acme"
@@ -140,73 +89,35 @@ def test_v2_full_flow_smoke(tmp_path: Path, monkeypatch) -> None:
     assert init_result.exit_code == 0, init_result.stderr.decode("utf-8")
 
     paths = resolve_company_root(root)
-    # evidence.jsonl is created lazily on first upsert; audits/ and plans/ are created by init
     assert paths.audits_dir.exists()
     assert paths.plans_dir.exists()
 
-    # --- Step 2: collect sec (monkeypatched to simulate per-section files) ---
+    # --- Step 2: add-source ---
+    filing_dir = paths.sources_dir / "10-K" / "2025-02-18"
+    filing_dir.mkdir(parents=True, exist_ok=True)
+    (filing_dir / "01-business.md").write_text("## Business\nAcme sells widgets.", encoding="utf-8")
 
-    def _fake_bulk_download(
-        *,
-        ticker: str,
-        base_output: Path,
-        annual: int,
-        quarters: int,
-        earnings: int,
-        include_financials: bool,
-        include_html: bool,
-        nest_ticker: bool,
-    ) -> None:
-        """Simulate edgartools writing per-section 10-K files."""
-        # Create a 10-K per-section directory
-        filing_dir = base_output / "10-K" / "2025-02-18"
-        filing_dir.mkdir(parents=True, exist_ok=True)
-        (filing_dir / "01-business.md").write_text("## Business\nAcme sells widgets.", encoding="utf-8")
-        (filing_dir / "07-mdna.md").write_text("## MD&A\nRevenue up 12%.", encoding="utf-8")
-        # Create an earnings release
-        earnings_dir = base_output / "earnings"
-        earnings_dir.mkdir(parents=True, exist_ok=True)
-        (earnings_dir / "2025-02-18.md").write_text("## Earnings\nQ4 beat by 3%.", encoding="utf-8")
-
-    monkeypatch.setattr(
-        "harness.workflows.evidence.collector.sec._bulk_download_one",
-        _fake_bulk_download,
-    )
-
-    # Also monkeypatch _configure_edgar to avoid needing env vars
-    monkeypatch.setattr(
-        "harness.workflows.evidence.collector.sec._configure_edgar",
-        lambda settings: None,
-    )
-
-    collect_result = dispatch_command(
+    add_result = dispatch_command(
         [
-            "evidence", "collect", "sec",
+            "evidence", "add-source",
             "--root", str(root),
-            "--ticker", "ACME",
-            "--annual", "1",
-            "--quarters", "0",
-            "--earnings", "1",
+            "--title", "ACME 10-K 2025",
+            "--category", "sec-annual",
+            "--status", "downloaded",
+            "--path", str(filing_dir),
+            "--date", "2025-02-18",
         ]
     )
-    assert collect_result.exit_code == 0, collect_result.stderr.decode("utf-8")
+    assert add_result.exit_code == 0, add_result.stderr.decode("utf-8")
 
-    # Ledger should now have entries for 10-K and earnings
+    # Ledger should now have the entry
     ledger_lines = [
         json.loads(line)
         for line in paths.evidence_jsonl.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert len(ledger_lines) >= 2
-    categories = {e["category"] for e in ledger_lines}
-    assert "sec-annual" in categories
-    assert "sec-earnings" in categories
-
-    # Status should be "collecting" before audit
-    status_result_pre = dispatch_command(["analysis", "status", "--root", str(root)])
-    assert status_result_pre.exit_code == 0, status_result_pre.stderr.decode("utf-8")
-    pre_status = json.loads(paths.status_json.read_text(encoding="utf-8"))
-    assert pre_status["stage"] == "collecting"
+    assert len(ledger_lines) >= 1
+    assert "sec-annual" in {e["category"] for e in ledger_lines}
 
     # --- Step 3: audit (monkeypatched LLM) ---
 
@@ -225,18 +136,6 @@ def test_v2_full_flow_smoke(tmp_path: Path, monkeypatch) -> None:
     memo_text = memo_files[0].read_text(encoding="utf-8")
     assert "Evidence Assessment" in memo_text
     assert "Readiness: ready" in memo_text
-
-    # --- Step 4: status after audit → should advance past "collecting" ---
-    status_result_post = dispatch_command(["analysis", "status", "--root", str(root)])
-    assert status_result_post.exit_code == 0, status_result_post.stderr.decode("utf-8")
-    post_status = json.loads(paths.status_json.read_text(encoding="utf-8"))
-    assert post_status["stage"] != "collecting", (
-        f"Expected stage to advance past 'collecting' after audit; got {post_status['stage']!r}"
-    )
-    # Milestones should show ledger and audit as done
-    milestone_map = {m["name"]: m["status"] for m in post_status["milestones"]}
-    assert milestone_map.get("ledger") == "done"
-    assert milestone_map.get("audit") == "done"
 
 
 def test_audit_command_produces_memo(tmp_path: Path, monkeypatch) -> None:
