@@ -94,65 +94,31 @@ def run_audit(
 # ---------------------------------------------------------------------------
 
 
-def default_audit_llm(api_key: str | None = None, *, prefer_openai: bool = True) -> Callable[..., str]:
-    """Return a callable ``(*, prompt: str, model: str) -> str``.
-
-    Tries OpenAI first (if ``prefer_openai=True``); falls back to Gemini via
-    ``harness.commands.extract._generate_answer``.
-
-    Note: OpenAI is not installed in this project (only used in jobwatch).
-    The factory always falls through to the Gemini backend.
-    """
-    if prefer_openai:
-        try:
-            import openai as _openai_mod  # noqa: F401
-
-            openai_key = api_key or _openai_mod.api_key
-            if not openai_key:
-                raise ImportError("OpenAI available but no API key configured")
-
-            def _openai_llm(*, prompt: str, model: str) -> str:
-                client = _openai_mod.OpenAI(api_key=openai_key)
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                content = response.choices[0].message.content
-                if not content:
-                    raise ValueError("OpenAI returned an empty response")
-                return str(content)
-
-            return _openai_llm
-        except (ImportError, ModuleNotFoundError):
-            pass  # Fall through to Gemini
-
-    # Gemini fallback via harness.commands.extract._generate_answer
+def default_audit_llm(api_key: str | None = None) -> Callable[..., str]:
+    """Return a callable ``(*, prompt: str, model: str) -> str`` using OpenAI."""
     import os
 
-    from harness.commands.extract import _generate_answer
-    from harness.config import get_settings
+    import openai as _openai_mod
 
-    settings = get_settings()
-    # Prefer explicit Gemini key over the generic api_key parameter,
-    # which may hold an OpenAI key when OpenAI is not installed.
-    gemini_api_key = (
-        os.environ.get("GEMINI_API_KEY")
-        or (settings.gemini_api_key if settings.gemini_api_key else None)
-        or api_key
-    )
-
-    def _gemini_llm(*, prompt: str, model: str) -> str:
-        if not gemini_api_key:
-            raise RuntimeError("No API key configured for Gemini audit LLM (set GEMINI_API_KEY)")
-        return _generate_answer(
-            question=prompt,
-            document_text="",
-            model=model,
-            max_tokens=8192,
-            api_key=gemini_api_key,
+    openai_key = api_key or os.environ.get("OPENAI_API_KEY") or _openai_mod.api_key
+    if not openai_key:
+        raise RuntimeError(
+            "No OpenAI API key configured for audit LLM. "
+            "Set OPENAI_API_KEY or pass --api-key-env-var."
         )
 
-    return _gemini_llm
+    def _openai_llm(*, prompt: str, model: str) -> str:
+        client = _openai_mod.OpenAI(api_key=openai_key)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("OpenAI returned an empty response")
+        return str(content)
+
+    return _openai_llm
 
 
 # ---------------------------------------------------------------------------

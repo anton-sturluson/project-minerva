@@ -59,7 +59,8 @@ def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: by
         if subcommand == "audit":
             parsed = parse_flag_args(args[1:])
             import os
-            api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            api_key_env = str(parsed.get("api-key-env-var", "OPENAI_API_KEY"))
+            api_key = os.environ.get(api_key_env)
             categories_raw = str(parsed["categories"]) if "categories" in parsed else None
             categories = [c.strip() for c in categories_raw.split(",") if c.strip()] if categories_raw else None
             return audit_command(
