@@ -24,7 +24,6 @@ def ensure_company_tree(paths: CompanyPaths) -> None:
         paths.research_dir,
         paths.analysis_dir,
         paths.bundles_dir,
-        paths.provenance_dir,
         paths.audits_dir,
         paths.plans_dir,
     ]:

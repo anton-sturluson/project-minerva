@@ -69,10 +69,6 @@ class CompanyPaths:
         return self.analysis_dir / "bundles"
 
     @property
-    def provenance_dir(self) -> Path:
-        return self.root / "provenance"
-
-    @property
     def source_registry_json(self) -> Path:
         return self.meta_dir / "source-registry.json"
 
