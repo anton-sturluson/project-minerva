@@ -11,7 +11,7 @@ from harness.workflows.evidence.constants import SEC_CATEGORIES
 from harness.workflows.evidence.ledger import load_ledger
 from harness.workflows.evidence.paths import CompanyPaths
 
-DEFAULT_AUDIT_MODEL = "gpt-5.4"
+DEFAULT_AUDIT_MODEL = "gpt-5.5"
 
 
 # ---------------------------------------------------------------------------
