@@ -26,7 +26,7 @@ EXTRACT_HELP = (
     "  minerva run \"sec 10k AAPL --items 1A | extract 'What are the top 3 risk factors?'\"\n"
 )
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
+DEFAULT_MODEL = "gemini-3-flash"
 SYSTEM_PROMPT = (
     "Extract information relevant to the following question. "
     "Be concise and specific. Cite section/page numbers when possible."
