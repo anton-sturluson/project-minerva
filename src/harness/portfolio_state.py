@@ -442,6 +442,7 @@ FINNHUB_SYMBOL_TABLE: dict[str, dict[str, Any]] = {
     "COIN": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "COIN", "company_name": "Coinbase Global Inc"},
     "DUOL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "DUOL", "company_name": "Duolingo Inc"},
     "GOOGL": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "GOOGL", "company_name": "Alphabet Inc"},
+    "HEM": {"exchange": "Nasdaq Stockholm", "country": "SE", "sec_registered": False, "finnhub_symbol": "HEM.ST", "company_name": "Hemnet Group AB (publ)"},
     "HOOD": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "HOOD", "company_name": "Robinhood Markets Inc"},
     "IMVT": {"exchange": "NASDAQ", "country": "US", "sec_registered": True, "finnhub_symbol": "IMVT", "company_name": "Immunovant Inc"},
     "KPG": {"exchange": "ASX", "country": "AU", "sec_registered": False, "finnhub_symbol": "KPG.AX", "company_name": "Kelly Partners Group Holdings Ltd"},
@@ -937,7 +938,7 @@ def _carry_forward_enrichment(
 
 def _normalize_security_row(row: dict[str, Any], *, source_kind: str) -> dict[str, Any]:
     ticker = _clean_ticker(row.get("ticker") or row.get("symbol"))
-    company_name = _clean_name(row.get("company") or row.get("name") or row.get("security"))
+    company_name = _clean_name(row.get("company") or row.get("name") or row.get("company_name") or row.get("security"))
     security_id = canonical_security_id(row.get("security_id") or ticker or company_name or row.get("cusip"))
     record: dict[str, Any] = {
         "security_id": security_id,
