@@ -2,9 +2,11 @@
 
 ## Overview
 
-The V2 evidence workflow is **ledger-driven**: every source — SEC filing, industry report, news article — is recorded as a single line in `data/evidence.jsonl`. The ledger is the single source of truth for inventory, audit, and analysis context. There are no YAML coverage profiles; all categories and extraction questions are defined in `src/harness/workflows/evidence/constants.py`.
+The V2 evidence workflow is **ledger-driven**: every source — SEC filing, industry report, news article — is recorded as a single line in `data/evidence.jsonl`. The ledger is the single source of truth for audit and downstream analysis. There are no YAML coverage profiles; recognized categories are defined in `src/harness/workflows/evidence/constants.py`.
 
-The three public entry-points for daily use are `init`, `add-source`, and `audit`. The other commands (`collect sec`, `extract`, `inventory`, `migrate`) support specific steps of the pipeline.
+The three public entry-points are `init`, `add-source`, and `audit`.
+
+The evidence workflow stops at a verified evidence base. It does **not** write the final investment analysis for you. Use it to create the company tree, persist sources, and produce an audit memo that says whether the evidence is strong enough to support serious synthesis.
 
 ---
 
@@ -25,12 +27,14 @@ The three public entry-points for daily use are `init`, `add-source`, and `audit
 │   │   ├── earnings/
 │   │   └── financials/
 │   ├── references/          # Manually saved external PDFs, reports, etc.
-│   └── meta/                # Inventory, SEC summary, extraction-runs/
+│   └── meta/                # Workflow metadata and generated summaries
 ├── audits/                  # Audit memos (audit-YYYY-MM-DD.md)
 ├── plans/                   # Research plans and notes
-├── research/                # Scraped or downloaded research materials
-└── analysis/                # Context manifests, status, valuation outputs
+├── research/                # Open-web research outputs and discovery notes
+└── analysis/                # Human/agent synthesis, valuation outputs, draft analysis
 ```
+
+`research/` is for discovery material: web research outputs, search notes, market maps, and other inputs that may become evidence. `analysis/` is for judgment work: thesis drafts, valuation outputs, memos, and final synthesis. Do not treat something as analysis just because it came from a research tool; analysis starts when the evidence is interpreted.
 
 ---
 
@@ -64,7 +68,8 @@ minerva evidence add-source \
   --category industry-report \
   --status downloaded \
   --path hard-disk/reports/00-companies/12-robinhood/data/references/nilson-2025.pdf \
-  --url https://nilsonreport.com/reports/2025
+  --url https://nilsonreport.com/reports/2025 \
+  --notes "Useful for payments industry sizing and card-volume context."
 
 # Register a discovered (not yet downloaded) competitor filing
 minerva evidence add-source \
@@ -72,7 +77,8 @@ minerva evidence add-source \
   --title "Webull 10-K FY2024" \
   --category competitor-data \
   --status discovered \
-  --url https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=webull
+  --url https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=webull \
+  --notes "Potential competitor filing; download before relying on it."
 ```
 
 **Recognized categories** (from `constants.py`):
@@ -96,6 +102,12 @@ minerva evidence add-source \
 
 Valid status values: `downloaded`, `discovered`, `blocked`.
 
+Useful optional fields:
+- `--notes` — why the source matters, what it covers, or why it is blocked.
+- `--date` — publication or filing date (`YYYY-MM-DD`).
+- `--collector` — who or what collected it, e.g. `manual`, `parallel`, `sec`.
+- `--url` — canonical source URL.
+
 An unknown category emits a warning to stderr but still writes the ledger entry.
 
 ---
@@ -111,81 +123,47 @@ minerva evidence audit \
 
 Optional flags:
 - `--categories sec-annual,sec-quarterly` — scope the audit to specific categories
-- `--model gpt-4o` — override the model (default: `gpt-4o`)
+- `--model gpt-5.5` — override the model (default: `gpt-5.5`)
 - `--api-key-env-var OPENAI_API_KEY` — env var containing the API key
 
-The audit memo is the primary readiness signal for `analysis status`.
+The audit memo is the readiness signal for downstream analysis. If the memo says coverage is thin, collect or save more sources, register them with `add-source`, and rerun `audit`.
 
 ---
 
-## Other commands
+## Related commands
 
-### `minerva evidence collect sec`
+### `minerva research`
 
-Downloads SEC filings from EDGAR using edgartools. Writes per-section `.md` files under `data/sources/10-K/<date>/` and `data/sources/10-Q/<date>/`. Registers one ledger entry per logical filing directory.
-
-```bash
-minerva evidence collect sec \
-  --root hard-disk/reports/00-companies/12-robinhood \
-  --ticker HOOD \
-  --annual 3 \
-  --quarters 4 \
-  --earnings 4
-```
-
-Optional flags:
-- `--no-financials` — skip financial statement markdown/CSV
-- `--no-html` — skip HTML rendering
-
-**Per-section files**: edgartools extracts each Item (e.g., Item 1, Item 7, Item 7A) into a separate `.md` file. If structured access fails, the command falls back to a single-file download. HTML files are never written to the ledger.
-
-**EDGAR identity**: set `EDGAR_COMPANY_NAME` and `EDGAR_EMAIL` environment variables, or configure them via `HarnessSettings`.
-
----
-
-### `minerva evidence extract`
-
-Runs LLM extraction questions over downloaded sources, writing structured outputs. Questions are defined per category in `constants.py` (`EXTRACTION_QUESTIONS`).
+Runs deep open-web research through Parallel.ai. Use it when you need discovery outside the sources already saved in the evidence tree: market structure, competitors, regulatory background, channel checks, or source leads.
 
 ```bash
-minerva evidence extract \
-  --root hard-disk/reports/00-companies/12-robinhood \
-  --profile default
+minerva research "Robinhood payment for order flow regulatory risk 2024 2025" \
+  --output hard-disk/reports/00-companies/12-robinhood/research/pfof-regulatory-risk.md
 ```
 
-Optional flags:
-- `--source-prefix data/sources/10-K` — filter by source path prefix
-- `--match "2025"` — filter by filename match
-- `--force` — recompute even if outputs already exist
-- `--model gemini-2.0-flash` — model override
+Research output is not automatically evidence. If the output itself is useful, save it under `research/` and register it with `add-source`. If it points to better primary sources, download those sources into `data/sources/` or `data/references/` and register those instead.
 
-Outputs are written to `data/meta/extraction-runs/`.
+### `minerva extract` / `minerva extract-many`
 
----
-
-### `minerva evidence inventory`
-
-Recomputes the evidence inventory from the ledger and disk state. Detects sources recorded as `downloaded` but missing on disk.
+Runs targeted LLM extraction over a saved file. Use this after a source exists on disk and you need specific facts pulled out of it.
 
 ```bash
-minerva evidence inventory \
-  --root hard-disk/reports/00-companies/12-robinhood
+minerva extract "What revenue drivers and risks does management emphasize?" \
+  --file hard-disk/reports/00-companies/12-robinhood/data/sources/10-K/2025-02-18/07-mdna.md
 ```
 
-Writes `data/meta/inventory.json` and optionally refreshes `INDEX.md` files.
+Extraction is a way to structure evidence; it is not a substitute for registering the underlying source in the ledger.
 
----
+### `minerva analyze`
 
-### `minerva evidence migrate`
-
-Migrates a V1 `source-registry.json` to the V2 `evidence.jsonl` ledger. HTML-only sources are dropped. The old registry is archived as `source-registry.archive.json`.
+Runs deterministic text analysis such as n-grams and topic clustering.
 
 ```bash
-minerva evidence migrate \
-  --root hard-disk/reports/00-companies/12-robinhood
+minerva analyze ngrams hard-disk/reports/00-companies/12-robinhood/data/sources/10-K/2025-02-18/01-business.md \
+  --top 20 --min-count 3
 ```
 
-Run once per company that was initialized under the V1 workflow. After migration, all V2 commands operate on the new ledger.
+`analyze` is mechanical text analysis. It is useful for finding repeated terms, themes, and document structure. It is not the same thing as investment analysis.
 
 ---
 
@@ -195,31 +173,39 @@ Run once per company that was initialized under the V1 workflow. After migration
 # 1. Initialize the workspace
 minerva evidence init --root .../12-robinhood --ticker HOOD --name Robinhood --slug robinhood
 
-# 2. Collect SEC filings from EDGAR
-minerva evidence collect sec --root .../12-robinhood --ticker HOOD --annual 3 --quarters 4 --earnings 4
-
-# 3. Add any external sources manually
+# 2. Add saved primary sources, filings, articles, and reports
 minerva evidence add-source --root .../12-robinhood --title "Nilson Report" \
   --category industry-report --status downloaded --path .../nilson-2025.pdf
 
-# 4. Run the evidence audit (LLM gap assessment)
+# 3. Use web research for discovery when the evidence base is thin
+minerva research "Robinhood competitive position and payments economics" \
+  --output .../12-robinhood/research/competitive-position.md
+
+# 4. Register any durable research output or primary source it identifies
+minerva evidence add-source --root .../12-robinhood --title "Competitive position research notes" \
+  --category other --status downloaded --path .../12-robinhood/research/competitive-position.md
+
+# 5. Run the evidence audit (LLM gap assessment)
 minerva evidence audit --root .../12-robinhood
 
-# 5. Check analysis readiness
-minerva analysis status --root .../12-robinhood
-
-# 6. Build analysis context (once audit passes)
-minerva analysis context --root .../12-robinhood
+# 6. If the audit passes, move into human/agent synthesis under analysis/
 ```
 
 ---
 
-## Migration note
+## Research vs. analysis
 
-If the workspace was initialized with the V1 workflow (presence of `data/meta/source-registry.json`):
+- **Research** finds and preserves inputs: filings, transcripts, articles, reports, market maps, source leads, and extracted facts.
+- **Analysis** makes judgments from those inputs: what matters, what is causal, what is noise, what the market is missing, what would change the thesis, and what the valuation implies.
+- `minerva research` is a tool for discovery. It can produce useful notes, but those notes should still be saved and registered if they matter.
+- `minerva analyze` is deterministic text analysis (`ngrams`, `topics`). It helps inspect documents, but it does not make investment judgments.
+- There is currently no `minerva analysis status` or `minerva analysis context` command. The current readiness gate is `minerva evidence audit`; after that, write synthesis and valuation artifacts under `analysis/`.
 
-```bash
-minerva evidence migrate --root <company-root>
-```
+## Notes
 
-This reads the V1 registry, converts each non-HTML source to a V2 ledger entry, and archives the old file. Existing monolithic filing `.md` files are preserved; per-section files will be populated on the next `collect sec` run.
+- Keep every durable source represented in `data/evidence.jsonl`; the ledger is the audit trail.
+- Prefer primary sources over research summaries when both are available.
+- A `discovered` ledger entry means “we know this source exists but do not have it yet.” A `downloaded` entry should point to a local file that exists.
+- Research outputs are acceptable evidence when they are the actual artifact being relied on, but they are weaker than the primary documents they cite.
+- If an audit memo identifies gaps, add or block the missing sources explicitly and rerun the audit before writing a confident thesis.
+- Put final memos, valuation work, and thesis drafts in `analysis/`; put source discovery notes in `research/`.
