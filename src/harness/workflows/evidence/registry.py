@@ -13,7 +13,6 @@ def ensure_company_tree(paths: CompanyPaths) -> None:
     """Create the canonical company evidence tree."""
     for directory in [
         paths.root,
-        paths.notes_dir,
         paths.sources_dir,
         paths.references_dir,
         paths.meta_dir,
