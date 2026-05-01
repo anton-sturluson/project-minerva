@@ -56,6 +56,31 @@ def error_result(
     )
 
 
+def _is_bare_default(v: object) -> bool:
+    """True only for None or empty list/tuple — the values Typer uses for unprovided args.
+
+    Deliberately narrow: does NOT treat False, 0, or "" as bare.
+    Typer passes None for unprovided Optional args and None for unprovided list options.
+    """
+    if v is None:
+        return True
+    if isinstance(v, (list, tuple)) and len(v) == 0:
+        return True
+    return False
+
+
+def show_help_if_bare(ctx: typer.Context, **kwargs: object) -> None:
+    """If every kwarg is an unprovided default (None or empty collection), print help and exit 0.
+
+    Call as the first line of a Typer callback to give bare invocations clean help
+    instead of an error message.  Pass only user-facing parameters that indicate intent —
+    not defaults like model/max_tokens/concurrency that always have values.
+    """
+    if all(_is_bare_default(v) for v in kwargs.values()):
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+
+
 def abort_with_help(
     ctx: typer.Context,
     *,

@@ -499,7 +499,7 @@ Writes:
 
 Exact behavior:
 1. **Audit & Plan**: Charlie reads the collected headlines and the source status, decides whether the evidence is sufficient, and writes an `execution-plan.md` containing targeted questions or angles needed for the specific events that actually matter.
-2. **Targeted Extraction**: Charlie uses `minerva extract` / `extract-many` (e.g. `--model openai/gpt-5.4`) against massive raw SEC/IR files to answer his planned questions. This keeps his working context strictly focused on signal instead of noise.
+2. **Targeted Extraction**: Charlie uses `minerva extract` (or `extract-files` for many files) (e.g. `--model openai/gpt-5.4`) against massive raw SEC/IR files to answer his planned questions. This keeps his working context strictly focused on signal instead of noise.
 3. **Synthesis**: Charlie writes the final reports based on the extracted answers.
 
 Implementation details:
@@ -521,7 +521,7 @@ In practice, that means:
 - `brief prep` compresses and groups the collected evidence before Charlie sees it
 - Charlie wakes up and starts from `grouped-events.md` and `source-status.md`
 - Charlie determines his own audit verdict and reading plan
-- to read the full text of SEC filings or press releases, Charlie uses `minerva extract` or `minerva extract-many` (e.g. `--model openai/gpt-5.4`) to ask targeted questions, rather than pulling the entire document into context. This prevents context bloat and keeps his working session strictly focused on signal instead of noise.
+- to read the full text of SEC filings or press releases, Charlie uses `minerva extract` or `minerva extract-files` (e.g. `--model openai/gpt-5.4`) to ask targeted questions, rather than pulling the entire document into context. This prevents context bloat and keeps his working session strictly focused on signal instead of noise.
 
 ---
 
@@ -540,7 +540,7 @@ The daily run should work like this:
 9. Charlie wakes up, reads `grouped-events.md` and `source-status.md`, and takes over as the autonomous intelligence layer:
    - he decides whether to audit the evidence pack or request more data
    - he builds his own execution plan
-   - he uses `minerva extract` / `extract-many` to deep dive on the full sources without blowing up his context window
+   - he uses `minerva extract` / `extract-files` to deep dive on the full sources without blowing up his context window
    - he runs `minerva brief audit` to validate the evidence pack before writing; if the audit fails, he loops back to collect or extract more data until the evidence passes
    - once the audit passes, he writes `notes/morning-brief-report.md` and `notes/slack-brief.md`
 10. OpenClaw posts the Slack brief

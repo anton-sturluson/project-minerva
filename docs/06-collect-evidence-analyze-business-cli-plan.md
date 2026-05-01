@@ -199,7 +199,7 @@ Model:
 
 Implementation notes:
 - one model call per matched file
-- use existing `extract-many` core logic
+- use existing `extract-files` core logic (literal markdown prompt pack via `--questions-file`)
 - skip outputs that already exist unless `--force`
 - write JSON + markdown per extracted source
 - source-backed outputs mirror the source-type folder layout; reference-backed outputs land under `structured/references/`

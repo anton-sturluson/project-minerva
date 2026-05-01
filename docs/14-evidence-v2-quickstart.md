@@ -143,14 +143,34 @@ minerva research "Robinhood payment for order flow regulatory risk 2024 2025" \
 
 Research output is not automatically evidence. If the output itself is useful, save it under `research/` and register it with `add-source`. If it points to better primary sources, download those sources into `data/sources/` or `data/references/` and register those instead.
 
-### `minerva extract` / `minerva extract-many`
+### `minerva extract` / `minerva extract-files`
 
-Runs targeted LLM extraction over a saved file. Use this after a source exists on disk and you need specific facts pulled out of it.
+Runs targeted LLM extraction over saved file(s). Use after a source exists on disk and you need specific facts pulled out of it.
 
 ```bash
-minerva extract "What revenue drivers and risks does management emphasize?" \
-  --file hard-disk/reports/00-companies/12-robinhood/data/sources/10-K/2025-02-18/07-mdna.md
+# One question or prompt pack against one file (flags before positional):
+minerva extract \
+  -f hard-disk/reports/00-companies/12-robinhood/data/sources/10-K/2025-02-18/07-mdna.md \
+  "What revenue drivers and risks does management emphasize?"
+
+# Many questions over one file (literal markdown prompt pack):
+minerva extract -q questions.md \
+  -f hard-disk/reports/00-companies/12-robinhood/data/sources/10-K/2025-02-18/07-mdna.md
+
+# Same prompt or pack across many files, written per-file under --out:
+minerva extract-files -q questions.md \
+  -f 'hard-disk/reports/00-companies/12-robinhood/data/sources/10-K/2025-02-18/*.md' \
+  -o hard-disk/reports/00-companies/12-robinhood/extractions/mdna-summary \
+  --concurrency 4
+
+# Curated files from different folders; one path or glob per line:
+minerva extract-files -q questions.md \
+  -F selected-source-files.txt \
+  -o hard-disk/reports/extractions/cross-company \
+  --concurrency 4
 ```
+
+`extract-files` is for UTF-8 text/markdown files. Convert PDFs, spreadsheets, images, and other binary sources to text first, or use the appropriate OpenClaw PDF/image tool.
 
 Extraction is a way to structure evidence; it is not a substitute for registering the underlying source in the ledger.
 

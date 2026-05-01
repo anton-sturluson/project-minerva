@@ -67,9 +67,10 @@ def test_direct_cli_missing_args_show_full_help_for_valuation_dcf() -> None:
 
 
 def test_direct_cli_missing_args_show_full_help_for_research() -> None:
+    """Bare 'minerva research' now shows clean help (exit 0, no error)."""
     result = runner.invoke(app, ["research"])
 
-    assert result.exit_code == 1
-    assert "What went wrong:" in result.stdout
+    assert result.exit_code == 0
+    assert "What went wrong" not in result.stdout
     assert "Usage:" in result.stdout
     assert "Deep web research powered by Parallel.ai." in result.stdout

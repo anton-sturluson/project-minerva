@@ -9,6 +9,7 @@ from typing import Callable
 import typer
 
 from harness.commands import register_commands
+from harness.commands.common import show_help_if_bare
 from harness.commands import analyze as analyze_commands
 from harness.commands import brief as brief_commands
 from harness.commands import evidence as evidence_commands
@@ -37,7 +38,8 @@ app = typer.Typer(
         "Minerva investment harness CLI.\n\n"
         "Examples:\n"
         "  minerva sec 10k AAPL --items 7\n"
-        "  minerva extract \"What are the key risks?\" --file apple-10k.md\n"
+        "  minerva extract -f apple-10k.md \"What are the key risks?\"\n"
+        "  minerva extract-files -q questions.md -F selected-files.txt -o data/extractions/summary\n"
         "  minerva run \"sec 10k AAPL --items 1A | extract 'What are the top 3 risk factors?'\"\n"
     ),
     add_completion=False,
@@ -62,6 +64,7 @@ def run_command(
     ),
 ) -> None:
     """Execute a shell-style command chain with pipes and short-circuit operators."""
+    show_help_if_bare(ctx, command=command)
     if not command:
         typer.echo(
             "What went wrong: no command chain was provided.\n"
@@ -220,7 +223,7 @@ def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSetti
         "extract": lambda full_argv, current_settings, current_stdin: extract_commands.dispatch(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
-        "extract-many": lambda full_argv, current_settings, current_stdin: extract_commands.dispatch_many(
+        "extract-files": lambda full_argv, current_settings, current_stdin: extract_commands.dispatch_files(
             full_argv[1:], settings=current_settings, stdin=current_stdin
         ),
         "fileinfo": lambda full_argv, current_settings, current_stdin: fileinfo_commands.dispatch(
@@ -301,5 +304,4 @@ def _available_root_commands() -> list[str]:
         names.add(command_info.name or command_info.callback.__name__.replace("_", "-"))
     for group_info in app.registered_groups:
         names.add(group_info.name or "group")
-    names.add("extract-many")
     return sorted(names)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from harness.commands.common import abort_with_help, elapsed_ms, error_result, relative_display_path, resolve_path
+from harness.commands.common import abort_with_help, elapsed_ms, error_result, relative_display_path, resolve_path, show_help_if_bare
 from harness.context import detect_file_format, estimate_tokens, is_binary
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
@@ -71,6 +71,7 @@ def fileinfo_cli_command(
     Example:
       minerva fileinfo ./aapl-filings/AAPL/10-K/2025-11-01.md
     """
+    show_help_if_bare(ctx, path=path)
     if not path:
         abort_with_help(
             ctx,
@@ -128,7 +129,7 @@ def _directory_inventory(path: Path) -> str:
     lines.extend(
         [
             f"total: {total_files} files, {_human_size(total_bytes)}, ~{total_tokens} tokens",
-            "recommendation: Use `minerva extract` or `extract-many` on individual files for targeted extraction.",
+            "recommendation: Use `minerva extract` for one file or `minerva extract-files` for many files.",
         ]
     )
     return "\n".join(lines)
@@ -159,7 +160,7 @@ def _recommendation(*, binary: bool, format_name: str, estimated_tokens: int) ->
         return "Binary file. Convert to text before processing."
     if estimated_tokens < 5_000:
         return "Small enough to read directly with OpenClaw's `read` tool."
-    return "Use `minerva extract` or `extract-many` for targeted extraction."
+    return "Use `minerva extract` for one file or `minerva extract-files` for many files."
 
 
 def _human_size(size_bytes: int) -> str:
