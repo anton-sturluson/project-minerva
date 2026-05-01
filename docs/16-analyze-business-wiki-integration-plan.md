@@ -597,7 +597,8 @@ Update `~/.openclaw/workspace/shared/TOOLS.md` and its Steve mirror. Verified ag
 | `minerva evidence init\|add-source\|audit` | Company evidence tree creation/reuse, source ledger registration, and evidence audit memo |
 | `minerva research "<query>"` | Deep web research via Parallel.ai |
 | `minerva extract "<question>" --file <path>` | LLM-powered extraction from a document |
-| `minerva extract-many --file <path> "<q1>" "<q2>"` | Multiple extractions in one pass |
+| `minerva extract --questions-file questions.md --file <path>` | Apply a literal markdown question pack against one document |
+| `minerva extract-files --files '<glob>' --out <dir>` | Apply one prompt or question pack across many files with bounded concurrency |
 | `minerva fileinfo <path>` | Inspect files and directories before deciding the handling path |
 | `minerva valuation dcf\|comps\|reverse-dcf\|sotp\|report` | Financial valuation models |
 | `minerva analyze ngrams\|topics` | Deterministic text analysis |

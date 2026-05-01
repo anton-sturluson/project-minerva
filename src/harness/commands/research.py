@@ -9,6 +9,7 @@ import typer
 
 from harness.commands.common import (
     abort_with_help,
+    show_help_if_bare,
     elapsed_ms,
     error_result,
     maybe_export_text,
@@ -94,6 +95,7 @@ def research_cli_command(
     Example:
       minerva research "market map of vertical SaaS companies in hospitality"
     """
+    show_help_if_bare(ctx, query=query, output=output)
     if not query:
         abort_with_help(
             ctx,
