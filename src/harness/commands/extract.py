@@ -48,7 +48,7 @@ EXTRACT_FILES_HELP = (
 )
 
 DEFAULT_MODEL = "gemini-3-flash"
-DEFAULT_MAX_TOKENS = 4096
+DEFAULT_MAX_TOKENS = 16384
 DEFAULT_CONCURRENCY = 4
 MODEL_ALIASES: dict[str, str] = {
     # OpenClaw/user-facing shorthand; Google GenAI expects the preview model id today.
@@ -184,7 +184,7 @@ def extract_cli_command(
         help="Markdown file containing the question/prompt pack to apply to the input document.",
     ),
     model: str = typer.Option(DEFAULT_MODEL, "--model", help="Gemini model to use."),
-    max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum response tokens."),
+    max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens."),
     thinking: str | None = typer.Option(
         None,
         "--thinking",
@@ -413,7 +413,7 @@ def extract_files_cli_command(
         help="Markdown file containing the question/prompt pack to apply to each source file.",
     ),
     model: str = typer.Option(DEFAULT_MODEL, "--model", help="Gemini model to use."),
-    max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum response tokens per file."),
+    max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens per file."),
     thinking: str | None = typer.Option(
         None,
         "--thinking",
