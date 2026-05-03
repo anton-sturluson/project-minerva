@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUN_DATE="${1:-$(date +%F)}"
+NEWS_DIR="${ROOT_DIR}/hard-disk/data/02-news/${RUN_DATE}"
+REPORT_DIR="${ROOT_DIR}/hard-disk/reports/03-daily-news/${RUN_DATE}"
+
+# Source env for API keys (Finnhub, etc.)
+source ~/.zshrc >/dev/null 2>&1 || true
+
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
+export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
+
+MINERVA_RUNNER="${MINERVA_RUNNER:-uv run minerva}"
+MINERVA_BRIEF_EARNINGS_PROVIDER="${MINERVA_BRIEF_EARNINGS_PROVIDER:-finnhub}"
+MINERVA_BRIEF_MARKET_PROVIDER="${MINERVA_BRIEF_MARKET_PROVIDER:-finnhub}"
+MINERVA_SKIP_STATUS_CHECK="${MINERVA_SKIP_STATUS_CHECK:-0}"
+MINERVA_SKIP_NEWS="${MINERVA_SKIP_NEWS:-0}"
+
+IFS=' ' read -r -a MINERVA_RUNNER_ARR <<< "${MINERVA_RUNNER}"
+
+run() { "${MINERVA_RUNNER_ARR[@]}" "$@"; }
+
+mkdir -p "${REPORT_DIR}" "${NEWS_DIR}/raw"
+
+echo "=== Morning Brief Pipeline ==="
+echo "date: ${RUN_DATE}"
+echo "news_dir: ${NEWS_DIR}"
+echo "report_dir: ${REPORT_DIR}"
+echo ""
+
+# ── PHASE 1: Structured data collection ──
+echo "── Phase 1: Structured data ──"
+
+portfolio_sync_args=(portfolio sync --date "${RUN_DATE}")
+[[ -n "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE:-}" ]] && portfolio_sync_args+=(--holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}")
+[[ -n "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE:-}" ]] && portfolio_sync_args+=(--transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
+[[ -n "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] && portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
+run "${portfolio_sync_args[@]}"
+
+run brief filings --date "${RUN_DATE}"
+
+earnings_args=(brief earnings --date "${RUN_DATE}" --provider "${MINERVA_BRIEF_EARNINGS_PROVIDER}")
+[[ -n "${MINERVA_BRIEF_EARNINGS_SOURCE:-}" ]] && earnings_args+=(--source "${MINERVA_BRIEF_EARNINGS_SOURCE}")
+run "${earnings_args[@]}"
+
+market_args=(brief market --date "${RUN_DATE}" --provider "${MINERVA_BRIEF_MARKET_PROVIDER}")
+[[ -n "${MINERVA_BRIEF_MARKET_SOURCE:-}" ]] && market_args+=(--source "${MINERVA_BRIEF_MARKET_SOURCE}")
+run "${market_args[@]}"
+
+echo ""
+
+# ── PHASE 2: News collection (parallel shell-level agents) ──
+if [[ "${MINERVA_SKIP_NEWS}" == "1" ]]; then
+  echo "── Phase 2: News collection (skipped) ──"
+else
+  echo "── Phase 2: News collection ──"
+
+  BROWSER_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news.md"
+  WEBFETCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news_webfetch.md"
+  NEWS_SOURCES="${ROOT_DIR}/hard-disk/data/02-news/news-sources.json"
+  IR_REGISTRY="${ROOT_DIR}/hard-disk/data/01-portfolio/current/ir-registry.json"
+  PIDS=()
+
+  # Helper: spawn one browser-based collection agent
+  collect_browser() {
+    local source_id="$1" source_name="$2" url="$3" output_path="$4"
+    local prompt
+    prompt=$(sed \
+      -e "s|{{DATE}}|${RUN_DATE}|g" \
+      -e "s|{{SOURCE_NAME}}|${source_name}|g" \
+      -e "s|{{URL}}|${url}|g" \
+      -e "s|{{OUTPUT_PATH}}|${output_path}|g" \
+      "${BROWSER_PROMPT_TEMPLATE}")
+
+    openclaw agent \
+      --agent main \
+      --timeout 300 \
+      --thinking medium \
+      --message "${prompt}" >/dev/null 2>&1 || echo "news: ${source_id} failed"
+  }
+
+  # Helper: spawn one web_fetch-based collection agent
+  collect_webfetch() {
+    local source_id="$1" source_name="$2" url="$3" output_path="$4"
+    local prompt
+    prompt=$(sed \
+      -e "s|{{DATE}}|${RUN_DATE}|g" \
+      -e "s|{{SOURCE_NAME}}|${source_name}|g" \
+      -e "s|{{URL}}|${url}|g" \
+      -e "s|{{OUTPUT_PATH}}|${output_path}|g" \
+      "${WEBFETCH_PROMPT_TEMPLATE}")
+
+    openclaw agent \
+      --agent main \
+      --timeout 120 \
+      --thinking medium \
+      --message "${prompt}" >/dev/null 2>&1 || echo "news: ${source_id} failed"
+  }
+
+  # Read news-sources.json and spawn agents
+  if [[ -f "${NEWS_SOURCES}" ]]; then
+    while IFS= read -r entry; do
+      source_id=$(echo "$entry" | jq -r '.id')
+      source_name=$(echo "$entry" | jq -r '.name')
+      url=$(echo "$entry" | jq -r '.url')
+      access=$(echo "$entry" | jq -r '.access')
+      output_path="${NEWS_DIR}/raw/${source_id}.md"
+
+      if [[ "$access" == "browser" ]]; then
+        echo "  spawning browser agent: ${source_id}"
+        collect_browser "$source_id" "$source_name" "$url" "$output_path" &
+        PIDS+=($!)
+      elif [[ "$access" == "web_fetch" ]]; then
+        echo "  spawning web_fetch agent: ${source_id}"
+        collect_webfetch "$source_id" "$source_name" "$url" "$output_path" &
+        PIDS+=($!)
+      fi
+    done < <(jq -c '.[]' "${NEWS_SOURCES}")
+  fi
+
+  # Read ir-registry.json and spawn browser agents (batched in groups of 5)
+  if [[ -f "${IR_REGISTRY}" ]]; then
+    IR_BATCH_SIZE=5
+    IR_COUNT=0
+    IR_PIDS=()
+
+    while IFS= read -r entry; do
+      ticker=$(echo "$entry" | jq -r '.security_id')
+      company=$(echo "$entry" | jq -r '.company_name')
+      url=$(echo "$entry" | jq -r '.feeds[0].url // empty')
+
+      if [[ -z "$url" ]]; then
+        continue
+      fi
+
+      output_path="${NEWS_DIR}/raw/ir-${ticker}.md"
+      echo "  spawning IR browser agent: ${ticker}"
+      collect_browser "ir-${ticker}" "IR — ${ticker}" "$url" "$output_path" &
+      IR_PIDS+=($!)
+      IR_COUNT=$((IR_COUNT + 1))
+
+      # Wait for batch to complete
+      if [[ $((IR_COUNT % IR_BATCH_SIZE)) -eq 0 ]]; then
+        echo "  waiting for IR batch..."
+        for pid in "${IR_PIDS[@]}"; do
+          wait "$pid" 2>/dev/null || true
+        done
+        IR_PIDS=()
+      fi
+    done < <(jq -c '.[]' "${IR_REGISTRY}")
+
+    # Wait for remaining IR agents
+    for pid in "${IR_PIDS[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  fi
+
+  # Wait for all editorial/calendar agents
+  echo "  waiting for news agents..."
+  for pid in "${PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+
+  echo "  news collection complete"
+fi
+
+echo ""
+
+# ── PHASE 3: Merge raw → articles.md + INDEX.md ──
+echo "── Phase 3: Merge ──"
+
+MERGE_SCRIPT="${ROOT_DIR}/scripts/merge_news.py"
+if [[ ! -f "${MERGE_SCRIPT}" ]]; then
+  echo "merge_news: script not found at ${MERGE_SCRIPT}, skipping"
+else
+  uv run python "${MERGE_SCRIPT}" \
+    --raw-dir "${NEWS_DIR}/raw" \
+    --articles "${NEWS_DIR}/articles.md" \
+    --index "${NEWS_DIR}/INDEX.md" \
+    --ledger "${ROOT_DIR}/hard-disk/data/02-news/LEDGER.md" \
+    --date "${RUN_DATE}" || echo "merge_news: failed (non-fatal)"
+fi
+
+echo ""
+
+# ── PHASE 4: Evidence preparation ──
+echo "── Phase 4: Evidence preparation ──"
+
+run brief prep --date "${RUN_DATE}"
+
+# Manifest check (relaxed: macro and ir no longer required)
+MANIFEST_PATH="${REPORT_DIR}/data/raw/manifest.json"
+
+if [[ "${MINERVA_SKIP_STATUS_CHECK}" != "1" ]]; then
+  uv run python - "${MANIFEST_PATH}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+sources = manifest.get("sources", {})
+required = ["filings", "earnings", "market", "prep"]
+missing = [name for name in required if name not in sources]
+blocking = [name for name in required if sources.get(name, {}).get("status") == "error"]
+if missing:
+    print(f"missing manifest source entries: {', '.join(missing)}", file=sys.stderr)
+    raise SystemExit(1)
+if blocking:
+    print(f"blocking morning-brief collection errors: {', '.join(blocking)}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+fi
+
+echo ""
+
+# ── Output paths ──
+PREPARED_PATH="${REPORT_DIR}/data/structured/prepared-evidence.json"
+echo "prepared_evidence: ${PREPARED_PATH}"
+echo "manifest: ${MANIFEST_PATH}"
+echo "articles: ${NEWS_DIR}/articles.md"
+echo "main_agent_step: read prepared evidence + articles.md, write notes/morning-brief-report.md and notes/slack-brief.md"
