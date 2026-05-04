@@ -240,7 +240,7 @@ def test_bulk_download_command_materializes_latest_results_and_falls_back_to_tex
     monkeypatch.setattr("harness.commands.sec._configure_edgar", lambda settings: None)
 
     result = sec.bulk_download_command(
-        tickers=["AAPL"],
+        ticker="AAPL",
         output_dir=str(tmp_path / "bulk"),
         annual=2,
         quarters=1,
@@ -251,9 +251,9 @@ def test_bulk_download_command_materializes_latest_results_and_falls_back_to_tex
 
     assert result.exit_code == 0
     # 10-K/10-Q are now per-section directories (fallback mode since fake filings have no obj()).
-    assert (tmp_path / "bulk" / "AAPL" / "10-K" / "2025-10-31").is_dir()
-    assert (tmp_path / "bulk" / "AAPL" / "10-K" / "2025-10-31" / "filing.md").read_text(encoding="utf-8") == "# annual 1"
-    assert (tmp_path / "bulk" / "AAPL" / "10-K" / "2024-10-31").is_dir()
-    assert (tmp_path / "bulk" / "AAPL" / "10-K" / "2024-10-31" / "_sections.md").exists()
+    assert (tmp_path / "bulk" / "10-K" / "2025-10-31").is_dir()
+    assert (tmp_path / "bulk" / "10-K" / "2025-10-31" / "filing.md").read_text(encoding="utf-8") == "# annual 1"
+    assert (tmp_path / "bulk" / "10-K" / "2024-10-31").is_dir()
+    assert (tmp_path / "bulk" / "10-K" / "2024-10-31" / "_sections.md").exists()
     # Earnings remain flat files.
-    assert (tmp_path / "bulk" / "AAPL" / "earnings" / "2025-07-24.md").read_text(encoding="utf-8") == "earnings text"
+    assert (tmp_path / "bulk" / "earnings" / "2025-07-24.md").read_text(encoding="utf-8") == "earnings text"

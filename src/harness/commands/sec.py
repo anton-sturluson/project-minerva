@@ -35,7 +35,7 @@ SEC_HELP = (
     "  minerva sec 10k AAPL --items 1,1A,7\n"
     "  minerva sec financials MSFT --type income --periods 5\n"
     "  minerva sec download AAPL --form 10-K --format markdown\n"
-    "  minerva sec bulk-download AAPL MSFT --output ./comp-analysis\n"
+    "  minerva sec bulk-download AAPL --output ./filings\n"
 )
 
 app = typer.Typer(help=SEC_HELP, no_args_is_help=True)
@@ -124,7 +124,7 @@ def dispatch(
 
         if subcommand == "bulk-download":
             parsed_args: list[str] = []
-            tickers: list[str] = []
+            ticker: str | None = None
             index = 1
             while index < len(args):
                 token = args[index]
@@ -132,13 +132,13 @@ def dispatch(
                     parsed_args.extend(args[index : index + 2])
                     index += 2
                     continue
-                tickers.append(token)
+                ticker = token
                 index += 1
             parsed = parse_flag_args(parsed_args)
-            if not tickers:
-                return _dispatch_help("bulk-download", ["`sec bulk-download AAPL MSFT --output ./comp-analysis`"])
+            if not ticker:
+                return _dispatch_help("bulk-download", ["`sec bulk-download AAPL --output ./filings`"])
             return bulk_download_command(
-                tickers=tickers,
+                ticker=ticker,
                 output_dir=str(parsed["output"]) if "output" in parsed else None,
                 annual=int(parsed.get("annual", 5)),
                 quarters=int(parsed.get("quarters", 4)),
@@ -298,7 +298,7 @@ def download_filing_command(
 
 def bulk_download_command(
     *,
-    tickers: list[str],
+    ticker: str,
     output_dir: str | None = None,
     annual: int = 5,
     quarters: int = 4,
@@ -306,7 +306,7 @@ def bulk_download_command(
     include_financials: bool = True,
     settings: HarnessSettings | None = None,
 ) -> CommandResult:
-    """Download a filing library for one or more tickers."""
+    """Download a filing library for a single ticker."""
     start: float = time.perf_counter()
     active_settings = settings or get_settings()
     identity_error = _configure_edgar(active_settings)
@@ -314,23 +314,19 @@ def bulk_download_command(
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
 
     base_output = resolve_path(output_dir or ".")
-    lines: list[str] = []
     try:
-        for ticker in tickers:
-            summary = _bulk_download_one(
-                ticker=ticker,
-                base_output=base_output,
-                annual=annual,
-                quarters=quarters,
-                earnings=earnings,
-                include_financials=include_financials,
-            )
-            lines.extend(summary)
-            lines.append("")
+        lines = _bulk_download_one(
+            ticker=ticker,
+            base_output=base_output,
+            annual=annual,
+            quarters=quarters,
+            earnings=earnings,
+            include_financials=include_financials,
+        )
     except Exception as exc:
         return error_result(
             f"bulk download failed: {exc}",
-            "retry with one ticker first or reduce the requested filing counts",
+            "retry or reduce the requested filing counts",
             ["`sec bulk-download AAPL`", "`sec download AAPL --form 10-K --format markdown`"],
             start,
         )
@@ -403,26 +399,26 @@ def download_command(
     _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output))
 
 
-@app.command("bulk-download", help="Download a filing library for one or more companies.\n\nExample:\n  minerva sec bulk-download AAPL MSFT --output ./comp-analysis")
+@app.command("bulk-download", help="Download a filing library for a single company.\n\nExample:\n  minerva sec bulk-download AAPL --output ./filings")
 def bulk_download_cli_command(
     ctx: typer.Context,
-    tickers: list[str] = typer.Argument(None, help="One or more company tickers."),
+    ticker: str | None = typer.Argument(None, help="Company ticker."),
     output: str | None = typer.Option(None, "--output", help="Output directory."),
     annual: int = typer.Option(5, "--annual", min=0, help="Number of annual 10-K filings."),
     quarters: int = typer.Option(4, "--quarters", min=0, help="Number of quarterly 10-Q filings."),
     earnings: int = typer.Option(4, "--earnings", min=0, help="Number of earnings releases."),
     financials: bool = typer.Option(True, "--financials/--no-financials", help="Include markdown financial statement tables."),
 ) -> None:
-    if not tickers:
+    if not ticker:
         abort_with_help(
             ctx,
-            what_went_wrong="no tickers were provided for `sec bulk-download`",
-            what_to_do="pass one or more tickers after the subcommand",
-            alternatives=["`minerva sec bulk-download AAPL`", "`minerva sec bulk-download AAPL MSFT --output ./comp-analysis`"],
+            what_went_wrong="no ticker was provided for `sec bulk-download`",
+            what_to_do="pass a ticker after the subcommand",
+            alternatives=["`minerva sec bulk-download AAPL`", "`minerva sec bulk-download AAPL --output ./filings`"],
         )
     _print(
         bulk_download_command(
-            tickers=tickers,
+            ticker=ticker,
             output_dir=output,
             annual=annual,
             quarters=quarters,
@@ -573,10 +569,9 @@ def _bulk_download_one(
     earnings: int,
     include_financials: bool,
     include_html: bool = True,
-    nest_ticker: bool = True,
 ) -> list[str]:
     company = Company(ticker)
-    company_root = base_output / ticker.upper() if nest_ticker else base_output
+    company_root = base_output
     company_root.mkdir(parents=True, exist_ok=True)
 
     downloaded = {"10-K": 0, "10-Q": 0, "earnings": 0}
@@ -676,7 +671,7 @@ def _dispatch_help(subcommand: str, alternatives: list[str]) -> CommandResult:
         "13f": "Usage: sec 13f <cik>",
         "financials": "Usage: sec financials <ticker> [--periods 5] [--type income|balance|cash]",
         "download": "Usage: sec download <ticker> [--form 10-K] [--format html|markdown] [--output PATH]",
-        "bulk-download": "Usage: sec bulk-download <ticker> [<ticker2> ...] [--output DIR] [--annual 5] [--quarters 4] [--earnings 4] [--financials true|false]",
+        "bulk-download": "Usage: sec bulk-download <ticker> [--output DIR] [--annual 5] [--quarters 4] [--earnings 4] [--financials true|false]",
     }
     return CommandResult.from_text(
         "",
