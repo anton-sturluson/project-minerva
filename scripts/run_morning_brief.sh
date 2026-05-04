@@ -6,7 +6,7 @@ source ~/.zshrc >/dev/null 2>&1 || true
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 RUN_DATE="${1:-$(date +%F)}"
 NEWS_DIR="${ROOT_DIR}/hard-disk/data/02-news/${RUN_DATE}"
 REPORT_DIR="${ROOT_DIR}/hard-disk/reports/03-daily-news/${RUN_DATE}"
@@ -24,7 +24,7 @@ IFS=' ' read -r -a MINERVA_RUNNER_ARR <<< "${MINERVA_RUNNER}"
 
 run() { "${MINERVA_RUNNER_ARR[@]}" "$@"; }
 
-mkdir -p "${REPORT_DIR}" "${NEWS_DIR}/raw"
+mkdir -p "${REPORT_DIR}" "${NEWS_DIR}/raw" "${NEWS_DIR}/summaries"
 
 echo "=== Morning Brief Pipeline ==="
 echo "date: ${RUN_DATE}"
@@ -53,11 +53,11 @@ run "${market_args[@]}"
 
 echo ""
 
-# ── PHASE 2: News collection (parallel shell-level agents) ──
+# ── PHASE 2a: News collection (parallel browser/web_fetch agents) ──
 if [[ "${MINERVA_SKIP_NEWS}" == "1" ]]; then
-  echo "── Phase 2: News collection (skipped) ──"
+  echo "── Phase 2a: News collection (skipped) ──"
 else
-  echo "── Phase 2: News collection ──"
+  echo "── Phase 2a: News collection ──"
 
   BROWSER_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news.md"
   WEBFETCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news_webfetch.md"
@@ -67,37 +67,43 @@ else
 
   # Helper: spawn one browser-based collection agent
   collect_browser() {
-    local source_id="$1" source_name="$2" url="$3" output_path="$4"
+    local source_id="$1" source_name="$2" url="$3"
+    local sessid="news-${source_id}-$(date +%s)"
     local prompt
     prompt=$(sed \
       -e "s|{{DATE}}|${RUN_DATE}|g" \
       -e "s|{{SOURCE_NAME}}|${source_name}|g" \
+      -e "s|{{SOURCE_ID}}|${source_id}|g" \
       -e "s|{{URL}}|${url}|g" \
-      -e "s|{{OUTPUT_PATH}}|${output_path}|g" \
+      -e "s|{{NEWS_DIR}}|${NEWS_DIR}|g" \
       "${BROWSER_PROMPT_TEMPLATE}")
 
     openclaw agent \
       --agent main \
-      --timeout 300 \
+      --timeout 2400 \
       --thinking medium \
+      --session-id "${sessid}" \
       --message "${prompt}" >/dev/null 2>&1 || echo "news: ${source_id} failed"
   }
 
   # Helper: spawn one web_fetch-based collection agent
   collect_webfetch() {
-    local source_id="$1" source_name="$2" url="$3" output_path="$4"
+    local source_id="$1" source_name="$2" url="$3"
+    local sessid="news-${source_id}-$(date +%s)"
     local prompt
     prompt=$(sed \
       -e "s|{{DATE}}|${RUN_DATE}|g" \
       -e "s|{{SOURCE_NAME}}|${source_name}|g" \
+      -e "s|{{SOURCE_ID}}|${source_id}|g" \
       -e "s|{{URL}}|${url}|g" \
-      -e "s|{{OUTPUT_PATH}}|${output_path}|g" \
+      -e "s|{{NEWS_DIR}}|${NEWS_DIR}|g" \
       "${WEBFETCH_PROMPT_TEMPLATE}")
 
     openclaw agent \
       --agent main \
-      --timeout 120 \
+      --timeout 300 \
       --thinking medium \
+      --session-id "${sessid}" \
       --message "${prompt}" >/dev/null 2>&1 || echo "news: ${source_id} failed"
   }
 
@@ -108,15 +114,14 @@ else
       source_name=$(echo "$entry" | jq -r '.name')
       url=$(echo "$entry" | jq -r '.url')
       access=$(echo "$entry" | jq -r '.access')
-      output_path="${NEWS_DIR}/raw/${source_id}.md"
 
       if [[ "$access" == "browser" ]]; then
         echo "  spawning browser agent: ${source_id}"
-        collect_browser "$source_id" "$source_name" "$url" "$output_path" &
+        collect_browser "$source_id" "$source_name" "$url" &
         PIDS+=($!)
       elif [[ "$access" == "web_fetch" ]]; then
         echo "  spawning web_fetch agent: ${source_id}"
-        collect_webfetch "$source_id" "$source_name" "$url" "$output_path" &
+        collect_webfetch "$source_id" "$source_name" "$url" &
         PIDS+=($!)
       fi
     done < <(jq -c '.[]' "${NEWS_SOURCES}")
@@ -137,9 +142,8 @@ else
         continue
       fi
 
-      output_path="${NEWS_DIR}/raw/ir-${ticker}.md"
       echo "  spawning IR browser agent: ${ticker}"
-      collect_browser "ir-${ticker}" "IR — ${ticker}" "$url" "$output_path" &
+      collect_browser "ir-${ticker}" "IR — ${ticker}" "$url" &
       IR_PIDS+=($!)
       IR_COUNT=$((IR_COUNT + 1))
 
@@ -170,7 +174,29 @@ fi
 
 echo ""
 
-# ── PHASE 3: Merge raw → articles.md + INDEX.md ──
+# ── PHASE 2b: Summarize raw articles with extract-files ──
+echo "── Phase 2b: Summarize articles ──"
+
+RAW_COUNT=$(find "${NEWS_DIR}/raw" -name "*.md" -not -name "*-error.md" 2>/dev/null | wc -l | tr -d ' ')
+if [[ "${RAW_COUNT}" -gt 0 ]]; then
+  EXTRACT_PROMPT="Summarize this article for a long-only investor in one detailed paragraph. Include: the key facts, why it matters for markets or specific companies, and any portfolio implications. If the article is a press release or data release, focus on the numbers and what they signal. Be specific — name companies, figures, and dates."
+
+  run extract-files \
+    -f "${NEWS_DIR}/raw/*.md" \
+    -o "${NEWS_DIR}/summaries" \
+    --model gemini-3-flash \
+    --concurrency 4 \
+    --force \
+    "${EXTRACT_PROMPT}" || echo "extract-files: failed (non-fatal)"
+
+  echo "  summarized ${RAW_COUNT} articles"
+else
+  echo "  no raw articles to summarize"
+fi
+
+echo ""
+
+# ── PHASE 3: Merge summaries → per-source summaries + articles.md + INDEX.md ──
 echo "── Phase 3: Merge ──"
 
 MERGE_SCRIPT="${ROOT_DIR}/scripts/merge_news.py"
@@ -179,8 +205,8 @@ if [[ ! -f "${MERGE_SCRIPT}" ]]; then
 else
   uv run python "${MERGE_SCRIPT}" \
     --raw-dir "${NEWS_DIR}/raw" \
-    --articles "${NEWS_DIR}/articles.md" \
-    --index "${NEWS_DIR}/INDEX.md" \
+    --summaries-dir "${NEWS_DIR}/summaries" \
+    --date-dir "${NEWS_DIR}" \
     --ledger "${ROOT_DIR}/hard-disk/data/02-news/LEDGER.md" \
     --date "${RUN_DATE}" || echo "merge_news: failed (non-fatal)"
 fi

@@ -1,29 +1,35 @@
-Collect news from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
+Collect data from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
+
+Save each item as a separate markdown file in `{{NEWS_DIR}}/raw/`.
+
+## Steps
 
 1. Fetch {{URL}} with the web_fetch tool
-2. Extract relevant items: releases, calendar entries, press statements, or policy announcements
-3. Write the results to `{{OUTPUT_PATH}}` using the exact markdown format below
+2. Identify relevant items: data releases, calendar entries, press statements, policy announcements
+3. For each item with enough substance to save:
+   a. Generate a short slug (lowercase, hyphens, 3-5 words)
+   b. Write to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md` using the format below
+4. If the fetch fails or returns no useful content, write one file `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-error.md` with Status: failed
+5. Reply briefly: how many items saved
 
-If the fetch fails or returns no useful content, write a file with Status: degraded and note the error.
-If no relevant items are found for today, write Status: ok with no article sections.
+## File format
 
-## Output format
-
-Write this exact markdown format to {{OUTPUT_PATH}}:
+Write this exact format to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md`:
 
 ```
-# {{SOURCE_NAME}} — {{DATE}}
+# {Item Title or Release Name}
 
-Source: {{URL}}
+Source: {{SOURCE_NAME}}
+URL: {item_url_if_available}
+Published: {date if visible, otherwise {{DATE}}}
 Collected: {current ISO timestamp}
-Method: web_fetch
-Status: {ok|degraded|failed}
+Section: {category if applicable}
 
-## {Item Title or Release Name}
-
-[link]({url_if_available})
-
-{Brief description of the item}
+{Full text of the release, calendar entry, or announcement}
 ```
 
-CRITICAL: Your reply should be brief — just confirm whether the file was written and how many items were found. All content goes into the file, not your reply.
+## Important
+
+- One file per item. Do NOT combine items into one file.
+- Save the full content, not a summary.
+- Your reply should be brief. All content goes into the files.

@@ -1,35 +1,49 @@
-Collect news from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
+Collect news articles from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
+
+Save each article as a separate markdown file in `{{NEWS_DIR}}/raw/`.
+
+## Steps
 
 1. Run: `browser open "{{URL}}" --new --window`
 2. Note the tab alias from the output (e.g. t7)
-3. Use `browser ask`, `browser extract`, or `browser eval` to find today's headlines and articles visible on the page
-4. For editorial sources (WSJ, Economist, Reuters): extract the top headlines with section, link URL, and a 1-2 sentence summary of each
-5. For calendar/data sources (BLS, BEA): extract upcoming and recently released data items with dates and descriptions
-6. For IR pages: look for press releases, announcements, or news items from {{DATE}} or the most recent business day
-7. Run: `browser close {tab_alias}`
-8. Write the results to `{{OUTPUT_PATH}}` using the exact markdown format below
+3. Scan the front page. Identify articles that are interesting for:
+   - Our investment portfolio and holdings
+   - The broader economy, markets, and macro environment
+   - Potential investment ideas or industry trends
+   - Geopolitics that affects markets
+   Be inclusive — prioritize recall over precision. Skip pure lifestyle, sports, entertainment, and celebrity fluff.
+4. For each interesting article:
+   a. Click into it (or open in a new tab)
+   b. Extract the full article text using `browser extract` or `browser ask`
+   c. Generate a short slug from the headline (lowercase, hyphens, 3-5 words, e.g. `trump-hormuz-ships`)
+   d. Write the full article to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md` using the format below
+   e. Navigate back to the front page (or close the tab and return to the main tab)
+   f. If extraction fails (404, CAPTCHA, video-only, paywall prompt), skip the article and continue to the next one
+5. After all articles are saved, close the browser: `browser close {tab_alias}`
+6. Reply briefly: how many articles saved, any failures worth noting
 
-If the browser bridge is not connected, write a file with Status: failed and note the error.
-If the page loads but shows a paywall or login prompt, write Status: degraded and note what happened.
-If no relevant articles are found for today, write Status: ok with no article sections.
+If the browser bridge is not connected, write one file `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-error.md` with Status: failed.
+If the page shows a paywall or login prompt, note it and continue with what's accessible.
 
-## Output format
+## File format for each article
 
-Write this exact markdown format to {{OUTPUT_PATH}}:
+Write this exact format to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md`:
 
 ```
-# {{SOURCE_NAME}} — {{DATE}}
+# {Article Headline}
 
-Source: {{URL}}
+Source: {{SOURCE_NAME}}
+URL: {article_url}
+Published: {date if visible, otherwise {{DATE}}}
 Collected: {current ISO timestamp}
-Method: browser
-Status: {ok|degraded|failed}
+Section: {section if applicable}
 
-## {Article Headline}
-
-Section: {section if applicable} | [link]({article_url})
-
-{1-3 sentence summary of the article content}
+{Full article text — the complete body of the article as visible on the page}
 ```
 
-CRITICAL: Your reply should be brief — just confirm whether the file was written and how many articles were found. All content goes into the file, not your reply.
+## Important
+
+- One file per article. Do NOT combine articles into one file.
+- Save the FULL article text, not a summary.
+- If you detect slug collision (two articles would get the same filename), append a number: `{slug}-2`.
+- Your reply should be brief. All content goes into the files.
