@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
+
+# Source env for API keys BEFORE strict mode
+# zshrc contains zsh-specific commands (setopt) that fail in bash with set -e
+source ~/.zshrc >/dev/null 2>&1 || true
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DATE="${1:-$(date +%F)}"
 NEWS_DIR="${ROOT_DIR}/hard-disk/data/02-news/${RUN_DATE}"
 REPORT_DIR="${ROOT_DIR}/hard-disk/reports/03-daily-news/${RUN_DATE}"
-
-# Source env for API keys (Finnhub, etc.)
-source ~/.zshrc >/dev/null 2>&1 || true
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
 export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
