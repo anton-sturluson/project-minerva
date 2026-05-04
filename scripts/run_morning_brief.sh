@@ -63,7 +63,76 @@ else
   WEBFETCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news_webfetch.md"
   NEWS_SOURCES="${ROOT_DIR}/hard-disk/data/02-news/news-sources.json"
   IR_REGISTRY="${ROOT_DIR}/hard-disk/data/01-portfolio/current/ir-registry.json"
+  NEWS_BASE="${ROOT_DIR}/hard-disk/data/02-news"
   PIDS=()
+
+  # ── Build portfolio company list (ticker + name) ──
+  COMPANY_DIR="${ROOT_DIR}/hard-disk/data/01-portfolio/current/company-directory.md"
+  RENDERED_PORTFOLIO="${ROOT_DIR}/hard-disk/data/01-portfolio/current/rendered.md"
+  PORTFOLIO_TICKERS="(not available)"
+  if [[ -f "$COMPANY_DIR" && -f "$RENDERED_PORTFOLIO" ]]; then
+    # Get active tickers from rendered.md (holdings + watchlist)
+    active_tickers=$(grep -E '^- `[A-Z0-9.]+`' "$RENDERED_PORTFOLIO" | sed 's/- `\([^`]*\)`.*/\1/' | sort -u)
+    # Look up company names from the directory table, output "Ticker — Company Name"
+    PORTFOLIO_TICKERS=""
+    while read -r tkr; do
+      name=$(grep -E "^\| ${tkr} \|" "$COMPANY_DIR" | head -1 | awk -F'|' '{gsub(/^ +| +$/, "", $3); print $3}')
+      if [[ -n "$name" ]]; then
+        entry="${name}"
+      else
+        entry="${tkr}"
+      fi
+      if [[ -n "$PORTFOLIO_TICKERS" ]]; then
+        PORTFOLIO_TICKERS="${PORTFOLIO_TICKERS}, ${entry}"
+      else
+        PORTFOLIO_TICKERS="${entry}"
+      fi
+    done <<< "$active_tickers"
+    echo "  portfolio: ${PORTFOLIO_TICKERS}"
+  elif [[ -f "$RENDERED_PORTFOLIO" ]]; then
+    PORTFOLIO_TICKERS=$(grep -E '^- `[A-Z0-9.]+`' "$RENDERED_PORTFOLIO" | sed 's/- `\([^`]*\)`.*/\1/' | sort -u | tr '\n' ', ' | sed 's/,$//')
+    echo "  portfolio tickers (no names): ${PORTFOLIO_TICKERS}"
+  fi
+
+  # ── Build dedup slug list from last 3 days ──
+  DEDUP_SLUGS=""
+  for days_ago in 1 2 3; do
+    prev_date=$(date -v-${days_ago}d +%F 2>/dev/null || date -d "${RUN_DATE} -${days_ago} days" +%F 2>/dev/null || true)
+    prev_dir="${NEWS_BASE}/${prev_date}/raw"
+    if [[ -d "$prev_dir" ]]; then
+      # Extract slugs: filename minus source prefix and .md extension
+      # e.g. wsj-trump-hormuz-ships.md → trump-hormuz-ships
+      for f in "$prev_dir"/*.md; do
+        [[ -f "$f" ]] || continue
+        bn=$(basename "$f" .md)
+        # Strip source prefix (everything up to and including the first hyphen-separated source id)
+        slug=$(echo "$bn" | sed -E 's/^(wsj|economist|reuters-markets|bls-calendar|bea-schedule|fed-press|ir-[A-Z0-9]+)-//')
+        DEDUP_SLUGS="${DEDUP_SLUGS}${slug}\n"
+      done
+    fi
+  done
+
+  # Also include today's raw dir (in case of re-run)
+  if [[ -d "${NEWS_DIR}/raw" ]]; then
+    for f in "${NEWS_DIR}/raw"/*.md; do
+      [[ -f "$f" ]] || continue
+      bn=$(basename "$f" .md)
+      slug=$(echo "$bn" | sed -E 's/^(wsj|economist|reuters-markets|bls-calendar|bea-schedule|fed-press|ir-[A-Z0-9]+)-//')
+      DEDUP_SLUGS="${DEDUP_SLUGS}${slug}\n"
+    done
+  fi
+
+  # Deduplicate, sort, and write to temp file
+  DEDUP_FILE=$(mktemp)
+  trap "rm -f '$DEDUP_FILE'" EXIT
+  if [[ -n "$DEDUP_SLUGS" ]]; then
+    echo -e "$DEDUP_SLUGS" | sort -u | grep -v '^$' > "$DEDUP_FILE" || true
+    dedup_count=$(wc -l < "$DEDUP_FILE" | tr -d ' ')
+    echo "  dedup list: ${dedup_count} slugs from recent days"
+  else
+    echo "(none)" > "$DEDUP_FILE"
+    echo "  dedup list: empty (first run)"
+  fi
 
   # Helper: spawn one browser-based collection agent
   collect_browser() {
@@ -77,6 +146,11 @@ else
       -e "s|{{URL}}|${url}|g" \
       -e "s|{{NEWS_DIR}}|${NEWS_DIR}|g" \
       "${BROWSER_PROMPT_TEMPLATE}")
+
+    # Inject dedup slugs from temp file
+    local dedup_content
+    dedup_content=$(cat "$DEDUP_FILE")
+    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" <<< "$prompt")
 
     openclaw agent \
       --agent main \
@@ -98,6 +172,11 @@ else
       -e "s|{{URL}}|${url}|g" \
       -e "s|{{NEWS_DIR}}|${NEWS_DIR}|g" \
       "${WEBFETCH_PROMPT_TEMPLATE}")
+
+    # Inject dedup slugs from temp file
+    local dedup_content
+    dedup_content=$(cat "$DEDUP_FILE")
+    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" <<< "$prompt")
 
     openclaw agent \
       --agent main \
