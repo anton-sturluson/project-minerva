@@ -404,7 +404,7 @@ class MorningBriefTests(unittest.TestCase):
         self.assertTrue(any("Broken source" in reason for reason in macro_payload["degraded_reasons"]))
 
     def test_wrapper_orchestrates_command_sequence_with_optional_sources(self) -> None:
-        workspace_root = self.workspace / "workspace"
+        """V2 script runs structured data + prep (news collection skipped via env)."""
         call_log = self.workspace / "calls.log"
         fake_minerva = self.workspace / "fake-minerva.sh"
         fake_minerva.write_text(
@@ -414,28 +414,30 @@ class MorningBriefTests(unittest.TestCase):
         )
         fake_minerva.chmod(0o755)
 
+        # Use a fake HOME so the v2 script's `source ~/.zshrc` is a no-op
+        # and doesn't re-export real env vars over our test overrides.
+        fake_home = self.workspace / "fakehome"
+        fake_home.mkdir(exist_ok=True)
+
         env = os.environ.copy()
         env.update(
             {
+                "HOME": str(fake_home),
                 "MINERVA_CALL_LOG": str(call_log),
                 "MINERVA_RUNNER": str(fake_minerva),
                 "MINERVA_SKIP_STATUS_CHECK": "1",
-                "MINERVA_WITH_POST_WRITE": "1",
-                "MINERVA_WORKSPACE_ROOT": str(workspace_root),
+                "MINERVA_SKIP_NEWS": "1",
+                "MINERVA_WORKSPACE_ROOT": str(self.workspace / "workspace"),
                 "MINERVA_PORTFOLIO_HOLDINGS_SOURCE": str(FIXTURE_DIR / "holdings.csv"),
                 "MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE": str(FIXTURE_DIR / "transactions.csv"),
                 "MINERVA_PORTFOLIO_WATCHLIST_SOURCE": str(FIXTURE_DIR / "watchlist.json"),
-                "MINERVA_BRIEF_FILINGS_SOURCE": str(FIXTURE_DIR / "filings.json"),
                 "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
-                "MINERVA_BRIEF_MACRO_SOURCE": str(FIXTURE_DIR / "macro-events.json"),
-                "MINERVA_BRIEF_IR_REGISTRY": str(self.workspace / "ir-registry.json"),
                 "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
             }
         )
-        Path(env["MINERVA_BRIEF_IR_REGISTRY"]).write_text("[]\n", encoding="utf-8")
 
         result = subprocess.run(
-            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief_v1.sh"), RUN_DATE.isoformat()],
+            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief.sh"), RUN_DATE.isoformat()],
             cwd=REPO_ROOT,
             env=env,
             capture_output=True,
@@ -444,32 +446,25 @@ class MorningBriefTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            f"prepared_evidence: {workspace_root}/reports/03-daily-news/{RUN_DATE.isoformat()}/data/structured/prepared-evidence.json",
-            result.stdout,
-        )
-        self.assertIn(
-            f"manifest: {workspace_root}/reports/03-daily-news/{RUN_DATE.isoformat()}/data/raw/manifest.json",
-            result.stdout,
-        )
-        self.assertTrue((workspace_root / "reports" / "03-daily-news" / RUN_DATE.isoformat()).is_dir())
+        # V2 prints output paths relative to ROOT_DIR/hard-disk, not MINERVA_WORKSPACE_ROOT.
+        self.assertIn("prepared_evidence:", result.stdout)
+        self.assertIn("manifest:", result.stdout)
+        # V2 creates dirs under ROOT_DIR/hard-disk.
+        report_dir = REPO_ROOT / "hard-disk" / "reports" / "03-daily-news" / RUN_DATE.isoformat()
+        self.assertTrue(report_dir.is_dir())
         self.assertEqual(
             call_log.read_text(encoding="utf-8").splitlines(),
             [
                 f"portfolio sync --date {RUN_DATE.isoformat()} --holdings-source {FIXTURE_DIR / 'holdings.csv'} --transactions-source {FIXTURE_DIR / 'transactions.csv'} --watchlist-source {FIXTURE_DIR / 'watchlist.json'}",
-                f"brief filings --date {RUN_DATE.isoformat()} --source {FIXTURE_DIR / 'filings.json'}",
-                f"brief earnings --date {RUN_DATE.isoformat()} --provider auto --source {FIXTURE_DIR / 'market-data.json'}",
-                f"brief macro --date {RUN_DATE.isoformat()} --registry {workspace_root / 'data' / '01-portfolio' / 'current' / 'macro-registry.json'} --source {FIXTURE_DIR / 'macro-events.json'}",
-                f"brief ir --date {RUN_DATE.isoformat()} --registry {self.workspace / 'ir-registry.json'}",
-                f"brief market --date {RUN_DATE.isoformat()} --provider auto --source {FIXTURE_DIR / 'market-data.json'}",
+                f"brief filings --date {RUN_DATE.isoformat()}",
+                f"brief earnings --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
+                f"brief market --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
                 f"brief prep --date {RUN_DATE.isoformat()}",
-                f"brief audit --date {RUN_DATE.isoformat()}",
-                f"brief review-log --date {RUN_DATE.isoformat()}",
             ],
         )
 
-    def test_wrapper_runs_macro_collect_when_no_macro_source_is_provided(self) -> None:
-        workspace_root = self.workspace / "workspace"
+    def test_wrapper_skips_news_collection_when_env_set(self) -> None:
+        """MINERVA_SKIP_NEWS=1 skips browser/openclaw news agents."""
         call_log = self.workspace / "calls.log"
         fake_minerva = self.workspace / "fake-minerva.sh"
         fake_minerva.write_text(
@@ -479,24 +474,28 @@ class MorningBriefTests(unittest.TestCase):
         )
         fake_minerva.chmod(0o755)
 
+        fake_home = self.workspace / "fakehome"
+        fake_home.mkdir(exist_ok=True)
+
         env = os.environ.copy()
         env.update(
             {
+                "HOME": str(fake_home),
                 "MINERVA_CALL_LOG": str(call_log),
                 "MINERVA_RUNNER": str(fake_minerva),
                 "MINERVA_SKIP_STATUS_CHECK": "1",
-                "MINERVA_WORKSPACE_ROOT": str(workspace_root),
+                "MINERVA_SKIP_NEWS": "1",
+                "MINERVA_WORKSPACE_ROOT": str(self.workspace / "workspace"),
                 "MINERVA_PORTFOLIO_HOLDINGS_SOURCE": str(FIXTURE_DIR / "holdings.csv"),
                 "MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE": str(FIXTURE_DIR / "transactions.csv"),
                 "MINERVA_PORTFOLIO_WATCHLIST_SOURCE": str(FIXTURE_DIR / "watchlist.json"),
-                "MINERVA_BRIEF_FILINGS_SOURCE": str(FIXTURE_DIR / "filings.json"),
                 "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
                 "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
             }
         )
 
         result = subprocess.run(
-            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief_v1.sh"), RUN_DATE.isoformat()],
+            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief.sh"), RUN_DATE.isoformat()],
             cwd=REPO_ROOT,
             env=env,
             capture_output=True,
@@ -505,15 +504,11 @@ class MorningBriefTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        generated_source = workspace_root / "reports" / "03-daily-news" / RUN_DATE.isoformat() / "data" / "raw" / "macro-events.json"
-        self.assertIn(
-            f"brief macro-collect --date {RUN_DATE.isoformat()} --registry {workspace_root / 'data' / '01-portfolio' / 'current' / 'macro-registry.json'} --output {generated_source}",
-            call_log.read_text(encoding="utf-8"),
-        )
-        self.assertIn(
-            f"brief macro --date {RUN_DATE.isoformat()} --registry {workspace_root / 'data' / '01-portfolio' / 'current' / 'macro-registry.json'} --source {generated_source}",
-            call_log.read_text(encoding="utf-8"),
-        )
+        self.assertIn("News collection (skipped)", result.stdout)
+        # No openclaw agent or news-related minerva calls in the log.
+        logged_commands = call_log.read_text(encoding="utf-8")
+        self.assertNotIn("openclaw", logged_commands)
+        self.assertNotIn("extract-files", logged_commands)
 
 
     def test_portfolio_enrich_uses_symbol_table_without_api_key(self) -> None:
