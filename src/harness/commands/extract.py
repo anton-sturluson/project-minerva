@@ -1,4 +1,4 @@
-"""LLM extraction commands backed by Gemini."""
+"""LLM extraction commands backed by Gemini or OpenAI."""
 
 from __future__ import annotations
 
@@ -45,6 +45,8 @@ EXTRACT_FILES_HELP = (
     "  minerva extract-files --questions-file questions.md \\\n"
     "    --files 'data/sources/**/*.md' --out data/extractions/summary \\\n"
     "    --model gemini-3-flash --thinking minimal --concurrency 4\n"
+    "  minerva extract-files -q questions.md -f 'data/**/*.md' -o out \\\n"
+    "    --model gpt-5.5 --concurrency 2\n"
 )
 
 DEFAULT_MODEL = "gemini-3-flash"
@@ -53,6 +55,9 @@ DEFAULT_CONCURRENCY = 4
 MODEL_ALIASES: dict[str, str] = {
     # OpenClaw/user-facing shorthand; Google GenAI expects the preview model id today.
     "gemini-3-flash": "gemini-3-flash-preview",
+    # Accept provider-qualified OpenClaw-style names while sending OpenAI its model id.
+    "openai/gpt-5.5": "gpt-5.5",
+    "openai/gpt-5.4": "gpt-5.4",
 }
 UNSUPPORTED_TEXT_EXTRACTION_EXTENSIONS: frozenset[str] = frozenset(
     {
@@ -123,13 +128,9 @@ def extract_command(
 ) -> CommandResult:
     start = time.perf_counter()
     active_settings = settings or get_settings()
-    if not active_settings.gemini_api_key:
-        return error_result(
-            "GEMINI_API_KEY is not set",
-            "set GEMINI_API_KEY and retry",
-            ["`export GEMINI_API_KEY=...`"],
-            start,
-        )
+    api_key = _api_key_for_model(active_settings, model)
+    if not api_key:
+        return _missing_api_key_result(model, start)
     try:
         prompt_pack = _build_prompt_pack(question=question, questions_file=questions_file)
         document_text = _read_document_text(file_path=file_path, stdin=stdin)
@@ -143,7 +144,7 @@ def extract_command(
             model=model,
             max_tokens=max_tokens,
             thinking=resolved_thinking,
-            api_key=active_settings.gemini_api_key,
+            api_key=api_key,
         )
     except _UsageError as exc:
         return error_result(
@@ -162,7 +163,7 @@ def extract_command(
     except Exception as exc:  # noqa: BLE001
         return error_result(
             f"extraction failed: {exc}",
-            "verify the input source, Gemini API key, and model name, then retry",
+            "verify the input source, API key, and model name, then retry",
             [
                 "`extract \"What is the revenue by segment?\" --file apple-10k.md`",
                 "`extract --questions-file questions.md --file apple-10k.md`",
@@ -183,7 +184,7 @@ def extract_cli_command(
         "-q",
         help="Markdown file containing the question/prompt pack to apply to the input document.",
     ),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Gemini model to use."),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Model to use (Gemini or OpenAI)."),
     max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens."),
     thinking: str | None = typer.Option(
         None,
@@ -276,13 +277,9 @@ def extract_files_command(
 ) -> CommandResult:
     start = time.perf_counter()
     active_settings = settings or get_settings()
-    if not active_settings.gemini_api_key:
-        return error_result(
-            "GEMINI_API_KEY is not set",
-            "set GEMINI_API_KEY and retry",
-            ["`export GEMINI_API_KEY=...`"],
-            start,
-        )
+    api_key = _api_key_for_model(active_settings, model)
+    if not api_key:
+        return _missing_api_key_result(model, start)
     if not out:
         return error_result(
             "no output directory was provided",
@@ -355,7 +352,7 @@ def extract_files_command(
             model=model,
             max_tokens=max_tokens,
             thinking=resolved_thinking,
-            api_key=active_settings.gemini_api_key,
+            api_key=api_key,
             concurrency=concurrency,
         )
     )
@@ -412,7 +409,7 @@ def extract_files_cli_command(
         "-q",
         help="Markdown file containing the question/prompt pack to apply to each source file.",
     ),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Gemini model to use."),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Model to use (Gemini or OpenAI)."),
     max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens per file."),
     thinking: str | None = typer.Option(
         None,
@@ -745,8 +742,35 @@ def _api_model_name(model: str) -> str:
     return MODEL_ALIASES.get(model, model)
 
 
+def _is_openai_model(model: str) -> bool:
+    api_model = _api_model_name(model)
+    return model.startswith("openai/") or api_model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4"))
+
+
+def _api_key_for_model(settings: HarnessSettings, model: str) -> str | None:
+    if _is_openai_model(model):
+        return settings.openai_api_key
+    return settings.gemini_api_key
+
+
+def _missing_api_key_result(model: str, start: float) -> CommandResult:
+    if _is_openai_model(model):
+        return error_result(
+            "OPENAI_API_KEY is not set",
+            "set OPENAI_API_KEY and retry, or choose a Gemini model with GEMINI_API_KEY configured",
+            ["`export OPENAI_API_KEY=...`", "`--model gemini-3-flash`"],
+            start,
+        )
+    return error_result(
+        "GEMINI_API_KEY is not set",
+        "set GEMINI_API_KEY and retry, or choose an OpenAI model with OPENAI_API_KEY configured",
+        ["`export GEMINI_API_KEY=...`", "`--model gpt-5.5`"],
+        start,
+    )
+
+
 # ---------------------------------------------------------------------------
-# Gemini call
+# Model calls
 # ---------------------------------------------------------------------------
 
 
@@ -760,6 +784,25 @@ def _generate_answer(
     api_key: str,
 ) -> str:
     _ = document_text  # the prompt already includes it; this preserves a tap point for tests
+    if _is_openai_model(model):
+        return _generate_openai_answer(prompt=prompt, model=model, max_tokens=max_tokens, api_key=api_key)
+    return _generate_gemini_answer(
+        prompt=prompt,
+        model=model,
+        max_tokens=max_tokens,
+        thinking=thinking,
+        api_key=api_key,
+    )
+
+
+def _generate_gemini_answer(
+    *,
+    prompt: str,
+    model: str,
+    max_tokens: int,
+    thinking: str | None,
+    api_key: str,
+) -> str:
     try:
         from google import genai
     except ModuleNotFoundError as exc:
@@ -771,6 +814,40 @@ def _generate_answer(
     if not text:
         raise ValueError("Gemini returned an empty response")
     return str(text)
+
+
+def _generate_openai_answer(*, prompt: str, model: str, max_tokens: int, api_key: str) -> str:
+    try:
+        import openai
+    except ModuleNotFoundError as exc:  # pragma: no cover
+        raise RuntimeError("openai is not installed") from exc
+
+    client = openai.OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model=_api_model_name(model),
+        input=prompt,
+        max_output_tokens=max_tokens,
+    )
+    text = _openai_response_text(response)
+    if not text:
+        raise ValueError("OpenAI returned an empty response")
+    return text
+
+
+def _openai_response_text(response: Any) -> str:
+    output_text = getattr(response, "output_text", None)
+    if output_text:
+        return str(output_text)
+
+    parts: list[str] = []
+    for item in getattr(response, "output", []) or []:
+        for content in getattr(item, "content", []) or []:
+            text = getattr(content, "text", None)
+            if text:
+                parts.append(str(text))
+            elif isinstance(content, dict) and content.get("text"):
+                parts.append(str(content["text"]))
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
