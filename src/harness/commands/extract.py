@@ -86,6 +86,8 @@ SYSTEM_PROMPT = (
 )
 
 VALID_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "adaptive"})
+OPENAI_REASONING_EFFORTS: frozenset[str] = frozenset({"minimal", "low", "medium", "high"})
+OPENAI_THINKING_LEVELS: frozenset[str] = OPENAI_REASONING_EFFORTS | {"off"}
 
 app = typer.Typer(help=EXTRACT_HELP, no_args_is_help=False, invoke_without_command=True)
 extract_files_app = typer.Typer(help=EXTRACT_FILES_HELP, no_args_is_help=False, invoke_without_command=True)
@@ -687,6 +689,14 @@ def _build_thinking_config(model: str, thinking: str | None):
             f"unknown thinking level `{thinking}` (expected one of {sorted(VALID_THINKING_LEVELS)})"
         )
 
+    if _is_openai_model(model):
+        if thinking in OPENAI_THINKING_LEVELS:
+            return None  # OpenAI reasoning is passed directly in _generate_openai_answer.
+        raise ValueError(
+            f"`--thinking {thinking}` is not supported for OpenAI models; "
+            "use off|minimal|low|medium|high"
+        )
+
     try:
         from google.genai import types as genai_types
     except ModuleNotFoundError as exc:  # pragma: no cover
@@ -785,7 +795,7 @@ def _generate_answer(
 ) -> str:
     _ = document_text  # the prompt already includes it; this preserves a tap point for tests
     if _is_openai_model(model):
-        return _generate_openai_answer(prompt=prompt, model=model, max_tokens=max_tokens, api_key=api_key)
+        return _generate_openai_answer(prompt=prompt, model=model, max_tokens=max_tokens, thinking=thinking, api_key=api_key)
     return _generate_gemini_answer(
         prompt=prompt,
         model=model,
@@ -816,18 +826,21 @@ def _generate_gemini_answer(
     return str(text)
 
 
-def _generate_openai_answer(*, prompt: str, model: str, max_tokens: int, api_key: str) -> str:
+def _generate_openai_answer(*, prompt: str, model: str, max_tokens: int, thinking: str | None = None, api_key: str) -> str:
     try:
         import openai
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise RuntimeError("openai is not installed") from exc
 
     client = openai.OpenAI(api_key=api_key)
-    response = client.responses.create(
-        model=_api_model_name(model),
-        input=prompt,
-        max_output_tokens=max_tokens,
-    )
+    kwargs: dict[str, Any] = {
+        "model": _api_model_name(model),
+        "input": prompt,
+        "max_output_tokens": max_tokens,
+    }
+    if thinking in OPENAI_REASONING_EFFORTS:
+        kwargs["reasoning"] = {"effort": thinking}
+    response = client.responses.create(**kwargs)
     text = _openai_response_text(response)
     if not text:
         raise ValueError("OpenAI returned an empty response")
