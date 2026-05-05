@@ -57,13 +57,12 @@ def test_dispatch_command_rejects_unknown_commands_without_subprocess(tmp_path: 
     assert "Available alternatives:" in stderr
 
 
-def test_direct_cli_missing_args_show_full_help_for_valuation_dcf() -> None:
+def test_direct_cli_missing_args_show_concise_error_for_valuation_dcf() -> None:
     result = runner.invoke(app, ["valuation", "dcf"])
 
     assert result.exit_code == 1
     assert "What went wrong:" in result.stdout
-    assert "Usage:" in result.stdout
-    assert "Run a discounted cash flow valuation." in result.stdout
+    assert "Usage:" not in result.stdout
 
 
 def test_direct_cli_missing_args_show_full_help_for_research() -> None:

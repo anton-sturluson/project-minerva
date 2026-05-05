@@ -95,7 +95,6 @@ def abort_with_help(
             what_went_wrong,
             what_to_do,
             alternatives,
-            help_text=ctx.get_help(),
         )
     )
     raise typer.Exit(exit_code)
