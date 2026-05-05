@@ -265,6 +265,17 @@ def test_build_thinking_config_gemini_25_rejects_levels() -> None:
         extract._build_thinking_config("gemini-2.5-pro", "minimal")
 
 
+def test_build_thinking_config_openai_accepts_reasoning_levels() -> None:
+    assert extract._build_thinking_config("gpt-5.5", "off") is None
+    assert extract._build_thinking_config("gpt-5.5", "minimal") is None
+    assert extract._build_thinking_config("gpt-5.5", "high") is None
+
+
+def test_build_thinking_config_openai_rejects_adaptive() -> None:
+    with pytest.raises(ValueError, match="OpenAI"):
+        extract._build_thinking_config("gpt-5.5", "adaptive")
+
+
 def test_build_thinking_config_invalid_level_raises() -> None:
     with pytest.raises(ValueError):
         extract._build_thinking_config("gemini-3-flash", "nonsense")
@@ -690,6 +701,36 @@ def test_extract_files_gpt55_uses_openai_key_without_gemini_key(tmp_path: Path, 
     assert manifest["api_model"] == "gpt-5.5"
 
 
+def test_extract_files_gpt55_passes_openai_thinking(tmp_path: Path, monkeypatch) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="openai-test-key")
+    src = tmp_path / "source.md"
+    src.write_text("body", encoding="utf-8")
+    out = tmp_path / "out"
+    captured: list[dict] = []
+
+    def fake_generate(**kwargs):
+        captured.append(kwargs)
+        return "answer"
+
+    monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
+
+    result = extract.extract_files_command(
+        question="Q",
+        files=[str(src)],
+        out=str(out),
+        model="gpt-5.5",
+        thinking="high",
+        concurrency=1,
+        settings=settings,
+    )
+
+    assert result.exit_code == 0, result.stderr.decode("utf-8")
+    assert captured[0]["model"] == "gpt-5.5"
+    assert captured[0]["thinking"] == "high"
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["thinking"] == "high"
+
+
 def test_extract_files_gpt55_reports_missing_openai_key(tmp_path: Path) -> None:
     settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="gemini-test-key")
     src = tmp_path / "source.md"
@@ -738,6 +779,37 @@ def test_generate_openai_answer_uses_responses_api(monkeypatch) -> None:
     assert captured["model"] == "gpt-5.5"
     assert captured["input"] == "prompt"
     assert captured["max_output_tokens"] == 123
+
+
+def test_generate_openai_answer_passes_reasoning_effort(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class Response:
+                output_text = "openai answer"
+
+            return Response()
+
+    class FakeClient:
+        def __init__(self, *, api_key: str):
+            captured["api_key"] = api_key
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr("openai.OpenAI", FakeClient)
+
+    answer = extract._generate_openai_answer(
+        prompt="prompt",
+        model="gpt-5.5",
+        max_tokens=123,
+        thinking="high",
+        api_key="key",
+    )
+
+    assert answer == "openai answer"
+    assert captured["reasoning"] == {"effort": "high"}
 
 
 def test_extract_files_mirrors_relative_paths(tmp_path: Path, monkeypatch) -> None:
