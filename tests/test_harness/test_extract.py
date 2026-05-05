@@ -106,6 +106,30 @@ def test_extract_command_passes_through_model_and_max_tokens(tmp_path: Path, mon
     assert captured["max_tokens"] == 2048
 
 
+def test_extract_command_gpt55_uses_openai_key_without_gemini_key(tmp_path: Path, monkeypatch) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="openai-test-key")
+    file_path = tmp_path / "doc.txt"
+    file_path.write_text("body", encoding="utf-8")
+    captured: dict = {}
+
+    def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
+
+    result = extract.extract_command(
+        question="Q",
+        file_path=str(file_path),
+        model="gpt-5.5",
+        settings=settings,
+    )
+
+    assert result.exit_code == 0
+    assert captured["api_key"] == "openai-test-key"
+    assert captured["model"] == "gpt-5.5"
+
+
 def test_extract_questions_file_preserves_markdown_formatting(tmp_path: Path, monkeypatch) -> None:
     settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key")
     questions_file = tmp_path / "questions.md"
@@ -258,6 +282,11 @@ def test_build_thinking_config_unknown_model_with_thinking_raises() -> None:
 def test_api_model_name_maps_user_facing_gemini_3_flash_alias() -> None:
     assert extract._api_model_name("gemini-3-flash") == "gemini-3-flash-preview"
     assert extract._api_model_name("gemini-3-flash-preview") == "gemini-3-flash-preview"
+
+
+def test_api_model_name_maps_provider_qualified_openai_alias() -> None:
+    assert extract._api_model_name("openai/gpt-5.5") == "gpt-5.5"
+    assert extract._api_model_name("gpt-5.5") == "gpt-5.5"
 
 
 def test_extract_command_default_thinking_for_gemini_3_flash(tmp_path: Path, monkeypatch) -> None:
@@ -628,6 +657,87 @@ def test_extract_files_passes_model_thinking_max_tokens(tmp_path: Path, monkeypa
     assert captured[0]["model"] == "gemini-3-pro"
     assert captured[0]["thinking"] == "medium"
     assert captured[0]["max_tokens"] == 1024
+
+
+def test_extract_files_gpt55_uses_openai_key_without_gemini_key(tmp_path: Path, monkeypatch) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="openai-test-key")
+    src = tmp_path / "source.md"
+    src.write_text("body", encoding="utf-8")
+    out = tmp_path / "out"
+    captured: list[dict] = []
+
+    def fake_generate(**kwargs):
+        captured.append(kwargs)
+        return "answer"
+
+    monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
+
+    result = extract.extract_files_command(
+        question="Q",
+        files=[str(src)],
+        out=str(out),
+        model="gpt-5.5",
+        concurrency=1,
+        settings=settings,
+    )
+
+    assert result.exit_code == 0, result.stderr.decode("utf-8")
+    assert captured[0]["model"] == "gpt-5.5"
+    assert captured[0]["api_key"] == "openai-test-key"
+    assert captured[0]["thinking"] is None
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["model"] == "gpt-5.5"
+    assert manifest["api_model"] == "gpt-5.5"
+
+
+def test_extract_files_gpt55_reports_missing_openai_key(tmp_path: Path) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="gemini-test-key")
+    src = tmp_path / "source.md"
+    src.write_text("body", encoding="utf-8")
+
+    result = extract.extract_files_command(
+        question="Q",
+        files=[str(src)],
+        out=str(tmp_path / "out"),
+        model="gpt-5.5",
+        settings=settings,
+    )
+
+    assert result.exit_code == 1
+    assert b"OPENAI_API_KEY" in result.stderr
+
+
+def test_generate_openai_answer_uses_responses_api(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class Response:
+                output_text = "openai answer"
+
+            return Response()
+
+    class FakeClient:
+        def __init__(self, *, api_key: str):
+            captured["api_key"] = api_key
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr("openai.OpenAI", FakeClient)
+
+    answer = extract._generate_openai_answer(
+        prompt="prompt",
+        model="openai/gpt-5.5",
+        max_tokens=123,
+        api_key="key",
+    )
+
+    assert answer == "openai answer"
+    assert captured["api_key"] == "key"
+    assert captured["model"] == "gpt-5.5"
+    assert captured["input"] == "prompt"
+    assert captured["max_output_tokens"] == 123
 
 
 def test_extract_files_mirrors_relative_paths(tmp_path: Path, monkeypatch) -> None:
