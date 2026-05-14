@@ -1809,6 +1809,8 @@ def _load_finnhub_payload(
             ).strip()
             if not finnhub_sym:
                 continue
+            if not security.get("sec_registered"):
+                continue
             try:
                 time_mod.sleep(delay)
                 cn_response = session.get(
@@ -1823,7 +1825,12 @@ def _load_finnhub_payload(
                     item["_finnhub_symbol"] = finnhub_sym
                 company_news.extend(items)
             except Exception as exc:
-                logger.warning("failed to fetch company news for %s: %s", finnhub_sym, exc)
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                logger.warning(
+                    "skipping company-news for %s: %s",
+                    finnhub_sym,
+                    f"HTTP {status}" if status else type(exc).__name__,
+                )
 
     return {
         "earnings": earnings_payload.get("earningsCalendar", earnings_payload.get("earnings", [])),
