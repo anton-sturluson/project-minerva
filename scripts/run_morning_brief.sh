@@ -76,7 +76,7 @@ else
     # Look up company names from the directory table, output "Ticker — Company Name"
     PORTFOLIO_TICKERS=""
     while read -r tkr; do
-      name=$(grep -E "^\| ${tkr} \|" "$COMPANY_DIR" | head -1 | awk -F'|' '{gsub(/^ +| +$/, "", $3); print $3}')
+      name=$(grep -E "^\| ${tkr} \|" "$COMPANY_DIR" 2>/dev/null | head -1 | awk -F'|' '{gsub(/^ +| +$/, "", $3); print $3}' || true)
       if [[ -n "$name" ]]; then
         entry="${name}"
       else
