@@ -19,12 +19,13 @@ MINERVA_BRIEF_EARNINGS_PROVIDER="${MINERVA_BRIEF_EARNINGS_PROVIDER:-finnhub}"
 MINERVA_BRIEF_MARKET_PROVIDER="${MINERVA_BRIEF_MARKET_PROVIDER:-finnhub}"
 MINERVA_SKIP_STATUS_CHECK="${MINERVA_SKIP_STATUS_CHECK:-0}"
 MINERVA_SKIP_NEWS="${MINERVA_SKIP_NEWS:-0}"
+MINERVA_ALLOW_THIN_BRIEF="${MINERVA_ALLOW_THIN_BRIEF:-0}"
 
 IFS=' ' read -r -a MINERVA_RUNNER_ARR <<< "${MINERVA_RUNNER}"
 
 run() { "${MINERVA_RUNNER_ARR[@]}" "$@"; }
 
-mkdir -p "${REPORT_DIR}" "${NEWS_DIR}/raw" "${NEWS_DIR}/summaries"
+mkdir -p "${REPORT_DIR}" "${NEWS_DIR}/raw" "${NEWS_DIR}/summaries" "${NEWS_DIR}/logs"
 
 echo "=== Morning Brief Pipeline ==="
 echo "date: ${RUN_DATE}"
@@ -64,7 +65,30 @@ else
   NEWS_SOURCES="${ROOT_DIR}/hard-disk/data/02-news/news-sources.json"
   IR_REGISTRY="${ROOT_DIR}/hard-disk/data/01-portfolio/current/ir-registry.json"
   NEWS_BASE="${ROOT_DIR}/hard-disk/data/02-news"
+  NEWS_LOG_DIR="${NEWS_DIR}/logs"
   PIDS=()
+
+  write_collection_error() {
+    local source_id="$1" source_name="$2" url="$3" sessid="$4" status="$5" log_file="$6"
+    local error_file="${NEWS_DIR}/raw/${source_id}-error.md"
+
+    cat > "${error_file}" <<EOF
+# ${source_name} collection failed
+
+Source: ${source_name}
+URL: ${url}
+Published: ${RUN_DATE}
+Collected: $(date -u +%FT%TZ)
+Section: collection-error
+
+Status: failed
+Exit status: ${status}
+Session: ${sessid}
+Log: ${log_file}
+
+The collector exited non-zero. See the log file above for stdout/stderr from the child openclaw agent run.
+EOF
+  }
 
   # ── Build portfolio company list (ticker + name) ──
   COMPANY_DIR="${ROOT_DIR}/hard-disk/data/01-portfolio/current/company-directory.md"
@@ -138,6 +162,7 @@ else
   collect_browser() {
     local source_id="$1" source_name="$2" url="$3"
     local sessid="news-${source_id}-$(date +%s)"
+    local log_file="${NEWS_LOG_DIR}/${source_id}.log"
     local prompt
     prompt=$(sed \
       -e "s|{{DATE}}|${RUN_DATE}|g" \
@@ -152,18 +177,35 @@ else
     dedup_content=$(cat "$DEDUP_FILE")
     prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" <<< "$prompt")
 
-    openclaw agent \
+    {
+      echo "source_id: ${source_id}"
+      echo "source_name: ${source_name}"
+      echo "url: ${url}"
+      echo "session_id: ${sessid}"
+      echo "started_at: $(date -u +%FT%TZ)"
+      echo ""
+    } > "${log_file}"
+
+    if openclaw agent \
       --agent main \
       --timeout 2400 \
       --thinking medium \
       --session-id "${sessid}" \
-      --message "${prompt}" >/dev/null 2>&1 || echo "news: ${source_id} failed"
+      --message "${prompt}" >>"${log_file}" 2>&1; then
+      echo "news: ${source_id} ok (log: ${log_file})"
+    else
+      local status=$?
+      echo "news: ${source_id} failed (status ${status}, log: ${log_file})"
+      write_collection_error "${source_id}" "${source_name}" "${url}" "${sessid}" "${status}" "${log_file}"
+      return "${status}"
+    fi
   }
 
   # Helper: spawn one web_fetch-based collection agent
   collect_webfetch() {
     local source_id="$1" source_name="$2" url="$3"
     local sessid="news-${source_id}-$(date +%s)"
+    local log_file="${NEWS_LOG_DIR}/${source_id}.log"
     local prompt
     prompt=$(sed \
       -e "s|{{DATE}}|${RUN_DATE}|g" \
@@ -178,12 +220,28 @@ else
     dedup_content=$(cat "$DEDUP_FILE")
     prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" <<< "$prompt")
 
-    openclaw agent \
+    {
+      echo "source_id: ${source_id}"
+      echo "source_name: ${source_name}"
+      echo "url: ${url}"
+      echo "session_id: ${sessid}"
+      echo "started_at: $(date -u +%FT%TZ)"
+      echo ""
+    } > "${log_file}"
+
+    if openclaw agent \
       --agent main \
       --timeout 300 \
       --thinking medium \
       --session-id "${sessid}" \
-      --message "${prompt}" >/dev/null 2>&1 || echo "news: ${source_id} failed"
+      --message "${prompt}" >>"${log_file}" 2>&1; then
+      echo "news: ${source_id} ok (log: ${log_file})"
+    else
+      local status=$?
+      echo "news: ${source_id} failed (status ${status}, log: ${log_file})"
+      write_collection_error "${source_id}" "${source_name}" "${url}" "${sessid}" "${status}" "${log_file}"
+      return "${status}"
+    fi
   }
 
   # Read news-sources.json and spawn agents
@@ -248,7 +306,12 @@ else
     wait "$pid" 2>/dev/null || true
   done
 
-  echo "  news collection complete"
+  COLLECTION_ERROR_COUNT=$(find "${NEWS_DIR}/raw" -name "*-error.md" 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "${COLLECTION_ERROR_COUNT}" -gt 0 ]]; then
+    echo "  news collection completed with ${COLLECTION_ERROR_COUNT} collector error(s); logs: ${NEWS_LOG_DIR}"
+  else
+    echo "  news collection complete; logs: ${NEWS_LOG_DIR}"
+  fi
 fi
 
 echo ""
@@ -287,7 +350,14 @@ else
     --summaries-dir "${NEWS_DIR}/summaries" \
     --date-dir "${NEWS_DIR}" \
     --ledger "${ROOT_DIR}/hard-disk/data/02-news/LEDGER.md" \
-    --date "${RUN_DATE}" || echo "merge_news: failed (non-fatal)"
+    --date "${RUN_DATE}" || echo "merge_news: failed"
+fi
+
+if [[ "${MINERVA_SKIP_NEWS}" != "1" && "${MINERVA_ALLOW_THIN_BRIEF}" != "1" && ! -s "${NEWS_DIR}/articles.md" ]]; then
+  echo "articles: missing or empty at ${NEWS_DIR}/articles.md" >&2
+  echo "articles: refusing to continue without article evidence; set MINERVA_ALLOW_THIN_BRIEF=1 to allow a thin brief" >&2
+  echo "articles: collector logs are in ${NEWS_DIR}/logs" >&2
+  exit 1
 fi
 
 echo ""
