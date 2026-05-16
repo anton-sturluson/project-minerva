@@ -36,7 +36,6 @@ def dispatch(
     stdin: bytes = b"",
 ) -> CommandResult:
     """Source-of-truth parser for `run` path valuation commands."""
-    _ = stdin
     settings: HarnessSettings = settings
     if not args:
         return CommandResult.from_text(

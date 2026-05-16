@@ -230,7 +230,6 @@ def extract_cli_command(
 # ---------------------------------------------------------------------------
 def dispatch_files(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch the `extract-files` command for `minerva run`."""
-    _ = stdin  # extract-files does not consume stdin
     
     try:
         parsed = _parse_extract_files_args(args)
@@ -723,7 +722,6 @@ def _generate_answer(
     thinking: str | None,
     api_key: str,
 ) -> str:
-    _ = document_text  # the prompt already includes it; this preserves a tap point for tests
     if _is_openai_model(model):
         return _generate_openai_answer(prompt=prompt, model=model, max_tokens=max_tokens, api_key=api_key)
     return _generate_gemini_answer(

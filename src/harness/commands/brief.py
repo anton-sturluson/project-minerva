@@ -36,7 +36,6 @@ BRIEF_HELP = (
 app = typer.Typer(help=BRIEF_HELP, no_args_is_help=True)
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch brief commands for `minerva run`."""
-    _ = stdin
     
     if not args:
         return CommandResult.from_text("", stderr=_usage_error("no `brief` subcommand was provided"), exit_code=1)

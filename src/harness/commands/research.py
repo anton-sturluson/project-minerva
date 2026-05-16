@@ -30,7 +30,6 @@ RESEARCH_HELP = (
 app = typer.Typer(help=RESEARCH_HELP, no_args_is_help=False, invoke_without_command=True)
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch research for `minerva run`."""
-    _ = stdin
     
     if not args:
         return CommandResult.from_text(

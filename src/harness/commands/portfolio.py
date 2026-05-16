@@ -47,7 +47,6 @@ app.add_typer(thesis_app, name="thesis")
 thesis_app.add_typer(thesis_metric_app, name="metric")
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch portfolio commands for `minerva run`."""
-    _ = stdin
     
     if not args:
         return CommandResult.from_text("", stderr=_usage_error("no `portfolio` subcommand was provided"), exit_code=1)
