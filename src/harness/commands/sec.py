@@ -528,12 +528,12 @@ def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
     if normalized not in {"html", "markdown"}:
         raise ValueError("`--format` must be either `html` or `markdown`")
     if normalized == "html":
-        if hasattr(filing, "save"):
-            filing.save(target)
-            return
         html_text = getattr(filing, "html", None)
         if callable(html_text):
             target.write_text(str(html_text()), encoding="utf-8")
+            return
+        if hasattr(filing, "save"):
+            filing.save(target)
             return
         raise ValueError("the filing object does not support HTML export")
 
