@@ -40,24 +40,20 @@ SEC_HELP = (
 
 app = typer.Typer(help=SEC_HELP, no_args_is_help=True)
 
-
 def Company(*args, **kwargs):
     from edgar import Company as EdgarCompany
 
     return EdgarCompany(*args, **kwargs)
-
 
 def set_identity(*args, **kwargs) -> None:
     from edgar import set_identity as edgar_set_identity
 
     edgar_set_identity(*args, **kwargs)
 
-
 def get_10k_items(*args, **kwargs):
     from minerva.sec import get_10k_items as minerva_get_10k_items
 
     return minerva_get_10k_items(*args, **kwargs)
-
 
 def get_13f_comparison(*args, **kwargs):
     from minerva.sec import get_13f_comparison as minerva_get_13f_comparison
@@ -70,15 +66,12 @@ def format_13f_report(*args, **kwargs):
 
     return minerva_format_13f_report(*args, **kwargs)
 
-
 def dispatch(
     args: list[str],
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
     stdin: bytes = b"",
 ) -> CommandResult:
     """Source-of-truth parser for `run` path SEC commands."""
-    _ = stdin
-    active_settings: HarnessSettings = settings or get_settings()
     if not args:
         return CommandResult.from_text(
             "",
@@ -98,7 +91,7 @@ def dispatch(
                 return _dispatch_help("10k", ["`sec financials MSFT --type income`"])
             parsed = parse_flag_args(args[2:])
             items = str(parsed.get("items", "1,1A,7"))
-            return get_10k_command(str(args[1]), items=_parse_csv_values(items), settings=active_settings)
+            return get_10k_command(str(args[1]), items=_parse_csv_values(items), settings=settings)
 
         if subcommand == "13f":
             if len(args) < 2:
@@ -107,7 +100,7 @@ def dispatch(
             return get_13f_command(
                 str(args[1]),
                 output_path=str(parsed["output"]) if "output" in parsed else None,
-                settings=active_settings,
+                settings=settings,
             )
 
         if subcommand == "financials":
@@ -118,7 +111,7 @@ def dispatch(
                 str(args[1]),
                 periods=int(parsed.get("periods", 5)),
                 statement_type=str(parsed.get("type", "income")),
-                settings=active_settings,
+                settings=settings,
             )
 
         if subcommand == "download":
@@ -130,7 +123,7 @@ def dispatch(
                 form=str(parsed.get("form", "10-K")),
                 file_format=str(parsed.get("format", "html")),
                 output_path=str(parsed["output"]) if "output" in parsed else None,
-                settings=active_settings,
+                settings=settings,
             )
 
         if subcommand == "bulk-download":
@@ -155,7 +148,7 @@ def dispatch(
                 quarters=int(parsed.get("quarters", 4)),
                 earnings=int(parsed.get("earnings", 4)),
                 include_financials=_as_bool(parsed.get("financials", True)),
-                settings=active_settings,
+                settings=settings,
             )
     except ValueError as exc:
         return CommandResult.from_text("", stderr=str(exc), exit_code=1)
@@ -171,17 +164,15 @@ def dispatch(
         exit_code=1,
     )
 
-
 def get_10k_command(
     ticker: str,
     *,
     items: list[str] | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Fetch selected 10-K item sections."""
     start: float = time.perf_counter()
-    active_settings: HarnessSettings = settings or get_settings()
-    identity_error = _configure_edgar(active_settings)
+    identity_error = _configure_edgar(settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
     try:
@@ -207,12 +198,11 @@ def get_13f_command(
     cik: str,
     *,
     output_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Fetch and format a 13-F comparison."""
     start: float = time.perf_counter()
-    active_settings: HarnessSettings = settings or get_settings()
-    identity_error = _configure_edgar(active_settings)
+    identity_error = _configure_edgar(settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
     try:
@@ -233,18 +223,16 @@ def get_13f_command(
         return CommandResult.from_text(f"saved_to: {relative_display_path(target)}", duration_ms=elapsed_ms(start))
     return CommandResult.from_text(report, duration_ms=elapsed_ms(start))
 
-
 def get_financials_command(
     ticker: str,
     *,
     periods: int = 5,
     statement_type: str = "income",
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Fetch annual financial statements with edgartools."""
     start: float = time.perf_counter()
-    active_settings: HarnessSettings = settings or get_settings()
-    identity_error = _configure_edgar(active_settings)
+    identity_error = _configure_edgar(settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
     try:
@@ -264,19 +252,18 @@ def get_financials_command(
     body: str = f"# {ticker.upper()} {statement_type.title()} Financials\n\n{dataframe_to_markdown(frame, max_rows=40)}"
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
 
-
 def download_filing_command(
     ticker: str,
     *,
     form: str = "10-K",
     file_format: str = "html",
     output_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Download a single filing to disk."""
     start: float = time.perf_counter()
-    active_settings = settings or get_settings()
-    identity_error = _configure_edgar(active_settings)
+    
+    identity_error = _configure_edgar(settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
 
@@ -306,7 +293,6 @@ def download_filing_command(
     )
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
 
-
 def bulk_download_command(
     *,
     ticker: str,
@@ -315,12 +301,12 @@ def bulk_download_command(
     quarters: int = 4,
     earnings: int = 4,
     include_financials: bool = True,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Download a filing library for a single ticker."""
     start: float = time.perf_counter()
-    active_settings = settings or get_settings()
-    identity_error = _configure_edgar(active_settings)
+    
+    identity_error = _configure_edgar(settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
 
@@ -343,7 +329,6 @@ def bulk_download_command(
         )
     return CommandResult.from_text("\n".join(line for line in lines if line is not None).rstrip(), duration_ms=elapsed_ms(start))
 
-
 @app.command("10k", help="Fetch selected sections from the most recent 10-K.\n\nExample:\n  minerva sec 10k AAPL --items 1,1A,7")
 def ten_k_command(
     ctx: typer.Context,
@@ -357,8 +342,8 @@ def ten_k_command(
             what_to_do="pass a ticker like `AAPL` or a numeric CIK",
             alternatives=["`minerva sec 10k AAPL --items 1,1A,7`", "`minerva sec financials AAPL --type income`"],
         )
-    _print(get_10k_command(ticker, items=_parse_csv_values(items)))
-
+    settings = get_settings()
+    _print(get_10k_command(ticker, items=_parse_csv_values(items), settings=settings))
 
 @app.command("13f", help="Compare the two most recent 13F-HR filings.\n\nExample:\n  minerva sec 13f 1067983")
 def thirteen_f_command(
@@ -373,8 +358,8 @@ def thirteen_f_command(
             what_to_do="pass a manager CIK such as `1067983`",
             alternatives=["`minerva sec 13f 1067983`", "`minerva sec 10k BRK-B --items 1A`"],
         )
-    _print(get_13f_command(cik, output_path=output))
-
+    settings = get_settings()
+    _print(get_13f_command(cik, output_path=output, settings=settings))
 
 @app.command("financials", help="Fetch annual financial statements.\n\nExample:\n  minerva sec financials MSFT --type income --periods 5")
 def financials_command(
@@ -390,8 +375,8 @@ def financials_command(
             what_to_do="pass a ticker and optional `--type` / `--periods` values",
             alternatives=["`minerva sec financials MSFT --type income`", "`minerva sec 10k MSFT --items 7`"],
         )
-    _print(get_financials_command(ticker, periods=periods, statement_type=statement_type))
-
+    settings = get_settings()
+    _print(get_financials_command(ticker, periods=periods, statement_type=statement_type, settings=settings))
 
 @app.command("download", help="Download a filing as HTML or markdown.\n\nExample:\n  minerva sec download AAPL --form 10-K --format markdown")
 def download_command(
@@ -408,8 +393,8 @@ def download_command(
             what_to_do="pass a ticker and optional form/format arguments",
             alternatives=["`minerva sec download AAPL --form 10-K --format markdown`", "`minerva sec bulk-download AAPL`"],
         )
-    _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output))
-
+    settings = get_settings()
+    _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output, settings=settings))
 
 @app.command("bulk-download", help="Download a filing library for a single company.\n\nExample:\n  minerva sec bulk-download AAPL --output ./filings")
 def bulk_download_cli_command(
@@ -436,9 +421,9 @@ def bulk_download_cli_command(
             quarters=quarters,
             earnings=earnings,
             include_financials=financials,
+            settings=get_settings(),
         )
     )
-
 
 def _download_filing_sections(
     *,
@@ -486,7 +471,6 @@ def _download_filing_sections(
     _write_sections_index(out_dir, sections)
     return {"mode": "split", "sections": sections}
 
-
 def _fallback_single_file(filing: Any, out_dir: Path) -> dict[str, Any]:
     """Fall back to downloading the full filing as a single markdown file."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -498,13 +482,11 @@ def _fallback_single_file(filing: Any, out_dir: Path) -> dict[str, Any]:
     _write_sections_index(out_dir, [{"filename": "filing.md", "title": "Full filing"}])
     return {"mode": "single", "sections": [{"filename": "filing.md", "title": "Full filing"}]}
 
-
 def _write_sections_index(out_dir: Path, sections: list[dict[str, str]]) -> None:
     lines = ["# Sections", ""]
     for item in sections:
         lines.append(f"- [{item['title']}](./{item['filename']})")
     (out_dir / "_sections.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
 
 def _configure_edgar(settings: HarnessSettings) -> str | None:
     if not settings.edgar_identity:
@@ -512,10 +494,8 @@ def _configure_edgar(settings: HarnessSettings) -> str | None:
     set_identity(settings.edgar_identity)
     return None
 
-
 def _parse_csv_values(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
-
 
 def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
     company = Company(ticker)
@@ -527,13 +507,11 @@ def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
         return company.cashflow_statement(periods=periods, period="annual", as_dataframe=True)
     raise ValueError(f"unknown financial statement type: {statement_type}")
 
-
 def _latest_filing(company: Any, *, form: str) -> Any:
     filing_list = _list_filings(company, form=form, limit=1)
     if not filing_list:
         raise ValueError(f"no filings found for form {form}")
     return filing_list[0]
-
 
 def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
     normalized = file_format.lower()
@@ -562,7 +540,6 @@ def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
         return
     raise ValueError("the filing object does not support markdown export")
 
-
 def _attachment_markdown(attachment: Any) -> str:
     markdown_value = getattr(attachment, "markdown", None)
     if callable(markdown_value):
@@ -570,7 +547,6 @@ def _attachment_markdown(attachment: Any) -> str:
     if markdown_value is None:
         raise ValueError("the attachment does not support markdown export")
     return str(markdown_value)
-
 
 def _bulk_download_one(
     *,
@@ -656,7 +632,6 @@ def _bulk_download_one(
         "  Errors: 0",
     ]
 
-
 def _list_filings(company: Company, *, form: str, limit: int) -> list[Any]:
     if limit <= 0:
         return []
@@ -666,16 +641,13 @@ def _list_filings(company: Company, *, form: str, limit: int) -> list[Any]:
     except TypeError:
         return [filings]
 
-
 def _filing_date(filing: Any) -> str:
     return str(getattr(filing, "filing_date", getattr(filing, "date", "latest")))
-
 
 def _as_bool(value: str | bool) -> bool:
     if isinstance(value, bool):
         return value
     return value.lower() not in {"0", "false", "no"}
-
 
 def _dispatch_help(subcommand: str, alternatives: list[str]) -> CommandResult:
     help_texts: dict[str, str] = {
@@ -696,7 +668,6 @@ def _dispatch_help(subcommand: str, alternatives: list[str]) -> CommandResult:
         exit_code=1,
     )
 
-
 def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
     return "\n".join(
         [
@@ -707,7 +678,6 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
             help_text.rstrip(),
         ]
     )
-
 
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())

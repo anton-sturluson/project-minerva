@@ -71,17 +71,18 @@ class MorningBriefTests(unittest.TestCase):
         )
         thesis = set_thesis_card(
             self.workspace,
-            security="NVDA",
+            card_id="nvda",
+            ticker_symbols=["NVDA"],
             summary="AI demand remains the core portfolio driver.",
-            expectations=["Blackwell ramps", "Networking attach stays elevated"],
-            disconfirming_signals=["Cloud capex slows materially"],
+            core_thesis=["Blackwell ramps", "Networking attach stays elevated"],
+            signals=["Cloud capex slows materially"],
         )
 
         self.assertEqual(summary["holdings_count"], 2)
         self.assertEqual(summary["watchlist_count"], 2)
         self.assertEqual(summary["universe_count"], 4)
         self.assertEqual(adjacency["adjacent"], "TSM")
-        self.assertEqual(thesis["security_id"], "NVDA")
+        self.assertEqual(thesis["card_id"], "nvda")
 
         rendered = (self.workspace / "data" / "01-portfolio" / "current" / "rendered.md").read_text(encoding="utf-8")
         history = (self.workspace / "data" / "01-portfolio" / "history" / "rendered-history.md").read_text(encoding="utf-8")
@@ -110,10 +111,11 @@ class MorningBriefTests(unittest.TestCase):
         )
         set_thesis_card(
             self.workspace,
-            security="NVDA",
+            card_id="nvda",
+            ticker_symbols=["NVDA"],
             summary="AI demand remains the core portfolio driver.",
-            expectations=["Blackwell ramps"],
-            disconfirming_signals=["Cloud capex slows materially"],
+            core_thesis=["Blackwell ramps"],
+            signals=["Cloud capex slows materially"],
         )
 
         ir_registry = self.workspace / "ir-registry.json"
@@ -789,6 +791,8 @@ class MorningBriefTests(unittest.TestCase):
         summary = enrich_portfolio(self.workspace, finnhub_api_key=None)
         self.assertEqual(summary["skipped_count"], 1)
         self.assertEqual(summary["enriched_count"], 0)
+
+
 
 
 if __name__ == "__main__":

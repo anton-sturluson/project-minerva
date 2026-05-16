@@ -56,6 +56,7 @@ app = typer.Typer(
         "  minerva run \"sec financials MSFT --type income && valuation comps --ntm-revenue 420e9 ...\"\n"
     ),
 )
+
 def run_command(
     ctx: typer.Context,
     command: str | None = typer.Argument(
@@ -135,9 +136,9 @@ def parse_chain(command: str) -> list[ParsedCommand]:
     return [item for item in commands if item.text]
 
 
-def execute_chain(command: str, settings: HarnessSettings | None = None) -> CommandResult:
+def execute_chain(command: str, settings: HarnessSettings) -> CommandResult:
     """Execute a parsed chain sequentially with shell-like operator semantics."""
-    active_settings: HarnessSettings = settings or get_settings()
+    active_settings: HarnessSettings = settings
     parsed: list[ParsedCommand] = parse_chain(command)
     if not parsed:
         return CommandResult.from_text(
@@ -183,9 +184,9 @@ def generate_command_catalog(typer_app: typer.Typer) -> str:
     return "\n".join(lines)
 
 
-def dispatch_command(argv: list[str], stdin: bytes = b"", settings: HarnessSettings | None = None) -> CommandResult:
+def dispatch_command(argv: list[str], settings: HarnessSettings | None = None, stdin: bytes = b"") -> CommandResult:
     """Dispatch a command to a registered internal handler only."""
-    active_settings: HarnessSettings = settings or get_settings()
+    active_settings: HarnessSettings = settings if settings is not None else get_settings()
     if not argv:
         return CommandResult.from_text(
             "",
