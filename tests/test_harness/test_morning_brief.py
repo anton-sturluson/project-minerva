@@ -34,7 +34,7 @@ from harness.portfolio_state import (
     add_adjacency_entry,
     enrich_portfolio,
     load_json,
-    set_thesis_card_v2,
+    set_thesis_card,
     sync_portfolio,
     write_json,
 )
@@ -69,7 +69,7 @@ class MorningBriefTests(unittest.TestCase):
             note="Packaging and foundry read-through",
             priority="high",
         )
-        thesis = set_thesis_card_v2(
+        thesis = set_thesis_card(
             self.workspace,
             card_id="nvda",
             ticker_symbols=["NVDA"],
@@ -109,7 +109,7 @@ class MorningBriefTests(unittest.TestCase):
             note="Packaging read-through",
             priority="high",
         )
-        set_thesis_card_v2(
+        set_thesis_card(
             self.workspace,
             card_id="nvda",
             ticker_symbols=["NVDA"],

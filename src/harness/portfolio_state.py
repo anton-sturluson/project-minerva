@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, NotRequired, Sequence, TypedDict
 from urllib.parse import urlparse
 
 import requests
@@ -35,6 +35,36 @@ FISCAL_PERIOD_PATTERN = re.compile(r"^(FY\d{4}|H[12] FY\d{4}|Q[1-4] FY\d{4})$")
 FISCAL_PERIOD_EXAMPLES = "FY2026, H1 FY2026, H2 FY2026, Q1 FY2026, Q2 FY2026, Q3 FY2026, Q4 FY2026"
 MAX_THESIS_LIST_ITEMS = 5
 MAX_THESIS_METRICS = 5
+
+
+class ThesisMetricObservation(TypedDict):
+    """One dated or undated observation for a thesis-card metric."""
+
+    period: str
+    value: str
+    date: NotRequired[str]
+    source: NotRequired[str]
+
+
+class ThesisMetric(TypedDict):
+    """Metric tracked on a thesis card."""
+
+    name: str
+    unit: str
+    observations: list[ThesisMetricObservation]
+
+
+class ThesisCard(TypedDict):
+    """Current thesis-card schema."""
+
+    card_id: str
+    ticker_symbols: list[str]
+    summary: str
+    core_thesis: list[str]
+    key_metrics: list[ThesisMetric]
+    signals: list[str]
+    updated_at: str
+
 
 # Explicit mapping from normalized-lowercase CSV headers to canonical keys.
 _CSV_HEADER_MAP: dict[str, str] = {
@@ -406,7 +436,7 @@ def remove_adjacency_entry(
 
 def validate_fiscal_period(value: str) -> str:
     """Validate and normalize a thesis metric fiscal period."""
-    period = (value or "").strip()
+    period = value.strip()
     if not FISCAL_PERIOD_PATTERN.match(period):
         raise ValueError(
             "metric observation period must use fiscal format; "
@@ -415,7 +445,7 @@ def validate_fiscal_period(value: str) -> str:
     return period
 
 
-def set_thesis_card_v2(
+def set_thesis_card(
     workspace_root: Path,
     *,
     card_id: str,
@@ -423,21 +453,21 @@ def set_thesis_card_v2(
     summary: str,
     core_thesis: list[str],
     signals: list[str],
-) -> dict[str, Any]:
-    """Create or replace a v2 thesis card definition while preserving metrics."""
+) -> ThesisCard:
+    """Create or replace a thesis card definition while preserving metrics."""
     paths = ensure_portfolio_layout(workspace_root)
     normalized_card_id = _normalize_thesis_card_id(card_id)
     normalized_tickers = _normalize_thesis_tickers(ticker_symbols)
-    normalized_summary = (summary or "").strip()
+    normalized_summary = summary.strip()
     normalized_core_thesis = _normalize_thesis_list(core_thesis, field_name="core_thesis")
     normalized_signals = _normalize_thesis_list(signals, field_name="signals")
 
     if not normalized_summary:
         raise ValueError("summary is required for a thesis card")
 
-    cards = _load_thesis_cards_v2(paths, backup_old_schema=True)
+    cards = _load_thesis_cards(paths, backup_old_schema=True)
     existing = next((card for card in cards if card.get("card_id") == normalized_card_id), None)
-    replacement = {
+    replacement: ThesisCard = {
         "card_id": normalized_card_id,
         "ticker_symbols": normalized_tickers,
         "summary": normalized_summary,
@@ -448,7 +478,7 @@ def set_thesis_card_v2(
     }
     updated_cards = [card for card in cards if card.get("card_id") != normalized_card_id]
     updated_cards.append(replacement)
-    _write_thesis_cards_v2(paths, updated_cards, event="thesis-set-v2", event_payload={"card_id": normalized_card_id})
+    _write_thesis_cards(paths, updated_cards, event="thesis-set", event_payload={"card_id": normalized_card_id})
     return replacement
 
 
@@ -462,12 +492,12 @@ def add_thesis_metric(
     value: str,
     date: str | None,
     source: str | None,
-) -> dict[str, Any]:
+) -> ThesisMetric:
     """Append one observation to a thesis card metric, creating the metric if needed."""
     paths = ensure_portfolio_layout(workspace_root)
     normalized_card_id = _normalize_thesis_card_id(card_id)
-    metric_name = (name or "").strip()
-    metric_value = (value or "").strip()
+    metric_name = name.strip()
+    metric_value = value.strip()
     metric_unit = (unit or "").strip()
     metric_period = validate_fiscal_period(period)
     if not metric_name:
@@ -475,7 +505,7 @@ def add_thesis_metric(
     if not metric_value:
         raise ValueError("metric observation value is required")
 
-    cards = _load_thesis_cards_v2(paths, backup_old_schema=True)
+    cards = _load_thesis_cards(paths, backup_old_schema=True)
     card = next((item for item in cards if item.get("card_id") == normalized_card_id), None)
     if not card:
         raise ValueError(
@@ -484,7 +514,10 @@ def add_thesis_metric(
         )
 
     metrics = card.setdefault("key_metrics", [])
-    metric = next((item for item in metrics if str(item.get("name", "")).strip().lower() == metric_name.lower()), None)
+    metric: ThesisMetric | None = next(
+        (item for item in metrics if str(item.get("name", "")).strip().lower() == metric_name.lower()),
+        None,
+    )
     if metric is None:
         if len(metrics) >= MAX_THESIS_METRICS:
             raise ValueError(f"a thesis card supports a maximum of {MAX_THESIS_METRICS} key metrics")
@@ -495,7 +528,7 @@ def add_thesis_metric(
     else:
         metric.setdefault("unit", "")
 
-    observation = {"period": metric_period, "value": metric_value}
+    observation: ThesisMetricObservation = {"period": metric_period, "value": metric_value}
     normalized_date = (date or "").strip()
     normalized_source = (source or "").strip()
     if normalized_date:
@@ -505,7 +538,7 @@ def add_thesis_metric(
     metric.setdefault("observations", []).append(observation)
     card["updated_at"] = now_utc_iso()
 
-    _write_thesis_cards_v2(
+    _write_thesis_cards(
         paths,
         cards,
         event="thesis-metric-add",
@@ -514,11 +547,11 @@ def add_thesis_metric(
     return metric
 
 
-def get_thesis_by_ticker(workspace_root: Path, *, ticker: str) -> list[dict[str, Any]]:
-    """Return v2 thesis cards linked to a ticker symbol."""
+def get_thesis_by_ticker(workspace_root: Path, *, ticker: str) -> list[ThesisCard]:
+    """Return thesis cards linked to a ticker symbol."""
     paths = ensure_portfolio_layout(workspace_root)
     normalized_ticker = _normalize_thesis_tickers([ticker])[0]
-    cards = _load_thesis_cards_v2(paths, backup_old_schema=False)
+    cards = _load_thesis_cards(paths, backup_old_schema=False)
     return [
         card
         for card in sorted(cards, key=lambda item: str(item.get("card_id", "")))
@@ -526,23 +559,23 @@ def get_thesis_by_ticker(workspace_root: Path, *, ticker: str) -> list[dict[str,
     ]
 
 
-def _load_thesis_cards_v2(paths: PortfolioPaths, *, backup_old_schema: bool) -> list[dict[str, Any]]:
+def _load_thesis_cards(paths: PortfolioPaths, *, backup_old_schema: bool) -> list[ThesisCard]:
     cards = load_json(paths.thesis_cards, default=[])
     if not isinstance(cards, list):
         raise ValueError("thesis-cards.json must contain a JSON array")
     if _contains_legacy_thesis_cards(cards):
         if backup_old_schema:
             _backup_thesis_cards(paths)
-        cards = [_coerce_thesis_card_v2(card) for card in cards]
+        cards = [_coerce_thesis_card(card) for card in cards]
     return cards
 
 
-def _write_thesis_cards_v2(
+def _write_thesis_cards(
     paths: PortfolioPaths,
-    cards: list[dict[str, Any]],
+    cards: list[ThesisCard],
     *,
     event: str,
-    event_payload: dict[str, Any],
+    event_payload: dict[str, str],
 ) -> None:
     sorted_cards = sorted(cards, key=lambda item: str(item.get("card_id", "")))
     write_json(paths.thesis_cards, sorted_cards)
@@ -551,7 +584,7 @@ def _write_thesis_cards_v2(
     update_history_render(paths)
 
 
-def _contains_legacy_thesis_cards(cards: list[dict[str, Any]]) -> bool:
+def _contains_legacy_thesis_cards(cards: Sequence[object]) -> bool:
     legacy_keys = {"security_id", "thesis_summary", "key_expectations", "disconfirming_signals"}
     return any(isinstance(card, dict) and (legacy_keys & set(card)) for card in cards)
 
@@ -569,7 +602,7 @@ def _backup_thesis_cards(paths: PortfolioPaths) -> Path:
     return backup_path
 
 
-def _coerce_thesis_card_v2(card: dict[str, Any]) -> dict[str, Any]:
+def _coerce_thesis_card(card: Mapping[str, object]) -> ThesisCard:
     if card.get("card_id"):
         coerced = dict(card)
         coerced["card_id"] = _normalize_thesis_card_id(str(coerced.get("card_id", "")))
@@ -852,14 +885,14 @@ def render_adjacency_markdown(entries: list[dict[str, Any]]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_thesis_markdown(cards: list[dict[str, Any]]) -> str:
-    """Render v2 thesis cards as markdown, including metric observation tables."""
+def render_thesis_markdown(cards: Sequence[Mapping[str, object]]) -> str:
+    """Render thesis cards as markdown, including metric observation tables."""
     lines = ["# Thesis Cards", ""]
     if not cards:
         lines.append("No thesis cards configured.")
         return "\n".join(lines) + "\n"
 
-    coerced_cards = [_coerce_thesis_card_v2(card) if _contains_legacy_thesis_cards([card]) else card for card in cards]
+    coerced_cards = [_coerce_thesis_card(card) if _contains_legacy_thesis_cards([card]) else card for card in cards]
     for card in sorted(coerced_cards, key=lambda item: str(item.get("card_id", ""))):
         tickers = ", ".join(f"`{ticker}`" for ticker in card.get("ticker_symbols", [])) or "None"
         core_thesis = [f"- {item}" for item in card.get("core_thesis", [])] or ["- None"]

@@ -10,7 +10,7 @@ from harness.portfolio_state import (
     add_thesis_metric,
     get_thesis_by_ticker,
     load_json,
-    set_thesis_card_v2,
+    set_thesis_card,
     write_json,
 )
 
@@ -24,7 +24,7 @@ class ThesisCardV2Tests(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def test_thesis_card_lifecycle(self) -> None:
-        card = set_thesis_card_v2(
+        card = set_thesis_card(
             self.workspace,
             card_id="gtlb-devsecops",
             ticker_symbols=["gtlb"],
@@ -45,7 +45,7 @@ class ThesisCardV2Tests(unittest.TestCase):
         self.assertEqual(cards[0]["signals"], ["NRR stabilizes", "FCF margin expands"])
         self.assertEqual(cards[0]["key_metrics"], [])
 
-        set_thesis_card_v2(
+        set_thesis_card(
             self.workspace,
             card_id="gtlb-devsecops",
             ticker_symbols=["GTLB"],
@@ -84,7 +84,7 @@ class ThesisCardV2Tests(unittest.TestCase):
         self.assertEqual(metrics["NRR"]["observations"][0]["value"], "116%")
         self.assertEqual(metrics["FCF margin"]["observations"][0]["period"], "FY2027")
 
-        set_thesis_card_v2(
+        set_thesis_card(
             self.workspace,
             card_id="gtlb-devsecops",
             ticker_symbols=["GTLB"],
@@ -104,7 +104,7 @@ class ThesisCardV2Tests(unittest.TestCase):
         self.assertIn("| Q1 FY2027 | 2026-06-02 | 116% | earnings call |", rendered)
 
     def test_thesis_by_ticker_cross_card(self) -> None:
-        set_thesis_card_v2(
+        set_thesis_card(
             self.workspace,
             card_id="gtlb",
             ticker_symbols=["GTLB"],
@@ -112,7 +112,7 @@ class ThesisCardV2Tests(unittest.TestCase):
             core_thesis=[],
             signals=[],
         )
-        set_thesis_card_v2(
+        set_thesis_card(
             self.workspace,
             card_id="memory-hbm",
             ticker_symbols=["MU", "SK-HYNIX"],
@@ -120,7 +120,7 @@ class ThesisCardV2Tests(unittest.TestCase):
             core_thesis=[],
             signals=[],
         )
-        set_thesis_card_v2(
+        set_thesis_card(
             self.workspace,
             card_id="mu-specific",
             ticker_symbols=["MU"],
@@ -134,7 +134,7 @@ class ThesisCardV2Tests(unittest.TestCase):
         self.assertEqual(get_thesis_by_ticker(self.workspace, ticker="AAPL"), [])
 
     def test_thesis_metric_validation_and_caps(self) -> None:
-        set_thesis_card_v2(
+        set_thesis_card(
             self.workspace,
             card_id="gtlb",
             ticker_symbols=["GTLB"],
@@ -216,7 +216,7 @@ class ThesisCardV2Tests(unittest.TestCase):
         ]
         write_json(current_dir / "thesis-cards.json", old_cards)
 
-        card = set_thesis_card_v2(
+        card = set_thesis_card(
             self.workspace,
             card_id="gtlb",
             ticker_symbols=["GTLB"],

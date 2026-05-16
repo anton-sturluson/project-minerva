@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Mapping
 
 import typer
 
@@ -23,7 +23,7 @@ from harness.portfolio_state import (
     remove_adjacency_entry,
     render_adjacency_markdown,
     render_thesis_markdown,
-    set_thesis_card_v2,
+    set_thesis_card,
     sync_portfolio,
 )
 
@@ -273,7 +273,7 @@ def set_thesis_command(
     """Create or replace one thesis card definition."""
     start = time.perf_counter()
     try:
-        card = set_thesis_card_v2(
+        card = set_thesis_card(
             (settings or get_settings()).ensure_workspace_root(),
             card_id=card_id,
             ticker_symbols=ticker_symbols,
@@ -590,7 +590,7 @@ def _optional_flag_value(parsed: dict[str, list[str]], key: str) -> str | None:
     return value or None
 
 
-def json_lines(payload: dict[str, Any]) -> str:
+def json_lines(payload: Mapping[str, object]) -> str:
     return "\n".join(f"{key}: {payload[key]}" for key in sorted(payload))
 
 

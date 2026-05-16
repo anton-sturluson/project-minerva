@@ -617,7 +617,6 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
         "grouped_events": grouped,
         "suppressed": suppressed,
         "thesis_cards": {key: thesis_map[key] for key in sorted(thesis_map)},
-        "thesis_cards_by_ticker": thesis_ticker_index,
         "thesis_ticker_index": thesis_ticker_index,
         "source_status": manifest.get("sources", {}),
     }
