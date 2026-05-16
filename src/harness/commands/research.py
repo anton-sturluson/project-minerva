@@ -28,12 +28,10 @@ RESEARCH_HELP = (
 )
 
 app = typer.Typer(help=RESEARCH_HELP, no_args_is_help=False, invoke_without_command=True)
-
-
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch research for `minerva run`."""
     _ = stdin
-    active_settings = settings
+    
     if not args:
         return CommandResult.from_text(
             "",
@@ -50,9 +48,7 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
         parsed = parse_flag_args(args[1:])
     except ValueError as exc:
         return CommandResult.from_text("", stderr=str(exc), exit_code=1)
-    return research_command(query=query, output_path=str(parsed["output"]) if "output" in parsed else None, settings=active_settings)
-
-
+    return research_command(query=query, output_path=str(parsed["output"]) if "output" in parsed else None, settings=settings)
 def research_command(
     *,
     query: str,
@@ -60,8 +56,8 @@ def research_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start = time.perf_counter()
-    active_settings = settings
-    if not active_settings.parallel_api_key:
+    
+    if not settings.parallel_api_key:
         return error_result(
             "PARALLEL_API_KEY is not set",
             "set PARALLEL_API_KEY and retry",
@@ -70,7 +66,7 @@ def research_command(
         )
     try:
         response_text = retry_call(
-            lambda: _call_parallel(query=query, api_key=active_settings.parallel_api_key),
+            lambda: _call_parallel(query=query, api_key=settings.parallel_api_key),
             should_retry=should_retry_http_error,
         )
     except Exception as exc:
@@ -82,8 +78,6 @@ def research_command(
         )
     output = response_text + maybe_export_text(response_text, output_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
-
-
 @app.callback()
 def research_cli_command(
     ctx: typer.Context,
@@ -105,8 +99,6 @@ def research_cli_command(
         )
     settings = get_settings()
     _print(research_command(query=query, output_path=output, settings=settings))
-
-
 def _call_parallel(*, query: str, api_key: str) -> str:
     import httpx
 
@@ -144,8 +136,6 @@ def _call_parallel(*, query: str, api_key: str) -> str:
     if isinstance(content, str) and content.strip():
         return content
     return json.dumps(payload, indent=2, sort_keys=True)
-
-
 def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
     return "\n".join(
         [
@@ -156,8 +146,6 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
             help_text.rstrip(),
         ]
     )
-
-
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())

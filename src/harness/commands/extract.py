@@ -89,16 +89,12 @@ VALID_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "med
 
 app = typer.Typer(help=EXTRACT_HELP, no_args_is_help=False, invoke_without_command=True)
 extract_files_app = typer.Typer(help=EXTRACT_FILES_HELP, no_args_is_help=False, invoke_without_command=True)
-
-
 # ---------------------------------------------------------------------------
 # `extract`
 # ---------------------------------------------------------------------------
-
-
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch the `extract` command for `minerva run`."""
-    active_settings = settings
+    
     try:
         parsed = _parse_extract_args(args)
     except ValueError as exc:
@@ -111,10 +107,8 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
         max_tokens=parsed.max_tokens,
         thinking=parsed.thinking,
         stdin=stdin,
-        settings=active_settings,
+        settings=settings,
     )
-
-
 def extract_command(
     *,
     question: str | None = None,
@@ -127,8 +121,8 @@ def extract_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start = time.perf_counter()
-    active_settings = settings
-    api_key = _api_key_for_model(active_settings, model)
+    
+    api_key = _api_key_for_model(settings, model)
     if not api_key:
         return _missing_api_key_result(model, start)
     try:
@@ -171,8 +165,6 @@ def extract_command(
             start,
         )
     return CommandResult.from_text(answer.strip(), duration_ms=elapsed_ms(start))
-
-
 @app.callback()
 def extract_cli_command(
     ctx: typer.Context,
@@ -233,17 +225,13 @@ def extract_cli_command(
             settings=settings,
         )
     )
-
-
 # ---------------------------------------------------------------------------
 # `extract-files`
 # ---------------------------------------------------------------------------
-
-
 def dispatch_files(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch the `extract-files` command for `minerva run`."""
     _ = stdin  # extract-files does not consume stdin
-    active_settings = settings
+    
     try:
         parsed = _parse_extract_files_args(args)
     except ValueError as exc:
@@ -259,10 +247,8 @@ def dispatch_files(args: list[str], settings: HarnessSettings, stdin: bytes = b"
         thinking=parsed.thinking,
         concurrency=parsed.concurrency,
         force=parsed.force,
-        settings=active_settings,
+        settings=settings,
     )
-
-
 def extract_files_command(
     *,
     question: str | None = None,
@@ -278,8 +264,8 @@ def extract_files_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start = time.perf_counter()
-    active_settings = settings
-    api_key = _api_key_for_model(active_settings, model)
+    
+    api_key = _api_key_for_model(settings, model)
     if not api_key:
         return _missing_api_key_result(model, start)
     if not out:
@@ -386,8 +372,6 @@ def extract_files_command(
             duration_ms=elapsed_ms(start),
         )
     return CommandResult.from_text("\n".join(summary_lines), duration_ms=elapsed_ms(start))
-
-
 @extract_files_app.callback()
 def extract_files_cli_command(
     ctx: typer.Context,
@@ -463,21 +447,15 @@ def extract_files_cli_command(
             settings=settings,
         )
     )
-
-
 # ---------------------------------------------------------------------------
 # Argument parsing helpers (run-chain)
 # ---------------------------------------------------------------------------
-
-
 class _UsageError(Exception):
     def __init__(self, what: str, what_to_do: str, alternatives: list[str]) -> None:
         super().__init__(what)
         self.what = what
         self.what_to_do = what_to_do
         self.alternatives = alternatives
-
-
 class _ExtractArgs:
     __slots__ = ("question", "questions_file", "file_path", "model", "max_tokens", "thinking")
 
@@ -488,8 +466,6 @@ class _ExtractArgs:
         self.model: str = DEFAULT_MODEL
         self.max_tokens: int = DEFAULT_MAX_TOKENS
         self.thinking: str | None = None
-
-
 class _ExtractFilesArgs:
     __slots__ = (
         "question",
@@ -515,8 +491,6 @@ class _ExtractFilesArgs:
         self.thinking: str | None = None
         self.concurrency: int = DEFAULT_CONCURRENCY
         self.force: bool = False
-
-
 def _parse_extract_args(args: list[str]) -> _ExtractArgs:
     parsed = _ExtractArgs()
     positionals: list[str] = []
@@ -548,8 +522,6 @@ def _parse_extract_args(args: list[str]) -> _ExtractArgs:
     if positionals:
         parsed.question = positionals[0]
     return parsed
-
-
 def _parse_extract_files_args(args: list[str]) -> _ExtractFilesArgs:
     parsed = _ExtractFilesArgs()
     positionals: list[str] = []
@@ -593,19 +565,13 @@ def _parse_extract_files_args(args: list[str]) -> _ExtractFilesArgs:
     if positionals:
         parsed.question = positionals[0]
     return parsed
-
-
 def _require_value(args: list[str], index: int, flag: str) -> str:
     if index + 1 >= len(args):
         raise ValueError(f"missing value for flag `{flag}`")
     return args[index + 1]
-
-
 # ---------------------------------------------------------------------------
 # Prompt / input helpers
 # ---------------------------------------------------------------------------
-
-
 def _build_prompt_pack(*, question: str | None, questions_file: str | None) -> str:
     sections: list[str] = []
     if question and question.strip():
@@ -648,8 +614,6 @@ def _build_prompt_pack(*, question: str | None, questions_file: str | None) -> s
             sections[1],
         ]
     )
-
-
 def _read_document_text(*, file_path: str | None, stdin: bytes) -> str:
     if file_path:
         return resolve_path(file_path).read_text(encoding="utf-8")
@@ -660,25 +624,17 @@ def _read_document_text(*, file_path: str | None, stdin: bytes) -> str:
         "pass `--file PATH` or pipe text into the command",
         ["`--file path/to/doc.md`"],
     )
-
-
 def _compose_prompt(*, prompt_pack: str, document_text: str) -> str:
     return f"{SYSTEM_PROMPT}\n\nPrompt:\n{prompt_pack}\n\nDocument:\n{document_text}"
-
-
 # ---------------------------------------------------------------------------
 # Thinking config helpers
 # ---------------------------------------------------------------------------
-
-
 def _resolve_default_thinking(model: str, explicit: str | None) -> str | None:
     if explicit is not None:
         return explicit
     if _is_gemini_3_flash(model):
         return "minimal"
     return None
-
-
 def _build_thinking_config(model: str, thinking: str | None):
     """Return a ThinkingConfig (or None) for the given model.
 
@@ -716,8 +672,6 @@ def _build_thinking_config(model: str, thinking: str | None):
     raise ValueError(
         f"`--thinking` is not configured for model `{model}`; omit `--thinking` to skip thinking config"
     )
-
-
 def _build_generate_config(model: str, max_tokens: int, thinking: str | None):
     try:
         from google.genai import types as genai_types
@@ -728,35 +682,21 @@ def _build_generate_config(model: str, max_tokens: int, thinking: str | None):
     if thinking_cfg is not None:
         kwargs["thinking_config"] = thinking_cfg
     return genai_types.GenerateContentConfig(**kwargs)
-
-
 def _is_gemini_3(model: str) -> bool:
     return model.startswith("gemini-3")
-
-
 def _is_gemini_3_flash(model: str) -> bool:
     return model.startswith("gemini-3-flash")
-
-
 def _is_gemini_25(model: str) -> bool:
     return model.startswith("gemini-2.5")
-
-
 def _api_model_name(model: str) -> str:
     return MODEL_ALIASES.get(model, model)
-
-
 def _is_openai_model(model: str) -> bool:
     api_model = _api_model_name(model)
     return model.startswith("openai/") or api_model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4"))
-
-
 def _api_key_for_model(settings: HarnessSettings, model: str) -> str | None:
     if _is_openai_model(model):
         return settings.openai_api_key
     return settings.gemini_api_key
-
-
 def _missing_api_key_result(model: str, start: float) -> CommandResult:
     if _is_openai_model(model):
         return error_result(
@@ -771,13 +711,9 @@ def _missing_api_key_result(model: str, start: float) -> CommandResult:
         ["`export GEMINI_API_KEY=...`", "`--model gpt-5.5`"],
         start,
     )
-
-
 # ---------------------------------------------------------------------------
 # Model calls
 # ---------------------------------------------------------------------------
-
-
 def _generate_answer(
     *,
     prompt: str,
@@ -797,8 +733,6 @@ def _generate_answer(
         thinking=thinking,
         api_key=api_key,
     )
-
-
 def _generate_gemini_answer(
     *,
     prompt: str,
@@ -818,8 +752,6 @@ def _generate_gemini_answer(
     if not text:
         raise ValueError("Gemini returned an empty response")
     return str(text)
-
-
 def _generate_openai_answer(*, prompt: str, model: str, max_tokens: int, api_key: str) -> str:
     try:
         import openai
@@ -836,8 +768,6 @@ def _generate_openai_answer(*, prompt: str, model: str, max_tokens: int, api_key
     if not text:
         raise ValueError("OpenAI returned an empty response")
     return text
-
-
 def _openai_response_text(response: Any) -> str:
     output_text = getattr(response, "output_text", None)
     if output_text:
@@ -852,13 +782,9 @@ def _openai_response_text(response: Any) -> str:
             elif isinstance(content, dict) and content.get("text"):
                 parts.append(str(content["text"]))
     return "\n".join(parts)
-
-
 # ---------------------------------------------------------------------------
 # extract-files internals
 # ---------------------------------------------------------------------------
-
-
 def _expand_file_inputs(patterns: list[str], *, files_from: str | None = None) -> list[Path]:
     seen: set[Path] = set()
     ordered: list[Path] = []
@@ -904,8 +830,6 @@ def _expand_file_inputs(patterns: list[str], *, files_from: str | None = None) -
             ["`--files data/a.md`", "`--files 'data/**/*.md'`"],
         )
     return sorted(ordered)
-
-
 def _read_files_from(files_from: str) -> list[tuple[str, Path | None]]:
     path = resolve_path(files_from)
     if not path.exists():
@@ -928,8 +852,6 @@ def _read_files_from(files_from: str) -> list[tuple[str, Path | None]]:
             ["`--files-from path/to/files.txt`"],
         )
     return entries
-
-
 def _read_extraction_text(path: Path) -> str:
     if path.suffix.lower() in UNSUPPORTED_TEXT_EXTRACTION_EXTENSIONS:
         raise ValueError(
@@ -942,8 +864,6 @@ def _read_extraction_text(path: Path) -> str:
         return raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError("file is not valid UTF-8 text; convert it before using extract-files") from exc
-
-
 def _plan_output_paths(files: list[Path], out_root: Path) -> list[tuple[Path, Path]]:
     common = _common_parent(files)
     used: set[Path] = set()
@@ -960,8 +880,6 @@ def _plan_output_paths(files: list[Path], out_root: Path) -> list[tuple[Path, Pa
         used.add(target)
         plan.append((src, target))
     return plan
-
-
 def _common_parent(files: list[Path]) -> Path:
     if not files:
         return Path(".")
@@ -977,8 +895,6 @@ def _common_parent(files: list[Path]) -> Path:
     if not common:
         return Path(files[0].anchor or ".")
     return Path(*common)
-
-
 async def _run_extractions(
     *,
     plan: list[tuple[Path, Path]],
@@ -1023,13 +939,9 @@ async def _run_extractions(
     return list(
         await asyncio.gather(*[_run_one(src, target) for src, target in plan])
     )
-
-
 # ---------------------------------------------------------------------------
 # CLI plumbing
 # ---------------------------------------------------------------------------
-
-
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())
