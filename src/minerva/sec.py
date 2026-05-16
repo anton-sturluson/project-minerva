@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import NotRequired, TypedDict
 
 import pandas as pd
 from edgar import Company
@@ -22,7 +22,31 @@ from minerva.formatting import (
 )
 
 
-def get_13f_comparison(cik: int | str) -> dict[str, Any]:
+class ThirteenFComparison(TypedDict):
+    current: pd.DataFrame
+    previous: pd.DataFrame
+    comparison: pd.DataFrame
+    new: pd.DataFrame
+    exited: pd.DataFrame
+    increased: pd.DataFrame
+    decreased: pd.DataFrame
+    unchanged: pd.DataFrame
+    manager_name: NotRequired[str]
+    current_period: NotRequired[str]
+    previous_period: NotRequired[str]
+
+
+class FilingRecord(TypedDict):
+    ticker_or_cik: str
+    form: str
+    filing_date: str
+    accession_number: str
+    primary_document: str
+    description: str
+    url: str
+
+
+def get_13f_comparison(cik: int | str) -> ThirteenFComparison:
     """Fetch latest 13-F and compare with previous quarter.
 
     Aggregates: Company lookup -> get_filings -> obj() -> compare holdings
@@ -87,7 +111,7 @@ def get_13f_comparison(cik: int | str) -> dict[str, Any]:
     }
 
 
-def format_13f_report(comparison: dict[str, Any]) -> str:
+def format_13f_report(comparison: ThirteenFComparison) -> str:
     """Render a clean markdown report for a two-quarter 13F comparison."""
     current: pd.DataFrame = _comparison_frame(comparison, "current")
     previous: pd.DataFrame = _comparison_frame(comparison, "previous")
@@ -141,7 +165,7 @@ def format_13f_report(comparison: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _comparison_frame(comparison: dict[str, Any], key: str) -> pd.DataFrame:
+def _comparison_frame(comparison: ThirteenFComparison, key: str) -> pd.DataFrame:
     value = comparison.get(key)
     return value if isinstance(value, pd.DataFrame) else pd.DataFrame()
 
@@ -290,7 +314,7 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
     return build_markdown_table(headers, rows, alignment=alignment)
 
 
-def _unchanged_from_comparison(comparison: dict[str, Any]) -> pd.DataFrame:
+def _unchanged_from_comparison(comparison: ThirteenFComparison) -> pd.DataFrame:
     merged: pd.DataFrame | None = comparison.get("comparison")
     if merged is None or merged.empty or "_merge" not in merged.columns:
         return pd.DataFrame()
@@ -316,7 +340,7 @@ def _section_value_total(df: pd.DataFrame, side: str) -> float:
     return total
 
 
-def _row_value(row: pd.Series, base: str, side: str | None = None) -> Any:
+def _row_value(row: pd.Series, base: str, side: str | None = None) -> float | None:
     column = _row_column(row, base, side)
     if not column:
         return ""
@@ -344,7 +368,7 @@ def _row_column(row: pd.Series, base: str, side: str | None = None) -> str | Non
     return _find_column(row.index, candidates)
 
 
-def _find_column(columns: Any, candidates: list[str]) -> str | None:
+def _find_column(columns: pd.Index | list[str], candidates: list[str]) -> str | None:
     column_map = {str(column).lower(): str(column) for column in columns}
     for candidate in candidates:
         found = column_map.get(candidate.lower())
@@ -371,7 +395,7 @@ def _sub(current: float | None, previous: float | None) -> float | None:
     return current - previous
 
 
-def _safe_attr_text(obj: Any, names: list[str]) -> str:
+def _safe_attr_text(obj: object, names: list[str]) -> str:
     for name in names:
         value = getattr(obj, name, None)
         if callable(value):
@@ -385,7 +409,7 @@ def _safe_attr_text(obj: Any, names: list[str]) -> str:
     return ""
 
 
-def _filing_period_label(filing_obj: Any, filing_wrapper: Any | None = None) -> str:
+def _filing_period_label(filing_obj: object, filing_wrapper: object | None = None) -> str:
     raw = _safe_attr_text(
         filing_obj,
         ["report_period", "period_of_report", "period_end", "report_date", "filing_date", "date"],
@@ -400,7 +424,7 @@ def _filing_period_label(filing_obj: Any, filing_wrapper: Any | None = None) -> 
     return raw or "Unknown period"
 
 
-def _safe_coerce_date(value: Any) -> date | None:
+def _safe_coerce_date(value: date | str | None) -> date | None:
     try:
         return _coerce_date(value)
     except (TypeError, ValueError):
@@ -443,7 +467,7 @@ def get_recent_filings(
     since: date | str | None = None,
     until: date | str | None = None,
     limit: int = 20,
-) -> list[dict[str, Any]]:
+) -> list[FilingRecord]:
     """List recent filings for a company in a date window.
 
     Returns a normalized list of small filing records so higher-level CLI
@@ -455,7 +479,7 @@ def get_recent_filings(
     company: Company = Company(ticker_or_cik)
     filings = company.get_filings(form=forms or ["8-K", "10-K", "10-Q"]).latest(limit)
 
-    records: list[dict[str, Any]] = []
+    records: list[FilingRecord] = []
     for filing in _iter_filings(filings):
         filing_date: date | None = _coerce_date(getattr(filing, "filing_date", getattr(filing, "date", None)))
         if normalized_since and filing_date and filing_date < normalized_since:
@@ -478,7 +502,7 @@ def get_recent_filings(
     return records
 
 
-def _iter_filings(filings: Any) -> list[Any]:
+def _iter_filings(filings: object) -> list[object]:
     if filings is None:
         return []
     if isinstance(filings, list):

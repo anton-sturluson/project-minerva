@@ -1,14 +1,13 @@
 """Utility functions for formatting financial data and building markdown tables."""
 
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import xmltodict
 import yaml
 
 
-def is_empty(value: Any) -> bool:
+def is_empty(value: object) -> bool:
     """Return True for None, pandas/numpy missing values, and blank-ish strings."""
     if value is None:
         return True
@@ -20,14 +19,14 @@ def is_empty(value: Any) -> bool:
     return str(value).strip().lower() in {"", "nan", "none", "nat", "<na>"}
 
 
-def clean_text(value: Any) -> str:
+def clean_text(value: object) -> str:
     """Convert a messy value to stripped text, returning an empty string for missing values."""
     if is_empty(value):
         return ""
     return str(value).strip()
 
 
-def md_cell(value: Any) -> str:
+def md_cell(value: object) -> str:
     """Clean text for use in a markdown table cell."""
     return clean_text(value).replace("\n", " ").replace("|", "\\|")
 
