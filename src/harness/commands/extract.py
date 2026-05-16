@@ -680,6 +680,9 @@ def _build_thinking_config(model: str, thinking: str | None):
             f"`--thinking {thinking}` is not supported for Gemini 2.5 models; use off|adaptive"
         )
 
+    if _is_openai_model(model):
+        return None  # OpenAI reasoning is handled in _generate_openai_answer.
+
     raise ValueError(
         f"`--thinking` is not configured for model `{model}`; omit `--thinking` to skip thinking config"
     )
@@ -743,7 +746,13 @@ def _generate_answer(
     api_key: str,
 ) -> str:
     if _is_openai_model(model):
-        return _generate_openai_answer(prompt=prompt, model=model, max_tokens=max_tokens, api_key=api_key)
+        return _generate_openai_answer(
+            prompt=prompt,
+            model=model,
+            max_tokens=max_tokens,
+            thinking=thinking,
+            api_key=api_key,
+        )
     return _generate_gemini_answer(
         prompt=prompt,
         model=model,
@@ -772,18 +781,24 @@ def _generate_gemini_answer(
         raise ValueError("Gemini returned an empty response")
     return str(text)
 
-def _generate_openai_answer(*, prompt: str, model: str, max_tokens: int, api_key: str) -> str:
+
+def _generate_openai_answer(
+    *, prompt: str, model: str, max_tokens: int, thinking: str | None = None, api_key: str
+) -> str:
     try:
         import openai
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise RuntimeError("openai is not installed") from exc
 
     client = openai.OpenAI(api_key=api_key)
-    response = client.responses.create(
-        model=_api_model_name(model),
-        input=prompt,
-        max_output_tokens=max_tokens,
-    )
+    kwargs: dict[str, Any] = {
+        "model": _api_model_name(model),
+        "input": prompt,
+        "max_output_tokens": max_tokens,
+    }
+    if thinking in {"low", "medium", "high"}:
+        kwargs["reasoning"] = {"effort": thinking}
+    response = client.responses.create(**kwargs)
     text = _openai_response_text(response)
     if not text:
         raise ValueError("OpenAI returned an empty response")

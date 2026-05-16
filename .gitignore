@@ -41,6 +41,4 @@ worktrees/
 .tmp/
 .obsidian/
 .venv
-TASK.md
-TASK-REFACTOR.md
-TASK-FIX.md
+.worktrees/

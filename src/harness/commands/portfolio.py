@@ -8,7 +8,7 @@ from typing import Mapping
 
 import typer
 
-from harness.commands.common import abort_with_help, elapsed_ms, error_result, parse_flag_args
+from harness.commands.common import abort_with_help, elapsed_ms, error_result, parse_flag_args, show_help_if_bare
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
 from harness.portfolio_state import (
@@ -365,12 +365,18 @@ def adjacency_list_cli() -> None:
 
 @adjacency_app.command("add", help="Add or replace one adjacency relationship.")
 def adjacency_add_cli(
-    monitored: str = typer.Argument(..., help="Monitored company identifier."),
-    adjacent: str = typer.Argument(..., help="Adjacent company identifier."),
-    relationship_type: str = typer.Option(..., "--type", help="Relationship type."),
+    ctx: typer.Context,
+    monitored: str | None = typer.Argument(None, help="Monitored company identifier."),
+    adjacent: str | None = typer.Argument(None, help="Adjacent company identifier."),
+    relationship_type: str | None = typer.Option(None, "--type", help="Relationship type."),
     note: str | None = typer.Option(None, "--note", help="Optional note."),
     priority: str | None = typer.Option(None, "--priority", help="Optional priority tag."),
 ) -> None:
+    show_help_if_bare(ctx, monitored=monitored, adjacent=adjacent, relationship_type=relationship_type)
+    if not monitored or not adjacent:
+        abort_with_help(ctx, what_went_wrong="monitored and adjacent identifiers are required", what_to_do="pass two company identifiers and a relationship type", alternatives=["`portfolio adjacency add NVDA TSM --type supply-chain`"])
+    if not relationship_type:
+        abort_with_help(ctx, what_went_wrong="--type is required", what_to_do="pass a relationship type", alternatives=["`portfolio adjacency add NVDA TSM --type supply-chain`"])
     _print(
         add_adjacency_command(
             monitored=monitored,
@@ -384,12 +390,15 @@ def adjacency_add_cli(
 
 @adjacency_app.command("remove", help="Remove one adjacency mapping pair.")
 def adjacency_remove_cli(
-    monitored: str = typer.Argument(..., help="Monitored company identifier."),
-    adjacent: str = typer.Argument(..., help="Adjacent company identifier."),
+    ctx: typer.Context,
+    monitored: str | None = typer.Argument(None, help="Monitored company identifier."),
+    adjacent: str | None = typer.Argument(None, help="Adjacent company identifier."),
     relationship_type: str | None = typer.Option(None, "--type", help="Optional relationship type filter."),
 ) -> None:
-    settings = get_settings()
-    _print(remove_adjacency_command(monitored=monitored, adjacent=adjacent, relationship_type=relationship_type, settings=settings))
+    show_help_if_bare(ctx, monitored=monitored, adjacent=adjacent)
+    if not monitored or not adjacent:
+        abort_with_help(ctx, what_went_wrong="monitored and adjacent identifiers are required", what_to_do="pass two company identifiers", alternatives=["`portfolio adjacency remove NVDA TSM`", "`portfolio adjacency remove NVDA TSM --type supply-chain`"])
+    _print(remove_adjacency_command(monitored=monitored, adjacent=adjacent, relationship_type=relationship_type, settings=get_settings()))
 
 @adjacency_app.command("render", help="Render adjacency markdown.")
 def adjacency_render_cli() -> None:
@@ -402,23 +411,39 @@ def thesis_list_cli() -> None:
     _print(list_thesis_command(settings=settings))
 
 @thesis_app.command("show", help="Show one thesis card.")
-def thesis_show_cli(card_id: str = typer.Argument(..., help="Thesis card id.")) -> None:
-    settings = get_settings()
-    _print(show_thesis_command(card_id=card_id, settings=settings))
+def thesis_show_cli(
+    ctx: typer.Context,
+    card_id: str | None = typer.Argument(None, help="Thesis card id."),
+) -> None:
+    show_help_if_bare(ctx, card_id=card_id)
+    if not card_id:
+        abort_with_help(ctx, what_went_wrong="no card id was provided", what_to_do="pass a thesis card id", alternatives=["`portfolio thesis show gtlb`"])
+    _print(show_thesis_command(card_id=card_id, settings=get_settings()))
 
 @thesis_app.command("by-ticker", help="Show thesis cards linked to a ticker.")
-def thesis_by_ticker_cli(ticker: str = typer.Argument(..., help="Ticker symbol.")) -> None:
-    settings = get_settings()
-    _print(by_ticker_thesis_command(ticker=ticker, settings=settings))
+def thesis_by_ticker_cli(
+    ctx: typer.Context,
+    ticker: str | None = typer.Argument(None, help="Ticker symbol."),
+) -> None:
+    show_help_if_bare(ctx, ticker=ticker)
+    if not ticker:
+        abort_with_help(ctx, what_went_wrong="no ticker was provided", what_to_do="pass a ticker symbol", alternatives=["`portfolio thesis by-ticker MU`", "`portfolio thesis by-ticker GTLB`"])
+    _print(by_ticker_thesis_command(ticker=ticker, settings=get_settings()))
 
 @thesis_app.command("set", help="Create or replace one thesis card definition.")
 def thesis_set_cli(
-    card_id: str = typer.Argument(..., help="Thesis card id, lowercase kebab-style."),
+    ctx: typer.Context,
+    card_id: str | None = typer.Argument(None, help="Thesis card id, lowercase kebab-style."),
     ticker_symbols: list[str] = typer.Option([], "--ticker", help="Ticker symbol; repeat for multi-ticker cards."),
-    summary: str = typer.Option(..., "--summary", help="Compact thesis summary."),
+    summary: str | None = typer.Option(None, "--summary", help="Compact thesis summary."),
     core_thesis: list[str] = typer.Option([], "--core-thesis", help="Core thesis bullet; repeat up to 5."),
     signals: list[str] = typer.Option([], "--signal", help="Signal bullet; repeat up to 5."),
 ) -> None:
+    show_help_if_bare(ctx, card_id=card_id, summary=summary)
+    if not card_id:
+        abort_with_help(ctx, what_went_wrong="no card id was provided", what_to_do="pass a card id, ticker, and summary", alternatives=["`portfolio thesis set gtlb --ticker GTLB --summary 'DevSecOps compounder'`"])
+    if not summary:
+        abort_with_help(ctx, what_went_wrong="--summary is required", what_to_do="pass a compact thesis summary", alternatives=["`portfolio thesis set gtlb --ticker GTLB --summary 'DevSecOps compounder'`"])
     _print(
         set_thesis_command(
             card_id=card_id,
@@ -432,14 +457,24 @@ def thesis_set_cli(
 
 @thesis_metric_app.command("add", help="Append one thesis metric observation.")
 def thesis_metric_add_cli(
-    card_id: str = typer.Argument(..., help="Thesis card id."),
-    name: str = typer.Option(..., "--name", help="Metric name."),
-    period: str = typer.Option(..., "--period", help="Fiscal period, e.g. Q1 FY2027."),
-    value: str = typer.Option(..., "--value", help="Metric observation value, stored as text."),
+    ctx: typer.Context,
+    card_id: str | None = typer.Argument(None, help="Thesis card id."),
+    name: str | None = typer.Option(None, "--name", help="Metric name."),
+    period: str | None = typer.Option(None, "--period", help="Fiscal period, e.g. Q1 FY2027."),
+    value: str | None = typer.Option(None, "--value", help="Metric observation value, stored as text."),
     date_value: str | None = typer.Option(None, "--date", help="Optional observation date."),
     source: str | None = typer.Option(None, "--source", help="Optional source note."),
     unit: str | None = typer.Option(None, "--unit", help="Optional metric unit."),
 ) -> None:
+    show_help_if_bare(ctx, card_id=card_id, name=name, period=period, value=value)
+    if not card_id:
+        abort_with_help(ctx, what_went_wrong="no card id was provided", what_to_do="pass a card id, metric name, period, and value", alternatives=["`portfolio thesis metric add gtlb --name NRR --period 'Q1 FY2027' --value '116%'`"])
+    if not name:
+        abort_with_help(ctx, what_went_wrong="--name is required", what_to_do="pass a metric name", alternatives=["`portfolio thesis metric add gtlb --name NRR --period 'Q1 FY2027' --value '116%'`"])
+    if not period:
+        abort_with_help(ctx, what_went_wrong="--period is required", what_to_do="pass a fiscal period", alternatives=["`portfolio thesis metric add gtlb --name NRR --period 'Q1 FY2027' --value '116%'`"])
+    if not value:
+        abort_with_help(ctx, what_went_wrong="--value is required", what_to_do="pass a metric value", alternatives=["`portfolio thesis metric add gtlb --name NRR --period 'Q1 FY2027' --value '116%'`"])
     _print(
         add_thesis_metric_command(
             card_id=card_id,
