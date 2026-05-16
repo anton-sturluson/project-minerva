@@ -190,8 +190,8 @@ def test_minerva_sec_helper_uses_correct_13f_form_code(monkeypatch) -> None:
 
 
 def test_minerva_sec_helper_uses_holdings_dataframe_directly(monkeypatch) -> None:
-    expected_current = pd.DataFrame([{"cusip": "123", "value": 20}])
-    expected_previous = pd.DataFrame([{"cusip": "123", "value": 10}])
+    expected_current = pd.DataFrame([{"cusip": "123", "value": 200_000_000}])
+    expected_previous = pd.DataFrame([{"cusip": "123", "value": 100_000_000}])
 
     class _FakeThirteenF:
         def __init__(self, holdings: pd.DataFrame) -> None:

@@ -73,6 +73,10 @@ def get_13f_comparison(cik: int | str) -> ThirteenFComparison:
     current_df: pd.DataFrame = current_filing.holdings
     previous_df: pd.DataFrame = previous_filing.holdings
 
+    # Normalize value units: SEC requires thousands but many filers use dollars.
+    current_df = _normalize_value_units(current_df)
+    previous_df = _normalize_value_units(previous_df)
+
     # edgartools uses capitalized column names: Cusip, Value, Issuer, etc.
     merge_key: str = _find_column(current_df.columns, ["Cusip", "cusip"]) or "Cusip"
     value_col: str = _find_column(current_df.columns, ["Value", "value"]) or "Value"
@@ -369,6 +373,31 @@ def _row_column(row: pd.Series, base: str, side: str | None = None) -> str | Non
         candidates.extend(f"{variant}_{side}" for variant in variants)
     candidates.extend(variants)
     return _find_column(row.index, candidates)
+
+
+# ---------------------------------------------------------------------------
+# Value-unit normalisation
+# ---------------------------------------------------------------------------
+
+_FILING_THRESHOLD_DOLLARS: int = 100_000_000  # SEC 13-F filing threshold
+
+
+def _normalize_value_units(df: pd.DataFrame) -> pd.DataFrame:
+    """Detect and normalise 13-F value units to dollars.
+
+    The SEC technically requires values in thousands, but many filers report
+    in whole dollars.  If the sum of all position values is below the $100M
+    filing threshold it is virtually certain the values are in thousands —
+    no filer can have <$100M in actual equity holdings.
+    """
+    value_col = _find_column(df.columns, ["Value", "value"])
+    if value_col is None or df.empty:
+        return df
+    total = pd.to_numeric(df[value_col], errors="coerce").fillna(0).sum()
+    if total < _FILING_THRESHOLD_DOLLARS:
+        df = df.copy()
+        df[value_col] = df[value_col] * 1_000
+    return df
 
 
 def _find_column(columns: pd.Index | list[str], candidates: list[str]) -> str | None:

@@ -206,3 +206,34 @@ def test_cli_13f_output_flag(tmp_path: Path, monkeypatch) -> None:
     assert written.startswith("## 13F-HR QoQ Comparison: Pershing Square")
     assert "MSFT" in written
     assert "saved_to: " in result.stdout.decode("utf-8")
+
+
+def test_normalize_value_units_thousands() -> None:
+    """Values reported in thousands (sum < $100M) should be multiplied by 1,000."""
+    from minerva.sec import _normalize_value_units
+
+    # Simulate a filer reporting in thousands (like Baupost/Duquesne)
+    df = pd.DataFrame({
+        "Issuer": ["AMAZON COM INC", "ALPHABET INC", "META PLATFORMS"],
+        "Value": [649_543, 350_000, 200_000],  # thousands: $650M, $350M, $200M
+        "SharesPrnAmount": [3_000_000, 1_000_000, 500_000],
+    })
+    result = _normalize_value_units(df)
+    assert result["Value"].sum() == (649_543 + 350_000 + 200_000) * 1_000
+    assert result["Value"].iloc[0] == 649_543_000
+    # Shares should be untouched
+    assert result["SharesPrnAmount"].iloc[0] == 3_000_000
+
+
+def test_normalize_value_units_dollars_unchanged() -> None:
+    """Values already in dollars (sum >= $100M) should be left as-is."""
+    from minerva.sec import _normalize_value_units
+
+    df = pd.DataFrame({
+        "Issuer": ["AMAZON COM INC", "ALPHABET INC"],
+        "Value": [2_385_104_083, 1_934_222_720],  # actual dollars
+        "SharesPrnAmount": [11_000_000, 6_000_000],
+    })
+    result = _normalize_value_units(df)
+    assert result["Value"].iloc[0] == 2_385_104_083
+    assert result["Value"].sum() == 2_385_104_083 + 1_934_222_720
