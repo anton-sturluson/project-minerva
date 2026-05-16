@@ -13,7 +13,6 @@ from harness.commands.common import (
     dataframe_to_markdown,
     elapsed_ms,
     error_result,
-    maybe_export_text,
     parse_flag_args,
     relative_display_path,
     resolve_path,
@@ -35,6 +34,7 @@ SEC_HELP = (
     "  minerva sec 10k AAPL --items 1,1A,7\n"
     "  minerva sec financials MSFT --type income --periods 5\n"
     "  minerva sec download AAPL --form 10-K --format markdown\n"
+    "  minerva sec 13f 1067983 --output pershing-13f.md\n"
     "  minerva sec bulk-download AAPL --output ./filings\n"
 )
 
@@ -680,7 +680,7 @@ def _as_bool(value: str | bool) -> bool:
 def _dispatch_help(subcommand: str, alternatives: list[str]) -> CommandResult:
     help_texts: dict[str, str] = {
         "10k": "Usage: sec 10k <ticker> [--items 1,1A,7]",
-        "13f": "Usage: sec 13f <cik>",
+        "13f": "Usage: sec 13f <cik> [--output PATH]",
         "financials": "Usage: sec financials <ticker> [--periods 5] [--type income|balance|cash]",
         "download": "Usage: sec download <ticker> [--form 10-K] [--format html|markdown] [--output PATH]",
         "bulk-download": "Usage: sec bulk-download <ticker> [--output DIR] [--annual 5] [--quarters 4] [--earnings 4] [--financials true|false]",

@@ -76,17 +76,18 @@ def get_13f_comparison(cik: int | str) -> dict[str, Any]:
 
 def format_13f_report(comparison: dict[str, Any]) -> str:
     """Render a clean markdown report for a two-quarter 13F comparison."""
-    current: pd.DataFrame = comparison.get("current", pd.DataFrame())
-    previous: pd.DataFrame = comparison.get("previous", pd.DataFrame())
+    current: pd.DataFrame = _comparison_frame(comparison, "current")
+    previous: pd.DataFrame = _comparison_frame(comparison, "previous")
     current_total: float = _dataframe_total(current, "Value")
     previous_total: float = _dataframe_total(previous, "Value")
 
-    new_positions: pd.DataFrame = comparison.get("new", pd.DataFrame())
-    exited_positions: pd.DataFrame = comparison.get("exited", pd.DataFrame())
-    increased: pd.DataFrame = comparison.get("increased", pd.DataFrame())
-    decreased: pd.DataFrame = comparison.get("decreased", pd.DataFrame())
-    unchanged_value = comparison.get("unchanged")
-    unchanged: pd.DataFrame = unchanged_value if isinstance(unchanged_value, pd.DataFrame) else _unchanged_from_comparison(comparison)
+    new_positions: pd.DataFrame = _comparison_frame(comparison, "new")
+    exited_positions: pd.DataFrame = _comparison_frame(comparison, "exited")
+    increased: pd.DataFrame = _comparison_frame(comparison, "increased")
+    decreased: pd.DataFrame = _comparison_frame(comparison, "decreased")
+    unchanged: pd.DataFrame = _comparison_frame(comparison, "unchanged")
+    if unchanged.empty:
+        unchanged = _unchanged_from_comparison(comparison)
 
     manager_name: str = _clean_text(comparison.get("manager_name") or comparison.get("fund_name") or "Unknown Manager")
     current_period: str = _clean_text(comparison.get("current_period") or "Current")
@@ -97,17 +98,17 @@ def format_13f_report(comparison: dict[str, Any]) -> str:
         f"Period: {current_period} vs {previous_period}",
         "",
         "### Summary",
-        (
-            f"- Positions: {len(current)} (prev: {len(previous)}) | New: {len(new_positions)} | "
-            f"Exited: {len(exited_positions)} | Increased: {len(increased)} | "
-            f"Decreased: {len(decreased)} | Unchanged: {len(unchanged)}"
+        *_format_13f_summary(
+            current=current,
+            previous=previous,
+            new_positions=new_positions,
+            exited_positions=exited_positions,
+            increased=increased,
+            decreased=decreased,
+            unchanged=unchanged,
+            current_total=current_total,
+            previous_total=previous_total,
         ),
-        (
-            f"- Portfolio value: {_format_millions(current_total)} "
-            f"(prev: {_format_millions(previous_total)}, Δ {_format_percent(_pct_change(current_total, previous_total), signed=True)})"
-        ),
-        f"- Net new capital deployed: {_format_millions(_section_value_total(new_positions, 'current'))}",
-        f"- Net capital exited: {_format_millions(_section_value_total(exited_positions, 'previous'))}",
         "",
         "### New Positions",
         _format_13f_section(new_positions, "new", current_total, previous_total),
@@ -125,6 +126,39 @@ def format_13f_report(comparison: dict[str, Any]) -> str:
         _format_13f_section(unchanged, "unchanged", current_total, previous_total),
     ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _comparison_frame(comparison: dict[str, Any], key: str) -> pd.DataFrame:
+    value = comparison.get(key)
+    return value if isinstance(value, pd.DataFrame) else pd.DataFrame()
+
+
+def _format_13f_summary(
+    *,
+    current: pd.DataFrame,
+    previous: pd.DataFrame,
+    new_positions: pd.DataFrame,
+    exited_positions: pd.DataFrame,
+    increased: pd.DataFrame,
+    decreased: pd.DataFrame,
+    unchanged: pd.DataFrame,
+    current_total: float,
+    previous_total: float,
+) -> list[str]:
+    return [
+        (
+            f"- Positions: {len(current)} (prev: {len(previous)}) | New: {len(new_positions)} | "
+            f"Exited: {len(exited_positions)} | Increased: {len(increased)} | "
+            f"Decreased: {len(decreased)} | Unchanged: {len(unchanged)}"
+        ),
+        (
+            f"- Portfolio value: {_format_millions(current_total)} "
+            f"(prev: {_format_millions(previous_total)}, "
+            f"Δ {_format_percent(_pct_change(current_total, previous_total), signed=True)})"
+        ),
+        f"- Net new capital deployed: {_format_millions(_section_value_total(new_positions, 'current'))}",
+        f"- Net capital exited: {_format_millions(_section_value_total(exited_positions, 'previous'))}",
+    ]
 
 
 def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previous_total: float) -> str:
