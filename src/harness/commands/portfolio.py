@@ -25,7 +25,6 @@ from harness.portfolio_state import (
     render_thesis_markdown,
     set_thesis_card_v2,
     sync_portfolio,
-    write_json,
 )
 
 PORTFOLIO_HELP = (
@@ -563,11 +562,6 @@ def _usage_error(message: str) -> str:
             PORTFOLIO_HELP.rstrip(),
         ]
     )
-
-
-def _split_multi_value(value: str) -> list[str]:
-    normalized = value.replace("|", ";")
-    return [item.strip() for item in normalized.split(";") if item.strip()]
 
 
 def _parse_repeated_flag_args(args: list[str]) -> dict[str, list[str]]:

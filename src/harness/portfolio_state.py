@@ -404,43 +404,6 @@ def remove_adjacency_entry(
     }
 
 
-def set_thesis_card(
-    workspace_root: Path,
-    *,
-    security: str,
-    summary: str,
-    expectations: list[str],
-    disconfirming_signals: list[str],
-) -> dict[str, Any]:
-    """Create or replace one legacy thesis card."""
-    paths = ensure_portfolio_layout(workspace_root)
-    security_id = canonical_security_id(security)
-    normalized_summary = summary.strip()
-    if not security_id:
-        raise ValueError("security identifier is required")
-    if not normalized_summary:
-        raise ValueError("summary is required")
-    cards = load_json(paths.thesis_cards, default=[])
-    replacement = {
-        "security_id": security_id,
-        "thesis_summary": normalized_summary,
-        "key_expectations": [item for item in (part.strip() for part in expectations) if item],
-        "disconfirming_signals": [item for item in (part.strip() for part in disconfirming_signals) if item],
-        "updated_at": now_utc_iso(),
-    }
-    filtered = [card for card in cards if str(card.get("security_id", "")).upper() != security_id]
-    filtered.append(replacement)
-    filtered.sort(key=lambda item: item.get("security_id", item.get("card_id", "")))
-    write_json(paths.thesis_cards, filtered)
-    paths.thesis_rendered.write_text(render_thesis_markdown(filtered), encoding="utf-8")
-    append_jsonl(
-        paths.metadata_history,
-        {"timestamp": now_utc_iso(), "event": "thesis-set", "security_id": security_id},
-    )
-    update_history_render(paths)
-    return replacement
-
-
 def validate_fiscal_period(value: str) -> str:
     """Validate and normalize a thesis metric fiscal period."""
     period = (value or "").strip()
