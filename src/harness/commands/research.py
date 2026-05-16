@@ -28,6 +28,7 @@ RESEARCH_HELP = (
 )
 
 app = typer.Typer(help=RESEARCH_HELP, no_args_is_help=False, invoke_without_command=True)
+
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch research for `minerva run`."""
     
@@ -48,6 +49,7 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
     except ValueError as exc:
         return CommandResult.from_text("", stderr=str(exc), exit_code=1)
     return research_command(query=query, output_path=str(parsed["output"]) if "output" in parsed else None, settings=settings)
+
 def research_command(
     *,
     query: str,
@@ -77,6 +79,7 @@ def research_command(
         )
     output = response_text + maybe_export_text(response_text, output_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
+
 @app.callback()
 def research_cli_command(
     ctx: typer.Context,
@@ -98,6 +101,7 @@ def research_cli_command(
         )
     settings = get_settings()
     _print(research_command(query=query, output_path=output, settings=settings))
+
 def _call_parallel(*, query: str, api_key: str) -> str:
     import httpx
 
@@ -135,6 +139,7 @@ def _call_parallel(*, query: str, api_key: str) -> str:
     if isinstance(content, str) and content.strip():
         return content
     return json.dumps(payload, indent=2, sort_keys=True)
+
 def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
     return "\n".join(
         [
@@ -145,6 +150,7 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
             help_text.rstrip(),
         ]
     )
+
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())

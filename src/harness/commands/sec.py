@@ -39,22 +39,27 @@ SEC_HELP = (
 )
 
 app = typer.Typer(help=SEC_HELP, no_args_is_help=True)
+
 def Company(*args, **kwargs):
     from edgar import Company as EdgarCompany
 
     return EdgarCompany(*args, **kwargs)
+
 def set_identity(*args, **kwargs) -> None:
     from edgar import set_identity as edgar_set_identity
 
     edgar_set_identity(*args, **kwargs)
+
 def get_10k_items(*args, **kwargs):
     from minerva.sec import get_10k_items as minerva_get_10k_items
 
     return minerva_get_10k_items(*args, **kwargs)
+
 def get_13f_comparison(*args, **kwargs):
     from minerva.sec import get_13f_comparison as minerva_get_13f_comparison
 
     return minerva_get_13f_comparison(*args, **kwargs)
+
 def dispatch(
     args: list[str],
     settings: HarnessSettings,
@@ -148,6 +153,7 @@ def dispatch(
         ),
         exit_code=1,
     )
+
 def get_10k_command(
     ticker: str,
     *,
@@ -177,6 +183,7 @@ def get_10k_command(
     for item_number, text in item_map.items():
         lines.append(f"## Item {item_number}\n\n{(text or '').strip() or '(no text returned)'}")
     return CommandResult.from_text("\n\n".join(lines), duration_ms=elapsed_ms(start))
+
 def get_13f_command(cik: str, *, settings: HarnessSettings) -> CommandResult:
     """Fetch and format a 13-F comparison."""
     start: float = time.perf_counter()
@@ -206,6 +213,7 @@ def get_13f_command(cik: str, *, settings: HarnessSettings) -> CommandResult:
     for key in ["new", "exited", "increased", "decreased"]:
         sections.append(f"## {key.title()}\n\n{dataframe_to_markdown(comparison[key])}")
     return CommandResult.from_text("\n\n".join(sections), duration_ms=elapsed_ms(start))
+
 def get_financials_command(
     ticker: str,
     *,
@@ -235,6 +243,7 @@ def get_financials_command(
     frame = frame.reset_index() if hasattr(frame, "reset_index") else frame
     body: str = f"# {ticker.upper()} {statement_type.title()} Financials\n\n{dataframe_to_markdown(frame, max_rows=40)}"
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
+
 def download_filing_command(
     ticker: str,
     *,
@@ -275,6 +284,7 @@ def download_filing_command(
         ]
     )
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
+
 def bulk_download_command(
     *,
     ticker: str,
@@ -310,6 +320,7 @@ def bulk_download_command(
             start,
         )
     return CommandResult.from_text("\n".join(line for line in lines if line is not None).rstrip(), duration_ms=elapsed_ms(start))
+
 @app.command("10k", help="Fetch selected sections from the most recent 10-K.\n\nExample:\n  minerva sec 10k AAPL --items 1,1A,7")
 def ten_k_command(
     ctx: typer.Context,
@@ -325,6 +336,7 @@ def ten_k_command(
         )
     settings = get_settings()
     _print(get_10k_command(ticker, items=_parse_csv_values(items), settings=settings))
+
 @app.command("13f", help="Compare the two most recent 13F-HR filings.\n\nExample:\n  minerva sec 13f 1067983")
 def thirteen_f_command(
     ctx: typer.Context,
@@ -339,6 +351,7 @@ def thirteen_f_command(
         )
     settings = get_settings()
     _print(get_13f_command(cik, settings=settings))
+
 @app.command("financials", help="Fetch annual financial statements.\n\nExample:\n  minerva sec financials MSFT --type income --periods 5")
 def financials_command(
     ctx: typer.Context,
@@ -355,6 +368,7 @@ def financials_command(
         )
     settings = get_settings()
     _print(get_financials_command(ticker, periods=periods, statement_type=statement_type, settings=settings))
+
 @app.command("download", help="Download a filing as HTML or markdown.\n\nExample:\n  minerva sec download AAPL --form 10-K --format markdown")
 def download_command(
     ctx: typer.Context,
@@ -372,6 +386,7 @@ def download_command(
         )
     settings = get_settings()
     _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output, settings=settings))
+
 @app.command("bulk-download", help="Download a filing library for a single company.\n\nExample:\n  minerva sec bulk-download AAPL --output ./filings")
 def bulk_download_cli_command(
     ctx: typer.Context,
@@ -400,6 +415,7 @@ def bulk_download_cli_command(
             settings=get_settings(),
         )
     )
+
 def _download_filing_sections(
     *,
     filing: Any,
@@ -445,6 +461,7 @@ def _download_filing_sections(
 
     _write_sections_index(out_dir, sections)
     return {"mode": "split", "sections": sections}
+
 def _fallback_single_file(filing: Any, out_dir: Path) -> dict[str, Any]:
     """Fall back to downloading the full filing as a single markdown file."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -455,18 +472,22 @@ def _fallback_single_file(filing: Any, out_dir: Path) -> dict[str, Any]:
     (out_dir / "filing.md").write_text(text, encoding="utf-8")
     _write_sections_index(out_dir, [{"filename": "filing.md", "title": "Full filing"}])
     return {"mode": "single", "sections": [{"filename": "filing.md", "title": "Full filing"}]}
+
 def _write_sections_index(out_dir: Path, sections: list[dict[str, str]]) -> None:
     lines = ["# Sections", ""]
     for item in sections:
         lines.append(f"- [{item['title']}](./{item['filename']})")
     (out_dir / "_sections.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 def _configure_edgar(settings: HarnessSettings) -> str | None:
     if not settings.edgar_identity:
         return "EDGAR_IDENTITY is required for SEC commands"
     set_identity(settings.edgar_identity)
     return None
+
 def _parse_csv_values(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
 def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
     company = Company(ticker)
     if statement_type == "income":
@@ -476,11 +497,13 @@ def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
     if statement_type == "cash":
         return company.cashflow_statement(periods=periods, period="annual", as_dataframe=True)
     raise ValueError(f"unknown financial statement type: {statement_type}")
+
 def _latest_filing(company: Any, *, form: str) -> Any:
     filing_list = _list_filings(company, form=form, limit=1)
     if not filing_list:
         raise ValueError(f"no filings found for form {form}")
     return filing_list[0]
+
 def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
     normalized = file_format.lower()
     if normalized not in {"html", "markdown"}:
@@ -507,6 +530,7 @@ def _save_filing(filing: Any, target: Path, *, file_format: str) -> None:
         target.write_text(str(text_method()), encoding="utf-8")
         return
     raise ValueError("the filing object does not support markdown export")
+
 def _attachment_markdown(attachment: Any) -> str:
     markdown_value = getattr(attachment, "markdown", None)
     if callable(markdown_value):
@@ -514,6 +538,7 @@ def _attachment_markdown(attachment: Any) -> str:
     if markdown_value is None:
         raise ValueError("the attachment does not support markdown export")
     return str(markdown_value)
+
 def _bulk_download_one(
     *,
     ticker: str,
@@ -597,6 +622,7 @@ def _bulk_download_one(
         f"  Skipped: {skipped}",
         "  Errors: 0",
     ]
+
 def _list_filings(company: Company, *, form: str, limit: int) -> list[Any]:
     if limit <= 0:
         return []
@@ -605,12 +631,15 @@ def _list_filings(company: Company, *, form: str, limit: int) -> list[Any]:
         return list(filings)
     except TypeError:
         return [filings]
+
 def _filing_date(filing: Any) -> str:
     return str(getattr(filing, "filing_date", getattr(filing, "date", "latest")))
+
 def _as_bool(value: str | bool) -> bool:
     if isinstance(value, bool):
         return value
     return value.lower() not in {"0", "false", "no"}
+
 def _dispatch_help(subcommand: str, alternatives: list[str]) -> CommandResult:
     help_texts: dict[str, str] = {
         "10k": "Usage: sec 10k <ticker> [--items 1,1A,7]",
@@ -629,6 +658,7 @@ def _dispatch_help(subcommand: str, alternatives: list[str]) -> CommandResult:
         ),
         exit_code=1,
     )
+
 def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
     return "\n".join(
         [
@@ -639,6 +669,7 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
             help_text.rstrip(),
         ]
     )
+
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())

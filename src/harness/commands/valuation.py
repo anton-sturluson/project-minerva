@@ -30,6 +30,7 @@ VALUATION_HELP = (
 )
 
 app = typer.Typer(help=VALUATION_HELP, no_args_is_help=True)
+
 def dispatch(
     args: list[str],
     settings: HarnessSettings,
@@ -138,6 +139,7 @@ def dispatch(
         ),
         exit_code=1,
     )
+
 def run_dcf_command(
     *,
     revenue: float,
@@ -228,6 +230,7 @@ def run_dcf_command(
     output = f"{assumptions_block}\n\n## Projections\n\n{projection_table}\n\n{summary}"
     output += maybe_export_text(output, export_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
+
 def run_comps_command(
     *,
     ntm_revenue: float,
@@ -277,6 +280,7 @@ def run_comps_command(
     output = f"## Comparable Company Valuation\n\n{table}"
     output += maybe_export_text(output, export_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
+
 def run_reverse_dcf_command(
     *,
     price: float,
@@ -326,6 +330,7 @@ def run_reverse_dcf_command(
     )
     output += maybe_export_text(output, export_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
+
 def run_sotp_command(
     *,
     segments_spec: str,
@@ -394,6 +399,7 @@ def run_sotp_command(
     )
     output += maybe_export_text(output, export_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
+
 def run_report_command(
     *,
     ticker: str,
@@ -508,6 +514,7 @@ def run_report_command(
         f"report_written_to: {str(target)}",
         duration_ms=elapsed_ms(start),
     )
+
 @app.command("dcf", help="Run a discounted cash flow valuation.\n\nExample:\n  minerva valuation dcf --revenue 394e9 --growth 0.06,0.05,0.04 --margins 0.28,0.29,0.30 --wacc 0.10 --terminal-growth 0.03 --shares 15.5e9 --net-cash 57e9")
 def dcf_command(
     ctx: typer.Context,
@@ -549,6 +556,7 @@ def dcf_command(
             settings=settings,
         )
     )
+
 @app.command("comps", help="Run a comparable company valuation.\n\nExample:\n  minerva valuation comps --ntm-revenue 420e9 --ntm-ebitda 140e9 --ntm-fcf 110e9 --shares 15.5e9 --net-cash 57e9 --ev-rev 8.5 --ev-ebitda 25 --p-fcf 30")
 def comps_command(
     ctx: typer.Context,
@@ -584,6 +592,7 @@ def comps_command(
             settings=settings,
         )
     )
+
 @app.command("reverse-dcf", help="Infer the market-implied constant revenue growth rate.\n\nExample:\n  minerva valuation reverse-dcf --price 220 --shares 15.5e9 --net-cash 57e9 --base-revenue 394e9 --margins 0.28,0.29,0.30 --wacc 0.10 --terminal-growth 0.03")
 def reverse_dcf_command(
     ctx: typer.Context,
@@ -619,6 +628,7 @@ def reverse_dcf_command(
             settings=settings,
         )
     )
+
 @app.command("sotp", help="Run a sum-of-the-parts valuation.\n\nExample:\n  minerva valuation sotp --segments segments.json --net-cash 57e9 --shares 15.5e9")
 def sotp_command(
     ctx: typer.Context,
@@ -636,6 +646,7 @@ def sotp_command(
             alternatives=["`minerva valuation sotp --segments segments.json --net-cash 57e9 --shares 15.5e9`", "`minerva valuation comps --ntm-revenue 420e9 ...`"],
         )
     _print(run_sotp_command(segments_spec=str(segments), net_cash=float(net_cash), shares=float(shares), export_path=export, settings=settings))
+
 @app.command("report", help="Generate a full markdown valuation report.\n\nExample:\n  minerva valuation report --ticker AAPL --config valuation.json --output valuation.md")
 def report_command(
     ctx: typer.Context,
@@ -652,6 +663,7 @@ def report_command(
             alternatives=["`minerva valuation report --ticker AAPL --config valuation.json --output valuation.md`", "`minerva valuation dcf --revenue 394e9 ...`"],
         )
     _print(run_report_command(ticker=str(ticker), config_path=str(config), output_path=str(output), settings=settings))
+
 def _load_segments_payload(segments_spec: str) -> list[dict[str, Any]]:
     try:
         parsed = json.loads(segments_spec)
@@ -661,6 +673,7 @@ def _load_segments_payload(segments_spec: str) -> list[dict[str, Any]]:
     if not isinstance(parsed, list):
         raise ValueError("segments JSON must decode to a list of objects")
     return parsed
+
 def _dispatch_help(subcommand: str, missing: list[str]) -> CommandResult:
     usage: dict[str, str] = {
         "dcf": "valuation dcf --revenue <float> --growth <csv> --margins <csv> --wacc <float> --terminal-growth <float> --shares <float> --net-cash <float> [--fcf <float>] [--export PATH]",
@@ -679,6 +692,7 @@ def _dispatch_help(subcommand: str, missing: list[str]) -> CommandResult:
         ),
         exit_code=1,
     )
+
 def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
     return "\n".join(
         [
@@ -689,6 +703,7 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
             help_text.rstrip(),
         ]
     )
+
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())

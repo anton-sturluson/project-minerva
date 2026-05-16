@@ -49,6 +49,7 @@ THEMES: dict[str, dict[str, str]] = {
 }
 
 app = typer.Typer(help=PLOT_HELP, no_args_is_help=True)
+
 def dispatch(
     args: list[str],
     settings: HarnessSettings,
@@ -110,6 +111,7 @@ def dispatch(
         ),
         exit_code=1,
     )
+
 def create_plot(
     *,
     chart_type: str,
@@ -152,6 +154,7 @@ def create_plot(
             start,
         )
     return CommandResult.from_text(f"saved_to: {relative_display_path(target_path)}", duration_ms=elapsed_ms(start))
+
 def create_wordcloud(
     *,
     file_path: str | None = None,
@@ -196,6 +199,7 @@ def create_wordcloud(
             start,
         )
     return CommandResult.from_text(f"saved_to: {relative_display_path(target_path)}", duration_ms=elapsed_ms(start))
+
 @app.command("bar", help="Create a bar chart from a CSV file.\n\nExample:\n  minerva plot bar --data revenue.csv --x year --y revenue --theme minerva-classic")
 def bar_command(
     ctx: typer.Context,
@@ -215,6 +219,7 @@ def bar_command(
             alternatives=["`minerva plot bar --data revenue.csv --x year --y revenue`", "`minerva plot line --data revenue.csv --x year --y revenue`"],
         )
     _print(create_plot(chart_type="bar", data_path=str(data), x_column=str(x), y_column=str(y), title=title, output_path=output, theme=theme or settings.minerva_plot_theme, settings=settings))
+
 @app.command("line", help="Create a line chart from a CSV file.\n\nExample:\n  minerva plot line --data revenue.csv --x year --y revenue --theme minerva-classic")
 def line_command(
     ctx: typer.Context,
@@ -234,6 +239,7 @@ def line_command(
             alternatives=["`minerva plot line --data revenue.csv --x year --y revenue`", "`minerva plot scatter --data comps.csv --x growth --y ev_rev`"],
         )
     _print(create_plot(chart_type="line", data_path=str(data), x_column=str(x), y_column=str(y), title=title, output_path=output, theme=theme or settings.minerva_plot_theme, settings=settings))
+
 @app.command("scatter", help="Create a scatter plot from a CSV file.\n\nExample:\n  minerva plot scatter --data comps.csv --x growth --y ev_rev --theme bloomberg")
 def scatter_command(
     ctx: typer.Context,
@@ -253,6 +259,7 @@ def scatter_command(
             alternatives=["`minerva plot scatter --data comps.csv --x growth --y ev_rev`", "`minerva plot line --data revenue.csv --x year --y revenue`"],
         )
     _print(create_plot(chart_type="scatter", data_path=str(data), x_column=str(x), y_column=str(y), title=title, output_path=output, theme=theme or settings.minerva_plot_theme, settings=settings))
+
 @app.command("wordcloud", help="Create a word cloud from text.\n\nExample:\n  minerva plot wordcloud --file apple-10k.md --title 'AAPL Risk Factors' --output aapl-risks.png")
 def wordcloud_command(
     ctx: typer.Context,
@@ -272,10 +279,12 @@ def wordcloud_command(
             alternatives=["`minerva plot wordcloud --file notes.txt`", "`minerva run \"sec 10k AAPL --items 1A | plot wordcloud --output aapl-risks.png\"`"],
         )
     _print(create_wordcloud(file_path=file_path, stdin=typer.get_binary_stream("stdin").read(), output_path=output, title=title, max_words=max_words, theme=theme or settings.minerva_plot_theme, stopwords_mode=stopwords, settings=settings))
+
 def _theme(name: str) -> dict[str, str]:
     if name not in THEMES:
         raise ValueError("theme must be `minerva-classic` or `bloomberg`")
     return THEMES[name]
+
 def _styled_figure(palette: dict[str, str]):
     import matplotlib.pyplot as plt
 
@@ -285,6 +294,7 @@ def _styled_figure(palette: dict[str, str]):
     for spine in ax.spines.values():
         spine.set_visible(False)
     return fig, ax
+
 def _finalize_axes(ax, palette: dict[str, str], *, x_label: str, y_label: str, title: str) -> None:
     ax.set_xlabel(x_label, color=palette["text"], fontsize=11, fontfamily="sans-serif")
     ax.set_ylabel(y_label, color=palette["text"], fontsize=11, fontfamily="sans-serif")
@@ -292,8 +302,10 @@ def _finalize_axes(ax, palette: dict[str, str], *, x_label: str, y_label: str, t
     ax.tick_params(axis="x", colors=palette["text"], labelsize=10)
     ax.tick_params(axis="y", colors=palette["text"], labelsize=10)
     _add_watermark(ax, palette)
+
 def _add_watermark(ax, palette: dict[str, str]) -> None:
     ax.text(0.99, 0.02, "Minerva", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color=palette["grid"], alpha=0.8)
+
 def _stopwords(mode: str) -> set[str]:
     from minerva.text_analysis import DEFAULT_FINANCIAL_STOPWORDS
     from wordcloud import STOPWORDS
@@ -303,6 +315,7 @@ def _stopwords(mode: str) -> set[str]:
     if mode == "default":
         return set(STOPWORDS)
     raise ValueError("`--stopwords` must be `financial` or `default`")
+
 def _dispatch_help(subcommand: str, missing: list[str]) -> CommandResult:
     return CommandResult.from_text(
         "",
@@ -314,6 +327,7 @@ def _dispatch_help(subcommand: str, missing: list[str]) -> CommandResult:
         ),
         exit_code=1,
     )
+
 def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
     return "\n".join(
         [
@@ -324,6 +338,7 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
             help_text.rstrip(),
         ]
     )
+
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())

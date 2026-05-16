@@ -56,6 +56,7 @@ app = typer.Typer(
         "  minerva run \"sec financials MSFT --type income && valuation comps --ntm-revenue 420e9 ...\"\n"
     ),
 )
+
 def run_command(
     ctx: typer.Context,
     command: str | None = typer.Argument(

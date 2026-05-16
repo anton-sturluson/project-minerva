@@ -34,6 +34,7 @@ BRIEF_HELP = (
 )
 
 app = typer.Typer(help=BRIEF_HELP, no_args_is_help=True)
+
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch brief commands for `minerva run`."""
     
@@ -109,6 +110,7 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
         return CommandResult.from_text("", stderr=str(exc), exit_code=1)
 
     return CommandResult.from_text("", stderr=_usage_error(f"unknown `brief` subcommand `{subcommand}`"), exit_code=1)
+
 def filings_command(
     *,
     run_date,
@@ -149,6 +151,7 @@ def filings_command(
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def earnings_command(
     *,
     run_date,
@@ -175,6 +178,7 @@ def earnings_command(
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def macro_command(
     *,
     run_date,
@@ -200,6 +204,7 @@ def macro_command(
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def macro_collect_command(
     *,
     run_date,
@@ -225,6 +230,7 @@ def macro_collect_command(
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def ir_command(
     *,
     run_date,
@@ -248,6 +254,7 @@ def ir_command(
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def market_command(
     *,
     run_date,
@@ -274,6 +281,7 @@ def market_command(
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def prep_command(*, run_date, settings: HarnessSettings) -> CommandResult:
     """Prepare agent-ready evidence from collected sources."""
     start = time.perf_counter()
@@ -288,6 +296,7 @@ def prep_command(*, run_date, settings: HarnessSettings) -> CommandResult:
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def audit_command(*, run_date, settings: HarnessSettings) -> CommandResult:
     """Run a bounded audit of the prepared evidence."""
     start = time.perf_counter()
@@ -302,6 +311,7 @@ def audit_command(*, run_date, settings: HarnessSettings) -> CommandResult:
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 def review_log_command(*, run_date, notes: str, settings: HarnessSettings) -> CommandResult:
     """Append one review-log entry for the run."""
     start = time.perf_counter()
@@ -316,6 +326,7 @@ def review_log_command(*, run_date, notes: str, settings: HarnessSettings) -> Co
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
 @app.command("filings", help="Collect overnight SEC filings for the monitored universe.")
 def filings_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -337,6 +348,7 @@ def filings_cli(
             settings=settings,
         )
     )
+
 @app.command("earnings", help="Collect reported and upcoming earnings metadata.")
 def earnings_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -345,6 +357,7 @@ def earnings_cli(
 ) -> None:
     settings = get_settings()
     _print(earnings_command(run_date=parse_iso_date(date_arg), source=source, provider=provider, settings=settings))
+
 @app.command("macro", help="Collect the run-date macro and policy calendar.")
 def macro_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -353,6 +366,7 @@ def macro_cli(
 ) -> None:
     settings = get_settings()
     _print(macro_command(run_date=parse_iso_date(date_arg), source=source, registry=registry, settings=settings))
+
 @app.command("macro-collect", help="Build a normalized macro-events source from the local registry.")
 def macro_collect_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -361,6 +375,7 @@ def macro_collect_cli(
 ) -> None:
     settings = get_settings()
     _print(macro_collect_command(run_date=parse_iso_date(date_arg), registry=registry, output=output, settings=settings))
+
 @app.command("ir", help="Scan configured IR feeds for overnight releases.")
 def ir_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -368,6 +383,7 @@ def ir_cli(
 ) -> None:
     settings = get_settings()
     _print(ir_command(run_date=parse_iso_date(date_arg), registry=registry, settings=settings))
+
 @app.command("market", help="Collect narrow market context that materially matters.")
 def market_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -376,14 +392,17 @@ def market_cli(
 ) -> None:
     settings = get_settings()
     _print(market_command(run_date=parse_iso_date(date_arg), source=source, provider=provider, settings=settings))
+
 @app.command("prep", help="Prepare the agent-ready evidence pack.")
 def prep_cli(date_arg: str | None = typer.Option(None, "--date", help="Run date.")) -> None:
     settings = get_settings()
     _print(prep_command(run_date=parse_iso_date(date_arg), settings=settings))
+
 @app.command("audit", help="Run a bounded miss-check after prep.")
 def audit_cli(date_arg: str | None = typer.Option(None, "--date", help="Run date.")) -> None:
     settings = get_settings()
     _print(audit_command(run_date=parse_iso_date(date_arg), settings=settings))
+
 @app.command("review-log", help="Append a structured review-log entry.")
 def review_log_cli(
     date_arg: str | None = typer.Option(None, "--date", help="Run date."),
@@ -391,6 +410,7 @@ def review_log_cli(
 ) -> None:
     settings = get_settings()
     _print(review_log_command(run_date=parse_iso_date(date_arg), notes=notes, settings=settings))
+
 def _usage_error(message: str) -> str:
     return "\n".join(
         [
@@ -401,10 +421,13 @@ def _usage_error(message: str) -> str:
             BRIEF_HELP.rstrip(),
         ]
     )
+
 def _summary_lines(summary: dict[str, object]) -> str:
     return "\n".join(f"{key}: {summary[key]}" for key in sorted(summary))
+
 def _split_csv(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())

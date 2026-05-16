@@ -23,6 +23,7 @@ ANALYZE_HELP = (
 
 TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9'-]*")
 app = typer.Typer(help=ANALYZE_HELP, no_args_is_help=True)
+
 def dispatch(
     args: list[str],
     settings: HarnessSettings,
@@ -72,6 +73,7 @@ def dispatch(
         ),
         exit_code=1,
     )
+
 def analyze_ngrams_command(
     *,
     file_path: str | None = None,
@@ -103,6 +105,7 @@ def analyze_ngrams_command(
             rows.append([term, str(count), f"{density:.1f}"])
         sections.append(f"## {title}\n\n{build_markdown_table(['term', 'count', 'mentions_per_10k_words'], rows or [['(none)', '0', '0.0']], alignment=['l', 'r', 'r'])}")
     return CommandResult.from_text("\n\n".join(sections), duration_ms=elapsed_ms(start))
+
 def analyze_topics_command(
     *,
     file_path: str | None = None,
@@ -173,6 +176,7 @@ def analyze_topics_command(
         member_text = ", ".join(f"{item} ({candidate_counts[item]})" for item in members)
         sections.append(f'Topic {index}: "{seed}" (density: {density:.1f} per 10K words)\n  {member_text}')
     return CommandResult.from_text("\n\n".join(sections), duration_ms=elapsed_ms(start))
+
 @app.command("ngrams", help="Extract frequent non-stopword unigrams, bigrams, and trigrams.\n\nExample:\n  minerva analyze ngrams apple-10k.md --top 20 --min-count 3")
 def ngrams_cli_command(
     ctx: typer.Context,
@@ -188,6 +192,7 @@ def ngrams_cli_command(
             alternatives=["`minerva analyze ngrams apple-10k.md --top 20`", "`minerva run \"sec 10k AAPL --items 1A | analyze ngrams --top 15\"`"],
         )
     _print(analyze_ngrams_command(file_path=file_path, stdin=typer.get_binary_stream("stdin").read(), top=top, min_count=min_count))
+
 @app.command("topics", help="Discover topic clusters from document term co-occurrence.\n\nExample:\n  minerva analyze topics apple-10k.md --clusters 5 --min-count 3")
 def topics_cli_command(
     ctx: typer.Context,
@@ -203,6 +208,7 @@ def topics_cli_command(
             alternatives=["`minerva analyze topics apple-10k.md --clusters 5`", "`minerva run \"sec 10k AAPL --items 1A | analyze topics --clusters 5\"`"],
         )
     _print(analyze_topics_command(file_path=file_path, stdin=typer.get_binary_stream("stdin").read(), clusters=clusters, min_count=min_count))
+
 def _split_file_and_flags(args: list[str]) -> tuple[str | None, dict[str, str | bool]]:
     file_path: str | None = None
     if args and not args[0].startswith("--"):
@@ -210,6 +216,7 @@ def _split_file_and_flags(args: list[str]) -> tuple[str | None, dict[str, str | 
         args = args[1:]
     parsed = parse_flag_args(args)
     return file_path, parsed
+
 def _filtered_tokens(text: str) -> list[str]:
     from minerva.text_analysis import DEFAULT_FINANCIAL_STOPWORDS
 
@@ -218,13 +225,17 @@ def _filtered_tokens(text: str) -> list[str]:
         for token in (match.group(0).lower() for match in TOKEN_RE.finditer(text))
         if token not in DEFAULT_FINANCIAL_STOPWORDS and len(token) > 2 and not token.isdigit()
     ]
+
 def _ngram_counter(tokens: list[str], *, n: int, min_count: int) -> Counter[str]:
     counts: Counter[str] = Counter(" ".join(tokens[index : index + n]) for index in range(0, max(len(tokens) - n + 1, 0)))
     return Counter({term: count for term, count in counts.items() if count >= min_count})
+
 def _affinity(term: str, seed: str, paragraph_presence: dict[str, set[int]]) -> int:
     return len(paragraph_presence.get(term, set()) & paragraph_presence.get(seed, set()))
+
 def _stdin_available() -> bool:
     return not typer.get_text_stream("stdin").isatty()
+
 def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text: str) -> str:
     return "\n".join(
         [
@@ -235,6 +246,7 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
             help_text.rstrip(),
         ]
     )
+
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())
