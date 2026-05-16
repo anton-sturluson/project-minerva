@@ -13,16 +13,17 @@ from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
 from harness.portfolio_state import (
     add_adjacency_entry,
-    canonical_security_id,
+    add_thesis_metric,
     enrich_portfolio,
     ensure_portfolio_layout,
+    get_thesis_by_ticker,
     load_json,
     parse_iso_date,
     portfolio_paths,
     remove_adjacency_entry,
     render_adjacency_markdown,
     render_thesis_markdown,
-    set_thesis_card,
+    set_thesis_card_v2,
     sync_portfolio,
     write_json,
 )
@@ -32,7 +33,7 @@ PORTFOLIO_HELP = (
     "Examples:\n"
     "  minerva portfolio sync --holdings-source ./holdings.csv --transactions-source ./transactions.csv --date 2026-04-08\n"
     "  minerva portfolio adjacency add NVDA TSM --type supply-chain --priority high\n"
-    "  minerva portfolio thesis set NVDA --summary \"AI capex demand stays strong\" --expectations \"Blackwell ramps;Gross margin normalizes\"\n"
+    "  minerva portfolio thesis set nvda --ticker NVDA --summary \"AI capex demand stays strong\" --core-thesis \"Blackwell ramps\"\n"
 )
 
 ADJACENCY_HELP = "Manage the local adjacent-company map."
@@ -41,8 +42,10 @@ THESIS_HELP = "Manage compact thesis cards for monitored securities."
 app = typer.Typer(help=PORTFOLIO_HELP, no_args_is_help=True)
 adjacency_app = typer.Typer(help=ADJACENCY_HELP, no_args_is_help=True)
 thesis_app = typer.Typer(help=THESIS_HELP, no_args_is_help=True)
+thesis_metric_app = typer.Typer(help="Manage thesis-card metric observations.", no_args_is_help=True)
 app.add_typer(adjacency_app, name="adjacency")
 app.add_typer(thesis_app, name="thesis")
+thesis_app.add_typer(thesis_metric_app, name="metric")
 
 
 def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: bytes = b"") -> CommandResult:
@@ -228,18 +231,32 @@ def list_thesis_command(*, settings: HarnessSettings | None = None) -> CommandRe
     return CommandResult.from_text(render_thesis_markdown(cards), duration_ms=elapsed_ms(start))
 
 
-def show_thesis_command(*, security: str, settings: HarnessSettings | None = None) -> CommandResult:
+def show_thesis_command(*, card_id: str, settings: HarnessSettings | None = None) -> CommandResult:
     """Show one thesis card."""
     start = time.perf_counter()
     paths = ensure_portfolio_layout((settings or get_settings()).ensure_workspace_root())
     cards = load_json(paths.thesis_cards, default=[])
-    security_id = canonical_security_id(security)
-    selected = [card for card in cards if str(card.get("security_id", "")).upper() == security_id]
+    selected = [card for card in cards if str(card.get("card_id", "")) == card_id]
     if not selected:
         return error_result(
-            f"no thesis card exists for {security_id}",
-            "set one first with `portfolio thesis set`",
-            [f"`portfolio thesis set {security_id} --summary ...`"],
+            f"no thesis card exists for `{card_id}`",
+            "create it first with `portfolio thesis set`",
+            [f"`portfolio thesis set {card_id} --ticker GTLB --summary ...`"],
+            start,
+        )
+    return CommandResult.from_text(render_thesis_markdown(selected), duration_ms=elapsed_ms(start))
+
+
+def by_ticker_thesis_command(*, ticker: str, settings: HarnessSettings | None = None) -> CommandResult:
+    """Show thesis cards linked to a ticker."""
+    start = time.perf_counter()
+    try:
+        selected = get_thesis_by_ticker((settings or get_settings()).ensure_workspace_root(), ticker=ticker)
+    except Exception as exc:
+        return error_result(
+            f"failed to look up thesis cards by ticker: {exc}",
+            "pass one valid ticker symbol",
+            ["`portfolio thesis by-ticker MU`", "`portfolio thesis by-ticker GTLB`"],
             start,
         )
     return CommandResult.from_text(render_thesis_markdown(selected), duration_ms=elapsed_ms(start))
@@ -247,30 +264,66 @@ def show_thesis_command(*, security: str, settings: HarnessSettings | None = Non
 
 def set_thesis_command(
     *,
-    security: str,
+    card_id: str,
+    ticker_symbols: list[str],
     summary: str,
-    expectations: str,
-    disconfirming: str,
+    core_thesis: list[str],
+    signals: list[str],
     settings: HarnessSettings | None = None,
 ) -> CommandResult:
-    """Create or replace one thesis card."""
+    """Create or replace one thesis card definition."""
     start = time.perf_counter()
     try:
-        card = set_thesis_card(
+        card = set_thesis_card_v2(
             (settings or get_settings()).ensure_workspace_root(),
-            security=security,
+            card_id=card_id,
+            ticker_symbols=ticker_symbols,
             summary=summary,
-            expectations=_split_multi_value(expectations),
-            disconfirming_signals=_split_multi_value(disconfirming),
+            core_thesis=core_thesis,
+            signals=signals,
         )
     except Exception as exc:
         return error_result(
             f"failed to set thesis card: {exc}",
-            "pass a security identifier and summary, then retry",
-            ["`portfolio thesis set NVDA --summary 'AI capex demand stays strong'`"],
+            "pass a lowercase card id, at least one --ticker, and a summary",
+            ["`portfolio thesis set gtlb --ticker GTLB --summary 'DevSecOps platform compounder'`"],
             start,
         )
     return CommandResult.from_text(json_lines(card), duration_ms=elapsed_ms(start))
+
+
+def add_thesis_metric_command(
+    *,
+    card_id: str,
+    name: str,
+    period: str,
+    value: str,
+    date: str | None,
+    source: str | None,
+    unit: str | None,
+    settings: HarnessSettings | None = None,
+) -> CommandResult:
+    """Append one metric observation to a thesis card."""
+    start = time.perf_counter()
+    try:
+        metric = add_thesis_metric(
+            (settings or get_settings()).ensure_workspace_root(),
+            card_id=card_id,
+            name=name,
+            period=period,
+            value=value,
+            date=date,
+            source=source,
+            unit=unit,
+        )
+    except Exception as exc:
+        return error_result(
+            f"failed to add thesis metric: {exc}",
+            "pass a card id, metric name, fiscal period, and value",
+            ["`portfolio thesis metric add gtlb --name NRR --period 'Q1 FY2027' --value '116%' --unit %`"],
+            start,
+        )
+    return CommandResult.from_text(json_lines(metric), duration_ms=elapsed_ms(start))
 
 
 def render_thesis_command(*, settings: HarnessSettings | None = None) -> CommandResult:
@@ -364,18 +417,55 @@ def thesis_list_cli() -> None:
 
 
 @thesis_app.command("show", help="Show one thesis card.")
-def thesis_show_cli(security: str = typer.Argument(..., help="Security identifier.")) -> None:
-    _print(show_thesis_command(security=security))
+def thesis_show_cli(card_id: str = typer.Argument(..., help="Thesis card id.")) -> None:
+    _print(show_thesis_command(card_id=card_id))
 
 
-@thesis_app.command("set", help="Create or replace one thesis card.")
+@thesis_app.command("by-ticker", help="Show thesis cards linked to a ticker.")
+def thesis_by_ticker_cli(ticker: str = typer.Argument(..., help="Ticker symbol.")) -> None:
+    _print(by_ticker_thesis_command(ticker=ticker))
+
+
+@thesis_app.command("set", help="Create or replace one thesis card definition.")
 def thesis_set_cli(
-    security: str = typer.Argument(..., help="Security identifier."),
+    card_id: str = typer.Argument(..., help="Thesis card id, lowercase kebab-style."),
+    ticker_symbols: list[str] = typer.Option([], "--ticker", help="Ticker symbol; repeat for multi-ticker cards."),
     summary: str = typer.Option(..., "--summary", help="Compact thesis summary."),
-    expectations: str = typer.Option("", "--expectations", help="Semicolon-separated key expectations."),
-    disconfirming: str = typer.Option("", "--disconfirming", help="Semicolon-separated disconfirming signals."),
+    core_thesis: list[str] = typer.Option([], "--core-thesis", help="Core thesis bullet; repeat up to 5."),
+    signals: list[str] = typer.Option([], "--signal", help="Signal bullet; repeat up to 5."),
 ) -> None:
-    _print(set_thesis_command(security=security, summary=summary, expectations=expectations, disconfirming=disconfirming))
+    _print(
+        set_thesis_command(
+            card_id=card_id,
+            ticker_symbols=ticker_symbols,
+            summary=summary,
+            core_thesis=core_thesis,
+            signals=signals,
+        )
+    )
+
+
+@thesis_metric_app.command("add", help="Append one thesis metric observation.")
+def thesis_metric_add_cli(
+    card_id: str = typer.Argument(..., help="Thesis card id."),
+    name: str = typer.Option(..., "--name", help="Metric name."),
+    period: str = typer.Option(..., "--period", help="Fiscal period, e.g. Q1 FY2027."),
+    value: str = typer.Option(..., "--value", help="Metric observation value, stored as text."),
+    date_value: str | None = typer.Option(None, "--date", help="Optional observation date."),
+    source: str | None = typer.Option(None, "--source", help="Optional source note."),
+    unit: str | None = typer.Option(None, "--unit", help="Optional metric unit."),
+) -> None:
+    _print(
+        add_thesis_metric_command(
+            card_id=card_id,
+            name=name,
+            period=period,
+            value=value,
+            date=date_value,
+            source=source,
+            unit=unit,
+        )
+    )
 
 
 @thesis_app.command("render", help="Render thesis cards markdown.")
@@ -426,17 +516,38 @@ def _dispatch_thesis(args: list[str], settings: HarnessSettings) -> CommandResul
         return render_thesis_command(settings=settings)
     if action == "show":
         if len(args) < 2:
-            return CommandResult.from_text("", stderr=_usage_error("missing security identifier"), exit_code=1)
-        return show_thesis_command(security=args[1], settings=settings)
+            return CommandResult.from_text("", stderr=_usage_error("missing thesis card id"), exit_code=1)
+        return show_thesis_command(card_id=args[1], settings=settings)
+    if action == "by-ticker":
+        if len(args) < 2:
+            return CommandResult.from_text("", stderr=_usage_error("missing ticker symbol"), exit_code=1)
+        return by_ticker_thesis_command(ticker=args[1], settings=settings)
     if action == "set":
         if len(args) < 2:
-            return CommandResult.from_text("", stderr=_usage_error("missing security identifier"), exit_code=1)
-        parsed = parse_flag_args(args[2:])
+            return CommandResult.from_text("", stderr=_usage_error("missing thesis card id"), exit_code=1)
+        parsed = _parse_repeated_flag_args(args[2:])
         return set_thesis_command(
-            security=args[1],
-            summary=str(parsed.get("summary", "")),
-            expectations=str(parsed.get("expectations", "")),
-            disconfirming=str(parsed.get("disconfirming", "")),
+            card_id=args[1],
+            ticker_symbols=parsed.get("ticker", []),
+            summary=_one_flag_value(parsed, "summary"),
+            core_thesis=parsed.get("core-thesis", []),
+            signals=parsed.get("signal", []),
+            settings=settings,
+        )
+    if action == "metric":
+        if len(args) < 2 or args[1] != "add":
+            return CommandResult.from_text("", stderr=_usage_error("expected `portfolio thesis metric add <CARD_ID>`"), exit_code=1)
+        if len(args) < 3:
+            return CommandResult.from_text("", stderr=_usage_error("missing thesis card id"), exit_code=1)
+        parsed = _parse_repeated_flag_args(args[3:])
+        return add_thesis_metric_command(
+            card_id=args[2],
+            name=_one_flag_value(parsed, "name"),
+            period=_one_flag_value(parsed, "period"),
+            value=_one_flag_value(parsed, "value"),
+            date=_optional_flag_value(parsed, "date"),
+            source=_optional_flag_value(parsed, "source"),
+            unit=_optional_flag_value(parsed, "unit"),
             settings=settings,
         )
     return CommandResult.from_text("", stderr=_usage_error(f"unknown thesis action `{action}`"), exit_code=1)
@@ -447,7 +558,7 @@ def _usage_error(message: str) -> str:
         [
             f"What went wrong: {message}",
             "What to do instead: use one of the supported portfolio commands",
-            "Available alternatives: `portfolio sync`, `portfolio adjacency list`, `portfolio thesis set NVDA --summary ...`",
+            "Available alternatives: `portfolio sync`, `portfolio adjacency list`, `portfolio thesis set gtlb --ticker GTLB --summary ...`",
             "",
             PORTFOLIO_HELP.rstrip(),
         ]
@@ -457,6 +568,32 @@ def _usage_error(message: str) -> str:
 def _split_multi_value(value: str) -> list[str]:
     normalized = value.replace("|", ";")
     return [item.strip() for item in normalized.split(";") if item.strip()]
+
+
+def _parse_repeated_flag_args(args: list[str]) -> dict[str, list[str]]:
+    """Parse simple `--name value` args while preserving repeated flags."""
+    parsed: dict[str, list[str]] = {}
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if not token.startswith("--"):
+            raise ValueError(_usage_error("arguments must be passed as `--name value` pairs"))
+        if index + 1 >= len(args):
+            raise ValueError(_usage_error(f"missing value for flag `{token}`"))
+        key = token.removeprefix("--")
+        parsed.setdefault(key, []).append(args[index + 1])
+        index += 2
+    return parsed
+
+
+def _one_flag_value(parsed: dict[str, list[str]], key: str) -> str:
+    values = parsed.get(key, [])
+    return values[-1] if values else ""
+
+
+def _optional_flag_value(parsed: dict[str, list[str]], key: str) -> str | None:
+    value = _one_flag_value(parsed, key).strip()
+    return value or None
 
 
 def json_lines(payload: dict[str, Any]) -> str:

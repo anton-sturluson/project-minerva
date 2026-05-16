@@ -601,7 +601,14 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
         ),
     )
     grouped = group_prepared_events(sorted_events)
-    thesis_map = {str(card.get("security_id", "")): card for card in thesis_cards}
+    thesis_map = {str(card.get("card_id", "")): card for card in thesis_cards if card.get("card_id")}
+    thesis_ticker_index: dict[str, list[str]] = {}
+    for card_id, card in thesis_map.items():
+        for ticker in card.get("ticker_symbols", []):
+            normalized_ticker = str(ticker or "").strip().upper()
+            if normalized_ticker:
+                thesis_ticker_index.setdefault(normalized_ticker, []).append(card_id)
+    thesis_ticker_index = {ticker: sorted(set(card_ids)) for ticker, card_ids in sorted(thesis_ticker_index.items())}
     prepared = {
         "date": run_date.isoformat(),
         "generated_at": now_utc_iso(),
@@ -610,6 +617,8 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
         "grouped_events": grouped,
         "suppressed": suppressed,
         "thesis_cards": {key: thesis_map[key] for key in sorted(thesis_map)},
+        "thesis_cards_by_ticker": thesis_ticker_index,
+        "thesis_ticker_index": thesis_ticker_index,
         "source_status": manifest.get("sources", {}),
     }
 
