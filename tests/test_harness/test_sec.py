@@ -36,13 +36,64 @@ def test_get_10k_command_formats_requested_items(tmp_path: Path, monkeypatch) ->
 
 def test_get_13f_command_formats_comparison_sections(tmp_path: Path, monkeypatch) -> None:
     settings = HarnessSettings(workspace_root=tmp_path, edgar_identity="Minerva Research minerva@example.com")
+    current = pd.DataFrame(
+        [
+            {
+                "Issuer": "AAA CORP",
+                "Class": "COM",
+                "Cusip": "000000001",
+                "Ticker": "AAA",
+                "SharesPrnAmount": 110,
+                "Value": 30_000_000,
+                "PutCall": "",
+            },
+            {
+                "Issuer": "BBB CORP",
+                "Class": "COM",
+                "Cusip": "000000002",
+                "Ticker": "BBB",
+                "SharesPrnAmount": 200,
+                "Value": 20_000_000,
+                "PutCall": "",
+            },
+        ]
+    )
+    previous = pd.DataFrame(
+        [
+            {
+                "Issuer": "AAA CORP",
+                "Class": "COM",
+                "Cusip": "000000001",
+                "Ticker": "AAA",
+                "SharesPrnAmount": 100,
+                "Value": 25_000_000,
+                "PutCall": "",
+            },
+            {
+                "Issuer": "CCC CORP",
+                "Class": "COM",
+                "Cusip": "000000003",
+                "Ticker": "CCC",
+                "SharesPrnAmount": 300,
+                "Value": 10_000_000,
+                "PutCall": "",
+            },
+        ]
+    )
+    merged = current.merge(previous, on=["Cusip"], how="outer", suffixes=("_current", "_previous"), indicator=True)
+    both = merged[merged["_merge"] == "both"].copy()
     comparison = {
-        "current": pd.DataFrame([{"issuer": "AAA"}, {"issuer": "BBB"}]),
-        "previous": pd.DataFrame([{"issuer": "AAA"}]),
-        "new": pd.DataFrame([{"issuer": "BBB", "value": 20}]),
-        "exited": pd.DataFrame([{"issuer": "CCC", "value": 10}]),
-        "increased": pd.DataFrame([{"issuer": "AAA", "value": 30}]),
-        "decreased": pd.DataFrame([{"issuer": "DDD", "value": 5}]),
+        "manager_name": "Example Manager",
+        "current_period": "Q1 2026 (2026-03-31)",
+        "previous_period": "Q4 2025 (2025-12-31)",
+        "current": current,
+        "previous": previous,
+        "comparison": merged,
+        "new": merged[merged["_merge"] == "left_only"].copy(),
+        "exited": merged[merged["_merge"] == "right_only"].copy(),
+        "increased": both[both["SharesPrnAmount_current"] > both["SharesPrnAmount_previous"]].copy(),
+        "decreased": both[both["SharesPrnAmount_current"] < both["SharesPrnAmount_previous"]].copy(),
+        "unchanged": both[both["SharesPrnAmount_current"] == both["SharesPrnAmount_previous"]].copy(),
     }
     monkeypatch.setattr("harness.commands.sec.get_13f_comparison", lambda cik: comparison)
     monkeypatch.setattr("harness.commands.sec._configure_edgar", lambda settings: None)
@@ -51,9 +102,12 @@ def test_get_13f_command_formats_comparison_sections(tmp_path: Path, monkeypatch
     output = result.stdout.decode("utf-8")
 
     assert result.exit_code == 0
-    assert "current positions: 2" in output
-    assert "## New" in output
-    assert "| BBB | 20 |" in output
+    assert "## 13F-HR QoQ Comparison: Example Manager" in output
+    assert "Positions: 2 (prev: 2) | New: 1 | Exited: 1 | Increased: 1" in output
+    assert "### New Positions" in output
+    assert "| BBB | BBB CORP | COM | 200 | $20M | 40.0% |" in output
+    assert "### Increased" in output
+    assert "| AAA | AAA CORP | COM | 110 | +10 | +10.0% | $30M | +$5M | 60.0% |" in output
 
 
 def test_get_financials_command_formats_statement_output(tmp_path: Path, monkeypatch) -> None:
@@ -136,8 +190,8 @@ def test_minerva_sec_helper_uses_correct_13f_form_code(monkeypatch) -> None:
 
 
 def test_minerva_sec_helper_uses_holdings_dataframe_directly(monkeypatch) -> None:
-    expected_current = pd.DataFrame([{"cusip": "123", "value": 20}])
-    expected_previous = pd.DataFrame([{"cusip": "123", "value": 10}])
+    expected_current = pd.DataFrame([{"cusip": "123", "value": 200_000_000}])
+    expected_previous = pd.DataFrame([{"cusip": "123", "value": 100_000_000}])
 
     class _FakeThirteenF:
         def __init__(self, holdings: pd.DataFrame) -> None:

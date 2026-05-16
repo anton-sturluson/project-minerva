@@ -3,20 +3,62 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import NotRequired, TypedDict
 
 import pandas as pd
 from edgar import Company
 
+from minerva.formatting import (
+    build_markdown_table,
+    clean_text,
+    format_delta_shares,
+    format_millions,
+    format_pct,
+    format_pp,
+    format_shares,
+    format_signed_percent,
+    is_empty,
+    md_cell,
+    pct_change,
+    sub,
+    weight,
+)
 
-def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
+
+class ThirteenFComparison(TypedDict):
+    current: pd.DataFrame
+    previous: pd.DataFrame
+    comparison: pd.DataFrame
+    new: pd.DataFrame
+    exited: pd.DataFrame
+    increased: pd.DataFrame
+    decreased: pd.DataFrame
+    unchanged: pd.DataFrame
+    manager_name: NotRequired[str]
+    current_period: NotRequired[str]
+    previous_period: NotRequired[str]
+
+
+class FilingRecord(TypedDict):
+    ticker_or_cik: str
+    form: str
+    filing_date: str
+    accession_number: str
+    primary_document: str
+    description: str
+    url: str
+
+
+def get_13f_comparison(cik: int | str) -> ThirteenFComparison:
     """Fetch latest 13-F and compare with previous quarter.
 
-    Aggregates: Company lookup -> get_filings -> obj() -> compare_holdings()
+    Aggregates: Company lookup -> get_filings -> obj() -> compare holdings
     -> split by status.
 
     Returns dict with keys: 'current', 'previous', 'comparison',
-    plus filtered views: 'new', 'exited', 'increased', 'decreased'.
+    plus filtered views: 'new', 'exited', 'increased', 'decreased',
+    and 'unchanged'. Increased/decreased classification uses share-count
+    changes when available so price moves do not masquerade as trades.
     """
     company: Company = Company(str(cik))
     filings_13f = company.get_filings(form="13F-HR").latest(2)
@@ -31,9 +73,17 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
     current_df: pd.DataFrame = current_filing.holdings
     previous_df: pd.DataFrame = previous_filing.holdings
 
+    # Normalize value units: SEC requires thousands but many filers use dollars.
+    current_df = _normalize_value_units(current_df)
+    previous_df = _normalize_value_units(previous_df)
+
     # edgartools uses capitalized column names: Cusip, Value, Issuer, etc.
-    merge_key: str = "Cusip" if "Cusip" in current_df.columns else "cusip"
-    value_col: str = "Value" if "Value" in current_df.columns else "value"
+    merge_key: str = _find_column(current_df.columns, ["Cusip", "cusip"]) or "Cusip"
+    value_col: str = _find_column(current_df.columns, ["Value", "value"]) or "Value"
+    share_col: str = _find_column(
+        current_df.columns,
+        ["SharesPrnAmount", "sharesPrnAmount", "shares_prn_amount", "sharesprnamount", "shares"],
+    ) or value_col
 
     merged: pd.DataFrame = current_df.merge(
         previous_df,
@@ -47,12 +97,16 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
     exited_positions: pd.DataFrame = merged[merged["_merge"] == "right_only"].copy()
 
     both: pd.DataFrame = merged[merged["_merge"] == "both"].copy()
-    val_current: str = f"{value_col}_current"
-    val_previous: str = f"{value_col}_previous"
-    increased: pd.DataFrame = both[both[val_current] > both[val_previous]].copy()
-    decreased: pd.DataFrame = both[both[val_current] < both[val_previous]].copy()
+    shares_current: str = f"{share_col}_current"
+    shares_previous: str = f"{share_col}_previous"
+    increased: pd.DataFrame = both[both[shares_current] > both[shares_previous]].copy()
+    decreased: pd.DataFrame = both[both[shares_current] < both[shares_previous]].copy()
+    unchanged: pd.DataFrame = both[both[shares_current] == both[shares_previous]].copy()
 
     return {
+        "manager_name": _safe_attr_text(company, ["name", "display_name", "ticker"]) or str(cik),
+        "current_period": _filing_period_label(current_filing, filing_list[0]),
+        "previous_period": _filing_period_label(previous_filing, filing_list[1]),
         "current": current_df,
         "previous": previous_df,
         "comparison": merged,
@@ -60,7 +114,335 @@ def get_13f_comparison(cik: int | str) -> dict[str, pd.DataFrame]:
         "exited": exited_positions,
         "increased": increased,
         "decreased": decreased,
+        "unchanged": unchanged,
     }
+
+
+def format_13f_report(comparison: ThirteenFComparison) -> str:
+    """Render a clean markdown report for a two-quarter 13F comparison."""
+    current: pd.DataFrame = _comparison_frame(comparison, "current")
+    previous: pd.DataFrame = _comparison_frame(comparison, "previous")
+    current_total: float = _dataframe_total(current, "Value")
+    previous_total: float = _dataframe_total(previous, "Value")
+
+    new_positions: pd.DataFrame = _comparison_frame(comparison, "new")
+    exited_positions: pd.DataFrame = _comparison_frame(comparison, "exited")
+    increased: pd.DataFrame = _comparison_frame(comparison, "increased")
+    decreased: pd.DataFrame = _comparison_frame(comparison, "decreased")
+    unchanged: pd.DataFrame = _comparison_frame(comparison, "unchanged")
+    if unchanged.empty:
+        unchanged = _unchanged_from_comparison(comparison)
+
+    manager_name: str = clean_text(comparison.get("manager_name") or comparison.get("fund_name") or "Unknown Manager")
+    current_period: str = clean_text(comparison.get("current_period") or "Current")
+    previous_period: str = clean_text(comparison.get("previous_period") or "Previous")
+
+    lines: list[str] = [
+        f"## 13F-HR QoQ Comparison: {manager_name}",
+        f"Period: {current_period} vs {previous_period}",
+        "",
+        "### Summary",
+        *_format_13f_summary(
+            current=current,
+            previous=previous,
+            new_positions=new_positions,
+            exited_positions=exited_positions,
+            increased=increased,
+            decreased=decreased,
+            unchanged=unchanged,
+            current_total=current_total,
+            previous_total=previous_total,
+        ),
+        "",
+        "### New Positions",
+        _format_13f_section(new_positions, "new", current_total, previous_total),
+        "",
+        "### Exited Positions",
+        _format_13f_section(exited_positions, "exited", current_total, previous_total),
+        "",
+        "### Increased",
+        _format_13f_section(increased, "increased", current_total, previous_total),
+        "",
+        "### Decreased",
+        _format_13f_section(decreased, "decreased", current_total, previous_total),
+        "",
+        "### Unchanged",
+        _format_13f_section(unchanged, "unchanged", current_total, previous_total),
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _comparison_frame(comparison: ThirteenFComparison, key: str) -> pd.DataFrame:
+    value = comparison.get(key)
+    return value if isinstance(value, pd.DataFrame) else pd.DataFrame()
+
+
+def _format_13f_summary(
+    *,
+    current: pd.DataFrame,
+    previous: pd.DataFrame,
+    new_positions: pd.DataFrame,
+    exited_positions: pd.DataFrame,
+    increased: pd.DataFrame,
+    decreased: pd.DataFrame,
+    unchanged: pd.DataFrame,
+    current_total: float,
+    previous_total: float,
+) -> list[str]:
+    return [
+        (
+            f"- Positions: {len(current)} (prev: {len(previous)}) | New: {len(new_positions)} | "
+            f"Exited: {len(exited_positions)} | Increased: {len(increased)} | "
+            f"Decreased: {len(decreased)} | Unchanged: {len(unchanged)}"
+        ),
+        (
+            f"- Portfolio value: {format_millions(current_total)} "
+            f"(prev: {format_millions(previous_total)}, "
+            f"Δ {format_signed_percent(pct_change(current_total, previous_total))})"
+        ),
+        f"- Net new capital deployed: {format_millions(_section_value_total(new_positions, 'current'))}",
+        f"- Net capital exited: {format_millions(_section_value_total(exited_positions, 'previous'))}",
+    ]
+
+
+def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previous_total: float) -> str:
+    if df.empty:
+        return "(no rows)"
+
+    row_payloads: list[tuple[float, list[str], str]] = []
+    put_calls: list[str] = []
+    for _, row in df.iterrows():
+        put_call_side: str = "previous" if kind == "exited" else "current"
+        put_call: str = clean_text(_row_value(row, "PutCall", put_call_side))
+        if not put_call and kind in {"increased", "decreased", "unchanged"}:
+            put_call = clean_text(_row_value(row, "PutCall", "previous"))
+        if put_call:
+            put_calls.append(put_call)
+
+        if kind == "new":
+            value = _row_number(row, "Value", "current")
+            cells = [
+                md_cell(_row_value(row, "Ticker", "current")),
+                md_cell(_row_value(row, "Issuer", "current")),
+                md_cell(_row_value(row, "Class", "current")),
+                format_shares(_row_number(row, "SharesPrnAmount", "current")),
+                format_millions(value),
+                format_pct(weight(value, current_total), na_value=""),
+            ]
+            sort_key = -(value or 0)
+        elif kind == "exited":
+            value = _row_number(row, "Value", "previous")
+            cells = [
+                md_cell(_row_value(row, "Ticker", "previous")),
+                md_cell(_row_value(row, "Issuer", "previous")),
+                md_cell(_row_value(row, "Class", "previous")),
+                format_shares(_row_number(row, "SharesPrnAmount", "previous")),
+                format_millions(value),
+                format_pct(weight(value, previous_total), na_value=""),
+            ]
+            sort_key = -(value or 0)
+        elif kind in {"increased", "decreased"}:
+            current_value = _row_number(row, "Value", "current")
+            previous_value = _row_number(row, "Value", "previous")
+            current_shares = _row_number(row, "SharesPrnAmount", "current")
+            previous_shares = _row_number(row, "SharesPrnAmount", "previous")
+            share_delta = sub(current_shares, previous_shares)
+            share_delta_pct = pct_change(current_shares, previous_shares)
+            current_weight = weight(current_value, current_total)
+            previous_weight = weight(previous_value, previous_total)
+            cells = [
+                md_cell(_row_value(row, "Ticker", "current")),
+                md_cell(_row_value(row, "Issuer", "current")),
+                md_cell(_row_value(row, "Class", "current")),
+                format_shares(current_shares),
+                format_delta_shares(share_delta),
+                format_signed_percent(share_delta_pct),
+                format_millions(current_value),
+                format_millions(sub(current_value, previous_value), signed=True),
+                format_pct(current_weight, na_value=""),
+                format_pp(sub(current_weight, previous_weight)),
+            ]
+            sort_key = -(share_delta_pct or 0) if kind == "increased" else (share_delta_pct or 0)
+        else:
+            current_value = _row_number(row, "Value", "current")
+            previous_value = _row_number(row, "Value", "previous")
+            current_weight = weight(current_value, current_total)
+            previous_weight = weight(previous_value, previous_total)
+            cells = [
+                md_cell(_row_value(row, "Ticker", "current")),
+                md_cell(_row_value(row, "Issuer", "current")),
+                md_cell(_row_value(row, "Class", "current")),
+                format_shares(_row_number(row, "SharesPrnAmount", "current")),
+                format_millions(current_value),
+                format_pct(current_weight, na_value=""),
+                format_pp(sub(current_weight, previous_weight)),
+            ]
+            sort_key = -(current_value or 0)
+
+        row_payloads.append((sort_key, cells, md_cell(put_call)))
+
+    include_put_call: bool = bool(put_calls)
+    row_payloads.sort(key=lambda item: item[0])
+    rows: list[list[str]] = []
+    for _, cells, put_call in row_payloads:
+        rows.append(cells + ([put_call] if include_put_call else []))
+
+    headers_by_kind: dict[str, list[str]] = {
+        "new": ["Ticker", "Issuer", "Class", "Shares", "Value ($M)", "Weight"],
+        "exited": ["Ticker", "Issuer", "Class", "Shares (prev)", "Value ($M prev)", "Weight (prev)"],
+        "increased": [
+            "Ticker",
+            "Issuer",
+            "Class",
+            "Shares",
+            "Δ Shares",
+            "Δ%",
+            "Value ($M)",
+            "Δ Value ($M)",
+            "Weight",
+            "Δ Weight",
+        ],
+        "decreased": [
+            "Ticker",
+            "Issuer",
+            "Class",
+            "Shares",
+            "Δ Shares",
+            "Δ%",
+            "Value ($M)",
+            "Δ Value ($M)",
+            "Weight",
+            "Δ Weight",
+        ],
+        "unchanged": ["Ticker", "Issuer", "Class", "Shares", "Value ($M)", "Weight", "Δ Weight"],
+    }
+    headers = headers_by_kind[kind] + (["Put/Call"] if include_put_call else [])
+    alignment = ["l", "l", "l"] + ["r"] * (len(headers) - 3)
+    return build_markdown_table(headers, rows, alignment=alignment)
+
+
+def _unchanged_from_comparison(comparison: ThirteenFComparison) -> pd.DataFrame:
+    merged: pd.DataFrame | None = comparison.get("comparison")
+    if merged is None or merged.empty or "_merge" not in merged.columns:
+        return pd.DataFrame()
+    both = merged[merged["_merge"] == "both"].copy()
+    current_col = _find_column(both.columns, ["SharesPrnAmount_current", "sharesPrnAmount_current", "shares_current"])
+    previous_col = _find_column(both.columns, ["SharesPrnAmount_previous", "sharesPrnAmount_previous", "shares_previous"])
+    if not current_col or not previous_col:
+        return pd.DataFrame()
+    return both[both[current_col] == both[previous_col]].copy()
+
+
+def _dataframe_total(df: pd.DataFrame, base_column: str) -> float:
+    column = _find_column(df.columns, [base_column, base_column.lower()])
+    if not column:
+        return 0.0
+    return float(pd.to_numeric(df[column], errors="coerce").fillna(0).sum())
+
+
+def _section_value_total(df: pd.DataFrame, side: str) -> float:
+    total = 0.0
+    for _, row in df.iterrows():
+        total += _row_number(row, "Value", side) or 0.0
+    return total
+
+
+def _row_value(row: pd.Series, base: str, side: str | None = None) -> float | None:
+    column = _row_column(row, base, side)
+    if not column:
+        return ""
+    return row.get(column, "")
+
+
+def _row_number(row: pd.Series, base: str, side: str | None = None) -> float | None:
+    value = _row_value(row, base, side)
+    if is_empty(value):
+        return None
+    numeric = pd.to_numeric(value, errors="coerce")
+    if pd.isna(numeric):
+        return None
+    return float(numeric)
+
+
+def _row_column(row: pd.Series, base: str, side: str | None = None) -> str | None:
+    candidates: list[str] = []
+    variants: list[str] = [base, base.lower()]
+    if base == "SharesPrnAmount":
+        variants.extend(["sharesPrnAmount", "shares_prn_amount", "sharesprnamount", "shares"])
+    if side:
+        candidates.extend(f"{variant}_{side}" for variant in variants)
+    candidates.extend(variants)
+    return _find_column(row.index, candidates)
+
+
+# ---------------------------------------------------------------------------
+# Value-unit normalisation
+# ---------------------------------------------------------------------------
+
+_FILING_THRESHOLD_DOLLARS: int = 100_000_000  # SEC 13-F filing threshold
+
+
+def _normalize_value_units(df: pd.DataFrame) -> pd.DataFrame:
+    """Detect and normalise 13-F value units to dollars.
+
+    The SEC technically requires values in thousands, but many filers report
+    in whole dollars.  If the sum of all position values is below the $100M
+    filing threshold it is virtually certain the values are in thousands —
+    no filer can have <$100M in actual equity holdings.
+    """
+    value_col = _find_column(df.columns, ["Value", "value"])
+    if value_col is None or df.empty:
+        return df
+    total = pd.to_numeric(df[value_col], errors="coerce").fillna(0).sum()
+    if total < _FILING_THRESHOLD_DOLLARS:
+        df = df.copy()
+        df[value_col] = df[value_col] * 1_000
+    return df
+
+
+def _find_column(columns: pd.Index | list[str], candidates: list[str]) -> str | None:
+    column_map = {str(column).lower(): str(column) for column in columns}
+    for candidate in candidates:
+        found = column_map.get(candidate.lower())
+        if found:
+            return found
+    return None
+
+
+def _safe_attr_text(obj: object, names: list[str]) -> str:
+    for name in names:
+        value = getattr(obj, name, None)
+        if callable(value):
+            try:
+                value = value()
+            except TypeError:
+                continue
+        text = clean_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _filing_period_label(filing_obj: object, filing_wrapper: object | None = None) -> str:
+    raw = _safe_attr_text(
+        filing_obj,
+        ["report_period", "period_of_report", "period_end", "report_date", "filing_date", "date"],
+    ) or _safe_attr_text(
+        filing_wrapper,
+        ["report_period", "period_of_report", "period_end", "report_date", "filing_date", "date"],
+    )
+    parsed = _safe_coerce_date(raw)
+    if parsed:
+        quarter = (parsed.month - 1) // 3 + 1
+        return f"Q{quarter} {parsed.year} ({parsed.isoformat()})"
+    return raw or "Unknown period"
+
+
+def _safe_coerce_date(value: date | str | None) -> date | None:
+    try:
+        return _coerce_date(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_10k_items(
@@ -99,7 +481,7 @@ def get_recent_filings(
     since: date | str | None = None,
     until: date | str | None = None,
     limit: int = 20,
-) -> list[dict[str, Any]]:
+) -> list[FilingRecord]:
     """List recent filings for a company in a date window.
 
     Returns a normalized list of small filing records so higher-level CLI
@@ -111,7 +493,7 @@ def get_recent_filings(
     company: Company = Company(ticker_or_cik)
     filings = company.get_filings(form=forms or ["8-K", "10-K", "10-Q"]).latest(limit)
 
-    records: list[dict[str, Any]] = []
+    records: list[FilingRecord] = []
     for filing in _iter_filings(filings):
         filing_date: date | None = _coerce_date(getattr(filing, "filing_date", getattr(filing, "date", None)))
         if normalized_since and filing_date and filing_date < normalized_since:
@@ -134,7 +516,7 @@ def get_recent_filings(
     return records
 
 
-def _iter_filings(filings: Any) -> list[Any]:
+def _iter_filings(filings: object) -> list[object]:
     if filings is None:
         return []
     if isinstance(filings, list):

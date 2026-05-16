@@ -2,8 +2,33 @@
 
 from pathlib import Path
 
+import pandas as pd
 import xmltodict
 import yaml
+
+
+def is_empty(value: object) -> bool:
+    """Return True for None, pandas/numpy missing values, and blank-ish strings."""
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().lower() in {"", "nan", "none", "nat", "<na>"}
+
+
+def clean_text(value: object) -> str:
+    """Convert a messy value to stripped text, returning an empty string for missing values."""
+    if is_empty(value):
+        return ""
+    return str(value).strip()
+
+
+def md_cell(value: object) -> str:
+    """Clean text for use in a markdown table cell."""
+    return clean_text(value).replace("\n", " ").replace("|", "\\|")
 
 
 def format_usd(value: float | None, decimals: int = 2, auto_scale: bool = True) -> str:
@@ -31,11 +56,55 @@ def format_usd(value: float | None, decimals: int = 2, auto_scale: bool = True) 
     return f"{sign}${abs_val:,.{decimals}f}"
 
 
-def format_pct(value: float | None, decimals: int = 1) -> str:
+def format_pct(value: float | None, decimals: int = 1, *, na_value: str = "N/A") -> str:
     """Format a percentage value (input as 0-100 range)."""
     if value is None:
-        return "N/A"
+        return na_value
     return f"{value:.{decimals}f}%"
+
+
+def format_signed_percent(value: float | None, decimals: int = 1) -> str:
+    """Format a signed percentage value (input as 0-100 range)."""
+    if value is None:
+        return ""
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.{decimals}f}%"
+
+
+def format_pp(value: float | None, decimals: int = 1) -> str:
+    """Format a percentage-point delta with an explicit plus sign for gains."""
+    if value is None:
+        return ""
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.{decimals}f}pp"
+
+
+def format_shares(value: float | None) -> str:
+    """Format a share count as a whole number with thousands separators."""
+    if value is None:
+        return ""
+    return f"{int(round(value)):,.0f}"
+
+
+def format_delta_shares(value: float | None) -> str:
+    """Format a signed share-count delta as a whole number with thousands separators."""
+    if value is None:
+        return ""
+    sign = "+" if value >= 0 else "-"
+    return f"{sign}{abs(int(round(value))):,}"
+
+
+def format_millions(value: float | None, *, signed: bool = False) -> str:
+    """Format a dollar value in whole millions (e.g. $1,500M)."""
+    if value is None:
+        return ""
+    amount = value / 1_000_000
+    if signed:
+        sign = "+" if amount >= 0 else "-"
+        return f"{sign}${abs(amount):,.0f}M"
+    if amount < 0:
+        return f"-${abs(amount):,.0f}M"
+    return f"${amount:,.0f}M"
 
 
 def format_multiple(value: float | None, suffix: str = "x", decimals: int = 1) -> str:
@@ -67,6 +136,27 @@ def build_markdown_table(headers: list[str], rows: list[list[str]], alignment: l
         data_lines.append("| " + " | ".join(padded_row[:len(headers)]) + " |")
 
     return "\n".join([header_line, separator_line] + data_lines)
+
+
+def weight(value: float | None, total: float) -> float | None:
+    """Return None when value is None or total is zero, allowing clean propagation to formatting functions."""
+    if value is None or total == 0:
+        return None
+    return (value / total) * 100
+
+
+def pct_change(current: float | None, previous: float | None) -> float | None:
+    """Return None when either input is None or previous is zero, allowing clean propagation to formatting functions."""
+    if current is None or previous in (None, 0):
+        return None
+    return ((current - previous) / previous) * 100
+
+
+def sub(current: float | None, previous: float | None) -> float | None:
+    """Return None when either input is None, allowing clean propagation to formatting functions."""
+    if current is None or previous is None:
+        return None
+    return current - previous
 
 
 def calculate_growth_rate(current: float, prior: float) -> float | None:
