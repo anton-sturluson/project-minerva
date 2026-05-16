@@ -67,12 +67,12 @@ def get_13f_comparison(*args, **kwargs):
 
 def dispatch(
     args: list[str],
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
     stdin: bytes = b"",
 ) -> CommandResult:
     """Source-of-truth parser for `run` path SEC commands."""
     _ = stdin
-    active_settings: HarnessSettings = settings or get_settings()
+    active_settings: HarnessSettings = settings
     if not args:
         return CommandResult.from_text(
             "",
@@ -165,11 +165,11 @@ def get_10k_command(
     ticker: str,
     *,
     items: list[str] | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Fetch selected 10-K item sections."""
     start: float = time.perf_counter()
-    active_settings: HarnessSettings = settings or get_settings()
+    active_settings: HarnessSettings = settings
     identity_error = _configure_edgar(active_settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
@@ -192,10 +192,10 @@ def get_10k_command(
     return CommandResult.from_text("\n\n".join(lines), duration_ms=elapsed_ms(start))
 
 
-def get_13f_command(cik: str, *, settings: HarnessSettings | None = None) -> CommandResult:
+def get_13f_command(cik: str, *, settings: HarnessSettings) -> CommandResult:
     """Fetch and format a 13-F comparison."""
     start: float = time.perf_counter()
-    active_settings: HarnessSettings = settings or get_settings()
+    active_settings: HarnessSettings = settings
     identity_error = _configure_edgar(active_settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
@@ -228,11 +228,11 @@ def get_financials_command(
     *,
     periods: int = 5,
     statement_type: str = "income",
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Fetch annual financial statements with edgartools."""
     start: float = time.perf_counter()
-    active_settings: HarnessSettings = settings or get_settings()
+    active_settings: HarnessSettings = settings
     identity_error = _configure_edgar(active_settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
@@ -260,11 +260,11 @@ def download_filing_command(
     form: str = "10-K",
     file_format: str = "html",
     output_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Download a single filing to disk."""
     start: float = time.perf_counter()
-    active_settings = settings or get_settings()
+    active_settings = settings
     identity_error = _configure_edgar(active_settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
@@ -304,11 +304,11 @@ def bulk_download_command(
     quarters: int = 4,
     earnings: int = 4,
     include_financials: bool = True,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Download a filing library for a single ticker."""
     start: float = time.perf_counter()
-    active_settings = settings or get_settings()
+    active_settings = settings
     identity_error = _configure_edgar(active_settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
@@ -346,7 +346,8 @@ def ten_k_command(
             what_to_do="pass a ticker like `AAPL` or a numeric CIK",
             alternatives=["`minerva sec 10k AAPL --items 1,1A,7`", "`minerva sec financials AAPL --type income`"],
         )
-    _print(get_10k_command(ticker, items=_parse_csv_values(items)))
+    settings = get_settings()
+    _print(get_10k_command(ticker, items=_parse_csv_values(items), settings=settings))
 
 
 @app.command("13f", help="Compare the two most recent 13F-HR filings.\n\nExample:\n  minerva sec 13f 1067983")
@@ -361,7 +362,8 @@ def thirteen_f_command(
             what_to_do="pass a manager CIK such as `1067983`",
             alternatives=["`minerva sec 13f 1067983`", "`minerva sec 10k BRK-B --items 1A`"],
         )
-    _print(get_13f_command(cik))
+    settings = get_settings()
+    _print(get_13f_command(cik, settings=settings))
 
 
 @app.command("financials", help="Fetch annual financial statements.\n\nExample:\n  minerva sec financials MSFT --type income --periods 5")
@@ -378,7 +380,8 @@ def financials_command(
             what_to_do="pass a ticker and optional `--type` / `--periods` values",
             alternatives=["`minerva sec financials MSFT --type income`", "`minerva sec 10k MSFT --items 7`"],
         )
-    _print(get_financials_command(ticker, periods=periods, statement_type=statement_type))
+    settings = get_settings()
+    _print(get_financials_command(ticker, periods=periods, statement_type=statement_type, settings=settings))
 
 
 @app.command("download", help="Download a filing as HTML or markdown.\n\nExample:\n  minerva sec download AAPL --form 10-K --format markdown")
@@ -396,7 +399,8 @@ def download_command(
             what_to_do="pass a ticker and optional form/format arguments",
             alternatives=["`minerva sec download AAPL --form 10-K --format markdown`", "`minerva sec bulk-download AAPL`"],
         )
-    _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output))
+    settings = get_settings()
+    _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output, settings=settings))
 
 
 @app.command("bulk-download", help="Download a filing library for a single company.\n\nExample:\n  minerva sec bulk-download AAPL --output ./filings")
@@ -424,6 +428,7 @@ def bulk_download_cli_command(
             quarters=quarters,
             earnings=earnings,
             include_financials=financials,
+            settings=get_settings(),
         )
     )
 

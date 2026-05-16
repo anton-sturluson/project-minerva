@@ -10,6 +10,7 @@ from harness.portfolio_state import (
     add_thesis_metric,
     get_thesis_by_ticker,
     load_json,
+    render_thesis_markdown,
     set_thesis_card,
     write_json,
 )
@@ -202,7 +203,7 @@ class ThesisCardV2Tests(unittest.TestCase):
         nrr = next(metric for metric in cards[0]["key_metrics"] if metric["name"] == "NRR")
         self.assertEqual([observation["period"] for observation in nrr["observations"]], ["Q1 FY2027", "Q2 FY2027"])
 
-    def test_thesis_set_preserves_metrics_and_backs_up_old_schema(self) -> None:
+    def test_thesis_set_skips_legacy_cards_without_backup(self) -> None:
         current_dir = self.workspace / "data" / "01-portfolio" / "current"
         current_dir.mkdir(parents=True, exist_ok=True)
         old_cards = [
@@ -226,13 +227,26 @@ class ThesisCardV2Tests(unittest.TestCase):
         )
 
         backups = sorted((self.workspace / "data" / "01-portfolio" / "backups").glob("thesis-cards-*.json"))
-        self.assertEqual(len(backups), 1)
-        self.assertEqual(load_json(backups[0], default=[]), old_cards)
+        self.assertEqual(backups, [])
         self.assertEqual(card["card_id"], "gtlb")
         self.assertNotIn("security_id", card)
         self.assertEqual(card["ticker_symbols"], ["GTLB"])
         self.assertEqual(card["summary"], "New pitch")
 
+    def test_render_thesis_markdown_skips_legacy_cards(self) -> None:
+        legacy_cards = [
+            {
+                "security_id": "GTLB",
+                "thesis_summary": "Old pitch",
+                "key_expectations": [f"Expectation {index}" for index in range(10)],
+                "disconfirming_signals": [f"Signal {index}" for index in range(10)],
+            }
+        ]
+
+        rendered = render_thesis_markdown(legacy_cards)
+
+        self.assertIn("No thesis cards configured.", rendered)
+        self.assertNotIn("Old pitch", rendered)
 
 
 if __name__ == "__main__":

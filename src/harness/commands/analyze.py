@@ -27,11 +27,11 @@ app = typer.Typer(help=ANALYZE_HELP, no_args_is_help=True)
 
 def dispatch(
     args: list[str],
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
     stdin: bytes = b"",
 ) -> CommandResult:
     """Source-of-truth parser for `run` path analysis commands."""
-    _ = settings or get_settings()
+    _ = settings
     if not args:
         return CommandResult.from_text(
             "",

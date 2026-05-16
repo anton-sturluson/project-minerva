@@ -26,7 +26,7 @@ EVIDENCE_HELP = (
 app = typer.Typer(help=EVIDENCE_HELP, no_args_is_help=True)
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: bytes = b"") -> CommandResult:
+def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch evidence commands for `minerva run`."""
     _ = stdin
     _ = settings

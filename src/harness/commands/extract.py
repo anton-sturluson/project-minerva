@@ -96,9 +96,9 @@ extract_files_app = typer.Typer(help=EXTRACT_FILES_HELP, no_args_is_help=False, 
 # ---------------------------------------------------------------------------
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: bytes = b"") -> CommandResult:
+def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch the `extract` command for `minerva run`."""
-    active_settings = settings or get_settings()
+    active_settings = settings
     try:
         parsed = _parse_extract_args(args)
     except ValueError as exc:
@@ -124,10 +124,10 @@ def extract_command(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     thinking: str | None = None,
     stdin: bytes = b"",
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start = time.perf_counter()
-    active_settings = settings or get_settings()
+    active_settings = settings
     api_key = _api_key_for_model(active_settings, model)
     if not api_key:
         return _missing_api_key_result(model, start)
@@ -220,6 +220,7 @@ def extract_cli_command(
                 "`minerva run \"sec 10k AAPL --items 7 | extract 'Revenue by segment'\"`",
             ],
         )
+    settings = get_settings()
     _print(
         extract_command(
             question=question,
@@ -229,6 +230,7 @@ def extract_cli_command(
             max_tokens=max_tokens,
             thinking=thinking,
             stdin=stdin,
+            settings=settings,
         )
     )
 
@@ -238,10 +240,10 @@ def extract_cli_command(
 # ---------------------------------------------------------------------------
 
 
-def dispatch_files(args: list[str], settings: HarnessSettings | None = None, stdin: bytes = b"") -> CommandResult:
+def dispatch_files(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch the `extract-files` command for `minerva run`."""
     _ = stdin  # extract-files does not consume stdin
-    active_settings = settings or get_settings()
+    active_settings = settings
     try:
         parsed = _parse_extract_files_args(args)
     except ValueError as exc:
@@ -273,10 +275,10 @@ def extract_files_command(
     thinking: str | None = None,
     concurrency: int = DEFAULT_CONCURRENCY,
     force: bool = False,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start = time.perf_counter()
-    active_settings = settings or get_settings()
+    active_settings = settings
     api_key = _api_key_for_model(active_settings, model)
     if not api_key:
         return _missing_api_key_result(model, start)
@@ -445,6 +447,7 @@ def extract_files_cli_command(
             what_to_do="pass `--out DIR` so per-file extractions are written somewhere durable",
             alternatives=["`--out data/extractions/q`"],
         )
+    settings = get_settings()
     _print(
         extract_files_command(
             question=question,
@@ -457,6 +460,7 @@ def extract_files_cli_command(
             thinking=thinking,
             concurrency=concurrency,
             force=force,
+            settings=settings,
         )
     )
 

@@ -34,12 +34,12 @@ app = typer.Typer(help=VALUATION_HELP, no_args_is_help=True)
 
 def dispatch(
     args: list[str],
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
     stdin: bytes = b"",
 ) -> CommandResult:
     """Source-of-truth parser for `run` path valuation commands."""
     _ = stdin
-    active_settings: HarnessSettings = settings or get_settings()
+    active_settings: HarnessSettings = settings
     if not args:
         return CommandResult.from_text(
             "",
@@ -157,10 +157,10 @@ def run_dcf_command(
     sbc_growth: float = 0.0,
     years: int = 5,
     export_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings or get_settings()
+    _ = settings
     try:
         from minerva.formatting import build_markdown_table, format_pct, format_usd
         from minerva.valuation import DCFAssumptions, run_dcf
@@ -247,10 +247,10 @@ def run_comps_command(
     ev_ebitda: float,
     p_fcf: float,
     export_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings or get_settings()
+    _ = settings
     try:
         from minerva.formatting import build_markdown_table, format_usd
         from minerva.valuation import CompsAssumptions, run_comps
@@ -299,10 +299,10 @@ def run_reverse_dcf_command(
     terminal_growth: float,
     years: int = 5,
     export_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings or get_settings()
+    _ = settings
     try:
         from minerva.formatting import format_pct, format_usd
         from minerva.valuation import run_reverse_dcf
@@ -346,10 +346,10 @@ def run_sotp_command(
     net_cash: float,
     shares: float,
     export_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings or get_settings()
+    _ = settings
     try:
         from minerva.formatting import build_markdown_table, format_multiple, format_pct, format_usd
         from minerva.valuation import SOTPSegment, run_sotp
@@ -416,10 +416,10 @@ def run_report_command(
     ticker: str,
     config_path: str,
     output_path: str,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings or get_settings()
+    _ = settings
     try:
         from minerva.valuation import (
             CompsAssumptions,
@@ -544,6 +544,7 @@ def dcf_command(
     years: int = typer.Option(5, "--years", help="Projection horizon."),
     export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
+    settings = get_settings()
     if None in {revenue, growth, margins, wacc, terminal_growth, shares, net_cash}:
         abort_with_help(
             ctx,
@@ -565,6 +566,7 @@ def dcf_command(
             sbc_growth=sbc_growth,
             years=years,
             export_path=export,
+            settings=settings,
         )
     )
 
@@ -582,6 +584,7 @@ def comps_command(
     p_fcf: float | None = typer.Option(None, "--p-fcf", help="Peer median P/FCF multiple."),
     export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
+    settings = get_settings()
     if None in {ntm_revenue, ntm_ebitda, ntm_fcf, shares, net_cash, ev_rev, ev_ebitda, p_fcf}:
         abort_with_help(
             ctx,
@@ -600,6 +603,7 @@ def comps_command(
             ev_ebitda=float(ev_ebitda),
             p_fcf=float(p_fcf),
             export_path=export,
+            settings=settings,
         )
     )
 
@@ -617,6 +621,7 @@ def reverse_dcf_command(
     years: int = typer.Option(5, "--years", help="Projection horizon."),
     export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
+    settings = get_settings()
     if None in {price, shares, net_cash, base_revenue, margins, wacc, terminal_growth}:
         abort_with_help(
             ctx,
@@ -635,6 +640,7 @@ def reverse_dcf_command(
             terminal_growth=float(terminal_growth),
             years=years,
             export_path=export,
+            settings=settings,
         )
     )
 
@@ -647,6 +653,7 @@ def sotp_command(
     shares: float | None = typer.Option(None, "--shares", help="Diluted shares outstanding."),
     export: str | None = typer.Option(None, "--export", help="Save full output to file."),
 ) -> None:
+    settings = get_settings()
     if None in {segments, net_cash, shares}:
         abort_with_help(
             ctx,
@@ -654,7 +661,7 @@ def sotp_command(
             what_to_do="provide a segment payload, net cash, and share count",
             alternatives=["`minerva valuation sotp --segments segments.json --net-cash 57e9 --shares 15.5e9`", "`minerva valuation comps --ntm-revenue 420e9 ...`"],
         )
-    _print(run_sotp_command(segments_spec=str(segments), net_cash=float(net_cash), shares=float(shares), export_path=export))
+    _print(run_sotp_command(segments_spec=str(segments), net_cash=float(net_cash), shares=float(shares), export_path=export, settings=settings))
 
 
 @app.command("report", help="Generate a full markdown valuation report.\n\nExample:\n  minerva valuation report --ticker AAPL --config valuation.json --output valuation.md")
@@ -664,6 +671,7 @@ def report_command(
     config: str | None = typer.Option(None, "--config", help="JSON file with valuation inputs."),
     output: str | None = typer.Option(None, "--output", help="Output markdown file path."),
 ) -> None:
+    settings = get_settings()
     if None in {ticker, config, output}:
         abort_with_help(
             ctx,
@@ -671,7 +679,7 @@ def report_command(
             what_to_do="provide a ticker, JSON config path, and markdown output path",
             alternatives=["`minerva valuation report --ticker AAPL --config valuation.json --output valuation.md`", "`minerva valuation dcf --revenue 394e9 ...`"],
         )
-    _print(run_report_command(ticker=str(ticker), config_path=str(config), output_path=str(output)))
+    _print(run_report_command(ticker=str(ticker), config_path=str(config), output_path=str(output), settings=settings))
 
 
 def _load_segments_payload(segments_spec: str) -> list[dict[str, Any]]:

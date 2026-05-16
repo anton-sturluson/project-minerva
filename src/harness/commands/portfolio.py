@@ -47,10 +47,10 @@ app.add_typer(thesis_app, name="thesis")
 thesis_app.add_typer(thesis_metric_app, name="metric")
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: bytes = b"") -> CommandResult:
+def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch portfolio commands for `minerva run`."""
     _ = stdin
-    active_settings = settings or get_settings()
+    active_settings = settings
     if not args:
         return CommandResult.from_text("", stderr=_usage_error("no `portfolio` subcommand was provided"), exit_code=1)
 
@@ -89,11 +89,11 @@ def sync_command(
     sheet_id: str | None,
     holdings_gid: str | None,
     transactions_gid: str | None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Sync holdings, watchlist, and transactions into local state."""
     start = time.perf_counter()
-    active_settings = settings or get_settings()
+    active_settings = settings
     try:
         summary = sync_portfolio(
             active_settings.ensure_workspace_root(),
@@ -124,10 +124,10 @@ def sync_command(
     return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
 
 
-def enrich_command(*, settings: HarnessSettings | None = None) -> CommandResult:
+def enrich_command(*, settings: HarnessSettings) -> CommandResult:
     """Enrich portfolio records with exchange, country, sec_registered, and finnhub_symbol."""
     start = time.perf_counter()
-    active_settings = settings or get_settings()
+    active_settings = settings
     try:
         summary = enrich_portfolio(
             active_settings.ensure_workspace_root(),
@@ -148,10 +148,10 @@ def enrich_command(*, settings: HarnessSettings | None = None) -> CommandResult:
     return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
 
 
-def list_adjacency_command(*, settings: HarnessSettings | None = None) -> CommandResult:
+def list_adjacency_command(*, settings: HarnessSettings) -> CommandResult:
     """List adjacency entries."""
     start = time.perf_counter()
-    paths = ensure_portfolio_layout((settings or get_settings()).ensure_workspace_root())
+    paths = ensure_portfolio_layout(settings.ensure_workspace_root())
     entries = load_json(paths.adjacency_map, default=[])
     return CommandResult.from_text(render_adjacency_markdown(entries), duration_ms=elapsed_ms(start))
 
@@ -163,13 +163,13 @@ def add_adjacency_command(
     relationship_type: str,
     note: str | None,
     priority: str | None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Add an adjacency entry."""
     start = time.perf_counter()
     try:
         entry = add_adjacency_entry(
-            (settings or get_settings()).ensure_workspace_root(),
+            settings.ensure_workspace_root(),
             monitored=monitored,
             adjacent=adjacent,
             relationship_type=relationship_type,
@@ -191,13 +191,13 @@ def remove_adjacency_command(
     monitored: str,
     adjacent: str,
     relationship_type: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Remove adjacency entries for one pair."""
     start = time.perf_counter()
     try:
         summary = remove_adjacency_entry(
-            (settings or get_settings()).ensure_workspace_root(),
+            settings.ensure_workspace_root(),
             monitored=monitored,
             adjacent=adjacent,
             relationship_type=relationship_type,
@@ -212,28 +212,28 @@ def remove_adjacency_command(
     return CommandResult.from_text(json_lines(summary), duration_ms=elapsed_ms(start))
 
 
-def render_adjacency_command(*, settings: HarnessSettings | None = None) -> CommandResult:
+def render_adjacency_command(*, settings: HarnessSettings) -> CommandResult:
     """Render adjacency markdown to disk."""
     start = time.perf_counter()
-    paths = ensure_portfolio_layout((settings or get_settings()).ensure_workspace_root())
+    paths = ensure_portfolio_layout(settings.ensure_workspace_root())
     entries = load_json(paths.adjacency_map, default=[])
     body = render_adjacency_markdown(entries)
     paths.adjacency_rendered.write_text(body, encoding="utf-8")
     return CommandResult.from_text(f"rendered_to: {paths.adjacency_rendered}", duration_ms=elapsed_ms(start))
 
 
-def list_thesis_command(*, settings: HarnessSettings | None = None) -> CommandResult:
+def list_thesis_command(*, settings: HarnessSettings) -> CommandResult:
     """List thesis cards."""
     start = time.perf_counter()
-    paths = ensure_portfolio_layout((settings or get_settings()).ensure_workspace_root())
+    paths = ensure_portfolio_layout(settings.ensure_workspace_root())
     cards = load_json(paths.thesis_cards, default=[])
     return CommandResult.from_text(render_thesis_markdown(cards), duration_ms=elapsed_ms(start))
 
 
-def show_thesis_command(*, card_id: str, settings: HarnessSettings | None = None) -> CommandResult:
+def show_thesis_command(*, card_id: str, settings: HarnessSettings) -> CommandResult:
     """Show one thesis card."""
     start = time.perf_counter()
-    paths = ensure_portfolio_layout((settings or get_settings()).ensure_workspace_root())
+    paths = ensure_portfolio_layout(settings.ensure_workspace_root())
     cards = load_json(paths.thesis_cards, default=[])
     selected = [card for card in cards if str(card.get("card_id", "")) == card_id]
     if not selected:
@@ -246,11 +246,11 @@ def show_thesis_command(*, card_id: str, settings: HarnessSettings | None = None
     return CommandResult.from_text(render_thesis_markdown(selected), duration_ms=elapsed_ms(start))
 
 
-def by_ticker_thesis_command(*, ticker: str, settings: HarnessSettings | None = None) -> CommandResult:
+def by_ticker_thesis_command(*, ticker: str, settings: HarnessSettings) -> CommandResult:
     """Show thesis cards linked to a ticker."""
     start = time.perf_counter()
     try:
-        selected = get_thesis_by_ticker((settings or get_settings()).ensure_workspace_root(), ticker=ticker)
+        selected = get_thesis_by_ticker(settings.ensure_workspace_root(), ticker=ticker)
     except Exception as exc:
         return error_result(
             f"failed to look up thesis cards by ticker: {exc}",
@@ -268,13 +268,13 @@ def set_thesis_command(
     summary: str,
     core_thesis: list[str],
     signals: list[str],
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Create or replace one thesis card definition."""
     start = time.perf_counter()
     try:
         card = set_thesis_card(
-            (settings or get_settings()).ensure_workspace_root(),
+            settings.ensure_workspace_root(),
             card_id=card_id,
             ticker_symbols=ticker_symbols,
             summary=summary,
@@ -300,13 +300,13 @@ def add_thesis_metric_command(
     date: str | None,
     source: str | None,
     unit: str | None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     """Append one metric observation to a thesis card."""
     start = time.perf_counter()
     try:
         metric = add_thesis_metric(
-            (settings or get_settings()).ensure_workspace_root(),
+            settings.ensure_workspace_root(),
             card_id=card_id,
             name=name,
             period=period,
@@ -325,10 +325,10 @@ def add_thesis_metric_command(
     return CommandResult.from_text(json_lines(metric), duration_ms=elapsed_ms(start))
 
 
-def render_thesis_command(*, settings: HarnessSettings | None = None) -> CommandResult:
+def render_thesis_command(*, settings: HarnessSettings) -> CommandResult:
     """Render thesis cards to disk."""
     start = time.perf_counter()
-    paths = ensure_portfolio_layout((settings or get_settings()).ensure_workspace_root())
+    paths = ensure_portfolio_layout(settings.ensure_workspace_root())
     cards = load_json(paths.thesis_cards, default=[])
     body = render_thesis_markdown(cards)
     paths.thesis_rendered.write_text(body, encoding="utf-8")
@@ -347,7 +347,8 @@ def sync_cli(
     holdings_gid: str | None = typer.Option(None, "--holdings-gid", help="Google Sheet gid for holdings."),
     transactions_gid: str | None = typer.Option(None, "--transactions-gid", help="Google Sheet gid for transactions."),
 ) -> None:
-    if not holdings_source and not sheet_id and not portfolio_paths(get_settings().ensure_workspace_root()).holdings.exists():
+    settings = get_settings()
+    if not holdings_source and not sheet_id and not portfolio_paths(settings.ensure_workspace_root()).holdings.exists():
         abort_with_help(
             ctx,
             what_went_wrong="no holdings source was provided",
@@ -363,18 +364,21 @@ def sync_cli(
             sheet_id=sheet_id,
             holdings_gid=holdings_gid,
             transactions_gid=transactions_gid,
+            settings=settings,
         )
     )
 
 
 @app.command("enrich", help="Enrich portfolio records with exchange, country, and Finnhub metadata.")
 def enrich_cli() -> None:
-    _print(enrich_command())
+    settings = get_settings()
+    _print(enrich_command(settings=settings))
 
 
 @adjacency_app.command("list", help="List stored adjacency mappings.")
 def adjacency_list_cli() -> None:
-    _print(list_adjacency_command())
+    settings = get_settings()
+    _print(list_adjacency_command(settings=settings))
 
 
 @adjacency_app.command("add", help="Add or replace one adjacency relationship.")
@@ -392,6 +396,7 @@ def adjacency_add_cli(
             relationship_type=relationship_type,
             note=note,
             priority=priority,
+            settings=get_settings(),
         )
     )
 
@@ -402,27 +407,32 @@ def adjacency_remove_cli(
     adjacent: str = typer.Argument(..., help="Adjacent company identifier."),
     relationship_type: str | None = typer.Option(None, "--type", help="Optional relationship type filter."),
 ) -> None:
-    _print(remove_adjacency_command(monitored=monitored, adjacent=adjacent, relationship_type=relationship_type))
+    settings = get_settings()
+    _print(remove_adjacency_command(monitored=monitored, adjacent=adjacent, relationship_type=relationship_type, settings=settings))
 
 
 @adjacency_app.command("render", help="Render adjacency markdown.")
 def adjacency_render_cli() -> None:
-    _print(render_adjacency_command())
+    settings = get_settings()
+    _print(render_adjacency_command(settings=settings))
 
 
 @thesis_app.command("list", help="List thesis cards.")
 def thesis_list_cli() -> None:
-    _print(list_thesis_command())
+    settings = get_settings()
+    _print(list_thesis_command(settings=settings))
 
 
 @thesis_app.command("show", help="Show one thesis card.")
 def thesis_show_cli(card_id: str = typer.Argument(..., help="Thesis card id.")) -> None:
-    _print(show_thesis_command(card_id=card_id))
+    settings = get_settings()
+    _print(show_thesis_command(card_id=card_id, settings=settings))
 
 
 @thesis_app.command("by-ticker", help="Show thesis cards linked to a ticker.")
 def thesis_by_ticker_cli(ticker: str = typer.Argument(..., help="Ticker symbol.")) -> None:
-    _print(by_ticker_thesis_command(ticker=ticker))
+    settings = get_settings()
+    _print(by_ticker_thesis_command(ticker=ticker, settings=settings))
 
 
 @thesis_app.command("set", help="Create or replace one thesis card definition.")
@@ -440,6 +450,7 @@ def thesis_set_cli(
             summary=summary,
             core_thesis=core_thesis,
             signals=signals,
+            settings=get_settings(),
         )
     )
 
@@ -463,13 +474,15 @@ def thesis_metric_add_cli(
             date=date_value,
             source=source,
             unit=unit,
+            settings=get_settings(),
         )
     )
 
 
 @thesis_app.command("render", help="Render thesis cards markdown.")
 def thesis_render_cli() -> None:
-    _print(render_thesis_command())
+    settings = get_settings()
+    _print(render_thesis_command(settings=settings))
 
 
 def _dispatch_adjacency(args: list[str], settings: HarnessSettings) -> CommandResult:

@@ -465,7 +465,7 @@ def set_thesis_card(
     if not normalized_summary:
         raise ValueError("summary is required for a thesis card")
 
-    cards = _load_thesis_cards(paths, backup_old_schema=True)
+    cards = _load_thesis_cards(paths)
     existing = next((card for card in cards if card.get("card_id") == normalized_card_id), None)
     replacement: ThesisCard = {
         "card_id": normalized_card_id,
@@ -505,7 +505,7 @@ def add_thesis_metric(
     if not metric_value:
         raise ValueError("metric observation value is required")
 
-    cards = _load_thesis_cards(paths, backup_old_schema=True)
+    cards = _load_thesis_cards(paths)
     card = next((item for item in cards if item.get("card_id") == normalized_card_id), None)
     if not card:
         raise ValueError(
@@ -515,7 +515,7 @@ def add_thesis_metric(
 
     metrics = card.setdefault("key_metrics", [])
     metric: ThesisMetric | None = next(
-        (item for item in metrics if str(item.get("name", "")).strip().lower() == metric_name.lower()),
+        (item for item in metrics if item["name"].strip().lower() == metric_name.lower()),
         None,
     )
     if metric is None:
@@ -551,23 +551,19 @@ def get_thesis_by_ticker(workspace_root: Path, *, ticker: str) -> list[ThesisCar
     """Return thesis cards linked to a ticker symbol."""
     paths = ensure_portfolio_layout(workspace_root)
     normalized_ticker = _normalize_thesis_tickers([ticker])[0]
-    cards = _load_thesis_cards(paths, backup_old_schema=False)
+    cards = _load_thesis_cards(paths)
     return [
         card
-        for card in sorted(cards, key=lambda item: str(item.get("card_id", "")))
-        if normalized_ticker in {str(symbol).strip().upper() for symbol in card.get("ticker_symbols", [])}
+        for card in sorted(cards, key=lambda item: item["card_id"])
+        if normalized_ticker in {symbol.strip().upper() for symbol in card["ticker_symbols"]}
     ]
 
 
-def _load_thesis_cards(paths: PortfolioPaths, *, backup_old_schema: bool) -> list[ThesisCard]:
+def _load_thesis_cards(paths: PortfolioPaths) -> list[ThesisCard]:
     cards = load_json(paths.thesis_cards, default=[])
     if not isinstance(cards, list):
         raise ValueError("thesis-cards.json must contain a JSON array")
-    if _contains_legacy_thesis_cards(cards):
-        if backup_old_schema:
-            _backup_thesis_cards(paths)
-        cards = [_coerce_thesis_card(card) for card in cards]
-    return cards
+    return [card for card in cards if isinstance(card, dict) and "card_id" in card]
 
 
 def _write_thesis_cards(
@@ -577,54 +573,11 @@ def _write_thesis_cards(
     event: str,
     event_payload: dict[str, str],
 ) -> None:
-    sorted_cards = sorted(cards, key=lambda item: str(item.get("card_id", "")))
+    sorted_cards = sorted(cards, key=lambda item: item["card_id"])
     write_json(paths.thesis_cards, sorted_cards)
     paths.thesis_rendered.write_text(render_thesis_markdown(sorted_cards), encoding="utf-8")
     append_jsonl(paths.metadata_history, {"timestamp": now_utc_iso(), "event": event, **event_payload})
     update_history_render(paths)
-
-
-def _contains_legacy_thesis_cards(cards: Sequence[object]) -> bool:
-    legacy_keys = {"security_id", "thesis_summary", "key_expectations", "disconfirming_signals"}
-    return any(isinstance(card, dict) and (legacy_keys & set(card)) for card in cards)
-
-
-def _backup_thesis_cards(paths: PortfolioPaths) -> Path:
-    backup_dir = paths.root / "backups"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    backup_path = backup_dir / f"thesis-cards-{stamp}.json"
-    suffix = 1
-    while backup_path.exists():
-        backup_path = backup_dir / f"thesis-cards-{stamp}-{suffix}.json"
-        suffix += 1
-    backup_path.write_text(paths.thesis_cards.read_text(encoding="utf-8"), encoding="utf-8")
-    return backup_path
-
-
-def _coerce_thesis_card(card: Mapping[str, object]) -> ThesisCard:
-    if card.get("card_id"):
-        coerced = dict(card)
-        coerced["card_id"] = _normalize_thesis_card_id(str(coerced.get("card_id", "")))
-        coerced["ticker_symbols"] = _normalize_thesis_tickers(list(coerced.get("ticker_symbols", [])))
-        coerced["core_thesis"] = _normalize_thesis_list(list(coerced.get("core_thesis", [])), field_name="core_thesis")
-        coerced["signals"] = _normalize_thesis_list(list(coerced.get("signals", [])), field_name="signals")
-        coerced.setdefault("key_metrics", [])
-        coerced.setdefault("updated_at", now_utc_iso())
-        return coerced
-
-    security_id = canonical_security_id(card.get("security_id") or card.get("ticker") or "")
-    card_id = _normalize_thesis_card_id(str(security_id).lower().replace("_", "-"))
-    ticker_symbols = _normalize_thesis_tickers([security_id]) if security_id else []
-    return {
-        "card_id": card_id,
-        "ticker_symbols": ticker_symbols,
-        "summary": str(card.get("thesis_summary") or card.get("summary") or "").strip(),
-        "core_thesis": _normalize_thesis_list(list(card.get("key_expectations", [])), field_name="core_thesis"),
-        "key_metrics": list(card.get("key_metrics", [])) if isinstance(card.get("key_metrics", []), list) else [],
-        "signals": _normalize_thesis_list(list(card.get("disconfirming_signals", [])), field_name="signals"),
-        "updated_at": str(card.get("updated_at") or now_utc_iso()),
-    }
 
 
 def _normalize_thesis_card_id(value: str) -> str:
@@ -665,7 +618,7 @@ def _normalize_thesis_list(values: list[str], *, field_name: str) -> list[str]:
 def _split_thesis_values(values: list[str]) -> list[str]:
     items: list[str] = []
     for value in values:
-        for part in str(value or "").replace("|", ";").split(";"):
+        for part in value.replace("|", ";").split(";"):
             normalized = part.strip()
             if normalized:
                 items.append(normalized)
@@ -892,8 +845,12 @@ def render_thesis_markdown(cards: Sequence[Mapping[str, object]]) -> str:
         lines.append("No thesis cards configured.")
         return "\n".join(lines) + "\n"
 
-    coerced_cards = [_coerce_thesis_card(card) if _contains_legacy_thesis_cards([card]) else card for card in cards]
-    for card in sorted(coerced_cards, key=lambda item: str(item.get("card_id", ""))):
+    current_cards = [card for card in cards if "card_id" in card]
+    if not current_cards:
+        lines.append("No thesis cards configured.")
+        return "\n".join(lines) + "\n"
+
+    for card in sorted(current_cards, key=lambda item: item["card_id"]):
         tickers = ", ".join(f"`{ticker}`" for ticker in card.get("ticker_symbols", [])) or "None"
         core_thesis = [f"- {item}" for item in card.get("core_thesis", [])] or ["- None"]
         signals = [f"- {item}" for item in card.get("signals", [])] or ["- None"]

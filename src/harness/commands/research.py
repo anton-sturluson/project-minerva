@@ -30,10 +30,10 @@ RESEARCH_HELP = (
 app = typer.Typer(help=RESEARCH_HELP, no_args_is_help=False, invoke_without_command=True)
 
 
-def dispatch(args: list[str], settings: HarnessSettings | None = None, stdin: bytes = b"") -> CommandResult:
+def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch research for `minerva run`."""
     _ = stdin
-    active_settings = settings or get_settings()
+    active_settings = settings
     if not args:
         return CommandResult.from_text(
             "",
@@ -57,10 +57,10 @@ def research_command(
     *,
     query: str,
     output_path: str | None = None,
-    settings: HarnessSettings | None = None,
+    settings: HarnessSettings,
 ) -> CommandResult:
     start = time.perf_counter()
-    active_settings = settings or get_settings()
+    active_settings = settings
     if not active_settings.parallel_api_key:
         return error_result(
             "PARALLEL_API_KEY is not set",
@@ -103,7 +103,8 @@ def research_cli_command(
             what_to_do="pass a natural-language research question",
             alternatives=["`minerva research \"market map of vertical SaaS companies in hospitality\"`", "`minerva research \"travel tech value migration\" --output travel-tech.md`"],
         )
-    _print(research_command(query=query, output_path=output))
+    settings = get_settings()
+    _print(research_command(query=query, output_path=output, settings=settings))
 
 
 def _call_parallel(*, query: str, api_key: str) -> str:
