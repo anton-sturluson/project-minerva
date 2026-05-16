@@ -25,7 +25,6 @@ app = typer.Typer(help=FILEINFO_HELP, no_args_is_help=False, invoke_without_comm
 
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch fileinfo for `minerva run`."""
-    _ = settings
     _ = stdin
     if not args:
         return CommandResult.from_text(

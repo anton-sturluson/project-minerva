@@ -29,7 +29,6 @@ app = typer.Typer(help=EVIDENCE_HELP, no_args_is_help=True)
 def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> CommandResult:
     """Dispatch evidence commands for `minerva run`."""
     _ = stdin
-    _ = settings
     if not args:
         return CommandResult.from_text("", stderr=_usage_error("no `evidence` subcommand was provided", "choose an evidence workflow command", ["`evidence init --root ... --ticker AAPL --name Apple --slug apple`", "`evidence add-source --root ... --title ... --category ... --status ...`", "`evidence audit --root ...`"], EVIDENCE_HELP), exit_code=1)
 

@@ -156,7 +156,6 @@ def run_dcf_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings
     try:
         from minerva.formatting import build_markdown_table, format_pct, format_usd
         from minerva.valuation import DCFAssumptions, run_dcf
@@ -244,7 +243,6 @@ def run_comps_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings
     try:
         from minerva.formatting import build_markdown_table, format_usd
         from minerva.valuation import CompsAssumptions, run_comps
@@ -294,7 +292,6 @@ def run_reverse_dcf_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings
     try:
         from minerva.formatting import format_pct, format_usd
         from minerva.valuation import run_reverse_dcf
@@ -339,7 +336,6 @@ def run_sotp_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings
     try:
         from minerva.formatting import build_markdown_table, format_multiple, format_pct, format_usd
         from minerva.valuation import SOTPSegment, run_sotp
@@ -407,7 +403,6 @@ def run_report_command(
     settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings
     try:
         from minerva.valuation import (
             CompsAssumptions,

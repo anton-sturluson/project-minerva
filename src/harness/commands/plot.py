@@ -122,7 +122,6 @@ def create_plot(
     settings: HarnessSettings,
 ) -> CommandResult:
     start: float = time.perf_counter()
-    _ = settings
     try:
         import matplotlib.pyplot as plt
         import pandas as pd
@@ -165,7 +164,6 @@ def create_wordcloud(
     settings: HarnessSettings,
 ) -> CommandResult:
     start = time.perf_counter()
-    _ = settings
     try:
         import matplotlib.pyplot as plt
         from wordcloud import WordCloud
