@@ -65,6 +65,12 @@ def get_13f_comparison(*args, **kwargs):
     return minerva_get_13f_comparison(*args, **kwargs)
 
 
+def format_13f_report(*args, **kwargs):
+    from minerva.sec import format_13f_report as minerva_format_13f_report
+
+    return minerva_format_13f_report(*args, **kwargs)
+
+
 def dispatch(
     args: list[str],
     settings: HarnessSettings | None = None,
@@ -95,9 +101,14 @@ def dispatch(
             return get_10k_command(str(args[1]), items=_parse_csv_values(items), settings=active_settings)
 
         if subcommand == "13f":
-            if len(args) != 2:
+            if len(args) < 2:
                 return _dispatch_help("13f", ["`sec 10k BRK-B --items 1A`"])
-            return get_13f_command(str(args[1]), settings=active_settings)
+            parsed = parse_flag_args(args[2:])
+            return get_13f_command(
+                str(args[1]),
+                output_path=str(parsed["output"]) if "output" in parsed else None,
+                settings=active_settings,
+            )
 
         if subcommand == "financials":
             if len(args) < 2:
@@ -192,7 +203,12 @@ def get_10k_command(
     return CommandResult.from_text("\n\n".join(lines), duration_ms=elapsed_ms(start))
 
 
-def get_13f_command(cik: str, *, settings: HarnessSettings | None = None) -> CommandResult:
+def get_13f_command(
+    cik: str,
+    *,
+    output_path: str | None = None,
+    settings: HarnessSettings | None = None,
+) -> CommandResult:
     """Fetch and format a 13-F comparison."""
     start: float = time.perf_counter()
     active_settings: HarnessSettings = settings or get_settings()
@@ -201,6 +217,7 @@ def get_13f_command(cik: str, *, settings: HarnessSettings | None = None) -> Com
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
     try:
         comparison = retry_call(lambda: get_13f_comparison(cik), should_retry=should_retry_network_error)
+        report = format_13f_report(comparison)
     except Exception as exc:
         return error_result(
             f"failed to compare 13-F filings for {cik}: {exc}",
@@ -209,18 +226,12 @@ def get_13f_command(cik: str, *, settings: HarnessSettings | None = None) -> Com
             start,
         )
 
-    summary_lines: list[str] = [
-        f"current positions: {len(comparison['current'])}",
-        f"previous positions: {len(comparison['previous'])}",
-        f"new positions: {len(comparison['new'])}",
-        f"exited positions: {len(comparison['exited'])}",
-        f"increased positions: {len(comparison['increased'])}",
-        f"decreased positions: {len(comparison['decreased'])}",
-    ]
-    sections: list[str] = ["\n".join(summary_lines)]
-    for key in ["new", "exited", "increased", "decreased"]:
-        sections.append(f"## {key.title()}\n\n{dataframe_to_markdown(comparison[key])}")
-    return CommandResult.from_text("\n\n".join(sections), duration_ms=elapsed_ms(start))
+    if output_path:
+        target = resolve_path(output_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(report, encoding="utf-8")
+        return CommandResult.from_text(f"saved_to: {relative_display_path(target)}", duration_ms=elapsed_ms(start))
+    return CommandResult.from_text(report, duration_ms=elapsed_ms(start))
 
 
 def get_financials_command(
@@ -353,6 +364,7 @@ def ten_k_command(
 def thirteen_f_command(
     ctx: typer.Context,
     cik: str | None = typer.Argument(None, help="Manager CIK number."),
+    output: str | None = typer.Option(None, "--output", help="Write markdown report to this file path."),
 ) -> None:
     if not cik:
         abort_with_help(
@@ -361,7 +373,7 @@ def thirteen_f_command(
             what_to_do="pass a manager CIK such as `1067983`",
             alternatives=["`minerva sec 13f 1067983`", "`minerva sec 10k BRK-B --items 1A`"],
         )
-    _print(get_13f_command(cik))
+    _print(get_13f_command(cik, output_path=output))
 
 
 @app.command("financials", help="Fetch annual financial statements.\n\nExample:\n  minerva sec financials MSFT --type income --periods 5")
