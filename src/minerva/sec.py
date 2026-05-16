@@ -8,6 +8,19 @@ from typing import Any
 import pandas as pd
 from edgar import Company
 
+from minerva.formatting import (
+    build_markdown_table,
+    clean_text,
+    format_delta_shares,
+    format_millions,
+    format_pct,
+    format_pp,
+    format_shares,
+    format_signed_percent,
+    is_empty,
+    md_cell,
+)
+
 
 def get_13f_comparison(cik: int | str) -> dict[str, Any]:
     """Fetch latest 13-F and compare with previous quarter.
@@ -89,9 +102,9 @@ def format_13f_report(comparison: dict[str, Any]) -> str:
     if unchanged.empty:
         unchanged = _unchanged_from_comparison(comparison)
 
-    manager_name: str = _clean_text(comparison.get("manager_name") or comparison.get("fund_name") or "Unknown Manager")
-    current_period: str = _clean_text(comparison.get("current_period") or "Current")
-    previous_period: str = _clean_text(comparison.get("previous_period") or "Previous")
+    manager_name: str = clean_text(comparison.get("manager_name") or comparison.get("fund_name") or "Unknown Manager")
+    current_period: str = clean_text(comparison.get("current_period") or "Current")
+    previous_period: str = clean_text(comparison.get("previous_period") or "Previous")
 
     lines: list[str] = [
         f"## 13F-HR QoQ Comparison: {manager_name}",
@@ -152,12 +165,12 @@ def _format_13f_summary(
             f"Decreased: {len(decreased)} | Unchanged: {len(unchanged)}"
         ),
         (
-            f"- Portfolio value: {_format_millions(current_total)} "
-            f"(prev: {_format_millions(previous_total)}, "
-            f"Δ {_format_percent(_pct_change(current_total, previous_total), signed=True)})"
+            f"- Portfolio value: {format_millions(current_total)} "
+            f"(prev: {format_millions(previous_total)}, "
+            f"Δ {format_signed_percent(_pct_change(current_total, previous_total))})"
         ),
-        f"- Net new capital deployed: {_format_millions(_section_value_total(new_positions, 'current'))}",
-        f"- Net capital exited: {_format_millions(_section_value_total(exited_positions, 'previous'))}",
+        f"- Net new capital deployed: {format_millions(_section_value_total(new_positions, 'current'))}",
+        f"- Net capital exited: {format_millions(_section_value_total(exited_positions, 'previous'))}",
     ]
 
 
@@ -165,38 +178,36 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
     if df.empty:
         return "(no rows)"
 
-    from minerva.formatting import build_markdown_table
-
     row_payloads: list[tuple[float, list[str], str]] = []
     put_calls: list[str] = []
     for _, row in df.iterrows():
         put_call_side: str = "previous" if kind == "exited" else "current"
-        put_call: str = _clean_text(_row_value(row, "PutCall", put_call_side))
+        put_call: str = clean_text(_row_value(row, "PutCall", put_call_side))
         if not put_call and kind in {"increased", "decreased", "unchanged"}:
-            put_call = _clean_text(_row_value(row, "PutCall", "previous"))
+            put_call = clean_text(_row_value(row, "PutCall", "previous"))
         if put_call:
             put_calls.append(put_call)
 
         if kind == "new":
             value = _row_number(row, "Value", "current")
             cells = [
-                _md_cell(_row_value(row, "Ticker", "current")),
-                _md_cell(_row_value(row, "Issuer", "current")),
-                _md_cell(_row_value(row, "Class", "current")),
-                _format_shares(_row_number(row, "SharesPrnAmount", "current")),
-                _format_millions(value),
-                _format_percent(_weight(value, current_total)),
+                md_cell(_row_value(row, "Ticker", "current")),
+                md_cell(_row_value(row, "Issuer", "current")),
+                md_cell(_row_value(row, "Class", "current")),
+                format_shares(_row_number(row, "SharesPrnAmount", "current")),
+                format_millions(value),
+                format_pct(_weight(value, current_total), na_value=""),
             ]
             sort_key = -(value or 0)
         elif kind == "exited":
             value = _row_number(row, "Value", "previous")
             cells = [
-                _md_cell(_row_value(row, "Ticker", "previous")),
-                _md_cell(_row_value(row, "Issuer", "previous")),
-                _md_cell(_row_value(row, "Class", "previous")),
-                _format_shares(_row_number(row, "SharesPrnAmount", "previous")),
-                _format_millions(value),
-                _format_percent(_weight(value, previous_total)),
+                md_cell(_row_value(row, "Ticker", "previous")),
+                md_cell(_row_value(row, "Issuer", "previous")),
+                md_cell(_row_value(row, "Class", "previous")),
+                format_shares(_row_number(row, "SharesPrnAmount", "previous")),
+                format_millions(value),
+                format_pct(_weight(value, previous_total), na_value=""),
             ]
             sort_key = -(value or 0)
         elif kind in {"increased", "decreased"}:
@@ -209,16 +220,16 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
             current_weight = _weight(current_value, current_total)
             previous_weight = _weight(previous_value, previous_total)
             cells = [
-                _md_cell(_row_value(row, "Ticker", "current")),
-                _md_cell(_row_value(row, "Issuer", "current")),
-                _md_cell(_row_value(row, "Class", "current")),
-                _format_shares(current_shares),
-                _format_delta_shares(share_delta),
-                _format_percent(share_delta_pct, signed=True),
-                _format_millions(current_value),
-                _format_millions(_sub(current_value, previous_value), signed=True),
-                _format_percent(current_weight),
-                _format_pp(_sub(current_weight, previous_weight)),
+                md_cell(_row_value(row, "Ticker", "current")),
+                md_cell(_row_value(row, "Issuer", "current")),
+                md_cell(_row_value(row, "Class", "current")),
+                format_shares(current_shares),
+                format_delta_shares(share_delta),
+                format_signed_percent(share_delta_pct),
+                format_millions(current_value),
+                format_millions(_sub(current_value, previous_value), signed=True),
+                format_pct(current_weight, na_value=""),
+                format_pp(_sub(current_weight, previous_weight)),
             ]
             sort_key = -(share_delta_pct or 0) if kind == "increased" else (share_delta_pct or 0)
         else:
@@ -227,17 +238,17 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
             current_weight = _weight(current_value, current_total)
             previous_weight = _weight(previous_value, previous_total)
             cells = [
-                _md_cell(_row_value(row, "Ticker", "current")),
-                _md_cell(_row_value(row, "Issuer", "current")),
-                _md_cell(_row_value(row, "Class", "current")),
-                _format_shares(_row_number(row, "SharesPrnAmount", "current")),
-                _format_millions(current_value),
-                _format_percent(current_weight),
-                _format_pp(_sub(current_weight, previous_weight)),
+                md_cell(_row_value(row, "Ticker", "current")),
+                md_cell(_row_value(row, "Issuer", "current")),
+                md_cell(_row_value(row, "Class", "current")),
+                format_shares(_row_number(row, "SharesPrnAmount", "current")),
+                format_millions(current_value),
+                format_pct(current_weight, na_value=""),
+                format_pp(_sub(current_weight, previous_weight)),
             ]
             sort_key = -(current_value or 0)
 
-        row_payloads.append((sort_key, cells, _md_cell(put_call)))
+        row_payloads.append((sort_key, cells, md_cell(put_call)))
 
     include_put_call: bool = bool(put_calls)
     row_payloads.sort(key=lambda item: item[0])
@@ -314,7 +325,7 @@ def _row_value(row: pd.Series, base: str, side: str | None = None) -> Any:
 
 def _row_number(row: pd.Series, base: str, side: str | None = None) -> float | None:
     value = _row_value(row, base, side)
-    if _is_empty(value):
+    if is_empty(value):
         return None
     numeric = pd.to_numeric(value, errors="coerce")
     if pd.isna(numeric):
@@ -340,66 +351,6 @@ def _find_column(columns: Any, candidates: list[str]) -> str | None:
         if found:
             return found
     return None
-
-
-def _is_empty(value: Any) -> bool:
-    if value is None:
-        return True
-    try:
-        if pd.isna(value):
-            return True
-    except (TypeError, ValueError):
-        pass
-    return str(value).strip().lower() in {"", "nan", "none", "nat", "<na>"}
-
-
-def _clean_text(value: Any) -> str:
-    if _is_empty(value):
-        return ""
-    return str(value).strip()
-
-
-def _md_cell(value: Any) -> str:
-    return _clean_text(value).replace("\n", " ").replace("|", "\\|")
-
-
-def _format_millions(value: float | None, *, signed: bool = False) -> str:
-    if value is None:
-        return ""
-    amount = value / 1_000_000
-    if signed:
-        sign = "+" if amount >= 0 else "-"
-        return f"{sign}${abs(amount):,.0f}M"
-    if amount < 0:
-        return f"-${abs(amount):,.0f}M"
-    return f"${amount:,.0f}M"
-
-
-def _format_percent(value: float | None, *, signed: bool = False) -> str:
-    if value is None:
-        return ""
-    sign = "+" if signed and value >= 0 else ""
-    return f"{sign}{value:.1f}%"
-
-
-def _format_pp(value: float | None) -> str:
-    if value is None:
-        return ""
-    sign = "+" if value >= 0 else ""
-    return f"{sign}{value:.1f}pp"
-
-
-def _format_shares(value: float | None) -> str:
-    if value is None:
-        return ""
-    return f"{int(round(value)):,.0f}"
-
-
-def _format_delta_shares(value: float | None) -> str:
-    if value is None:
-        return ""
-    sign = "+" if value >= 0 else "-"
-    return f"{sign}{abs(int(round(value))):,}"
 
 
 def _weight(value: float | None, total: float) -> float | None:
@@ -428,7 +379,7 @@ def _safe_attr_text(obj: Any, names: list[str]) -> str:
                 value = value()
             except TypeError:
                 continue
-        text = _clean_text(value)
+        text = clean_text(value)
         if text:
             return text
     return ""
