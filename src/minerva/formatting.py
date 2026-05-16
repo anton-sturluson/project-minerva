@@ -138,6 +138,27 @@ def build_markdown_table(headers: list[str], rows: list[list[str]], alignment: l
     return "\n".join([header_line, separator_line] + data_lines)
 
 
+def weight(value: float | None, total: float) -> float | None:
+    """Return None when value is None or total is zero, allowing clean propagation to formatting functions."""
+    if value is None or total == 0:
+        return None
+    return (value / total) * 100
+
+
+def pct_change(current: float | None, previous: float | None) -> float | None:
+    """Return None when either input is None or previous is zero, allowing clean propagation to formatting functions."""
+    if current is None or previous in (None, 0):
+        return None
+    return ((current - previous) / previous) * 100
+
+
+def sub(current: float | None, previous: float | None) -> float | None:
+    """Return None when either input is None, allowing clean propagation to formatting functions."""
+    if current is None or previous is None:
+        return None
+    return current - previous
+
+
 def calculate_growth_rate(current: float, prior: float) -> float | None:
     """Calculate year-over-year growth rate as a percentage.
 

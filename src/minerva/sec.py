@@ -19,6 +19,9 @@ from minerva.formatting import (
     format_signed_percent,
     is_empty,
     md_cell,
+    pct_change,
+    sub,
+    weight,
 )
 
 
@@ -191,7 +194,7 @@ def _format_13f_summary(
         (
             f"- Portfolio value: {format_millions(current_total)} "
             f"(prev: {format_millions(previous_total)}, "
-            f"Δ {format_signed_percent(_pct_change(current_total, previous_total))})"
+            f"Δ {format_signed_percent(pct_change(current_total, previous_total))})"
         ),
         f"- Net new capital deployed: {format_millions(_section_value_total(new_positions, 'current'))}",
         f"- Net capital exited: {format_millions(_section_value_total(exited_positions, 'previous'))}",
@@ -220,7 +223,7 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
                 md_cell(_row_value(row, "Class", "current")),
                 format_shares(_row_number(row, "SharesPrnAmount", "current")),
                 format_millions(value),
-                format_pct(_weight(value, current_total), na_value=""),
+                format_pct(weight(value, current_total), na_value=""),
             ]
             sort_key = -(value or 0)
         elif kind == "exited":
@@ -231,7 +234,7 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
                 md_cell(_row_value(row, "Class", "previous")),
                 format_shares(_row_number(row, "SharesPrnAmount", "previous")),
                 format_millions(value),
-                format_pct(_weight(value, previous_total), na_value=""),
+                format_pct(weight(value, previous_total), na_value=""),
             ]
             sort_key = -(value or 0)
         elif kind in {"increased", "decreased"}:
@@ -239,10 +242,10 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
             previous_value = _row_number(row, "Value", "previous")
             current_shares = _row_number(row, "SharesPrnAmount", "current")
             previous_shares = _row_number(row, "SharesPrnAmount", "previous")
-            share_delta = _sub(current_shares, previous_shares)
-            share_delta_pct = _pct_change(current_shares, previous_shares)
-            current_weight = _weight(current_value, current_total)
-            previous_weight = _weight(previous_value, previous_total)
+            share_delta = sub(current_shares, previous_shares)
+            share_delta_pct = pct_change(current_shares, previous_shares)
+            current_weight = weight(current_value, current_total)
+            previous_weight = weight(previous_value, previous_total)
             cells = [
                 md_cell(_row_value(row, "Ticker", "current")),
                 md_cell(_row_value(row, "Issuer", "current")),
@@ -251,16 +254,16 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
                 format_delta_shares(share_delta),
                 format_signed_percent(share_delta_pct),
                 format_millions(current_value),
-                format_millions(_sub(current_value, previous_value), signed=True),
+                format_millions(sub(current_value, previous_value), signed=True),
                 format_pct(current_weight, na_value=""),
-                format_pp(_sub(current_weight, previous_weight)),
+                format_pp(sub(current_weight, previous_weight)),
             ]
             sort_key = -(share_delta_pct or 0) if kind == "increased" else (share_delta_pct or 0)
         else:
             current_value = _row_number(row, "Value", "current")
             previous_value = _row_number(row, "Value", "previous")
-            current_weight = _weight(current_value, current_total)
-            previous_weight = _weight(previous_value, previous_total)
+            current_weight = weight(current_value, current_total)
+            previous_weight = weight(previous_value, previous_total)
             cells = [
                 md_cell(_row_value(row, "Ticker", "current")),
                 md_cell(_row_value(row, "Issuer", "current")),
@@ -268,7 +271,7 @@ def _format_13f_section(df: pd.DataFrame, kind: str, current_total: float, previ
                 format_shares(_row_number(row, "SharesPrnAmount", "current")),
                 format_millions(current_value),
                 format_pct(current_weight, na_value=""),
-                format_pp(_sub(current_weight, previous_weight)),
+                format_pp(sub(current_weight, previous_weight)),
             ]
             sort_key = -(current_value or 0)
 
@@ -375,24 +378,6 @@ def _find_column(columns: pd.Index | list[str], candidates: list[str]) -> str | 
         if found:
             return found
     return None
-
-
-def _weight(value: float | None, total: float) -> float | None:
-    if value is None or total == 0:
-        return None
-    return (value / total) * 100
-
-
-def _pct_change(current: float | None, previous: float | None) -> float | None:
-    if current is None or previous in (None, 0):
-        return None
-    return ((current - previous) / previous) * 100
-
-
-def _sub(current: float | None, previous: float | None) -> float | None:
-    if current is None or previous is None:
-        return None
-    return current - previous
 
 
 def _safe_attr_text(obj: object, names: list[str]) -> str:
