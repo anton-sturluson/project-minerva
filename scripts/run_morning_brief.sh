@@ -189,6 +189,7 @@ EOF
     if openclaw agent \
       --agent main \
       --timeout 2400 \
+      --model anthropic/claude-sonnet-4-6 \
       --thinking medium \
       --session-id "${sessid}" \
       --message "${prompt}" >>"${log_file}" 2>&1; then
@@ -232,6 +233,7 @@ EOF
     if openclaw agent \
       --agent main \
       --timeout 300 \
+      --model anthropic/claude-sonnet-4-6 \
       --thinking medium \
       --session-id "${sessid}" \
       --message "${prompt}" >>"${log_file}" 2>&1; then
@@ -295,9 +297,11 @@ EOF
     done < <(jq -c '.[]' "${IR_REGISTRY}")
 
     # Wait for remaining IR agents
-    for pid in "${IR_PIDS[@]}"; do
-      wait "$pid" 2>/dev/null || true
-    done
+    if [[ $((IR_COUNT % IR_BATCH_SIZE)) -ne 0 ]]; then
+      for pid in "${IR_PIDS[@]}"; do
+        wait "$pid" 2>/dev/null || true
+      done
+    fi
   fi
 
   # Wait for all editorial/calendar agents
