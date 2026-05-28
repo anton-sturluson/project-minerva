@@ -310,6 +310,11 @@ EOF
     wait "$pid" 2>/dev/null || true
   done
 
+  # Close any leftover browser tabs from collection
+  for alias in $(browser tabs 2>/dev/null | grep -oE 't[0-9]+'); do
+    browser close "$alias" 2>/dev/null || true
+  done
+
   COLLECTION_ERROR_COUNT=$(find "${NEWS_DIR}/raw" -name "*-error.md" 2>/dev/null | wc -l | tr -d ' ')
   if [[ "${COLLECTION_ERROR_COUNT}" -gt 0 ]]; then
     echo "  news collection completed with ${COLLECTION_ERROR_COUNT} collector error(s); logs: ${NEWS_LOG_DIR}"
