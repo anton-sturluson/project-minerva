@@ -196,9 +196,24 @@ EOF
       echo "news: ${source_id} ok (log: ${log_file})"
     else
       local status=$?
-      echo "news: ${source_id} failed (status ${status}, log: ${log_file})"
-      write_collection_error "${source_id}" "${source_name}" "${url}" "${sessid}" "${status}" "${log_file}"
-      return "${status}"
+      echo "news: ${source_id} failed (status ${status}); retrying once (log: ${log_file})"
+      local retry_sessid="${sessid}-retry"
+      echo "" >>"${log_file}"
+      echo "--- retry (session ${retry_sessid}) at $(date -u +%FT%TZ) ---" >>"${log_file}"
+      if openclaw agent \
+        --agent main \
+        --timeout 2400 \
+        --model anthropic/claude-sonnet-4-6 \
+        --thinking medium \
+        --session-id "${retry_sessid}" \
+        --message "${prompt}" >>"${log_file}" 2>&1; then
+        echo "news: ${source_id} ok on retry (log: ${log_file})"
+      else
+        status=$?
+        echo "news: ${source_id} failed after retry (status ${status}, log: ${log_file})"
+        write_collection_error "${source_id}" "${source_name}" "${url}" "${retry_sessid}" "${status}" "${log_file}"
+        return "${status}"
+      fi
     fi
   }
 
@@ -240,9 +255,24 @@ EOF
       echo "news: ${source_id} ok (log: ${log_file})"
     else
       local status=$?
-      echo "news: ${source_id} failed (status ${status}, log: ${log_file})"
-      write_collection_error "${source_id}" "${source_name}" "${url}" "${sessid}" "${status}" "${log_file}"
-      return "${status}"
+      echo "news: ${source_id} failed (status ${status}); retrying once (log: ${log_file})"
+      local retry_sessid="${sessid}-retry"
+      echo "" >>"${log_file}"
+      echo "--- retry (session ${retry_sessid}) at $(date -u +%FT%TZ) ---" >>"${log_file}"
+      if openclaw agent \
+        --agent main \
+        --timeout 300 \
+        --model anthropic/claude-sonnet-4-6 \
+        --thinking medium \
+        --session-id "${retry_sessid}" \
+        --message "${prompt}" >>"${log_file}" 2>&1; then
+        echo "news: ${source_id} ok on retry (log: ${log_file})"
+      else
+        status=$?
+        echo "news: ${source_id} failed after retry (status ${status}, log: ${log_file})"
+        write_collection_error "${source_id}" "${source_name}" "${url}" "${retry_sessid}" "${status}" "${log_file}"
+        return "${status}"
+      fi
     fi
   }
 
