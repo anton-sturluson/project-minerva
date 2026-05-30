@@ -10,7 +10,7 @@ Our current holdings and watchlist tickers (prioritize articles mentioning these
 
 ## Constraints
 
-- **Maximum 10 articles.** Scan the full front page first, then select the top 10 (or fewer) most relevant. Prioritize by: (1) direct relevance to portfolio companies above, (2) macro/market significance, (3) industry trends, (4) geopolitics that affects markets. Skip lifestyle, sports, entertainment, and celebrity fluff.
+- **Maximum 15 articles.** Scan the full front page first, then select the top 15 (or fewer) most relevant. Prioritize by: (1) direct relevance to portfolio companies above, (2) macro/market significance, (3) industry trends, (4) geopolitics or politics that affects the economy or markets, (5) genuinely interesting business, technology, science, or world stories a thoughtful investor would want to know. Skip lifestyle, sports, entertainment, and celebrity fluff.
 - **Skip articles older than 3 days** based on the visible publish date. If no date is visible, include the article.
 - **Skip duplicates.** If an article's slug matches any in the dedup list below, do not re-collect it.
 
@@ -23,7 +23,7 @@ Our current holdings and watchlist tickers (prioritize articles mentioning these
 1. Run: `browser open "{{URL}}" --new --window`
 2. Note the tab alias from the output (e.g. t7).
 3. Scan the front page. Identify all potentially relevant articles and their headlines.
-4. Select up to 10 articles, skipping any that match the dedup list or are older than 3 days.
+4. Select up to 15 articles, skipping any that match the dedup list or are older than 3 days.
 5. For each selected article:
    a. Click into it (or open in a new tab).
    b. Extract the full article text using `browser extract` or `browser ask`.
