@@ -63,6 +63,7 @@ class ThesisCard(TypedDict):
     core_thesis: list[str]
     key_metrics: list[ThesisMetric]
     signals: list[str]
+    game_plan: NotRequired[str]
     updated_at: str
 
 
@@ -453,6 +454,7 @@ def set_thesis_card(
     summary: str,
     core_thesis: list[str],
     signals: list[str],
+    game_plan: str | None = None,
 ) -> ThesisCard:
     """Create or replace a thesis card definition while preserving metrics."""
     paths = ensure_portfolio_layout(workspace_root)
@@ -467,6 +469,12 @@ def set_thesis_card(
 
     cards = _load_thesis_cards(paths)
     existing = next((card for card in cards if card.get("card_id") == normalized_card_id), None)
+    # Preserve-on-omit: when game_plan is None (flag not passed) keep the existing
+    # value; when an explicit string is passed, strip and use it (empty string clears).
+    if game_plan is None:
+        normalized_game_plan = str(existing.get("game_plan", "")).strip() if existing else ""
+    else:
+        normalized_game_plan = game_plan.strip()
     replacement: ThesisCard = {
         "card_id": normalized_card_id,
         "ticker_symbols": normalized_tickers,
@@ -474,6 +482,7 @@ def set_thesis_card(
         "core_thesis": normalized_core_thesis,
         "key_metrics": list(existing.get("key_metrics", [])) if existing else [],
         "signals": normalized_signals,
+        "game_plan": normalized_game_plan,
         "updated_at": now_utc_iso(),
     }
     updated_cards = [card for card in cards if card.get("card_id") != normalized_card_id]
@@ -854,6 +863,7 @@ def render_thesis_markdown(cards: Sequence[Mapping[str, object]]) -> str:
         tickers = ", ".join(f"`{ticker}`" for ticker in card.get("ticker_symbols", [])) or "None"
         core_thesis = [f"- {item}" for item in card.get("core_thesis", [])] or ["- None"]
         signals = [f"- {item}" for item in card.get("signals", [])] or ["- None"]
+        game_plan = str(card.get("game_plan", "")).strip()
         lines.extend(
             [
                 f"## {card['card_id']}",
@@ -862,6 +872,9 @@ def render_thesis_markdown(cards: Sequence[Mapping[str, object]]) -> str:
                 f"- Updated: {card.get('updated_at', '')}",
                 "",
                 str(card.get("summary", "")).strip() or "(no thesis summary)",
+                "",
+                "### Game Plan",
+                game_plan or "(no game plan)",
                 "",
                 "### Core Thesis",
                 *core_thesis,

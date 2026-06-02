@@ -104,6 +104,54 @@ class ThesisCardV2Tests(unittest.TestCase):
         self.assertIn("| Period | Date | Value | Source |", rendered)
         self.assertIn("| Q1 FY2027 | 2026-06-02 | 116% | earnings call |", rendered)
 
+    def test_thesis_game_plan_set_preserve_clear_and_render(self) -> None:
+        cards_path = self.workspace / "data" / "01-portfolio" / "current" / "thesis-cards.json"
+        rendered_path = self.workspace / "data" / "01-portfolio" / "current" / "thesis-cards.md"
+
+        # 1. Set with an explicit game plan.
+        card = set_thesis_card(
+            self.workspace,
+            card_id="gtlb",
+            ticker_symbols=["GTLB"],
+            summary="DevSecOps compounder",
+            core_thesis=["Platform consolidation"],
+            signals=["NRR > 120%"],
+            game_plan="Hold to 2028. Add below 25x fwd rev.",
+        )
+        self.assertEqual(card["game_plan"], "Hold to 2028. Add below 25x fwd rev.")
+
+        rendered = rendered_path.read_text(encoding="utf-8")
+        self.assertIn("### Game Plan", rendered)
+        self.assertIn("Hold to 2028. Add below 25x fwd rev.", rendered)
+
+        # 2. Preserve-on-omit: re-set without game_plan keeps the existing value.
+        set_thesis_card(
+            self.workspace,
+            card_id="gtlb",
+            ticker_symbols=["GTLB"],
+            summary="DevSecOps compounder v2",
+            core_thesis=["Platform consolidation"],
+            signals=["NRR > 120%"],
+        )
+        cards = load_json(cards_path, default=[])
+        self.assertEqual(cards[0]["summary"], "DevSecOps compounder v2")
+        self.assertEqual(cards[0]["game_plan"], "Hold to 2028. Add below 25x fwd rev.")
+
+        # 3. Explicit empty string clears the game plan.
+        set_thesis_card(
+            self.workspace,
+            card_id="gtlb",
+            ticker_symbols=["GTLB"],
+            summary="DevSecOps compounder v2",
+            core_thesis=["Platform consolidation"],
+            signals=["NRR > 120%"],
+            game_plan="",
+        )
+        cards = load_json(cards_path, default=[])
+        self.assertEqual(cards[0]["game_plan"], "")
+        rendered = rendered_path.read_text(encoding="utf-8")
+        self.assertIn("(no game plan)", rendered)
+
     def test_thesis_by_ticker_cross_card(self) -> None:
         set_thesis_card(
             self.workspace,
