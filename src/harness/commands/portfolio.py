@@ -256,6 +256,7 @@ def set_thesis_command(
     summary: str,
     core_thesis: list[str],
     signals: list[str],
+    game_plan: str | None = None,
     settings: HarnessSettings,
 ) -> CommandResult:
     """Create or replace one thesis card definition."""
@@ -268,6 +269,7 @@ def set_thesis_command(
             summary=summary,
             core_thesis=core_thesis,
             signals=signals,
+            game_plan=game_plan,
         )
     except Exception as exc:
         return error_result(
@@ -438,6 +440,7 @@ def thesis_set_cli(
     summary: str | None = typer.Option(None, "--summary", help="Compact thesis summary."),
     core_thesis: list[str] = typer.Option([], "--core-thesis", help="Core thesis bullet; repeat up to 5."),
     signals: list[str] = typer.Option([], "--signal", help="Signal bullet; repeat up to 5."),
+    game_plan: str | None = typer.Option(None, "--game-plan", help="Game plan for this thesis; omit to preserve existing."),
 ) -> None:
     show_help_if_bare(ctx, card_id=card_id, summary=summary)
     if not card_id:
@@ -451,6 +454,7 @@ def thesis_set_cli(
             summary=summary,
             core_thesis=core_thesis,
             signals=signals,
+            game_plan=game_plan,
             settings=get_settings(),
         )
     )
@@ -551,6 +555,7 @@ def _dispatch_thesis(args: list[str], settings: HarnessSettings) -> CommandResul
             summary=_one_flag_value(parsed, "summary"),
             core_thesis=parsed.get("core-thesis", []),
             signals=parsed.get("signal", []),
+            game_plan=_optional_flag_value(parsed, "game-plan"),
             settings=settings,
         )
     if action == "metric":
