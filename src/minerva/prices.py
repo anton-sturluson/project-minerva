@@ -1,12 +1,13 @@
 """52-week price position tracking.
 
-Pulls current price and 52-week high/low from Finnhub, persists dated snapshots
-to invest.db, and reports where each ticker sits in its 52-week band:
+Pulls current price and 52-week high/low from Yahoo Finance, persists dated
+snapshots to invest.db, and reports where each ticker sits in its 52-week band:
 
     range_pct = (current - low) / (high - low)   # 0 = on 52w low, 1 = on 52w high
 
-The derived range_pct is computed on read (via the ``price_position`` view), never
-stored, so a corrected input never leaves a stale value behind.
+Yahoo covers US and international listings with one keyless call per ticker.
+range_pct is computed on read (via the ``price_position`` view), never stored, so a
+corrected input never leaves a stale value behind.
 
 Network access is isolated in ``fetch_price`` and injected into ``refresh_prices`` as
 a ``fetcher`` callable, which keeps the orchestration testable without mocking HTTP.
@@ -26,13 +27,32 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+YAHOO_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# Finnhub free tier allows 60 calls/min. We spend 2 calls per ticker, so pace to
-# stay comfortably under the ceiling: ~50 calls/min => one call every 1.2s.
-DEFAULT_MIN_INTERVAL = 1.2
-MAX_RETRIES = 3
-BACKOFF_CAP_SECONDS = 30.0
+# Yahoo is tolerant of request volume; this spacing is politeness, not a hard limit.
+DEFAULT_MIN_INTERVAL = 0.3
+# Yahoo intermittently throttles mid-batch, returning an empty result instead of an
+# error. Retry those a few times before giving up so a big refresh doesn't silently
+# drop valid tickers.
+EMPTY_RESULT_RETRIES = 3
+RETRY_BACKOFF_SECONDS = 1.0
+
+# Exchange code -> Yahoo symbol suffix. US listings (empty/None exchange) use the
+# bare ticker. Symbols already carrying a "." pass through unchanged.
+_EXCHANGE_SUFFIX = {
+    "TSX": ".TO",
+    "TSXV": ".V",
+    "ASX": ".AX",
+    "LSE": ".L",
+    "TSE": ".T",     # Tokyo
+    "ETR": ".DE",    # Xetra
+    "EPA": ".PA",    # Euronext Paris
+    "AMS": ".AS",    # Euronext Amsterdam
+    "SWX": ".SW",    # SIX Swiss
+    "STO": ".ST",    # Nasdaq Stockholm
+    "BME": ".MC",    # Madrid
+}
 
 # Mirrored in hard-disk/data/04-database/schema.sql. Kept here so tests and the CLI
 # can materialize the table + view into any database without reading that file.
@@ -44,15 +64,14 @@ CREATE TABLE IF NOT EXISTS prices (
     current     REAL,
     wk52_low    REAL,
     wk52_high   REAL,
-    low_date    TEXT,
-    high_date   TEXT,
-    source      TEXT NOT NULL DEFAULT 'finnhub',
+    currency    TEXT,
+    source      TEXT NOT NULL DEFAULT 'yahoo',
     fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (ticker, as_of)
 );
 CREATE VIEW IF NOT EXISTS price_position AS
 SELECT
-    ticker, as_of, current, wk52_low, wk52_high, low_date, high_date,
+    ticker, as_of, current, wk52_low, wk52_high, currency,
     ROUND((current - wk52_low) / NULLIF(wk52_high - wk52_low, 0), 4) AS range_pct
 FROM prices;
 CREATE INDEX IF NOT EXISTS idx_prices_ticker ON prices(ticker);
@@ -69,9 +88,8 @@ class PriceRow:
     current: float | None
     wk52_low: float | None
     wk52_high: float | None
-    low_date: str | None = None
-    high_date: str | None = None
-    source: str = "finnhub"
+    currency: str | None = None
+    source: str = "yahoo"
 
 
 def range_pct(row: PriceRow) -> float | None:
@@ -85,12 +103,21 @@ def range_pct(row: PriceRow) -> float | None:
     return (current - low) / span
 
 
-class RateLimiter:
-    """Monotonic spacer: guarantees at least ``min_interval`` seconds between acquires.
+def yahoo_symbol(ticker: str, exchange: str | None) -> str:
+    """Map a company ticker + exchange to the symbol Yahoo expects.
 
-    Single-threaded and sleep-based on purpose — the price pull is sequential, so a
-    simple pacer is enough and there is nothing to coordinate across threads.
+    US listings (no exchange) use the bare ticker. Symbols that already carry an
+    exchange suffix (a ".") pass through unchanged.
     """
+    ticker = ticker.strip().upper()
+    if "." in ticker:
+        return ticker
+    suffix = _EXCHANGE_SUFFIX.get((exchange or "").strip().upper())
+    return f"{ticker}{suffix}" if suffix else ticker
+
+
+class RateLimiter:
+    """Monotonic spacer: guarantees at least ``min_interval`` seconds between acquires."""
 
     def __init__(self, min_interval: float = DEFAULT_MIN_INTERVAL) -> None:
         self.min_interval = min_interval
@@ -110,20 +137,14 @@ def default_db_path(workspace_root: str | Path) -> Path:
     return Path(workspace_root) / "data" / "04-database" / "invest.db"
 
 
-def tracked_tickers(db_path: str | Path) -> list[str]:
-    """Return every non-null company ticker, alphabetically.
-
-    No priority filtering: a full refresh of the whole table is cheap enough
-    (2 calls/ticker, paced under the rate limit) that filtering isn't worth the
-    complexity. If a priority subset is ever wanted, drive it from actual
-    portfolio holdings or a real interest flag — not a documentation-state proxy.
-    """
+def tracked_companies(db_path: str | Path) -> list[tuple[str, str | None]]:
+    """Return (ticker, exchange) for every company with a non-empty ticker, alphabetically."""
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(
-            "SELECT ticker FROM companies "
+            "SELECT ticker, exchange FROM companies "
             "WHERE ticker IS NOT NULL AND ticker != '' ORDER BY ticker ASC"
         ).fetchall()
-    return [r[0] for r in rows]
+    return [(r[0], r[1]) for r in rows]
 
 
 def ensure_schema(db_path: str | Path) -> None:
@@ -141,14 +162,13 @@ def upsert_prices(db_path: str | Path, rows: Iterable[PriceRow]) -> int:
             conn.execute(
                 """
                 INSERT INTO prices
-                    (ticker, as_of, current, wk52_low, wk52_high, low_date, high_date, source, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    (ticker, as_of, current, wk52_low, wk52_high, currency, source, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(ticker, as_of) DO UPDATE SET
                     current    = excluded.current,
                     wk52_low   = excluded.wk52_low,
                     wk52_high  = excluded.wk52_high,
-                    low_date   = excluded.low_date,
-                    high_date  = excluded.high_date,
+                    currency   = excluded.currency,
                     source     = excluded.source,
                     fetched_at = excluded.fetched_at
                 """,
@@ -158,8 +178,7 @@ def upsert_prices(db_path: str | Path, rows: Iterable[PriceRow]) -> int:
                     row.current,
                     row.wk52_low,
                     row.wk52_high,
-                    row.low_date,
-                    row.high_date,
+                    row.currency,
                     row.source,
                 ),
             )
@@ -196,45 +215,63 @@ def read_positions(
 def fetch_price(
     ticker: str,
     *,
-    api_key: str,
+    exchange: str | None = None,
     session: requests.Session | None = None,
     limiter: RateLimiter | None = None,
     as_of: str | None = None,
 ) -> PriceRow:
-    """Fetch current price + 52-week band for one ticker from Finnhub.
+    """Fetch current price + 52-week band for one ticker from Yahoo Finance.
 
-    Two calls: /quote (current) and /stock/metric (52-week high/low). Honors the
-    shared rate limiter and retries on HTTP 429 with backoff.
+    One call to the chart endpoint. Raises on a missing/empty response so the caller
+    records it as a per-ticker failure rather than persisting bogus data.
     """
     session = session or requests.Session()
     as_of = as_of or datetime.now(timezone.utc).date().isoformat()
+    symbol = yahoo_symbol(ticker, exchange)
 
-    quote = _finnhub_get(session, "/quote", {"symbol": ticker, "token": api_key}, limiter)
-    metric = _finnhub_get(
-        session, "/stock/metric", {"symbol": ticker, "metric": "price", "token": api_key}, limiter
-    )
-    m = metric.get("metric", {}) if isinstance(metric, dict) else {}
+    result: list[Any] = []
+    for attempt in range(EMPTY_RESULT_RETRIES + 1):
+        if limiter is not None:
+            limiter.acquire()
+        resp = session.get(
+            YAHOO_CHART_URL.format(symbol=symbol),
+            params={"interval": "1d", "range": "1d"},
+            headers=YAHOO_HEADERS,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        result = (resp.json().get("chart") or {}).get("result") or []
+        if result:
+            break
+        # Empty result: usually a transient throttle, not a bad symbol. Back off and retry.
+        if attempt < EMPTY_RESULT_RETRIES:
+            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+    if not result:
+        raise ValueError(f"no chart data for {symbol}")
+    meta = result[0].get("meta") or {}
+
+    price = _as_float(meta.get("regularMarketPrice"))
+    if price is None:
+        raise ValueError(f"no price in chart meta for {symbol}")
 
     return PriceRow(
         ticker=ticker.upper(),
         as_of=as_of,
-        current=_as_float(quote.get("c")),
-        wk52_low=_as_float(m.get("52WeekLow")),
-        wk52_high=_as_float(m.get("52WeekHigh")),
-        low_date=m.get("52WeekLowDate"),
-        high_date=m.get("52WeekHighDate"),
+        current=price,
+        wk52_low=_as_float(meta.get("fiftyTwoWeekLow")),
+        wk52_high=_as_float(meta.get("fiftyTwoWeekHigh")),
+        currency=meta.get("currency"),
     )
 
 
 def refresh_prices(
     db_path: str | Path,
-    tickers: Sequence[str],
+    companies: Sequence[tuple[str, str | None]],
     *,
-    api_key: str,
     fetcher: Callable[..., PriceRow] = fetch_price,
     limiter: RateLimiter | None = None,
 ) -> dict[str, Any]:
-    """Fetch each ticker, upsert into the DB, and report results.
+    """Fetch each (ticker, exchange), upsert into the DB, and report results.
 
     Per-ticker failures are collected, not fatal — one bad ticker never aborts the run.
     """
@@ -244,10 +281,9 @@ def refresh_prices(
 
     fetched: list[PriceRow] = []
     errors: list[dict[str, str]] = []
-    for ticker in tickers:
+    for ticker, exchange in companies:
         try:
-            row = fetcher(ticker, api_key=api_key, session=session, limiter=limiter)
-            fetched.append(row)
+            fetched.append(fetcher(ticker, exchange=exchange, session=session, limiter=limiter))
         except Exception as exc:  # noqa: BLE001 — isolate one ticker's failure
             logger.warning("price fetch failed for %s: %s", ticker, exc)
             errors.append({"ticker": ticker, "error": str(exc)})
@@ -256,31 +292,6 @@ def refresh_prices(
         upsert_prices(db_path, fetched)
 
     return {"fetched": len(fetched), "errors": errors}
-
-
-def _finnhub_get(
-    session: requests.Session,
-    path: str,
-    params: dict[str, Any],
-    limiter: RateLimiter | None,
-) -> dict[str, Any]:
-    """GET a Finnhub endpoint, pacing via the limiter and retrying on 429."""
-    delay = 1.0
-    for attempt in range(MAX_RETRIES + 1):
-        if limiter is not None:
-            limiter.acquire()
-        resp = session.get(f"{FINNHUB_BASE_URL}{path}", params=params, timeout=30)
-        if resp.status_code == 429 and attempt < MAX_RETRIES:
-            retry_after = resp.headers.get("Retry-After")
-            wait = float(retry_after) if retry_after else min(delay, BACKOFF_CAP_SECONDS)
-            logger.warning("finnhub 429 on %s; backing off %.1fs", path, wait)
-            time.sleep(wait)
-            delay = min(delay * 2, BACKOFF_CAP_SECONDS)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    resp.raise_for_status()  # exhausted retries on 429
-    return resp.json()
 
 
 def _as_float(value: Any) -> float | None:

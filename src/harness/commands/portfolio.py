@@ -160,41 +160,38 @@ def prices_command(
 ) -> CommandResult:
     """Fetch/persist 52-week price positions, or read the stored table.
 
-    Naming tickers (or --refresh) fetches live from Finnhub and upserts. Naming
-    nothing is a zero-API read of the stored table, sorted by range_pct.
+    Naming tickers (or --refresh) fetches live from Yahoo and upserts. Naming
+    nothing is a zero-network read of the stored table, sorted by range_pct.
     """
     start = time.perf_counter()
     db_path = prices_mod.default_db_path(settings.ensure_workspace_root())
     prices_mod.ensure_schema(db_path)
 
-    universe = [t.upper() for t in tickers]
     if refresh:
-        universe = prices_mod.tracked_tickers(db_path)
+        companies = prices_mod.tracked_companies(db_path)
+    elif tickers:
+        # Resolve each named ticker's exchange from the DB so foreign symbols map
+        # correctly (e.g. TOI -> TOI.V); unknown tickers fetch bare.
+        known = dict(prices_mod.tracked_companies(db_path))
+        companies = [(t.upper(), known.get(t.upper())) for t in tickers]
+    else:
+        companies = []
 
-    if universe:
-        if not settings.finnhub_api_key:
-            return error_result(
-                "FINNHUB_API_KEY is not set; cannot fetch live prices",
-                "export FINNHUB_API_KEY, or run `portfolio prices` with no args to read stored data",
-                ["`portfolio prices` (read-only)"],
-                start,
-            )
+    if companies:
         try:
-            result = prices_mod.refresh_prices(db_path, universe, api_key=settings.finnhub_api_key)
+            result = prices_mod.refresh_prices(db_path, companies)
         except Exception as exc:
             return error_result(
                 f"failed to refresh prices: {exc}",
-                "check network access and the FINNHUB_API_KEY value",
+                "check network access",
                 ["`portfolio prices AAPL`"],
                 start,
             )
-        rows = prices_mod.read_positions(db_path, tickers=universe)
-        header = f"fetched: {result['fetched']}  errors: {len(result['errors'])}"
-        body = _render_price_table(rows)
-        lines = [header]
+        rows = prices_mod.read_positions(db_path, tickers=[t for t, _ in companies])
+        lines = [f"fetched: {result['fetched']}  errors: {len(result['errors'])}"]
         if result["errors"]:
             lines.append("error tickers: " + ", ".join(e["ticker"] for e in result["errors"]))
-        lines.append(body)
+        lines.append(_render_price_table(rows))
         return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
 
     # No universe => read-only view of everything stored.
@@ -205,14 +202,17 @@ def prices_command(
 def _render_price_table(rows: list[dict]) -> str:
     if not rows:
         return "(no price data — run `portfolio prices --refresh` or name a ticker)"
-    header = f"{'TICKER':<8} {'CURRENT':>10} {'52W_LOW':>10} {'52W_HIGH':>10} {'RANGE_PCT':>10}  AS_OF"
+    header = (
+        f"{'TICKER':<8} {'CURRENT':>10} {'52W_LOW':>10} {'52W_HIGH':>10} "
+        f"{'RANGE_PCT':>10} {'CCY':>4}  AS_OF"
+    )
     out = [header]
     for r in rows:
         pct = r.get("range_pct")
         pct_str = f"{pct:.4f}" if pct is not None else "n/a"
         out.append(
             f"{r['ticker']:<8} {_fmt_num(r.get('current')):>10} {_fmt_num(r.get('wk52_low')):>10} "
-            f"{_fmt_num(r.get('wk52_high')):>10} {pct_str:>10}  {r.get('as_of', '')}"
+            f"{_fmt_num(r.get('wk52_high')):>10} {pct_str:>10} {(r.get('currency') or ''):>4}  {r.get('as_of', '')}"
         )
     return "\n".join(out)
 
