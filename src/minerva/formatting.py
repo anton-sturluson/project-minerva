@@ -1,10 +1,24 @@
 """Utility functions for formatting financial data and building markdown tables."""
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import xmltodict
 import yaml
+
+
+def to_float(value: Any) -> float | None:
+    """Coerce a value to float, or None if empty/unparseable.
+
+    Tolerates common financial-string noise (%, thousands separators, whitespace).
+    """
+    if value in {None, ""}:
+        return None
+    try:
+        return float(str(value).replace("%", "").replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def is_empty(value: object) -> bool:

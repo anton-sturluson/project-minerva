@@ -31,6 +31,7 @@ from harness.portfolio_state import (
     read_text_source,
     write_json,
 )
+from minerva.formatting import to_float
 from minerva.sec import get_recent_filings
 
 
@@ -1569,7 +1570,7 @@ def _normalize_market_event(
     *,
     category: str | None = None,
 ) -> dict[str, Any] | None:
-    change_pct = _to_float(row.get("change_pct") or row.get("percent_change") or row.get("pct"))
+    change_pct = to_float(row.get("change_pct") or row.get("percent_change") or row.get("pct"))
     material = bool(row.get("material")) or (change_pct is not None and abs(change_pct) >= 1.0)
     symbol = str(row.get("symbol") or row.get("name") or row.get("pair") or "").strip()
     headline = str(row.get("headline") or f"{symbol} moved {change_pct:.2f}%").strip() if change_pct is not None else str(row.get("headline") or symbol)
@@ -1900,11 +1901,3 @@ def _coerce_event_date(value: Any) -> str | None:
             continue
     return None
 
-
-def _to_float(value: Any) -> float | None:
-    if value in {None, ""}:
-        return None
-    try:
-        return float(str(value).replace("%", "").replace(",", "").strip())
-    except ValueError:
-        return None
