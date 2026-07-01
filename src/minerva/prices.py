@@ -34,11 +34,6 @@ YAHOO_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # Yahoo is tolerant of request volume; this spacing is politeness, not a hard limit.
 DEFAULT_MIN_INTERVAL = 0.3
-# Yahoo intermittently throttles mid-batch, returning an empty result instead of an
-# error. Retry those a few times before giving up so a big refresh doesn't silently
-# drop valid tickers.
-EMPTY_RESULT_RETRIES = 3
-RETRY_BACKOFF_SECONDS = 1.0
 
 # Exchange code -> Yahoo symbol suffix. US listings (empty/None exchange) use the
 # bare ticker. Symbols already carrying a "." pass through unchanged.
@@ -228,7 +223,6 @@ def fetch_price(
     exchange: str | None = None,
     session: requests.Session | None = None,
     limiter: RateLimiter | None = None,
-    as_of: str | None = None,
 ) -> PriceRow:
     """Fetch current price + 52-week band for one ticker from Yahoo Finance.
 
@@ -236,26 +230,18 @@ def fetch_price(
     records it as a per-ticker failure rather than persisting bogus data.
     """
     session = session or requests.Session()
-    as_of = as_of or datetime.now(timezone.utc).date().isoformat()
     symbol = yahoo_symbol(ticker, exchange)
 
-    result: list[Any] = []
-    for attempt in range(EMPTY_RESULT_RETRIES + 1):
-        if limiter is not None:
-            limiter.acquire()
-        resp = session.get(
-            YAHOO_CHART_URL.format(symbol=symbol),
-            params={"interval": "1d", "range": "1d"},
-            headers=YAHOO_HEADERS,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        result = (resp.json().get("chart") or {}).get("result") or []
-        if result:
-            break
-        # Empty result: usually a transient throttle, not a bad symbol. Back off and retry.
-        if attempt < EMPTY_RESULT_RETRIES:
-            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+    if limiter is not None:
+        limiter.acquire()
+    resp = session.get(
+        YAHOO_CHART_URL.format(symbol=symbol),
+        params={"interval": "1d", "range": "1d"},
+        headers=YAHOO_HEADERS,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    result = (resp.json().get("chart") or {}).get("result") or []
     if not result:
         raise ValueError(f"no chart data for {symbol}")
     meta = result[0].get("meta") or {}
@@ -266,7 +252,7 @@ def fetch_price(
 
     return PriceRow(
         ticker=ticker.upper(),
-        as_of=as_of,
+        as_of=datetime.now(timezone.utc).date().isoformat(),
         current=price,
         wk52_low=to_float(meta.get("fiftyTwoWeekLow")),
         wk52_high=to_float(meta.get("fiftyTwoWeekHigh")),
