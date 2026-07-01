@@ -203,15 +203,16 @@ def _render_price_table(rows: list[dict]) -> str:
     if not rows:
         return "(no price data — run `portfolio prices --refresh` or name a ticker)"
     header = (
-        f"{'TICKER':<8} {'CURRENT':>10} {'52W_LOW':>10} {'52W_HIGH':>10} "
+        f"{'TICKER':<8} {'EXCH':<5} {'CURRENT':>10} {'52W_LOW':>10} {'52W_HIGH':>10} "
         f"{'RANGE_PCT':>10} {'CCY':>4}  AS_OF"
     )
     out = [header]
     for r in rows:
         pct = r.get("range_pct")
         pct_str = f"{pct:.4f}" if pct is not None else "n/a"
+        exch = (r.get("exchange") or "US")
         out.append(
-            f"{r['ticker']:<8} {_fmt_num(r.get('current')):>10} {_fmt_num(r.get('wk52_low')):>10} "
+            f"{r['ticker']:<8} {exch:<5} {_fmt_num(r.get('current')):>10} {_fmt_num(r.get('wk52_low')):>10} "
             f"{_fmt_num(r.get('wk52_high')):>10} {pct_str:>10} {(r.get('currency') or ''):>4}  {r.get('as_of', '')}"
         )
     return "\n".join(out)

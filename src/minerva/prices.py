@@ -198,10 +198,18 @@ def read_positions(
     """
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
+        # Pull the exchange label from companies when that table exists (prices stores
+        # only the ticker). A bare/fresh DB without companies still reads fine.
+        has_companies = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='companies'"
+        ).fetchone()
+        exch_select = "c.exchange AS exchange" if has_companies else "NULL AS exchange"
+        exch_join = "LEFT JOIN companies c ON UPPER(c.ticker) = p.ticker" if has_companies else ""
         sql = (
-            "SELECT p.* FROM price_position p "
+            f"SELECT p.*, {exch_select} FROM price_position p "
             "JOIN (SELECT ticker, MAX(as_of) AS as_of FROM prices GROUP BY ticker) latest "
-            "  ON p.ticker = latest.ticker AND p.as_of = latest.as_of"
+            "  ON p.ticker = latest.ticker AND p.as_of = latest.as_of "
+            f"{exch_join}"
         )
         params: list[Any] = []
         if tickers:
