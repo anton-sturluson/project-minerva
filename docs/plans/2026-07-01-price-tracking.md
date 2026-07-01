@@ -63,14 +63,16 @@ value. `NULLIF` guards the high == low divide-by-zero.
 ## Code
 
 - `src/minerva/prices.py`:
-  - `PriceRow`, `range_pct`, `ensure_schema`, `upsert_prices`, `read_positions` — unchanged
-    logic (schema gains `currency`, drops the Finnhub-specific `low_date`/`high_date`).
+  - `PriceRow`, `range_pct`, `ensure_schema`, `upsert_prices`, `read_positions` — schema/model
+    and persistence. `read_positions` LEFT JOINs `companies` for the exchange label.
   - `yahoo_symbol(ticker, exchange)` — pure suffix derivation.
   - `tracked_companies(db)` — returns `(ticker, exchange)` for every non-empty ticker.
-  - `fetch_price(ticker, *, exchange, session, limiter)` — one Yahoo call → `PriceRow`.
+  - `fetch_price(ticker, *, exchange, session, limiter)` — one Yahoo call → `PriceRow`;
+    retries transient empty responses, raises on genuine 404 (delisted).
   - `refresh_prices(db, companies, *, fetcher=fetch_price, limiter)` — orchestration; fetcher
     injectable so tests need no HTTP mock. `RateLimiter` at ~0.3s spacing (Yahoo tolerant;
     politeness only).
+  - Float coercion reuses `minerva.formatting.to_float` (shared, not a local helper).
 - `src/harness/commands/portfolio.py`: thin `prices` subcommand + dispatch. No API key.
 
 ## Tests (`tests/test_minerva/test_prices.py`, real temp DB, injectable fetcher)

@@ -25,6 +25,8 @@ from typing import Any, Callable, Iterable, Sequence
 
 import requests
 
+from minerva.formatting import to_float
+
 logger = logging.getLogger(__name__)
 
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -258,7 +260,7 @@ def fetch_price(
         raise ValueError(f"no chart data for {symbol}")
     meta = result[0].get("meta") or {}
 
-    price = _as_float(meta.get("regularMarketPrice"))
+    price = to_float(meta.get("regularMarketPrice"))
     if price is None:
         raise ValueError(f"no price in chart meta for {symbol}")
 
@@ -266,8 +268,8 @@ def fetch_price(
         ticker=ticker.upper(),
         as_of=as_of,
         current=price,
-        wk52_low=_as_float(meta.get("fiftyTwoWeekLow")),
-        wk52_high=_as_float(meta.get("fiftyTwoWeekHigh")),
+        wk52_low=to_float(meta.get("fiftyTwoWeekLow")),
+        wk52_high=to_float(meta.get("fiftyTwoWeekHigh")),
         currency=meta.get("currency"),
     )
 
@@ -301,9 +303,3 @@ def refresh_prices(
 
     return {"fetched": len(fetched), "errors": errors}
 
-
-def _as_float(value: Any) -> float | None:
-    try:
-        return float(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None

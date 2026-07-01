@@ -1,10 +1,31 @@
-"""Tests for minerva.formatting.xml_to_yaml."""
+"""Tests for minerva.formatting."""
 
 from pathlib import Path
 
 import yaml
 
-from minerva.formatting import xml_to_yaml
+from minerva.formatting import to_float, xml_to_yaml
+
+
+class TestToFloat:
+    """Tests for to_float coercion."""
+
+    def test_plain_number(self):
+        assert to_float(292.46) == 292.46
+        assert to_float(5) == 5.0
+
+    def test_none_and_empty_return_none(self):
+        assert to_float(None) is None
+        assert to_float("") is None
+
+    def test_strips_financial_noise(self):
+        assert to_float("1,234.5") == 1234.5
+        assert to_float("12.5%") == 12.5
+        assert to_float("  42 ") == 42.0
+
+    def test_unparseable_returns_none(self):
+        assert to_float("n/a") is None
+        assert to_float(object()) is None
 
 
 class TestXmlToYaml:
