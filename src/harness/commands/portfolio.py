@@ -75,7 +75,6 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
             return prices_command(
                 tickers=positional,
                 refresh=bool(parsed.get("refresh")),
-                all_status=bool(parsed.get("all-status")),
                 settings=settings,
             )
         if subcommand == "adjacency":
@@ -157,7 +156,6 @@ def prices_command(
     *,
     tickers: list[str],
     refresh: bool,
-    all_status: bool,
     settings: HarnessSettings,
 ) -> CommandResult:
     """Fetch/persist 52-week price positions, or read the stored table.
@@ -171,8 +169,7 @@ def prices_command(
 
     universe = [t.upper() for t in tickers]
     if refresh:
-        statuses = ("tracking", "owned", "exited", "passed") if all_status else ("tracking", "owned")
-        universe = prices_mod.tracked_tickers(db_path, statuses=statuses)
+        universe = prices_mod.tracked_tickers(db_path)
 
     if universe:
         if not settings.finnhub_api_key:
@@ -444,15 +441,13 @@ def enrich_cli() -> None:
 @app.command("prices", help="Show or refresh 52-week price positions (current vs 52w low/high).")
 def prices_cli(
     tickers: list[str] = typer.Argument(None, help="Tickers to fetch + persist. Omit to read stored data."),
-    refresh: bool = typer.Option(False, "--refresh", help="Fetch every tracked company (status tracking/owned)."),
-    all_status: bool = typer.Option(False, "--all-status", help="With --refresh, include exited/passed too."),
+    refresh: bool = typer.Option(False, "--refresh", help="Fetch every company in the table."),
 ) -> None:
     settings = get_settings()
     _print(
         prices_command(
             tickers=list(tickers or []),
             refresh=refresh,
-            all_status=all_status,
             settings=settings,
         )
     )

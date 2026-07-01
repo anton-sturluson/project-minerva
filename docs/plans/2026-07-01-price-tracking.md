@@ -12,14 +12,20 @@ Finnhub (already wired into the harness via `FINNHUB_API_KEY`).
 minerva portfolio prices                 # read-only: print stored table, sorted by range_pct. Zero API calls.
 minerva portfolio prices AAPL            # fetch AAPL live, upsert, print it
 minerva portfolio prices AAPL MSFT       # fetch several, upsert, print them
-minerva portfolio prices --refresh       # fetch ALL tracked companies, upsert all
+minerva portfolio prices --refresh       # fetch every company in the table
 ```
 
 **One rule:** naming tickers (or `--refresh`) fetches live + persists; naming nothing is a
-read-only view. `--refresh` just means "the universe is every tracked company."
+read-only view. `--refresh` means "the universe is every company in the table."
 
-Refresh universe = `companies` where `status IN ('tracking','owned')`. (Exited/passed names
-are excluded by default; `--all-status` flag can override if we want everything.)
+Refresh universe = all `companies` with a non-empty ticker. No priority filtering:
+a full refresh (2 calls/ticker, paced under the rate limit) is cheap enough that
+filtering isn't worth the complexity. If a priority subset is ever wanted, drive it
+from actual portfolio holdings or a real interest flag — not a documentation-state
+proxy like `folder_exists`.
+NOTE: the live `companies` table uses `folder_exists`/`categories`, not the `status`
+column in the repo's schema.sql (which drifted ahead of the actual DB). We no longer
+depend on either for the universe.
 
 ## Data model
 

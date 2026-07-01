@@ -25,7 +25,7 @@ def test_read_only_renders_stored_table(tmp_path: Path):
     ensure_schema(db)
     upsert_prices(db, [PriceRow("AAPL", "2026-07-01", current=150, wk52_low=100, wk52_high=200)])
 
-    result = portfolio.prices_command(tickers=[], refresh=False, all_status=False, settings=settings)
+    result = portfolio.prices_command(tickers=[], refresh=False, settings=settings)
     out = result.stdout.decode()
     assert result.exit_code == 0
     assert "AAPL" in out
@@ -34,13 +34,13 @@ def test_read_only_renders_stored_table(tmp_path: Path):
 
 def test_empty_table_message(tmp_path: Path):
     settings = _settings(tmp_path)
-    result = portfolio.prices_command(tickers=[], refresh=False, all_status=False, settings=settings)
+    result = portfolio.prices_command(tickers=[], refresh=False, settings=settings)
     assert result.exit_code == 0
     assert "no price data" in result.stdout.decode()
 
 
 def test_fetch_without_api_key_errors(tmp_path: Path):
     settings = _settings(tmp_path, key=None)
-    result = portfolio.prices_command(tickers=["AAPL"], refresh=False, all_status=False, settings=settings)
+    result = portfolio.prices_command(tickers=["AAPL"], refresh=False, settings=settings)
     assert result.exit_code != 0
     assert "FINNHUB_API_KEY" in result.stderr.decode()

@@ -149,31 +149,28 @@ class TestRefreshPrices:
 
 class TestTrackedTickers:
     def _seed_companies(self, db: Path) -> None:
+        # Mirrors the real companies schema: folder_exists drives the active set.
         with sqlite3.connect(db) as conn:
             conn.execute(
-                "CREATE TABLE companies (id INTEGER PRIMARY KEY, ticker TEXT, name TEXT, status TEXT)"
+                "CREATE TABLE companies (id INTEGER PRIMARY KEY, ticker TEXT, name TEXT, "
+                "folder_exists INTEGER NOT NULL DEFAULT 0)"
             )
             conn.executemany(
-                "INSERT INTO companies (ticker, name, status) VALUES (?, ?, ?)",
+                "INSERT INTO companies (ticker, name, folder_exists) VALUES (?, ?, ?)",
                 [
-                    ("AAPL", "Apple", "owned"),
-                    ("MSFT", "Microsoft", "tracking"),
-                    ("OLD", "Exited Co", "exited"),
-                    ("NO", "Passed Co", "passed"),
-                    (None, "Private Co", "tracking"),  # null ticker excluded
+                    ("AAPL", "Apple", 1),
+                    ("MSFT", "Microsoft", 0),
+                    ("CRM", "Salesforce", 0),
+                    (None, "Private Co", 1),  # null ticker excluded
+                    ("", "Blank Co", 1),      # empty ticker excluded
                 ],
             )
             conn.commit()
 
-    def test_defaults_to_tracking_and_owned(self, tmp_path: Path):
+    def test_returns_all_tickers_regardless_of_folder(self, tmp_path: Path):
         db = tmp_path / "test.db"
         self._seed_companies(db)
-        assert tracked_tickers(db) == ["AAPL", "MSFT"]
-
-    def test_status_override(self, tmp_path: Path):
-        db = tmp_path / "test.db"
-        self._seed_companies(db)
-        assert tracked_tickers(db, statuses=("exited",)) == ["OLD"]
+        assert tracked_tickers(db) == ["AAPL", "CRM", "MSFT"]
 
 
 class TestRateLimiter:

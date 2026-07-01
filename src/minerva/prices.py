@@ -110,15 +110,18 @@ def default_db_path(workspace_root: str | Path) -> Path:
     return Path(workspace_root) / "data" / "04-database" / "invest.db"
 
 
-def tracked_tickers(db_path: str | Path, *, statuses: Sequence[str] = ("tracking", "owned")) -> list[str]:
-    """Return non-null tickers for companies in the given statuses, alphabetically."""
-    placeholders = ",".join("?" for _ in statuses)
+def tracked_tickers(db_path: str | Path) -> list[str]:
+    """Return every non-null company ticker, alphabetically.
+
+    No priority filtering: a full refresh of the whole table is cheap enough
+    (2 calls/ticker, paced under the rate limit) that filtering isn't worth the
+    complexity. If a priority subset is ever wanted, drive it from actual
+    portfolio holdings or a real interest flag — not a documentation-state proxy.
+    """
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(
-            f"SELECT ticker FROM companies "
-            f"WHERE ticker IS NOT NULL AND ticker != '' AND status IN ({placeholders}) "
-            f"ORDER BY ticker ASC",
-            tuple(statuses),
+            "SELECT ticker FROM companies "
+            "WHERE ticker IS NOT NULL AND ticker != '' ORDER BY ticker ASC"
         ).fetchall()
     return [r[0] for r in rows]
 
