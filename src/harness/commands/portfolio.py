@@ -11,6 +11,7 @@ import typer
 from harness.commands.common import abort_with_help, elapsed_ms, error_result, parse_flag_args, show_help_if_bare
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
+from minerva import prices as prices_mod
 from harness.portfolio_state import (
     add_adjacency_entry,
     add_thesis_metric,
@@ -68,6 +69,15 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
             )
         if subcommand == "enrich":
             return enrich_command(settings=settings)
+        if subcommand == "prices":
+            parsed = parse_flag_args(args[1:])
+            positional = [a for a in args[1:] if not a.startswith("-")]
+            return prices_command(
+                tickers=positional,
+                refresh=bool(parsed.get("refresh")),
+                all_status=bool(parsed.get("all-status")),
+                settings=settings,
+            )
         if subcommand == "adjacency":
             return _dispatch_adjacency(args[1:], settings)
         if subcommand == "thesis":
@@ -142,6 +152,77 @@ def enrich_command(*, settings: HarnessSettings) -> CommandResult:
         f"errors: {summary['error_count']}",
     ]
     return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
+
+def prices_command(
+    *,
+    tickers: list[str],
+    refresh: bool,
+    all_status: bool,
+    settings: HarnessSettings,
+) -> CommandResult:
+    """Fetch/persist 52-week price positions, or read the stored table.
+
+    Naming tickers (or --refresh) fetches live from Finnhub and upserts. Naming
+    nothing is a zero-API read of the stored table, sorted by range_pct.
+    """
+    start = time.perf_counter()
+    db_path = prices_mod.default_db_path(settings.ensure_workspace_root())
+    prices_mod.ensure_schema(db_path)
+
+    universe = [t.upper() for t in tickers]
+    if refresh:
+        statuses = ("tracking", "owned", "exited", "passed") if all_status else ("tracking", "owned")
+        universe = prices_mod.tracked_tickers(db_path, statuses=statuses)
+
+    if universe:
+        if not settings.finnhub_api_key:
+            return error_result(
+                "FINNHUB_API_KEY is not set; cannot fetch live prices",
+                "export FINNHUB_API_KEY, or run `portfolio prices` with no args to read stored data",
+                ["`portfolio prices` (read-only)"],
+                start,
+            )
+        try:
+            result = prices_mod.refresh_prices(db_path, universe, api_key=settings.finnhub_api_key)
+        except Exception as exc:
+            return error_result(
+                f"failed to refresh prices: {exc}",
+                "check network access and the FINNHUB_API_KEY value",
+                ["`portfolio prices AAPL`"],
+                start,
+            )
+        rows = prices_mod.read_positions(db_path, tickers=universe)
+        header = f"fetched: {result['fetched']}  errors: {len(result['errors'])}"
+        body = _render_price_table(rows)
+        lines = [header]
+        if result["errors"]:
+            lines.append("error tickers: " + ", ".join(e["ticker"] for e in result["errors"]))
+        lines.append(body)
+        return CommandResult.from_text("\n".join(lines), duration_ms=elapsed_ms(start))
+
+    # No universe => read-only view of everything stored.
+    rows = prices_mod.read_positions(db_path)
+    return CommandResult.from_text(_render_price_table(rows), duration_ms=elapsed_ms(start))
+
+
+def _render_price_table(rows: list[dict]) -> str:
+    if not rows:
+        return "(no price data — run `portfolio prices --refresh` or name a ticker)"
+    header = f"{'TICKER':<8} {'CURRENT':>10} {'52W_LOW':>10} {'52W_HIGH':>10} {'RANGE_PCT':>10}  AS_OF"
+    out = [header]
+    for r in rows:
+        pct = r.get("range_pct")
+        pct_str = f"{pct:.4f}" if pct is not None else "n/a"
+        out.append(
+            f"{r['ticker']:<8} {_fmt_num(r.get('current')):>10} {_fmt_num(r.get('wk52_low')):>10} "
+            f"{_fmt_num(r.get('wk52_high')):>10} {pct_str:>10}  {r.get('as_of', '')}"
+        )
+    return "\n".join(out)
+
+
+def _fmt_num(value) -> str:
+    return f"{value:.2f}" if isinstance(value, (int, float)) else "n/a"
+
 
 def list_adjacency_command(*, settings: HarnessSettings) -> CommandResult:
     """List adjacency entries."""
@@ -359,6 +440,22 @@ def sync_cli(
 def enrich_cli() -> None:
     settings = get_settings()
     _print(enrich_command(settings=settings))
+
+@app.command("prices", help="Show or refresh 52-week price positions (current vs 52w low/high).")
+def prices_cli(
+    tickers: list[str] = typer.Argument(None, help="Tickers to fetch + persist. Omit to read stored data."),
+    refresh: bool = typer.Option(False, "--refresh", help="Fetch every tracked company (status tracking/owned)."),
+    all_status: bool = typer.Option(False, "--all-status", help="With --refresh, include exited/passed too."),
+) -> None:
+    settings = get_settings()
+    _print(
+        prices_command(
+            tickers=list(tickers or []),
+            refresh=refresh,
+            all_status=all_status,
+            settings=settings,
+        )
+    )
 
 @adjacency_app.command("list", help="List stored adjacency mappings.")
 def adjacency_list_cli() -> None:
