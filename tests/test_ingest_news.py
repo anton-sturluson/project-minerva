@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,14 @@ def _ir_json(tmp: Path) -> Path:
     return p
 
 
+def _epoch(iso_utc: str) -> int:
+    value = iso_utc.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
 def _ingest(tmp_path: Path, raw_dir: Path, *, summaries_dir=None, enrichment=None) -> tuple[dict[str, int], Path]:
     db = tmp_path / "test.db"
     stats = ingest_news.ingest(
@@ -74,12 +83,15 @@ def test_schema_ensure_is_idempotent(tmp_path: Path) -> None:
     try:
         ingest_news.ensure_schema(conn)
         ingest_news.ensure_schema(conn)  # second call must not raise
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(news)")]
+        column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
     finally:
         conn.close()
-    assert cols == [
+
+    columns = {row[1]: row for row in column_rows}
+    assert list(columns) == [
         "article_key",
         "published_at",
+        "published_at_raw",
         "title",
         "content",
         "summary",
@@ -88,16 +100,116 @@ def test_schema_ensure_is_idempotent(tmp_path: Path) -> None:
         "section",
         "collected_at",
     ]
+    assert columns["published_at"][2].upper() == "INTEGER"
+    assert columns["published_at"][3] == 1
+    assert columns["published_at_raw"][2].upper() == "TEXT"
+    assert columns["published_at_raw"][3] == 1
+
+
+def test_schema_migrates_legacy_text_rows_and_is_idempotent(tmp_path: Path) -> None:
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE news (
+                article_key TEXT PRIMARY KEY,
+                published_at TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                summary TEXT,
+                source TEXT NOT NULL,
+                url TEXT NOT NULL,
+                section TEXT,
+                collected_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_news_published ON news(published_at);
+            CREATE INDEX idx_news_collected ON news(collected_at);
+            """
+        )
+        legacy_rows = [
+            (
+                "one",
+                "2026-07-15T09:00:00-04:00",
+                "Offset",
+                "Body one",
+                "Summary one",
+                "wsj",
+                "https://one",
+                "markets",
+                "2026-07-16T01:02:03Z",
+            ),
+            (
+                "two",
+                "July 16, 2026 9:00 AM ET",
+                "Ambiguous",
+                "Body two",
+                None,
+                "economist",
+                "https://two",
+                None,
+                "2026-07-17T04:05:06-04:00",
+            ),
+        ]
+        conn.executemany(
+            "INSERT INTO news VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", legacy_rows
+        )
+        conn.commit()
+
+        ingest_news.ensure_schema(conn)
+        ingest_news.ensure_schema(conn)
+
+        column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
+        rows = conn.execute(
+            "SELECT article_key, published_at, published_at_raw, title, content, "
+            "summary, source, url, section, collected_at FROM news ORDER BY article_key"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    columns = {row[1]: row for row in column_rows}
+    assert columns["published_at"][2].upper() == "INTEGER"
+    assert columns["published_at_raw"][3] == 1
+    assert rows == [
+        (
+            "one",
+            _epoch("2026-07-15T13:00:00Z"),
+            "2026-07-15T09:00:00-04:00",
+            "Offset",
+            "Body one",
+            "Summary one",
+            "wsj",
+            "https://one",
+            "markets",
+            "2026-07-16T01:02:03Z",
+        ),
+        (
+            "two",
+            _epoch("2026-07-16T13:00:00Z"),
+            "July 16, 2026 9:00 AM ET",
+            "Ambiguous",
+            "Body two",
+            None,
+            "economist",
+            "https://two",
+            None,
+            "2026-07-17T04:05:06-04:00",
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------
 # 2. article_key is stable across time-precision changes
 # ---------------------------------------------------------------------------
 def test_article_key_stable_across_time_precision() -> None:
-    # Same source, same DATE, same title — different times or offsets must
-    # collapse to the same key.
-    coarse = ingest_news.article_key("wsj", "2026-07-16", "A Big Story")
-    fine = ingest_news.article_key("wsj", "2026-07-16", "A Big Story")
+    # The precise value crosses into the prior UTC day, but identity still uses
+    # the source calendar date and therefore matches the date-only collection.
+    coarse_date = ingest_news.normalize_published("2026-07-16")
+    fine_date = ingest_news.normalize_published("2026-07-16T00:30:00+05:30")
+    assert coarse_date is not None
+    assert fine_date is not None
+    coarse = ingest_news.article_key("wsj", coarse_date.date_only, "A Big Story")
+    fine = ingest_news.article_key("wsj", fine_date.date_only, "A Big Story")
     assert coarse == fine
 
     # Casing / whitespace on title normalizes.
@@ -140,21 +252,97 @@ def test_published_without_day_returns_none() -> None:
         assert ingest_news.normalize_published(bad) is None
 
 
-def test_published_preserves_explicit_offset() -> None:
-    parsed = ingest_news.normalize_published("2026-07-19T04:25:00-04:00")
+@pytest.mark.parametrize(
+    ("raw", "expected_utc"),
+    [
+        ("2026-07-19T04:25:00-04:00", "2026-07-19T08:25:00Z"),
+        ("2026-07-19T04:25:00-0400", "2026-07-19T08:25:00Z"),
+        ("2026-07-19T04:25:00+05:30", "2026-07-18T22:55:00Z"),
+        ("2026-07-19T04:25:00Z", "2026-07-19T04:25:00Z"),
+    ],
+)
+def test_published_exact_offsets_convert_to_utc_epoch(
+    raw: str, expected_utc: str
+) -> None:
+    parsed = ingest_news.normalize_published(raw)
     assert parsed is not None
-    assert parsed.iso == "2026-07-19T04:25:00-04:00"
-
-    compact = ingest_news.normalize_published("2026-07-19T04:25:00-0400")
-    assert compact is not None
-    assert compact.iso == "2026-07-19T04:25:00-04:00"
+    assert parsed.epoch == _epoch(expected_utc)
+    # Identity follows the source calendar date, even when UTC is a day earlier.
+    assert parsed.date_only == "2026-07-19"
 
 
-def test_published_drops_ambiguous_zone() -> None:
-    # "ET" is DST-ambiguous; we must not fabricate an offset.
-    parsed = ingest_news.normalize_published("July 16, 2026 9:00 AM ET")
+@pytest.mark.parametrize(
+    ("raw", "expected_utc"),
+    [
+        ("July 16, 2026 9:00 AM EDT", "2026-07-16T13:00:00Z"),
+        ("2026-06-18 02:06 EST", "2026-06-18T07:06:00Z"),
+        ("July 16, 2026 9:00 AM JST", "2026-07-16T00:00:00Z"),
+        ("July 16, 2026 9:00 AM UTC", "2026-07-16T09:00:00Z"),
+    ],
+)
+def test_published_fixed_abbreviations_convert_to_utc_epoch(
+    raw: str, expected_utc: str
+) -> None:
+    parsed = ingest_news.normalize_published(raw)
     assert parsed is not None
-    assert parsed.iso == "2026-07-16T09:00:00"  # naive time, no offset
+    assert parsed.epoch == _epoch(expected_utc)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_utc"),
+    [
+        ("July 16, 2026 11:00 PM ET", "2026-07-17T03:00:00Z"),
+        ("January 16, 2026 11:00 PM ET", "2026-01-17T04:00:00Z"),
+        ("July 16, 2026 9:00 AM PT", "2026-07-16T16:00:00Z"),
+        ("January 16, 2026 9:00 AM PT", "2026-01-16T17:00:00Z"),
+    ],
+)
+def test_published_generic_us_zones_use_date_aware_utc_offsets(
+    raw: str, expected_utc: str
+) -> None:
+    parsed = ingest_news.normalize_published(raw)
+    assert parsed is not None
+    assert parsed.epoch == _epoch(expected_utc)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "2026-07-19",
+        "July 19, 2026",
+        "2026/07/19",
+        "19 July 2026",
+    ],
+)
+def test_published_date_only_is_midnight_utc(raw: str) -> None:
+    parsed = ingest_news.normalize_published(raw)
+    assert parsed is not None
+    assert parsed.epoch == _epoch("2026-07-19T00:00:00Z")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "July 16, 2026 9:00 AM",
+        "2026-07-16T09:00:00",
+        "2026-07-16 09:00 UNKNOWN",
+    ],
+)
+def test_published_unknown_or_missing_zone_falls_back_to_midnight(
+    raw: str,
+) -> None:
+    parsed = ingest_news.normalize_published(raw)
+    assert parsed is not None
+    assert parsed.epoch == _epoch("2026-07-16T00:00:00Z")
+    assert parsed.date_only == "2026-07-16"
+
+
+def test_collected_timestamp_is_canonicalized_without_changing_offset() -> None:
+    assert (
+        ingest_news.normalize_collected("2026-07-19T04:25:00-0400")
+        == "2026-07-19T04:25:00-04:00"
+    )
+    assert ingest_news.normalize_collected("2026-07-19T08:25:00Z") == "2026-07-19T08:25:00Z"
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +438,11 @@ def test_missing_publication_day_falls_back_to_collection_date(tmp_path: Path) -
     assert stats["inserted"] == 1
     assert stats["publication_fallbacks"] == 1
     with sqlite3.connect(db) as conn:
-        (published,) = conn.execute("SELECT published_at FROM news").fetchone()
-    assert published == "2026-07-19"
+        published, published_raw = conn.execute(
+            "SELECT published_at, published_at_raw FROM news"
+        ).fetchone()
+    assert published == _epoch("2026-07-19T00:00:00Z")
+    assert published_raw == "July 2026"
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +520,13 @@ def test_duplicate_reingest_keeps_one_row(tmp_path: Path) -> None:
     assert stats2["db_total"] == 1
 
     with sqlite3.connect(db) as conn:
-        (collected,) = conn.execute("SELECT collected_at FROM news").fetchone()
+        collected, published, published_raw, content = conn.execute(
+            "SELECT collected_at, published_at, published_at_raw, content FROM news"
+        ).fetchone()
     assert collected == "2026-07-16T09:00:00Z", "original collected_at must survive"
+    assert published == _epoch("2026-07-16T00:00:00Z")
+    assert published_raw == "2026-07-16"
+    assert content == "Body v1."
 
 
 # ---------------------------------------------------------------------------
@@ -355,8 +551,11 @@ def test_enrichment_overrides_raw_published(tmp_path: Path) -> None:
     assert stats["inserted"] == 1
 
     with sqlite3.connect(db) as conn:
-        (published,) = conn.execute("SELECT published_at FROM news").fetchone()
-    assert published == "2026-07-15T09:00:00-04:00"
+        published, published_raw = conn.execute(
+            "SELECT published_at, published_at_raw FROM news"
+        ).fetchone()
+    assert published == _epoch("2026-07-15T13:00:00Z")
+    assert published_raw == "2026-07-15T09:00:00-04:00"
 
 
 def test_enrichment_directory_input(tmp_path: Path) -> None:
@@ -377,8 +576,11 @@ def test_enrichment_directory_input(tmp_path: Path) -> None:
     stats, db = _ingest(tmp_path, raw, enrichment=[enrich_dir])
     assert stats["inserted"] == 1
     with sqlite3.connect(db) as conn:
-        (published,) = conn.execute("SELECT published_at FROM news").fetchone()
-    assert published == "2026-07-14"
+        published, published_raw = conn.execute(
+            "SELECT published_at, published_at_raw FROM news"
+        ).fetchone()
+    assert published == _epoch("2026-07-14T00:00:00Z")
+    assert published_raw == "2026-07-14"
 
 
 def test_enrichment_does_not_fabricate_midnight_time(tmp_path: Path) -> None:
@@ -405,8 +607,11 @@ def test_enrichment_does_not_fabricate_midnight_time(tmp_path: Path) -> None:
     )
     _, db = _ingest(tmp_path, raw, enrichment=[enrich_file])
     with sqlite3.connect(db) as conn:
-        (published,) = conn.execute("SELECT published_at FROM news").fetchone()
-    assert published == "2026-07-14"
+        published, published_raw = conn.execute(
+            "SELECT published_at, published_at_raw FROM news"
+        ).fetchone()
+    assert published == _epoch("2026-07-14T00:00:00Z")
+    assert published_raw == "2026-07-14T00:00:00"
 
 
 def test_fallback_enrichment_does_not_expand_partial_date(tmp_path: Path) -> None:
@@ -436,8 +641,11 @@ def test_fallback_enrichment_does_not_expand_partial_date(tmp_path: Path) -> Non
     stats, db = _ingest(tmp_path, raw, enrichment=[enrich_file])
     assert stats["publication_fallbacks"] == 1
     with sqlite3.connect(db) as conn:
-        (published,) = conn.execute("SELECT published_at FROM news").fetchone()
-    assert published == "2026-07-15"
+        published, published_raw = conn.execute(
+            "SELECT published_at, published_at_raw FROM news"
+        ).fetchone()
+    assert published == _epoch("2026-07-15T00:00:00Z")
+    assert published_raw == "March 2026"
 
 
 # ---------------------------------------------------------------------------
@@ -480,4 +688,49 @@ def test_end_to_end_backfill(tmp_path: Path) -> None:
 
     with sqlite3.connect(db) as conn:
         sources = {row[0] for row in conn.execute("SELECT source FROM news")}
+        rows = conn.execute(
+            "SELECT title, published_at, published_at_raw, summary, "
+            "typeof(published_at) FROM news ORDER BY title"
+        ).fetchall()
     assert sources == {"wsj", "economist", "ir-AMZN", "ir-BRK-B"}
+    assert rows == [
+        (
+            "Alpha",
+            _epoch("2026-07-17T00:00:00Z"),
+            "July 17, 2026",
+            "Summary of Alpha.",
+            "integer",
+        ),
+        (
+            "Beta",
+            _epoch("2026-07-17T00:00:00Z"),
+            "Jul 17th 2026",
+            "Summary of Beta.",
+            "integer",
+        ),
+        (
+            "Delta",
+            _epoch("2026-07-18T12:00:00Z"),
+            "July 18, 2026 8:00 AM EDT",
+            "Summary of Delta.",
+            "integer",
+        ),
+        (
+            "Gamma",
+            _epoch("2026-07-18T00:00:00Z"),
+            "2026-07-18",
+            "Summary of Gamma.",
+            "integer",
+        ),
+    ]
+
+    rerun = ingest_news.ingest(
+        db_path=db,
+        news_root=tmp_path,
+        news_sources_path=_sources_json(tmp_path),
+        ir_registry_path=_ir_json(tmp_path),
+        all_dates=True,
+    )
+    assert rerun["inserted"] == 0
+    assert rerun["duplicates"] == 4
+    assert rerun["db_total"] == 4

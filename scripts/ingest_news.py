@@ -25,9 +25,10 @@ import re
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 # ---------------------------------------------------------------------------
 # Default filesystem layout
@@ -148,31 +149,44 @@ _MONTHS = {
     "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 
-# Unambiguous timezone abbreviations → UTC offset. Abbreviations that vary
-# with DST ("ET", "CT", "MT", "PT") are left out on purpose: converting them
-# would require guessing DST for the article date. Time is preserved as naive
-# in that case rather than fabricated.
+# Fixed-offset timezone abbreviations. Generic US zone names use IANA zones so
+# daylight-saving offsets are resolved from the publication date rather than
+# hard-coded.
 _TZ_OFFSETS = {
-    "UTC": "+00:00", "GMT": "+00:00", "Z": "+00:00",
-    "EST": "-05:00", "EDT": "-04:00",
-    "CST": "-06:00", "CDT": "-05:00",
-    "MST": "-07:00", "MDT": "-06:00",
-    "PST": "-08:00", "PDT": "-07:00",
-    "BST": "+01:00", "CET": "+01:00", "CEST": "+02:00",
-    "JST": "+09:00", "KST": "+09:00", "IST": "+05:30",
-    "HKT": "+08:00", "SGT": "+08:00",
+    "UTC": "+00:00",
+    "GMT": "+00:00",
+    "Z": "+00:00",
+    "EST": "-05:00",
+    "EDT": "-04:00",
+    "CST": "-06:00",
+    "CDT": "-05:00",
+    "MST": "-07:00",
+    "MDT": "-06:00",
+    "PST": "-08:00",
+    "PDT": "-07:00",
+    "BST": "+01:00",
+    "CET": "+01:00",
+    "CEST": "+02:00",
+    "JST": "+09:00",
+    "KST": "+09:00",
+    "IST": "+05:30",
+    "HKT": "+08:00",
+    "SGT": "+08:00",
 }
+_GENERIC_US_ZONES = {
+    "ET": "America/New_York",
+    "CT": "America/Chicago",
+    "MT": "America/Denver",
+    "PT": "America/Los_Angeles",
+}
+_TZ_TOKEN = r"(?:Z|[A-Za-z]+|[+-]\d{2}:?\d{2})"
 
 
-@dataclass
+@dataclass(frozen=True)
 class ParsedPublished:
-    """Normalized publication timestamp.
+    """A publication instant plus its source-calendar identity date."""
 
-    ``iso`` is what we store in the DB (a date or a full datetime string).
-    ``date_only`` is the YYYY-MM-DD used for the article-key hash — so the key
-    stays stable when the same article is re-collected with a more precise time.
-    """
-    iso: str
+    epoch: int
     date_only: str
 
 
@@ -180,22 +194,98 @@ def _month(token: str) -> int | None:
     return _MONTHS.get(token.lower().rstrip("."))
 
 
-def _strip_ordinal(day_token: str) -> str:
-    # "16th" → "16", "1st" → "1"
-    return re.sub(r"(st|nd|rd|th)$", "", day_token, flags=re.IGNORECASE)
+def _midnight_utc(value: date) -> ParsedPublished:
+    dt = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    return ParsedPublished(epoch=int(dt.timestamp()), date_only=value.isoformat())
+
+
+def _offset_timezone(token: str) -> timezone | None:
+    normalized = _TZ_OFFSETS.get(token.upper(), token)
+    match = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", normalized)
+    if not match:
+        return None
+    hours, minutes = int(match.group(2)), int(match.group(3))
+    if hours > 23 or minutes > 59:
+        return None
+    delta = timedelta(hours=hours, minutes=minutes)
+    if match.group(1) == "-":
+        delta = -delta
+    return timezone(delta)
+
+
+def _with_time(
+    value: date,
+    hour: int,
+    minute: int,
+    second: int,
+    zone_token: str,
+    ampm: str = "",
+) -> ParsedPublished | None:
+    """Convert an explicitly zoned time, or fall back to source-date midnight."""
+    marker = ampm.upper()
+    if marker:
+        if not 1 <= hour <= 12:
+            return None
+        if marker == "PM" and hour < 12:
+            hour += 12
+        elif marker == "AM" and hour == 12:
+            hour = 0
+    try:
+        naive = datetime(value.year, value.month, value.day, hour, minute, second)
+    except ValueError:
+        return None
+
+    zone = zone_token.upper()
+    if not zone:
+        return _midnight_utc(value)
+    if zone in {"UTC", "GMT", "Z"}:
+        tz = timezone.utc
+    elif zone in _GENERIC_US_ZONES:
+        tz = ZoneInfo(_GENERIC_US_ZONES[zone])
+    else:
+        tz = _offset_timezone(zone)
+    if tz is None:
+        # An unknown abbreviation is no safer to guess than a missing zone.
+        return _midnight_utc(value)
+    aware = naive.replace(tzinfo=tz)
+    return ParsedPublished(
+        epoch=int(aware.timestamp()),
+        date_only=value.isoformat(),
+    )
+
+
+def _date_with_optional_time(value: date, remainder: str) -> ParsedPublished | None:
+    match = re.match(
+        rf"^[\s,]*(?:at\s+)?(\d{{1,2}}):(\d{{2}})(?::(\d{{2}}))?\s*"
+        rf"([APap][Mm])?\s*({_TZ_TOKEN})?\b",
+        remainder,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return _midnight_utc(value)
+    return _with_time(
+        value,
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3) or 0),
+        match.group(5) or "",
+        match.group(4) or "",
+    )
 
 
 def normalize_published(raw: str) -> ParsedPublished | None:
-    """Parse the ``Published:`` field into ISO form.
+    """Parse a publication value into integer UTC epoch seconds.
 
-    Returns None if the value has no complete calendar day.
+    Exact times are used when the input has an explicit numeric offset, a
+    fixed-offset abbreviation, or a generic US zone resolvable with IANA DST
+    rules. Date-only values, naive times, and unknown zones map to midnight UTC
+    on the source calendar date. The source date is retained separately for
+    stable article identity.
     """
     if not raw:
         return None
     s = raw.strip()
-    # Strip common leading verbs.
     s = re.sub(r"^(updated|posted|published|as of)\s+", "", s, flags=re.IGNORECASE)
-    # Strip leading weekday like "Monday, " / "Mon, ".
     s = re.sub(
         r"^(mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)[a-z]*\.?,?\s+",
         "",
@@ -206,129 +296,157 @@ def normalize_published(raw: str) -> ParsedPublished | None:
     if not s:
         return None
 
-    # 1) Pure ISO date: 2026-07-19
-    if DATE_ONLY_RE.match(s):
-        return ParsedPublished(iso=s, date_only=s)
+    # Pure ISO date: 2026-07-19.
+    if DATE_ONLY_RE.fullmatch(s):
+        try:
+            return _midnight_utc(date.fromisoformat(s))
+        except ValueError:
+            return None
 
-    # 2) Full ISO datetime with optional offset / Z.
+    # ISO datetime. datetime.fromisoformat handles Z, colon/compact numeric
+    # offsets, and fractional seconds. A parsed naive time deliberately falls
+    # back to midnight rather than being treated as local time or UTC.
     iso = s.replace(" ", "T", 1) if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d", s) else s
     if re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", iso):
         try:
-            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(iso.replace("z", "+00:00").replace("Z", "+00:00"))
         except ValueError:
             dt = None
         if dt is not None:
-            date_only = dt.date().isoformat()
-            # Canonical ISO keeps the same instant/offset while normalizing
-            # forms SQLite cannot parse, such as -0400 instead of -04:00.
-            normalized_iso = dt.isoformat(timespec="seconds")
-            if iso.upper().endswith("Z"):
-                normalized_iso = normalized_iso.replace("+00:00", "Z")
-            return ParsedPublished(iso=normalized_iso, date_only=date_only)
+            source_date = dt.date()
+            if dt.tzinfo is None:
+                return _midnight_utc(source_date)
+            return ParsedPublished(
+                epoch=int(dt.timestamp()),
+                date_only=source_date.isoformat(),
+            )
 
-    # 3) YYYY/MM/DD
-    m = re.match(r"^(\d{4})/(\d{1,2})/(\d{1,2})\b", s)
-    if m:
-        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        try:
-            iso_date = date(y, mo, d).isoformat()
-            return ParsedPublished(iso=iso_date, date_only=iso_date)
-        except ValueError:
-            return None
-
-    # 3b) MM/DD/YYYY (US)
-    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})\b", s)
-    if m:
-        mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        try:
-            iso_date = date(y, mo, d).isoformat()
-            return ParsedPublished(iso=iso_date, date_only=iso_date)
-        except ValueError:
-            return None
-
-    # 3c) "8-May-2026" — DD-Mon-YYYY
-    m = re.match(r"^(\d{1,2})-([A-Za-z]+)-(\d{4})\b", s)
-    if m:
-        mo = _month(m.group(2))
-        if mo:
-            try:
-                iso_date = date(int(m.group(3)), mo, int(m.group(1))).isoformat()
-                return ParsedPublished(iso=iso_date, date_only=iso_date)
-            except ValueError:
-                return None
-
-    # 3d) "YYYY-MM-DD HH:MM TZABBR"
-    m = re.match(
-        r"^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([A-Za-z]+)?\b",
+    # YYYY-MM-DD HH:MM[:SS] [AM/PM] ZONE, including a fixed abbreviation.
+    match = re.match(
+        rf"^(\d{{4}}-\d{{2}}-\d{{2}})[ T](\d{{1,2}}):(\d{{2}})"
+        rf"(?::(\d{{2}}))?\s*([APap][Mm])?\s*({_TZ_TOKEN})?\b",
         s,
     )
-    if m:
-        iso_date = m.group(1)
-        hh, mm = int(m.group(2)), int(m.group(3))
-        ss = int(m.group(4) or 0)
-        tz = (m.group(5) or "").upper()
-        offset = _TZ_OFFSETS.get(tz, "")
-        return ParsedPublished(
-            iso=f"{iso_date}T{hh:02d}:{mm:02d}:{ss:02d}{offset}",
-            date_only=iso_date,
+    if match:
+        try:
+            source_date = date.fromisoformat(match.group(1))
+        except ValueError:
+            return None
+        return _with_time(
+            source_date,
+            int(match.group(2)),
+            int(match.group(3)),
+            int(match.group(4) or 0),
+            match.group(6) or "",
+            match.group(5) or "",
         )
 
-    # 4) "Jul 15th 2026" / "Jul 16. 2026" / "Jul 15 2026"
-    m = re.match(
-        r"^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\.?\s+(\d{4})\b", s
-    )
-    if m:
-        mo = _month(m.group(1))
-        if mo:
-            try:
-                iso_date = date(int(m.group(3)), mo, int(m.group(2))).isoformat()
-                return ParsedPublished(iso=iso_date, date_only=iso_date)
-            except ValueError:
-                return None
-
-    # 5) "July 16, 2026" or "July 16, 2026 9:00 AM EDT" / "JULY 15, 2026"
-    # Also tolerate "May 8, 20269:16 AM EDT" (missing space) and trailing junk
-    # like "Updated N hours ago" that Reuters appends.
-    m = re.match(
-        r"^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})"
-        r"(?:\s*(\d{1,2}):(\d{2})\s*([APap][Mm])?\s*([A-Za-z]+)?)?",
-        s,
-    )
-    if m:
-        mo = _month(m.group(1))
-        if not mo:
-            return None
+    # YYYY/MM/DD.
+    match = re.match(r"^(\d{4})/(\d{1,2})/(\d{1,2})\b(.*)$", s)
+    if match:
         try:
-            d0 = date(int(m.group(3)), mo, int(m.group(2)))
+            source_date = date(
+                int(match.group(1)), int(match.group(2)), int(match.group(3))
+            )
         except ValueError:
             return None
-        iso_date = d0.isoformat()
-        if not m.group(4):
-            return ParsedPublished(iso=iso_date, date_only=iso_date)
-        # Have time.
-        hh, mm = int(m.group(4)), int(m.group(5))
-        ampm = (m.group(6) or "").upper()
-        if ampm == "PM" and hh < 12:
-            hh += 12
-        elif ampm == "AM" and hh == 12:
-            hh = 0
-        tz = (m.group(7) or "").upper()
-        offset = _TZ_OFFSETS.get(tz, "") if tz else ""
-        iso = f"{iso_date}T{hh:02d}:{mm:02d}:00{offset}"
-        return ParsedPublished(iso=iso, date_only=iso_date)
+        return _date_with_optional_time(source_date, match.group(4))
 
-    # 6) "16 July 2026"
-    m = re.match(r"^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b", s)
-    if m:
-        mo = _month(m.group(2))
-        if mo:
+    # MM/DD/YYYY (US).
+    match = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})\b(.*)$", s)
+    if match:
+        try:
+            source_date = date(
+                int(match.group(3)), int(match.group(1)), int(match.group(2))
+            )
+        except ValueError:
+            return None
+        return _date_with_optional_time(source_date, match.group(4))
+
+    # DD-Mon-YYYY.
+    match = re.match(r"^(\d{1,2})-([A-Za-z]+)-(\d{4})\b(.*)$", s)
+    if match:
+        month = _month(match.group(2))
+        if month:
             try:
-                iso_date = date(int(m.group(3)), mo, int(m.group(1))).isoformat()
-                return ParsedPublished(iso=iso_date, date_only=iso_date)
+                source_date = date(int(match.group(3)), month, int(match.group(1)))
             except ValueError:
                 return None
+            return _date_with_optional_time(source_date, match.group(4))
+
+    # "Jul 15th 2026" / "Jul 16. 2026" / "Jul 15 2026".
+    match = re.match(
+        r"^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\.?\s+(\d{4})\b(.*)$",
+        s,
+    )
+    if match:
+        month = _month(match.group(1))
+        if month:
+            try:
+                source_date = date(int(match.group(3)), month, int(match.group(2)))
+            except ValueError:
+                return None
+            return _date_with_optional_time(source_date, match.group(4))
+
+    # "July 16, 2026 9:00 AM EDT". The optional whitespace before the time
+    # also tolerates the historical malformed value "May 8, 20269:16 AM EDT".
+    match = re.match(
+        rf"^([A-Za-z]+)\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})"
+        rf"(?:\s*(\d{{1,2}}):(\d{{2}})(?::(\d{{2}}))?\s*"
+        rf"([APap][Mm])?\s*({_TZ_TOKEN})?)?",
+        s,
+    )
+    if match:
+        month = _month(match.group(1))
+        if not month:
+            return None
+        try:
+            source_date = date(int(match.group(3)), month, int(match.group(2)))
+        except ValueError:
+            return None
+        if not match.group(4):
+            return _midnight_utc(source_date)
+        return _with_time(
+            source_date,
+            int(match.group(4)),
+            int(match.group(5)),
+            int(match.group(6) or 0),
+            match.group(8) or "",
+            match.group(7) or "",
+        )
+
+    # "16 July 2026".
+    match = re.match(r"^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b(.*)$", s)
+    if match:
+        month = _month(match.group(2))
+        if month:
+            try:
+                source_date = date(int(match.group(3)), month, int(match.group(1)))
+            except ValueError:
+                return None
+            return _date_with_optional_time(source_date, match.group(4))
 
     return None
+
+
+def normalize_collected(raw: str) -> str:
+    """Canonicalize an ISO collection timestamp without changing its instant."""
+    value = raw.strip()
+    if not value:
+        return value
+    iso = (
+        value.replace(" ", "T", 1)
+        if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d", value)
+        else value
+    )
+    try:
+        parsed = datetime.fromisoformat(
+            iso.replace("z", "+00:00").replace("Z", "+00:00")
+        )
+    except ValueError:
+        return value
+    normalized = parsed.isoformat(timespec="seconds")
+    return normalized.replace("+00:00", "Z") if iso.upper().endswith("Z") else normalized
 
 
 # ---------------------------------------------------------------------------
@@ -392,25 +510,131 @@ def article_key(source_id: str, date_only: str, title: str) -> str:
 # ---------------------------------------------------------------------------
 # Schema management
 # ---------------------------------------------------------------------------
-NEWS_TABLE_DDL = """
+NEWS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS news (
-    article_key   TEXT PRIMARY KEY,
-    published_at  TEXT NOT NULL,
-    title         TEXT NOT NULL,
-    content       TEXT NOT NULL,
-    summary       TEXT,
-    source        TEXT NOT NULL,
-    url           TEXT NOT NULL,
-    section       TEXT,
-    collected_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_news_published ON news(published_at);
-CREATE INDEX IF NOT EXISTS idx_news_collected ON news(collected_at);
+    article_key       TEXT PRIMARY KEY,
+    published_at      INTEGER NOT NULL,
+    published_at_raw  TEXT NOT NULL,
+    title             TEXT NOT NULL,
+    content           TEXT NOT NULL,
+    summary           TEXT,
+    source            TEXT NOT NULL,
+    url               TEXT NOT NULL,
+    section           TEXT,
+    collected_at      TEXT NOT NULL
+)
 """
+
+NEWS_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_news_published ON news(published_at)",
+    "CREATE INDEX IF NOT EXISTS idx_news_collected ON news(collected_at)",
+)
+
+_NEWS_COLUMNS = (
+    "article_key",
+    "published_at",
+    "published_at_raw",
+    "title",
+    "content",
+    "summary",
+    "source",
+    "url",
+    "section",
+    "collected_at",
+)
+
+
+def _create_news_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(NEWS_TABLE_SQL)
+    for statement in NEWS_INDEX_SQL:
+        conn.execute(statement)
+
+
+def _legacy_publication_epoch(raw: str, collected_at: str) -> int:
+    published = normalize_published(raw)
+    if published is not None:
+        return published.epoch
+    collected = normalize_published(collected_at)
+    if collected is not None:
+        return _midnight_utc(date.fromisoformat(collected.date_only)).epoch
+    # A malformed legacy row must not be dropped merely because its old text
+    # cannot be parsed. Epoch zero is an explicit unknown sentinel; the exact
+    # legacy value remains available in published_at_raw.
+    return 0
+
+
+def _migrate_legacy_news(
+    conn: sqlite3.Connection, legacy_columns: set[str]
+) -> None:
+    required = set(_NEWS_COLUMNS) - {"published_at_raw"}
+    missing = required - legacy_columns
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise RuntimeError(f"cannot migrate legacy news table; missing columns: {names}")
+
+    select_columns = tuple(column for column in _NEWS_COLUMNS if column != "published_at_raw")
+    cursor = conn.execute(f"SELECT {', '.join(select_columns)} FROM news")
+    legacy_rows = [dict(zip(select_columns, row, strict=True)) for row in cursor]
+
+    conn.execute("SAVEPOINT migrate_legacy_news")
+    try:
+        conn.execute("DROP INDEX IF EXISTS idx_news_published")
+        conn.execute("DROP INDEX IF EXISTS idx_news_collected")
+        conn.execute("ALTER TABLE news RENAME TO news_legacy_migration")
+        _create_news_schema(conn)
+
+        migrated_rows = []
+        for row in legacy_rows:
+            raw_value = row["published_at"]
+            published_at_raw = "" if raw_value is None else str(raw_value)
+            collected_at = row["collected_at"]
+            migrated_rows.append(
+                (
+                    row["article_key"],
+                    _legacy_publication_epoch(
+                        published_at_raw,
+                        "" if collected_at is None else str(collected_at),
+                    ),
+                    published_at_raw,
+                    row["title"],
+                    row["content"],
+                    row["summary"],
+                    row["source"],
+                    row["url"],
+                    row["section"],
+                    collected_at,
+                )
+            )
+        conn.executemany(
+            "INSERT INTO news "
+            f"({', '.join(_NEWS_COLUMNS)}) VALUES ({', '.join('?' for _ in _NEWS_COLUMNS)})",
+            migrated_rows,
+        )
+        conn.execute("DROP TABLE news_legacy_migration")
+        conn.execute("RELEASE SAVEPOINT migrate_legacy_news")
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT migrate_legacy_news")
+        conn.execute("RELEASE SAVEPOINT migrate_legacy_news")
+        raise
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(NEWS_TABLE_DDL)
+    """Create the news schema or atomically migrate the legacy TEXT schema."""
+    table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'news'"
+    ).fetchone()
+    if table_exists is None:
+        _create_news_schema(conn)
+        conn.commit()
+        return
+
+    column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
+    columns = {row[1]: row for row in column_rows}
+    published_type = str(columns.get("published_at", (None, None, ""))[2]).upper()
+    if "published_at_raw" not in columns or published_type != "INTEGER":
+        _migrate_legacy_news(conn, set(columns))
+    else:
+        _create_news_schema(conn)
     conn.commit()
 
 
@@ -439,7 +663,6 @@ def load_enrichment(paths: Iterable[Path]) -> dict[str, str]:
                 path = obj.get("path")
                 published = obj.get("published_at")
                 if path and published:
-                    precision = str(obj.get("precision", "")).lower()
                     existing = str(obj.get("existing_published", "")).strip()
                     method = str(obj.get("method", "")).lower()
                     status = str(obj.get("status", "")).lower()
@@ -459,23 +682,14 @@ def load_enrichment(paths: Iterable[Path]) -> dict[str, str]:
                         # A fallback worker may expand "2026" to Jan 1 or
                         # "March 2026" to Mar 1. That is not a recovered day.
                         continue
-                    # Do not turn known date-only values into fabricated
-                    # midnight publication times.
-                    if precision in {"date", "date_only"}:
-                        match = re.match(r"^(\d{4}-\d{2}-\d{2})", str(published))
-                        if match:
-                            published = match.group(1)
-                    elif (
-                        re.fullmatch(r"\d{4}-\d{2}-\d{2}", existing)
-                        and re.fullmatch(
-                            r"\d{4}-\d{2}-\d{2}T00:00:00", str(published)
-                        )
-                    ):
-                        published = existing
+                    # Keep the exact chosen enrichment value. In particular,
+                    # a naive midnight remains visible in published_at_raw even
+                    # though its safe epoch representation is date midnight.
+                    publication_input = str(published)
                     article_path = Path(path)
-                    out[str(article_path)] = published
+                    out[str(article_path)] = publication_input
                     if len(article_path.parts) >= 3:
-                        out["/".join(article_path.parts[-3:])] = published
+                        out["/".join(article_path.parts[-3:])] = publication_input
     return out
 
 
@@ -643,18 +857,27 @@ def _ingest_one(
             "+00:00", "Z"
         )
     else:
-        normalized_collected = normalize_published(collected)
-        if normalized_collected is not None:
-            collected = normalized_collected.iso
+        collected = normalize_collected(collected)
 
-    relative_key = "/".join(raw_path.parts[-3:]) if len(raw_path.parts) >= 3 else str(raw_path)
-    published_raw = (
-        enrichment.get(str(raw_path))
-        or enrichment.get(str(raw_path.resolve()))
-        or enrichment.get(relative_key)
-        or parsed.meta.get("published", "")
+    relative_key = (
+        "/".join(raw_path.parts[-3:])
+        if len(raw_path.parts) >= 3
+        else str(raw_path)
     )
-    published = normalize_published(published_raw)
+    enrichment_value = next(
+        (
+            value
+            for key in (str(raw_path), str(raw_path.resolve()), relative_key)
+            if (value := enrichment.get(key)) is not None
+        ),
+        None,
+    )
+    published_at_raw = (
+        enrichment_value
+        if enrichment_value is not None
+        else parsed.meta.get("published", "")
+    )
+    published = normalize_published(published_at_raw)
     if published is None:
         # Completeness wins for the historical migration. Collection date is
         # the least-bad deterministic fallback and cannot make an old row show
@@ -663,13 +886,10 @@ def _ingest_one(
         if collected_date is None:
             stats.skipped += 1
             report.append(
-                f"skip:no-date(published={published_raw!r}, collected={collected!r})\t{raw_path}"
+                f"skip:no-date(published={published_at_raw!r}, collected={collected!r})\t{raw_path}"
             )
             return
-        published = ParsedPublished(
-            iso=collected_date.date_only,
-            date_only=collected_date.date_only,
-        )
+        published = _midnight_utc(date.fromisoformat(collected_date.date_only))
         stats.publication_fallbacks += 1
         report.append(f"fallback:publication-date\t{raw_path}")
 
@@ -688,11 +908,13 @@ def _ingest_one(
     key = article_key(source_id, published.date_only, parsed.title)
     cursor = conn.execute(
         "INSERT OR IGNORE INTO news "
-        "(article_key, published_at, title, content, summary, source, url, section, collected_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "(article_key, published_at, published_at_raw, title, content, summary, "
+        "source, url, section, collected_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             key,
-            published.iso,
+            published.epoch,
+            published_at_raw,
             parsed.title,
             parsed.body,
             summary_text,
