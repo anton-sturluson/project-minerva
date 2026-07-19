@@ -8,13 +8,18 @@ Our current holdings and watchlist tickers (prioritize articles mentioning these
 
 {{PORTFOLIO_TICKERS}}
 
+## Source-specific scope
+
+{{COLLECT_SCOPE}}
+
 ## Constraints
 
 - **Maximum 15 articles.** Scan the full front page first, then select the top 15 (or fewer) most relevant. Prioritize by: (1) direct relevance to portfolio companies above, (2) macro/market significance, (3) industry trends, (4) geopolitics or politics that affects the economy or markets, (5) genuinely interesting business, technology, science, or world stories a thoughtful investor would want to know. Skip lifestyle, sports, entertainment, and celebrity fluff.
 - **Skip articles older than 3 days** based on the visible publish date. If no date is visible, include the article.
-- **Skip duplicates.** If an article's slug matches any in the dedup list below, do not re-collect it.
+- **Skip duplicates.** If an article's title or URL matches an item in the recent-items list below, do not re-collect it.
+- If no qualifying new articles exist, save no files and report that zero items qualified. Do not create a placeholder article.
 
-## Dedup list (already collected recently)
+## Recent items already collected
 
 {{DEDUP_SLUGS}}
 
@@ -46,12 +51,19 @@ Write this exact format to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md`:
 
 Source: {{SOURCE_NAME}}
 URL: {article_url}
-Published: {date if visible, otherwise {{DATE}}}
+Published: {most precise publication datetime + timezone visible on the article}
 Collected: {current ISO timestamp}
 Section: {section if applicable}
 
 {Full article text — the complete body of the article as visible on the page}
 ```
+
+### Recording the Published value
+
+- Copy the most precise publication timestamp visible on the article page or its HTML metadata (`<meta property="article:published_time">`, `<time datetime="...">`, byline dateline, etc.). Prefer machine-readable page metadata over rendered text when both are present.
+- Include the timezone or UTC offset exactly as shown (e.g. `2026-07-16T09:00:00-04:00`, `July 16, 2026 9:00 AM EDT`, `Jul 16th 2026`).
+- If only a date is visible (no time), record just the date. Never invent, round, or fill in a time that is not shown on the page.
+- If no publication date is visible anywhere on the page, use `{{DATE}}` (the run date) as a last resort and flag that in your reply.
 
 ## Important
 
