@@ -8,13 +8,19 @@ Our current holdings and watchlist tickers (prioritize items mentioning these):
 
 {{PORTFOLIO_TICKERS}}
 
+## Source-specific scope
+
+{{COLLECT_SCOPE}}
+
 ## Constraints
 
 - **Maximum 10 items.** If the page has more, select the most relevant for a long-only investor.
 - **Skip items older than 3 days** based on the visible date.
-- **Skip duplicates.** If an item's slug matches any in the dedup list below, do not re-collect it.
+- **Calendar pages:** collect only releases dated from 3 days before {{DATE}} through 7 days after {{DATE}}. Never collect later future entries merely because they appear on the schedule. Collect no more than 5 calendar items.
+- **Skip duplicates.** If an item's title or URL matches an item in the recent-items list below, do not re-collect it.
+- If the fetch succeeds but no items qualify, save no files and report that zero items qualified. Do not create a placeholder or `no new releases` article.
 
-## Dedup list (already collected recently)
+## Recent items already collected
 
 {{DEDUP_SLUGS}}
 
@@ -26,7 +32,7 @@ Our current holdings and watchlist tickers (prioritize items mentioning these):
 4. For each selected item:
    a. Generate a short slug (lowercase, hyphens, 3-5 words).
    b. Write to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md` using the format below.
-5. If the fetch fails or returns no useful content, write one file `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-error.md` with Status: failed.
+5. If the fetch itself fails, write one file `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-error.md` with Status: failed. If the fetch succeeds but no items qualify, write no file.
 6. Reply briefly: how many items saved, any skipped.
 
 ## File format
@@ -38,12 +44,19 @@ Write this exact format to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md`:
 
 Source: {{SOURCE_NAME}}
 URL: {item_url_if_available}
-Published: {date if visible, otherwise {{DATE}}}
+Published: {most precise publication datetime + timezone visible on the item}
 Collected: {current ISO timestamp}
 Section: {category if applicable}
 
 {Full text of the release, calendar entry, or announcement}
 ```
+
+### Recording the Published value
+
+- Copy the most precise publication timestamp visible on the page or in its metadata (`<meta property="article:published_time">`, `<time datetime="...">`, dateline, release header). Prefer machine-readable page metadata over rendered text.
+- Include the timezone or UTC offset exactly as shown (e.g. `2026-07-14T08:30:00-04:00`, `July 14, 2026 8:30 AM ET`).
+- If only a date is visible (no time), record just the date. Never invent, round, or fabricate a time that is not shown.
+- If no publication date is visible anywhere, use `{{DATE}}` as a last resort and flag that in your reply.
 
 ## Important
 

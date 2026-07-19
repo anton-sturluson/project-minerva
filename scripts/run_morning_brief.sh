@@ -8,8 +8,29 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 RUN_DATE="${1:-$(date +%F)}"
-NEWS_DIR="${ROOT_DIR}/hard-disk/data/02-news/${RUN_DATE}"
+# Ephemeral run directory: raw articles + per-article summaries live here for
+# the duration of one run, get ingested into invest.db, then are removed.
+# Parallel collector agents write markdown here; only the final ingest process
+# writes SQLite.
+NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
+# NEWS_DIR is what collector prompts and extract-files see. Point it at the
+# temp run dir so their outputs are ephemeral.
+NEWS_DIR="${NEWS_RUN_DIR}"
 REPORT_DIR="${ROOT_DIR}/hard-disk/reports/03-daily-news/${RUN_DATE}"
+INVEST_DB="${INVEST_DB:-${ROOT_DIR}/hard-disk/data/04-database/invest.db}"
+INGEST_OK=0
+DEDUP_FILE=""
+cleanup_run_dir() {
+  # Remove the temp run dir only when ingest into invest.db succeeded.
+  # Otherwise leave it for debugging.
+  if [[ "${INGEST_OK}" == "1" && -d "${NEWS_RUN_DIR}" ]]; then
+    rm -rf "${NEWS_RUN_DIR}"
+  fi
+  if [[ -n "${DEDUP_FILE}" && -f "${DEDUP_FILE}" ]]; then
+    rm -f "${DEDUP_FILE}"
+  fi
+}
+trap cleanup_run_dir EXIT
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
 export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
@@ -29,7 +50,8 @@ mkdir -p "${REPORT_DIR}" "${NEWS_DIR}/raw" "${NEWS_DIR}/summaries" "${NEWS_DIR}/
 
 echo "=== Morning Brief Pipeline ==="
 echo "date: ${RUN_DATE}"
-echo "news_dir: ${NEWS_DIR}"
+echo "news_run_dir: ${NEWS_RUN_DIR}"
+echo "invest_db: ${INVEST_DB}"
 echo "report_dir: ${REPORT_DIR}"
 echo ""
 
@@ -64,8 +86,7 @@ else
   WEBFETCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news_webfetch.md"
   NEWS_SOURCES="${ROOT_DIR}/hard-disk/data/02-news/news-sources.json"
   IR_REGISTRY="${ROOT_DIR}/hard-disk/data/01-portfolio/current/ir-registry.json"
-  NEWS_BASE="${ROOT_DIR}/hard-disk/data/02-news"
-  NEWS_LOG_DIR="${NEWS_DIR}/logs"
+  NEWS_LOG_DIR="${NEWS_RUN_DIR}/logs"
   PIDS=()
 
   write_collection_error() {
@@ -118,49 +139,22 @@ EOF
     echo "  portfolio tickers (no names): ${PORTFOLIO_TICKERS}"
   fi
 
-  # ── Build dedup slug list from last 3 days ──
-  DEDUP_SLUGS=""
-  for days_ago in 1 2 3; do
-    prev_date=$(date -v-${days_ago}d +%F 2>/dev/null || date -d "${RUN_DATE} -${days_ago} days" +%F 2>/dev/null || true)
-    prev_dir="${NEWS_BASE}/${prev_date}/raw"
-    if [[ -d "$prev_dir" ]]; then
-      # Extract slugs: filename minus source prefix and .md extension
-      # e.g. wsj-trump-hormuz-ships.md → trump-hormuz-ships
-      for f in "$prev_dir"/*.md; do
-        [[ -f "$f" ]] || continue
-        bn=$(basename "$f" .md)
-        # Strip source prefix (everything up to and including the first hyphen-separated source id)
-        slug=$(echo "$bn" | sed -E 's/^(wsj|economist|reuters-markets|bls-calendar|bea-schedule|fed-press|ir-[A-Z0-9]+)-//')
-        DEDUP_SLUGS="${DEDUP_SLUGS}${slug}\n"
-      done
-    fi
-  done
-
-  # Also include today's raw dir (in case of re-run)
-  if [[ -d "${NEWS_DIR}/raw" ]]; then
-    for f in "${NEWS_DIR}/raw"/*.md; do
-      [[ -f "$f" ]] || continue
-      bn=$(basename "$f" .md)
-      slug=$(echo "$bn" | sed -E 's/^(wsj|economist|reuters-markets|bls-calendar|bea-schedule|fed-press|ir-[A-Z0-9]+)-//')
-      DEDUP_SLUGS="${DEDUP_SLUGS}${slug}\n"
-    done
-  fi
-
-  # Deduplicate, sort, and write to temp file
+  # ── Build recent-item dedup list from SQLite ──
   DEDUP_FILE=$(mktemp)
-  trap "rm -f '$DEDUP_FILE'" EXIT
-  if [[ -n "$DEDUP_SLUGS" ]]; then
-    echo -e "$DEDUP_SLUGS" | sort -u | grep -v '^$' > "$DEDUP_FILE" || true
+  if [[ -f "${INVEST_DB}" ]] && [[ "$(sqlite3 "${INVEST_DB}" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='news';" 2>/dev/null || echo 0)" == "1" ]]; then
+    sqlite3 -separator ' | ' "${INVEST_DB}" \
+      "SELECT title, url FROM news WHERE date(collected_at) >= date('${RUN_DATE}', '-3 days') ORDER BY collected_at DESC;" \
+      > "${DEDUP_FILE}" || true
     dedup_count=$(wc -l < "$DEDUP_FILE" | tr -d ' ')
-    echo "  dedup list: ${dedup_count} slugs from recent days"
+    echo "  dedup list: ${dedup_count} recent titles/URLs from SQLite"
   else
     echo "(none)" > "$DEDUP_FILE"
-    echo "  dedup list: empty (first run)"
+    echo "  dedup list: empty (news table not initialized)"
   fi
 
   # Helper: spawn one browser-based collection agent
   collect_browser() {
-    local source_id="$1" source_name="$2" url="$3"
+    local source_id="$1" source_name="$2" url="$3" collection_scope="$4"
     local sessid="news-${source_id}-$(date +%s)"
     local log_file="${NEWS_LOG_DIR}/${source_id}.log"
     local prompt
@@ -175,7 +169,7 @@ EOF
     # Inject dedup slugs from temp file
     local dedup_content
     dedup_content=$(cat "$DEDUP_FILE")
-    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" <<< "$prompt")
+    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); t=t.replace('{{COLLECT_SCOPE}}', sys.argv[3]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" "$collection_scope" <<< "$prompt")
 
     {
       echo "source_id: ${source_id}"
@@ -189,8 +183,8 @@ EOF
     if openclaw agent \
       --agent main \
       --timeout 2400 \
-      --model anthropic/claude-sonnet-4-6 \
-      --thinking medium \
+      --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
+      --thinking high \
       --session-id "${sessid}" \
       --message "${prompt}" >>"${log_file}" 2>&1; then
       echo "news: ${source_id} ok (log: ${log_file})"
@@ -203,8 +197,8 @@ EOF
       if openclaw agent \
         --agent main \
         --timeout 2400 \
-        --model anthropic/claude-sonnet-4-6 \
-        --thinking medium \
+        --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
+        --thinking high \
         --session-id "${retry_sessid}" \
         --message "${prompt}" >>"${log_file}" 2>&1; then
         echo "news: ${source_id} ok on retry (log: ${log_file})"
@@ -219,7 +213,7 @@ EOF
 
   # Helper: spawn one web_fetch-based collection agent
   collect_webfetch() {
-    local source_id="$1" source_name="$2" url="$3"
+    local source_id="$1" source_name="$2" url="$3" collection_scope="$4"
     local sessid="news-${source_id}-$(date +%s)"
     local log_file="${NEWS_LOG_DIR}/${source_id}.log"
     local prompt
@@ -234,7 +228,7 @@ EOF
     # Inject dedup slugs from temp file
     local dedup_content
     dedup_content=$(cat "$DEDUP_FILE")
-    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" <<< "$prompt")
+    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); t=t.replace('{{COLLECT_SCOPE}}', sys.argv[3]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" "$collection_scope" <<< "$prompt")
 
     {
       echo "source_id: ${source_id}"
@@ -248,8 +242,8 @@ EOF
     if openclaw agent \
       --agent main \
       --timeout 300 \
-      --model anthropic/claude-sonnet-4-6 \
-      --thinking medium \
+      --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
+      --thinking high \
       --session-id "${sessid}" \
       --message "${prompt}" >>"${log_file}" 2>&1; then
       echo "news: ${source_id} ok (log: ${log_file})"
@@ -262,8 +256,8 @@ EOF
       if openclaw agent \
         --agent main \
         --timeout 300 \
-        --model anthropic/claude-sonnet-4-6 \
-        --thinking medium \
+        --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
+        --thinking high \
         --session-id "${retry_sessid}" \
         --message "${prompt}" >>"${log_file}" 2>&1; then
         echo "news: ${source_id} ok on retry (log: ${log_file})"
@@ -283,14 +277,15 @@ EOF
       source_name=$(echo "$entry" | jq -r '.name')
       url=$(echo "$entry" | jq -r '.url')
       access=$(echo "$entry" | jq -r '.access')
+      collection_scope=$(echo "$entry" | jq -r '.collect // "Items relevant to a long-only investor."')
 
       if [[ "$access" == "browser" ]]; then
         echo "  spawning browser agent: ${source_id}"
-        collect_browser "$source_id" "$source_name" "$url" &
+        collect_browser "$source_id" "$source_name" "$url" "$collection_scope" &
         PIDS+=($!)
       elif [[ "$access" == "web_fetch" ]]; then
         echo "  spawning web_fetch agent: ${source_id}"
-        collect_webfetch "$source_id" "$source_name" "$url" &
+        collect_webfetch "$source_id" "$source_name" "$url" "$collection_scope" &
         PIDS+=($!)
       fi
     done < <(jq -c '.[]' "${NEWS_SOURCES}")
@@ -312,7 +307,7 @@ EOF
       fi
 
       echo "  spawning IR browser agent: ${ticker}"
-      collect_browser "ir-${ticker}" "IR — ${ticker}" "$url" &
+      collect_browser "ir-${ticker}" "IR — ${ticker}" "$url" "New investor-relations releases, filings, earnings materials, capital-allocation announcements, or other material company updates published within the last 3 days." &
       IR_PIDS+=($!)
       IR_COUNT=$((IR_COUNT + 1))
 
@@ -365,7 +360,8 @@ if [[ "${RAW_COUNT}" -gt 0 ]]; then
   run extract-files \
     -f "${NEWS_DIR}/raw/*.md" \
     -o "${NEWS_DIR}/summaries" \
-    --model gemini-3-flash \
+    --model gemini-3.5-flash \
+    --thinking high \
     --concurrency 4 \
     --force \
     "${EXTRACT_PROMPT}" || echo "extract-files: failed (non-fatal)"
@@ -377,26 +373,47 @@ fi
 
 echo ""
 
-# ── PHASE 3: Merge summaries → per-source summaries + articles.md + INDEX.md ──
-echo "── Phase 3: Merge ──"
+# ── PHASE 2c: Ingest raw + summaries into invest.db ──
+# One writer, single SQLite transaction. Parallel collector agents never
+# open the DB — they only produce markdown into NEWS_RUN_DIR.
+echo "── Phase 2c: Ingest into invest.db ──"
 
-MERGE_SCRIPT="${ROOT_DIR}/scripts/merge_news.py"
-if [[ ! -f "${MERGE_SCRIPT}" ]]; then
-  echo "merge_news: script not found at ${MERGE_SCRIPT}, skipping"
+INGEST_SCRIPT="${ROOT_DIR}/scripts/ingest_news.py"
+ingest_report="${NEWS_RUN_DIR}/logs/ingest.log"
+ingest_stats="${NEWS_RUN_DIR}/logs/ingest.json"
+if [[ "${RAW_COUNT}" -gt 0 ]]; then
+  if [[ ! -f "${INGEST_SCRIPT}" ]]; then
+    echo "ingest_news: script not found at ${INGEST_SCRIPT}" >&2
+    exit 1
+  fi
+  if uv run python "${INGEST_SCRIPT}" \
+      --raw-dir "${NEWS_RUN_DIR}/raw" \
+      --summaries-dir "${NEWS_RUN_DIR}/summaries" \
+      --db "${INVEST_DB}" \
+      --report "${ingest_report}" > "${ingest_stats}"; then
+    INGEST_OK=1
+    echo "  ingest stats: $(cat "${ingest_stats}")"
+  else
+    echo "ingest_news: failed (temp run dir preserved at ${NEWS_RUN_DIR})" >&2
+    exit 1
+  fi
 else
-  uv run python "${MERGE_SCRIPT}" \
-    --raw-dir "${NEWS_DIR}/raw" \
-    --summaries-dir "${NEWS_DIR}/summaries" \
-    --date-dir "${NEWS_DIR}" \
-    --ledger "${ROOT_DIR}/hard-disk/data/02-news/LEDGER.md" \
-    --date "${RUN_DATE}" || echo "merge_news: failed"
+  # Nothing to ingest, but the temp dir is safe to remove.
+  echo '{"eligible": 0}' > "${ingest_stats}"
+  INGEST_OK=1
 fi
 
-if [[ "${MINERVA_SKIP_NEWS}" != "1" && "${MINERVA_ALLOW_THIN_BRIEF}" != "1" && ! -s "${NEWS_DIR}/articles.md" ]]; then
-  echo "articles: missing or empty at ${NEWS_DIR}/articles.md" >&2
-  echo "articles: refusing to continue without article evidence; set MINERVA_ALLOW_THIN_BRIEF=1 to allow a thin brief" >&2
-  echo "articles: collector logs are in ${NEWS_DIR}/logs" >&2
-  exit 1
+echo ""
+
+if [[ "${MINERVA_SKIP_NEWS}" != "1" && "${MINERVA_ALLOW_THIN_BRIEF}" != "1" ]]; then
+  eligible_count=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("eligible", 0))' "${ingest_stats}" 2>/dev/null || echo 0)
+  if [[ "${eligible_count}" -eq 0 ]]; then
+    echo "news: no eligible articles were ingested" >&2
+    echo "news: refusing to continue without article evidence; set MINERVA_ALLOW_THIN_BRIEF=1 to allow a thin brief" >&2
+    echo "news: temp run directory preserved at ${NEWS_RUN_DIR}" >&2
+    INGEST_OK=0
+    exit 1
+  fi
 fi
 
 echo ""
@@ -436,5 +453,5 @@ echo ""
 PREPARED_PATH="${REPORT_DIR}/data/structured/prepared-evidence.json"
 echo "prepared_evidence: ${PREPARED_PATH}"
 echo "manifest: ${MANIFEST_PATH}"
-echo "articles: ${NEWS_DIR}/articles.md"
-echo "main_agent_step: read prepared evidence + articles.md, write notes/morning-brief-report.md and notes/slack-brief.md"
+echo "news_db: ${INVEST_DB}"
+echo "main_agent_step: read prepared evidence + query today's fresh rows from the news table, then write notes/morning-brief-report.md and notes/slack-brief.md"
