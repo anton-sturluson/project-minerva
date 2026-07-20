@@ -1,9 +1,10 @@
-"""Post-ingest, two-pass model synthesis for the daily morning brief.
+"""Post-ingest, two-pass OpenClaw synthesis for the daily morning brief.
 
-The collection pipeline owns all network/tool work and SQLite ingestion.  This
-module starts at the resulting SQLite database and prepared evidence file.  It
-makes two plain model calls: a title-only broad shortlist, followed by final
-synthesis from evidence fetched only for validated shortlist IDs.
+The collection pipeline owns all network/tool work and SQLite ingestion. This
+module starts at the resulting SQLite database and prepared evidence file. It
+runs two OpenClaw main-agent turns in one dedicated session: a title-only broad
+shortlist, followed by final synthesis from evidence fetched only for validated
+shortlist IDs.
 """
 
 from __future__ import annotations
@@ -14,19 +15,16 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from harness.commands.extract import _generate_answer
-from harness.config import get_settings
-
 DEFAULT_MODEL = "gpt-5.6-sol"
 DEFAULT_REASONING = "high"
-DEFAULT_PASS_1_TOKENS = 16_384
-DEFAULT_PASS_2_TOKENS = 12_000
 MAX_ARTICLE_CONTENT_CHARS = 4_000
 MAX_EVENT_DETAIL_CHARS = 2_000
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -206,8 +204,9 @@ def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date)
     }
     return (
         "You are Sol performing PASS 1 of a deterministic morning-brief workflow.\n"
-        "You have no tools and must not request tools, browse, or write files. The JSON below is the "
-        "complete title/headline universe for this run.\n\n"
+        "For this turn, DO NOT use or call any tools. DO NOT browse, search, or fetch anything. "
+        "DO NOT read, create, edit, or write any files. Work only from this message and reply "
+        "directly. The JSON below is the complete title/headline universe for this run.\n\n"
         "Select a BROAD shortlist for a long-only investor. Cast a wide net: retain anything plausibly "
         "market-moving, company-specific, portfolio-relevant, useful as a read-through, materially "
         "economic/political/geopolitical, or a significant scheduled event. Include relevant IR and "
@@ -338,8 +337,11 @@ def build_final_prompt(evidence: Sequence[dict[str, Any]], run_date: date) -> st
     }
     return (
         "You are Sol performing PASS 2 of a deterministic morning-brief workflow.\n"
-        "You have no tools and must not request tools, browse, or write files. All available shortlisted "
-        "evidence is included below. Filter and rank it now; do not rely on outside facts.\n\n"
+        "For this turn, DO NOT use or call any tools. DO NOT browse, search, or fetch anything. "
+        "DO NOT read, create, edit, or write any files. Work only from this message and reply "
+        "directly. Even though the prior pass is visible in this session, all available shortlisted "
+        "evidence is included below. Filter and rank it now; do not rely on outside facts or prior-pass "
+        "titles that are absent from this evidence.\n\n"
         "Return ONLY the final Slack-formatted daily-news brief as plain text (Slack mrkdwn), with no "
         "JSON, code fence, preamble, postscript, or file instructions. Use this section order:\n"
         "1. *Worth Knowing Today* — required; ranked, concise news bullets.\n"
@@ -386,12 +388,14 @@ def synthesize_morning_brief(
     model_call: ModelCall | None = None,
     model: str = DEFAULT_MODEL,
     reasoning: str = DEFAULT_REASONING,
+    session_key: str | None = None,
     output_path: Path | None = None,
     retry_count: int = 1,
 ) -> str:
-    """Run both in-memory model passes and optionally persist the final text artifact."""
+    """Run both OpenClaw turns and optionally persist the final text artifact."""
     candidates = build_title_universe(db_path, prepared_path, run_date)
     call_model = model_call or _default_model_call
+    active_session_key = _resolve_session_key(session_key, run_date)
     pass_1_prompt = build_shortlist_prompt(candidates, run_date)
 
     shortlist_ids = _with_retries(
@@ -401,7 +405,7 @@ def synthesize_morning_brief(
                     prompt=pass_1_prompt,
                     model=model,
                     reasoning=reasoning,
-                    max_tokens=DEFAULT_PASS_1_TOKENS,
+                    session_key=active_session_key,
                 )
             ),
             candidates,
@@ -417,7 +421,7 @@ def synthesize_morning_brief(
                 prompt=pass_2_prompt,
                 model=model,
                 reasoning=reasoning,
-                max_tokens=DEFAULT_PASS_2_TOKENS,
+                session_key=active_session_key,
             )
         ),
         attempts=retry_count + 1,
@@ -430,20 +434,130 @@ def synthesize_morning_brief(
     return brief
 
 
+def _resolve_session_key(session_key: str | None, run_date: date) -> str:
+    if session_key is None:
+        return f"daily-news-sol-{run_date.isoformat()}-{uuid.uuid4().hex[:12]}"
+    resolved = session_key.strip()
+    if not resolved:
+        raise SynthesisError("--session-key must not be empty")
+    return resolved
+
+
 def _default_model_call(
-    *, prompt: str, model: str, reasoning: str, max_tokens: int
+    *, prompt: str, model: str, reasoning: str, session_key: str
 ) -> str:
-    settings = get_settings()
-    if not settings.openai_api_key:
-        raise SynthesisError("OPENAI_API_KEY is not set for morning-brief synthesis")
-    return _generate_answer(
-        prompt=prompt,
-        document_text="",
-        model=model,
-        max_tokens=max_tokens,
-        thinking=reasoning,
-        api_key=settings.openai_api_key,
-    )
+    command = [
+        "openclaw",
+        "agent",
+        "--agent",
+        "main",
+        "--model",
+        model,
+        "--thinking",
+        reasoning,
+        "--json",
+        "--session-key",
+        session_key,
+        "--message",
+        prompt,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise SynthesisError(f"could not start OpenClaw agent command: {exc}") from exc
+
+    if completed.returncode != 0:
+        diagnostic = completed.stderr.strip() or completed.stdout.strip()
+        if diagnostic:
+            diagnostic = _bounded_text(diagnostic, 2_000)
+            detail = f": {diagnostic}"
+        else:
+            detail = " (no diagnostic output)"
+        raise SynthesisError(
+            f"OpenClaw agent command exited with status {completed.returncode}{detail}"
+        )
+    return parse_openclaw_json_output(completed.stdout)
+
+
+def parse_openclaw_json_output(raw: str) -> str:
+    """Extract visible assistant text from top-level or Gateway-nested payloads."""
+    if not raw.strip():
+        raise SynthesisError("OpenClaw agent returned empty JSON stdout")
+    try:
+        response = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SynthesisError(
+            f"OpenClaw agent returned invalid JSON stdout at line {exc.lineno}, "
+            f"column {exc.colno}: {exc.msg}"
+        ) from exc
+    if not isinstance(response, dict):
+        raise SynthesisError("OpenClaw agent JSON stdout must be an object")
+
+    result = response.get("result")
+    result_object = result if isinstance(result, dict) else None
+    for container in (response, result_object):
+        if container is None:
+            continue
+        status = container.get("status")
+        if isinstance(status, str) and status.casefold() not in {
+            "ok",
+            "success",
+            "completed",
+        }:
+            detail = _openclaw_error_detail(response, result_object)
+            suffix = f": {detail}" if detail else ""
+            raise SynthesisError(f"OpenClaw agent returned status {status!r}{suffix}")
+
+    if "payloads" in response:
+        payloads = response["payloads"]
+    elif result_object is not None and "payloads" in result_object:
+        payloads = result_object["payloads"]
+    else:
+        detail = _openclaw_error_detail(response, result_object)
+        suffix = f": {detail}" if detail else ""
+        raise SynthesisError(f"OpenClaw agent JSON contained no payloads{suffix}")
+    if not isinstance(payloads, list):
+        raise SynthesisError("OpenClaw agent `payloads` must be a list")
+
+    texts: list[str] = []
+    for index, payload in enumerate(payloads):
+        if not isinstance(payload, dict):
+            raise SynthesisError(
+                f"OpenClaw agent payload {index} must be a JSON object"
+            )
+        text = payload.get("text")
+        if payload.get("isError") is True:
+            detail = text.strip() if isinstance(text, str) else "unknown agent error"
+            raise SynthesisError(f"OpenClaw agent returned an error payload: {detail}")
+        if payload.get("isReasoning") is True:
+            continue
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    if not texts:
+        raise SynthesisError("OpenClaw agent returned no visible text payload")
+    return "\n\n".join(texts)
+
+
+def _openclaw_error_detail(
+    response: dict[str, Any], result: dict[str, Any] | None
+) -> str:
+    for container in (result, response):
+        if container is None:
+            continue
+        for key in ("errorMessage", "error", "summary", "message"):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return _bounded_text(value.strip(), 2_000)
+            if isinstance(value, dict) and value:
+                return _bounded_text(
+                    json.dumps(value, ensure_ascii=False, sort_keys=True), 2_000
+                )
+    return ""
 
 
 def _query_article_evidence(
@@ -624,7 +738,7 @@ def _with_retries(
     for attempt in range(1, attempts + 1):
         try:
             return operation()
-        except Exception as exc:  # model/API and output-validation errors retry once
+        except Exception as exc:  # OpenClaw and output-validation errors retry once
             last_error = exc
             if attempt < attempts:
                 print(
@@ -646,7 +760,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", type=Path, help="Final Slack brief output path.")
     parser.add_argument("--workspace-root", type=Path, help="Minerva hard-disk workspace root.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Pure model-call model name.")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="OpenClaw model override.")
+    parser.add_argument(
+        "--session-key",
+        help=(
+            "OpenClaw session key shared by both passes. By default, generate a unique "
+            "daily-news-sol-<date>-... key."
+        ),
+    )
     return parser
 
 
@@ -685,6 +806,7 @@ def main(argv: list[str] | None = None, *, model_call: ModelCall | None = None) 
             run_date=run_date,
             model_call=model_call,
             model=args.model,
+            session_key=args.session_key,
             output_path=output_path,
         )
     except Exception as exc:

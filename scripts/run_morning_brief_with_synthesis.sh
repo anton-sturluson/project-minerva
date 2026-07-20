@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# Load API keys for both child processes before strict mode.  The existing
-# collection script does this too, but exports made in a child do not propagate
-# back to this wrapper.
+# Load the shell environment needed by the collection pipeline and OpenClaw
+# before strict mode. The collection script does this too, but exports made in
+# a child do not propagate back to this wrapper.
 source ~/.zshrc >/dev/null 2>&1 || true
 
 set -euo pipefail
@@ -26,7 +26,7 @@ export MINERVA_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
 export INVEST_DB
 
 # Collection, extraction, SQLite ingestion, and evidence preparation must all
-# finish successfully before the first Sol call. Retry the complete wrapper
+# finish successfully before the first OpenClaw Sol turn. Retry the complete wrapper
 # once on a non-zero exit or a missing/empty rendered evidence directory.
 # Noisy output stays out of cron stdout, which is reserved for the final brief.
 pipeline_status=1

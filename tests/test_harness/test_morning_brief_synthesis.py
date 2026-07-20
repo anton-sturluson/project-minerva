@@ -15,6 +15,7 @@ from harness.morning_brief_synthesis import (
     MAX_ARTICLE_CONTENT_CHARS,
     SynthesisError,
     main,
+    parse_openclaw_json_output,
     parse_shortlist_output,
     synthesize_morning_brief,
 )
@@ -200,6 +201,14 @@ def test_all_fresh_titles_reach_pass_1_and_only_valid_shortlist_reaches_pass_2(
     assert len(prompts) == 2
     assert {call["model"] for call in model_calls} == {"gpt-5.6-sol"}
     assert {call["reasoning"] for call in model_calls} == {"high"}
+    session_keys = {call["session_key"] for call in model_calls}
+    assert len(session_keys) == 1
+    assert next(iter(session_keys)).startswith(
+        f"daily-news-sol-{RUN_DATE.isoformat()}-"
+    )
+    assert all("DO NOT use or call any tools" in prompt for prompt in prompts)
+    assert all("DO NOT browse, search, or fetch anything" in prompt for prompt in prompts)
+    assert all("DO NOT read, create, edit, or write any files" in prompt for prompt in prompts)
     title_universe = _payload_from_prompt(prompts[0], "TITLE_UNIVERSE_JSON:")
     article_records = [
         item for item in title_universe["candidates"] if item["kind"] == "article"
@@ -352,7 +361,10 @@ def test_cli_stdout_and_artifact_are_final_text_only_and_no_temp_json(
     system_tmp.mkdir()
     monkeypatch.setenv("TMPDIR", str(system_tmp))
 
+    model_calls: list[dict] = []
+
     def model_call(**kwargs) -> str:
+        model_calls.append(kwargs)
         if "PASS 1" in kwargs["prompt"]:
             universe = _payload_from_prompt(kwargs["prompt"], "TITLE_UNIVERSE_JSON:")
             return json.dumps({"ids": [universe["candidates"][0]["id"]]})
@@ -368,6 +380,8 @@ def test_cli_stdout_and_artifact_are_final_text_only_and_no_temp_json(
             str(prepared_path),
             "--output",
             str(output_path),
+            "--session-key",
+            "daily-news-sol-manual-test",
         ],
         model_call=model_call,
     )
@@ -376,9 +390,120 @@ def test_cli_stdout_and_artifact_are_final_text_only_and_no_temp_json(
     assert status == 0
     assert captured.out == f"{FINAL_BRIEF}\n"
     assert captured.err == ""
+    assert {call["session_key"] for call in model_calls} == {
+        "daily-news-sol-manual-test"
+    }
     assert output_path.read_text(encoding="utf-8") == f"{FINAL_BRIEF}\n"
     assert not list(system_tmp.rglob("*.json"))
     assert not any(system_tmp.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('{"payloads":[{"text":"top-level reply"}]}', "top-level reply"),
+        (
+            '{"status":"ok","result":{"payloads":[{"text":"first"},{"text":"second"}]}}',
+            "first\n\nsecond",
+        ),
+        (
+            '{"payloads":[{"isReasoning":true,"text":"hidden"},{"text":"visible"}]}',
+            "visible",
+        ),
+    ],
+)
+def test_openclaw_json_payload_parsing(raw: str, expected: str) -> None:
+    assert parse_openclaw_json_output(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("", "empty JSON stdout"),
+        ("not-json", "invalid JSON stdout"),
+        ('{"status":"error","summary":"gateway exploded"}', "gateway exploded"),
+        ('{"result":{}}', "contained no payloads"),
+        ('{"payloads":{}}', "payloads` must be a list"),
+        ('{"payloads":[{"text":""}]}', "no visible text payload"),
+        (
+            '{"payloads":[{"isError":true,"text":"model unavailable"}]}',
+            "model unavailable",
+        ),
+    ],
+)
+def test_openclaw_json_payload_errors_are_clear(raw: str, message: str) -> None:
+    with pytest.raises(SynthesisError, match=message):
+        parse_openclaw_json_output(raw)
+
+
+def test_default_workflow_uses_two_main_agent_turns_in_one_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, prepared_path = _make_inputs(tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str], *, capture_output: bool, text: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        assert check is False
+        commands.append(command)
+        prompt = command[command.index("--message") + 1]
+        if "PASS 1" in prompt:
+            universe = _payload_from_prompt(prompt, "TITLE_UNIVERSE_JSON:")
+            reply = json.dumps({"ids": [universe["candidates"][0]["id"]]})
+            stdout = json.dumps({"payloads": [{"text": reply}]})
+        else:
+            stdout = json.dumps(
+                {"status": "ok", "result": {"payloads": [{"text": FINAL_BRIEF}]}}
+            )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="diagnostic")
+
+    monkeypatch.setattr("harness.morning_brief_synthesis.subprocess.run", fake_run)
+
+    brief = synthesize_morning_brief(
+        db_path=db_path,
+        prepared_path=prepared_path,
+        run_date=RUN_DATE,
+        session_key="daily-news-sol-known-audit-key",
+    )
+
+    assert brief == FINAL_BRIEF
+    assert len(commands) == 2
+    for command in commands:
+        assert command[:2] == ["openclaw", "agent"]
+        assert command[command.index("--agent") + 1] == "main"
+        assert command[command.index("--model") + 1] == "gpt-5.6-sol"
+        assert command[command.index("--thinking") + 1] == "high"
+        assert command[command.index("--session-key") + 1] == (
+            "daily-news-sol-known-audit-key"
+        )
+        assert "--json" in command
+        assert "--deliver" not in command
+
+
+def test_openclaw_subprocess_failure_surfaces_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, prepared_path = _make_inputs(tmp_path)
+
+    def fake_run(*args, **kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args[0], 17, stdout="", stderr="gateway connection failed"
+        )
+
+    monkeypatch.setattr("harness.morning_brief_synthesis.subprocess.run", fake_run)
+
+    with pytest.raises(
+        SynthesisError, match="status 17: gateway connection failed"
+    ):
+        synthesize_morning_brief(
+            db_path=db_path,
+            prepared_path=prepared_path,
+            run_date=RUN_DATE,
+            retry_count=0,
+        )
 
 
 def _write_fake_wrapper_commands(tmp_path: Path, *, pipeline_status: int) -> tuple[Path, Path]:
