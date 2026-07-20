@@ -8,6 +8,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 RUN_DATE="${1:-$(date +%F)}"
+WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
 MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"
@@ -28,8 +29,8 @@ done
 # raw directory for summarization and the single SQLite writer.
 NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 NEWS_SOURCE_ROOTS_DIR="${NEWS_RUN_DIR}/sources"
-REPORT_DIR="${ROOT_DIR}/hard-disk/reports/03-daily-news/${RUN_DATE}"
-INVEST_DB="${INVEST_DB:-${ROOT_DIR}/hard-disk/data/04-database/invest.db}"
+REPORT_DIR="${WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}"
+INVEST_DB="${INVEST_DB:-${WORKSPACE_ROOT}/data/04-database/invest.db}"
 INGEST_OK=0
 cleanup_run_dir() {
   # Remove the temp run dir only when ingest into invest.db succeeded.
@@ -41,7 +42,7 @@ cleanup_run_dir() {
 trap cleanup_run_dir EXIT
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
-export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
+export MINERVA_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
 
 MINERVA_RUNNER="${MINERVA_RUNNER:-uv run minerva}"
 MINERVA_BRIEF_EARNINGS_PROVIDER="${MINERVA_BRIEF_EARNINGS_PROVIDER:-finnhub}"
