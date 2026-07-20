@@ -1,10 +1,12 @@
 """Post-ingest, two-pass OpenClaw synthesis for the daily morning brief.
 
 The collection pipeline owns all network/tool work and SQLite ingestion. This
-module starts at the resulting SQLite database and prepared evidence file. It
-runs two OpenClaw main-agent turns in one dedicated session: a title-only broad
-shortlist, followed by final synthesis from evidence fetched only for validated
-shortlist IDs.
+module starts at the resulting SQLite database and prepared evidence file,
+then deterministically separates article choices from automatic events. It
+runs two OpenClaw main-agent turns in one dedicated session: pass 1 chooses
+only among collected articles and secondary ``market-news`` records; pass 2
+receives evidence for those choices plus every automatically routed prepared
+event.
 """
 
 from __future__ import annotations
@@ -27,6 +29,12 @@ DEFAULT_MODEL = "gpt-5.6-sol"
 DEFAULT_REASONING = "high"
 MAX_ARTICLE_CONTENT_CHARS = 4_000
 MAX_EVENT_DETAIL_CHARS = 2_000
+MAX_SHORTLIST_IDS = 30
+ROUTING_SELECTED_ARTICLE = "selected_article"
+ROUTING_AUTO_PORTFOLIO = "auto_portfolio_watchlist"
+ROUTING_AUTO_MARKET = "auto_market_move"
+ROUTING_OTHER_AUTO = "other_auto_event"
+PORTFOLIO_ROLES = frozenset({"holding", "watchlist"})
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 ModelCall = Callable[..., str]
@@ -38,7 +46,7 @@ class SynthesisError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class CandidateTitle:
-    """One stable title/headline candidate shown to the first model pass."""
+    """One stable collected-article or prepared-event candidate."""
 
     id: str
     kind: str
@@ -49,13 +57,18 @@ class CandidateTitle:
     metadata: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     def title_record(self) -> dict[str, Any]:
-        """Return the compact, summary-free representation for pass 1."""
+        """Return the compact, summary-free article-choice record for pass 1."""
         record: dict[str, Any] = {
             "id": self.id,
             "kind": self.kind,
             "source": self.source,
             "published": self.published,
             "title": self.title,
+            "article_candidate_class": (
+                "collected_sqlite_article"
+                if self.kind == "article"
+                else "secondary_prepared_market_news"
+            ),
         }
         if self.article_key is not None:
             record["article_key"] = self.article_key
@@ -71,6 +84,22 @@ class CandidateTitle:
             if value not in (None, ""):
                 record[key] = value
         return record
+
+
+@dataclass(frozen=True, slots=True)
+class RoutedEvent:
+    """A prepared event that bypasses pass 1 with an editorial routing class."""
+
+    candidate: CandidateTitle
+    routing_class: str
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingPlan:
+    """Deterministic pass-1 candidates and pass-2 automatic events."""
+
+    article_candidates: tuple[CandidateTitle, ...]
+    automatic_events: tuple[RoutedEvent, ...]
 
 
 def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateTitle]:
@@ -128,7 +157,9 @@ def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateT
     return candidates
 
 
-def load_prepared_event_titles(prepared_path: Path, run_date: date) -> list[CandidateTitle]:
+def load_prepared_event_titles(
+    prepared_path: Path, run_date: date
+) -> list[CandidateTitle]:
     """Load compact prepared-evidence headlines and assign deterministic IDs."""
     if not prepared_path.is_file():
         raise SynthesisError(f"prepared evidence does not exist: {prepared_path}")
@@ -153,8 +184,14 @@ def load_prepared_event_titles(prepared_path: Path, run_date: date) -> list[Cand
         event_date = str(raw_event.get("event_date") or run_date.isoformat()).strip()
         if not title or event_date not in {"", run_date.isoformat()}:
             continue
-        source = str(raw_event.get("source_name") or raw_event.get("source") or "prepared-evidence").strip()
-        security_id = str(raw_event.get("security_id") or raw_event.get("ticker") or "").strip()
+        source = str(
+            raw_event.get("source_name")
+            or raw_event.get("source")
+            or "prepared-evidence"
+        ).strip()
+        security_id = str(
+            raw_event.get("security_id") or raw_event.get("ticker") or ""
+        ).strip()
         stable_key = "|".join((source, security_id, title, event_date))
         candidate_id = f"event:{hashlib.sha256(stable_key.encode('utf-8')).hexdigest()}"
         if candidate_id in seen_ids:
@@ -189,14 +226,48 @@ def load_prepared_event_titles(prepared_path: Path, run_date: date) -> list[Cand
 def build_title_universe(
     db_path: Path, prepared_path: Path, run_date: date
 ) -> list[CandidateTitle]:
-    """Build the complete, stable pass-1 universe (articles first, then events)."""
+    """Build all fresh collected articles and current prepared events."""
     return query_fresh_article_titles(db_path, run_date) + load_prepared_event_titles(
         prepared_path, run_date
     )
 
 
+def partition_candidates(candidates: Sequence[CandidateTitle]) -> RoutingPlan:
+    """Partition candidates before pass 1 using the approved routing hierarchy.
+
+    Collected SQLite articles always compete in pass 1. A prepared event linked
+    to a holding/watchlist security bypasses pass 1 even when it is article-like;
+    otherwise market moves bypass, unlinked ``market-news`` records compete as
+    secondary article candidates, and every remaining prepared event advances as
+    an ``other_auto_event``.
+    """
+    article_candidates: list[CandidateTitle] = []
+    automatic_events: list[RoutedEvent] = []
+    for candidate in candidates:
+        if candidate.kind == "article":
+            article_candidates.append(candidate)
+            continue
+
+        event_type = str(candidate.metadata.get("event_type") or "").strip().casefold()
+        portfolio_role = (
+            str(candidate.metadata.get("portfolio_role") or "").strip().casefold()
+        )
+        if portfolio_role in PORTFOLIO_ROLES:
+            routing_class = ROUTING_AUTO_PORTFOLIO
+        elif event_type == "market":
+            routing_class = ROUTING_AUTO_MARKET
+        elif event_type == "market-news":
+            article_candidates.append(candidate)
+            continue
+        else:
+            routing_class = ROUTING_OTHER_AUTO
+        automatic_events.append(RoutedEvent(candidate, routing_class))
+
+    return RoutingPlan(tuple(article_candidates), tuple(automatic_events))
+
+
 def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date) -> str:
-    """Render the first-pass prompt containing every title and no article body."""
+    """Render pass 1 with only article-choice titles and no evidence bodies."""
     payload = {
         "run_date": run_date.isoformat(),
         "candidate_count": len(candidates),
@@ -206,15 +277,22 @@ def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date)
         "You are Sol performing PASS 1 of a deterministic morning-brief workflow.\n"
         "For this turn, DO NOT use or call any tools. DO NOT browse, search, or fetch anything. "
         "DO NOT read, create, edit, or write any files. Work only from this message and reply "
-        "directly. The JSON below is the complete title/headline universe for this run.\n\n"
-        "Select a BROAD shortlist for a long-only investor. Cast a wide net: retain anything plausibly "
-        "market-moving, company-specific, portfolio-relevant, useful as a read-through, materially "
-        "economic/political/geopolitical, or a significant scheduled event. Include relevant IR and "
-        "prepared-evidence events. Prefer false positives over false negatives at this stage. Source "
-        "balance must follow merit, not quotas. Do not draft, summarize, filter to a tiny final list, "
-        "or invent IDs.\n\n"
-        "Return exactly one strict JSON object and no markdown or commentary:\n"
-        '{"ids":["exact-stable-id", "..."]}\n\n'
+        "directly. The JSON below is the complete ARTICLE-CHOICE title/headline universe for this "
+        "run. Portfolio/watchlist events, market moves, and other non-article events have already "
+        "been routed automatically and must not compete in this pass.\n\n"
+        "Select a focused but broad shortlist for a long-only investor, targeting 15-25 choices "
+        "when the candidate quality supports it. HARD MAXIMUM: select no more than 30 IDs. Retain "
+        "stories that are plausibly market-moving, company-specific, useful as an investor "
+        "read-through, or materially economic, political, or geopolitical. Reject lifestyle, "
+        "sports, celebrity, and other non-investor fluff. Semantically deduplicate overlapping "
+        "headlines: select one representative of the same development, preferring a "
+        "collected_sqlite_article over a secondary_prepared_market_news record because the former "
+        "has richer collected evidence. A secondary market-news record may be selected when it is "
+        "the only coverage or is materially distinct. Rank and balance sources on merit, not quotas. "
+        "Do not draft the brief, summarize unsupported details, or invent IDs.\n\n"
+        "Return exactly one strict JSON object and no markdown or commentary. Include exactly one "
+        "concise editorial reason with every selected ID:\n"
+        '{"selections":[{"id":"exact-stable-id","reason":"concise reason"}]}\n\n'
         "TITLE_UNIVERSE_JSON:\n"
         f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
@@ -261,18 +339,25 @@ def parse_shortlist_output(raw: str) -> list[str]:
                 unique.append(identifier)
         return unique
 
-    raise SynthesisError("pass 1 did not return a JSON shortlist with an `ids` array")
+    raise SynthesisError(
+        "pass 1 did not return a JSON shortlist with a `selections` or `ids` array"
+    )
 
 
 def validate_shortlist_ids(
     requested_ids: Sequence[str], candidates: Sequence[CandidateTitle]
 ) -> list[str]:
-    """Drop unknown/duplicate IDs and return valid IDs in stable universe order."""
+    """Return valid IDs in stable universe order and reject an oversized shortlist."""
     requested = set(requested_ids)
     valid = [candidate.id for candidate in candidates if candidate.id in requested]
     if candidates and not valid:
         raise SynthesisError(
             "pass 1 returned no valid IDs from the non-empty title universe"
+        )
+    if len(valid) > MAX_SHORTLIST_IDS:
+        raise SynthesisError(
+            f"pass 1 returned {len(valid)} valid IDs; hard maximum is "
+            f"{MAX_SHORTLIST_IDS}"
         )
     return valid
 
@@ -284,7 +369,7 @@ def query_shortlisted_evidence(
     *,
     max_content_chars: int = MAX_ARTICLE_CONTENT_CHARS,
 ) -> list[dict[str, Any]]:
-    """Fetch summaries/bounded content only for validated shortlist candidates."""
+    """Fetch evidence only for validated pass-1 article choices."""
     candidate_by_id = {candidate.id: candidate for candidate in candidates}
     selected = [candidate_by_id[item_id] for item_id in shortlist_ids]
     selected_article_keys = [
@@ -299,7 +384,9 @@ def query_shortlisted_evidence(
         if candidate.kind == "article":
             row = article_rows.get(candidate.article_key or "")
             if row is None:
-                raise SynthesisError(f"shortlisted article disappeared from SQLite: {candidate.id}")
+                raise SynthesisError(
+                    f"shortlisted article disappeared from SQLite: {candidate.id}"
+                )
             summary = str(row["summary"] or "").strip()
             content = str(row["content"] or "").strip()
             if summary:
@@ -320,38 +407,76 @@ def query_shortlisted_evidence(
                     "url": str(row["url"] or "").strip(),
                     "section": str(row["section"] or "").strip(),
                     "evidence_kind": evidence_kind,
+                    "routing_class": ROUTING_SELECTED_ARTICLE,
+                    "article_candidate_class": "collected_sqlite_article",
                     "evidence": evidence_text,
                 }
             )
         else:
-            evidence.append(_event_evidence(candidate))
+            evidence.append(
+                _event_evidence(candidate, routing_class=ROUTING_SELECTED_ARTICLE)
+            )
     return evidence
 
 
-def build_final_prompt(evidence: Sequence[dict[str, Any]], run_date: date) -> str:
-    """Render the second-pass prompt with all and only shortlisted evidence."""
+def build_final_prompt(
+    evidence: Sequence[dict[str, Any]],
+    run_date: date,
+    *,
+    shortlisted_count: int | None = None,
+    automatic_event_count: int | None = None,
+) -> str:
+    """Render pass 2 with selected-article and automatic-event evidence."""
+    selected_count = (
+        shortlisted_count
+        if shortlisted_count is not None
+        else sum(
+            item.get("routing_class") == ROUTING_SELECTED_ARTICLE for item in evidence
+        )
+    )
+    automatic_count = (
+        automatic_event_count
+        if automatic_event_count is not None
+        else len(evidence) - selected_count
+    )
     payload = {
         "run_date": run_date.isoformat(),
-        "shortlisted_count": len(evidence),
+        "shortlisted_count": selected_count,
+        "automatic_event_count": automatic_count,
+        "evidence_count": len(evidence),
         "evidence": list(evidence),
     }
     return (
         "You are Sol performing PASS 2 of a deterministic morning-brief workflow.\n"
         "For this turn, DO NOT use or call any tools. DO NOT browse, search, or fetch anything. "
         "DO NOT read, create, edit, or write any files. Work only from this message and reply "
-        "directly. Even though the prior pass is visible in this session, all available shortlisted "
-        "evidence is included below. Filter and rank it now; do not rely on outside facts or prior-pass "
-        "titles that are absent from this evidence.\n\n"
+        "directly. Even though the prior pass is visible in this session, the JSON below is the "
+        "complete closed evidence set. Use no outside facts, tools, files, or prior-pass titles that "
+        "are absent from this evidence. Never fabricate a fact, link, date, portfolio relationship, "
+        "or event.\n\n"
+        "Every evidence record has an explicit routing_class. Apply this hierarchy exactly:\n"
+        "- selected_article: editorially rank the strongest items as concise bullets in *Worth "
+        "Knowing Today*. Semantically deduplicate overlapping stories and do not repeat one "
+        "development from multiple outlets. Collected SQLite articles are richer than "
+        "secondary_prepared_market_news records; the latter retain only their supplied prepared "
+        "summary and URL and must not be treated as equally complete reporting.\n"
+        "- auto_portfolio_watchlist: represent EVERY record in *Portfolio / Watchlist Events*. "
+        "Consolidate overlapping records by ticker into one coherent bullet rather than producing "
+        "one bullet per record. Do not drop a record merely because it seems less newsworthy.\n"
+        "- auto_market_move: represent ALL such records in exactly ONE compact bullet/line under "
+        "*Market Snapshot*. Never emit multiple market-move bullets. Omit the section only when no "
+        "auto_market_move evidence exists.\n"
+        "- other_auto_event: include EVERY record appropriately and concisely, consolidating true "
+        "duplicates; use *Other Events* after Market Snapshot when a separate section is clearest.\n\n"
         "Return ONLY the final Slack-formatted daily-news brief as plain text (Slack mrkdwn), with no "
-        "JSON, code fence, preamble, postscript, or file instructions. Use this section order:\n"
-        "1. *Worth Knowing Today* — required; ranked, concise news bullets.\n"
-        "2. *Portfolio / Watchlist Events* — optional; include only direct, material portfolio or "
-        "watchlist developments. Omit it entirely when none are supported.\n\n"
-        "Preserve source links using Slack links such as <https://example.com|Source> wherever a supplied "
-        "URL supports a claim. Use concise labels such as Reuters, WSJ, Economist, or TICKER IR rather "
-        "than internal source IDs. Rank and balance sources on merit; do not enforce quotas and do not repeat "
-        "the same development from multiple outlets. Never fabricate a fact, link, date, portfolio "
-        "relationship, or event. If evidence is thin, say so briefly rather than padding the brief.\n\n"
+        "JSON, code fence, preamble, postscript, or file instructions. Use section order: *Worth "
+        "Knowing Today* (required), then *Portfolio / Watchlist Events*, *Market Snapshot*, and "
+        "*Other Events* when their routed evidence exists. Preserve supplied URLs when representing "
+        "their evidence, using Slack links such as <https://example.com|Source>; never replace or "
+        "invent a link. Use concise source labels such as Reuters, WSJ, Economist, or TICKER IR rather "
+        "than internal IDs. Rank and balance selected articles on merit, not quotas. If selected-article "
+        "evidence is thin, say so briefly rather than padding Worth Knowing Today, while still "
+        "representing every automatic event as directed.\n\n"
         "SHORTLISTED_EVIDENCE_JSON:\n"
         f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
@@ -372,11 +497,15 @@ def normalize_final_brief(raw: str) -> str:
         raise SynthesisError("pass 2 returned JSON instead of a text-only Slack brief")
 
     worth_position = _section_heading_position(brief, "Worth Knowing Today")
-    portfolio_position = _section_heading_position(brief, "Portfolio / Watchlist Events")
+    portfolio_position = _section_heading_position(
+        brief, "Portfolio / Watchlist Events"
+    )
     if worth_position is None:
         raise SynthesisError("pass 2 omitted required Worth Knowing Today section")
     if portfolio_position is not None and worth_position >= portfolio_position:
-        raise SynthesisError("pass 2 returned the optional portfolio/watchlist section out of order")
+        raise SynthesisError(
+            "pass 2 returned the optional portfolio/watchlist section out of order"
+        )
     return brief
 
 
@@ -392,8 +521,10 @@ def synthesize_morning_brief(
     output_path: Path | None = None,
     retry_count: int = 1,
 ) -> str:
-    """Run both OpenClaw turns and optionally persist the final text artifact."""
-    candidates = build_title_universe(db_path, prepared_path, run_date)
+    """Run both OpenClaw turns in one session and persist the final artifact."""
+    all_candidates = build_title_universe(db_path, prepared_path, run_date)
+    routing_plan = partition_candidates(all_candidates)
+    candidates = routing_plan.article_candidates
     call_model = model_call or _default_model_call
     active_session_key = _resolve_session_key(session_key, run_date)
     pass_1_prompt = build_shortlist_prompt(candidates, run_date)
@@ -413,8 +544,18 @@ def synthesize_morning_brief(
         attempts=retry_count + 1,
         stage="pass 1 shortlist",
     )
-    evidence = query_shortlisted_evidence(db_path, candidates, shortlist_ids)
-    pass_2_prompt = build_final_prompt(evidence, run_date)
+    selected_evidence = query_shortlisted_evidence(db_path, candidates, shortlist_ids)
+    automatic_evidence = [
+        _event_evidence(item.candidate, routing_class=item.routing_class)
+        for item in routing_plan.automatic_events
+    ]
+    evidence = [*selected_evidence, *automatic_evidence]
+    pass_2_prompt = build_final_prompt(
+        evidence,
+        run_date,
+        shortlisted_count=len(selected_evidence),
+        automatic_event_count=len(automatic_evidence),
+    )
     brief = _with_retries(
         lambda: normalize_final_brief(
             call_model(
@@ -583,13 +724,16 @@ def _query_article_evidence(
             for row in connection.execute(query, tuple(chunk)):
                 rows[str(row["article_key"])] = row
     except sqlite3.Error as exc:
-        raise SynthesisError(f"could not query shortlisted news evidence: {exc}") from exc
+        raise SynthesisError(
+            f"could not query shortlisted news evidence: {exc}"
+        ) from exc
     finally:
         connection.close()
     return rows
 
 
-def _event_evidence(candidate: CandidateTitle) -> dict[str, Any]:
+def _event_evidence(candidate: CandidateTitle, *, routing_class: str) -> dict[str, Any]:
+    """Preserve one prepared event's own bounded summary and supplied URL."""
     event = candidate.metadata
     url = str(event.get("reference_url") or event.get("source_url") or "").strip()
     summary = _first_nonempty_text(
@@ -632,7 +776,7 @@ def _event_evidence(candidate: CandidateTitle) -> dict[str, Any]:
             if value not in (None, "", [], {}) and key not in compact_details:
                 compact_details[key] = value
 
-    return {
+    evidence_record = {
         "id": candidate.id,
         "kind": "event",
         "source": candidate.source,
@@ -641,8 +785,12 @@ def _event_evidence(candidate: CandidateTitle) -> dict[str, Any]:
         "url": url,
         "details": compact_details,
         "evidence_kind": "prepared_event",
+        "routing_class": routing_class,
         "evidence": _bounded_text(summary, MAX_EVENT_DETAIL_CHARS),
     }
+    if str(event.get("event_type") or "").strip().casefold() == "market-news":
+        evidence_record["article_candidate_class"] = "secondary_prepared_market_news"
+    return evidence_record
 
 
 def _universe_role_map(raw_universe: Any) -> dict[str, str]:
@@ -652,7 +800,9 @@ def _universe_role_map(raw_universe: Any) -> dict[str, str]:
     for item in raw_universe:
         if not isinstance(item, dict):
             continue
-        security_id = str(item.get("security_id") or item.get("ticker") or "").strip().upper()
+        security_id = (
+            str(item.get("security_id") or item.get("ticker") or "").strip().upper()
+        )
         role = str(item.get("source_kind") or item.get("relationship") or "").strip()
         if security_id and role:
             roles[security_id] = role
@@ -662,8 +812,10 @@ def _universe_role_map(raw_universe: Any) -> dict[str, str]:
 def _epoch_as_iso(raw_epoch: Any) -> str:
     try:
         epoch = int(raw_epoch)
-        return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace(
-            "+00:00", "Z"
+        return (
+            datetime.fromtimestamp(epoch, timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
         )
     except (TypeError, ValueError, OSError, OverflowError):
         return ""
@@ -696,7 +848,7 @@ def _extract_id_list(value: Any) -> list[Any] | None:
     normalized = {
         str(key).casefold().replace("-", "_"): item for key, item in value.items()
     }
-    for key in ("ids", "shortlist_ids", "selected_ids"):
+    for key in ("selections", "ids", "shortlist_ids", "selected_ids"):
         selected = normalized.get(key)
         if isinstance(selected, list):
             return selected
@@ -729,9 +881,7 @@ def _section_heading_position(text: str, heading: str) -> int | None:
     return match.start() if match else None
 
 
-def _with_retries(
-    operation: Callable[[], Any], *, attempts: int, stage: str
-) -> Any:
+def _with_retries(operation: Callable[[], Any], *, attempts: int, stage: str) -> Any:
     if attempts < 1:
         raise ValueError("attempts must be at least one")
     last_error: Exception | None = None
@@ -753,14 +903,20 @@ def _with_retries(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", required=True, help="Morning-brief run date (YYYY-MM-DD).")
+    parser.add_argument(
+        "--date", required=True, help="Morning-brief run date (YYYY-MM-DD)."
+    )
     parser.add_argument("--db", type=Path, help="Path to invest.db.")
     parser.add_argument(
         "--prepared-evidence", type=Path, help="Path to prepared-evidence.json."
     )
     parser.add_argument("--output", type=Path, help="Final Slack brief output path.")
-    parser.add_argument("--workspace-root", type=Path, help="Minerva hard-disk workspace root.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="OpenClaw model override.")
+    parser.add_argument(
+        "--workspace-root", type=Path, help="Minerva hard-disk workspace root."
+    )
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL, help="OpenClaw model override."
+    )
     parser.add_argument(
         "--session-key",
         help=(

@@ -13,11 +13,14 @@ import pytest
 
 from harness.morning_brief_synthesis import (
     MAX_ARTICLE_CONTENT_CHARS,
+    MAX_SHORTLIST_IDS,
+    CandidateTitle,
     SynthesisError,
     main,
     parse_openclaw_json_output,
     parse_shortlist_output,
     synthesize_morning_brief,
+    validate_shortlist_ids,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -125,7 +128,12 @@ def _make_inputs(tmp_path: Path) -> tuple[Path, Path]:
                         "security_id": "PORT",
                         "ticker": "PORT",
                         "source_kind": "holding",
-                    }
+                    },
+                    {
+                        "security_id": "WATCH",
+                        "ticker": "WATCH",
+                        "source_kind": "watchlist",
+                    },
                 ],
                 "events": [
                     {
@@ -140,7 +148,55 @@ def _make_inputs(tmp_path: Path) -> tuple[Path, Path]:
                         "timing": "bmo",
                         "reference_url": "https://example.com/calendar",
                         "summary": "Consensus expects revenue growth.",
-                    }
+                    },
+                    {
+                        "source": "ir",
+                        "source_name": "ir",
+                        "event_type": "company-news",
+                        "event_date": RUN_DATE.isoformat(),
+                        "security_id": "WATCH",
+                        "relationship": "monitored",
+                        "group": "company-specific",
+                        "headline": "WATCH schedules an investor day",
+                        "reference_url": "https://example.com/watch-ir",
+                        "summary": "The prepared event gives the scheduled time.",
+                    },
+                    {
+                        "source": "market",
+                        "source_name": "market",
+                        "event_type": "market",
+                        "event_date": RUN_DATE.isoformat(),
+                        "security_id": "SPY",
+                        "relationship": "market",
+                        "group": "market-context",
+                        "headline": "SPY moved 1.25%",
+                        "change_pct": 1.25,
+                        "reference_url": "https://example.com/spy",
+                    },
+                    {
+                        "source": "macro",
+                        "source_name": "macro",
+                        "event_type": "macro-release",
+                        "event_date": RUN_DATE.isoformat(),
+                        "security_id": "",
+                        "relationship": "market",
+                        "group": "macro-policy",
+                        "headline": "Employment report due at 08:30 ET",
+                        "reference_url": "https://example.com/macro",
+                        "summary": "The release is scheduled for 08:30 ET.",
+                    },
+                    {
+                        "source": "market",
+                        "source_name": "market",
+                        "event_type": "market-news",
+                        "event_date": RUN_DATE.isoformat(),
+                        "security_id": "",
+                        "relationship": "market",
+                        "group": "market-context",
+                        "headline": "Thin wire record covers a bank merger",
+                        "reference_url": "https://example.com/market-news",
+                        "summary": "A short prepared summary of the merger report.",
+                    },
                 ],
             }
         ),
@@ -153,7 +209,7 @@ def _payload_from_prompt(prompt: str, marker: str) -> dict:
     return json.loads(prompt.split(marker, 1)[1].strip())
 
 
-def test_all_fresh_titles_reach_pass_1_and_only_valid_shortlist_reaches_pass_2(
+def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     tmp_path: Path,
 ) -> None:
     db_path, prepared_path = _make_inputs(tmp_path)
@@ -167,22 +223,38 @@ def test_all_fresh_titles_reach_pass_1_and_only_valid_shortlist_reaches_pass_2(
         if "PASS 1" in prompt:
             universe = _payload_from_prompt(prompt, "TITLE_UNIVERSE_JSON:")
             article_ids = [
-                item["id"] for item in universe["candidates"] if item["kind"] == "article"
+                item["id"]
+                for item in universe["candidates"]
+                if item["kind"] == "article"
             ]
-            event_id = next(
-                item["id"] for item in universe["candidates"] if item["kind"] == "event"
+            market_news_id = next(
+                item["id"]
+                for item in universe["candidates"]
+                if item.get("event_type") == "market-news"
             )
-            # Fenced JSON, duplicate IDs, and an invented ID are tolerated, but
-            # deterministic validation must keep only supplied universe IDs.
+            # Fenced JSON, reasons, duplicate IDs, and an invented ID are
+            # tolerated; validation keeps only supplied IDs.
             return (
                 "shortlist follows\n```json\n"
                 + json.dumps(
                     {
-                        "shortlist_ids": [
-                            article_ids[1],
-                            event_id,
-                            "article:not-in-universe",
-                            article_ids[1],
+                        "selections": [
+                            {
+                                "id": article_ids[1],
+                                "reason": "Richer IR evidence; punctuation: [] {}.",
+                            },
+                            {
+                                "id": market_news_id,
+                                "reason": "Distinct merger story.",
+                            },
+                            {
+                                "id": "article:not-in-universe",
+                                "reason": "Invented and rejected.",
+                            },
+                            {
+                                "id": article_ids[1],
+                                "reason": "Duplicate and rejected.",
+                            },
                         ]
                     }
                 )
@@ -207,8 +279,13 @@ def test_all_fresh_titles_reach_pass_1_and_only_valid_shortlist_reaches_pass_2(
         f"daily-news-sol-{RUN_DATE.isoformat()}-"
     )
     assert all("DO NOT use or call any tools" in prompt for prompt in prompts)
-    assert all("DO NOT browse, search, or fetch anything" in prompt for prompt in prompts)
-    assert all("DO NOT read, create, edit, or write any files" in prompt for prompt in prompts)
+    assert all(
+        "DO NOT browse, search, or fetch anything" in prompt for prompt in prompts
+    )
+    assert all(
+        "DO NOT read, create, edit, or write any files" in prompt for prompt in prompts
+    )
+
     title_universe = _payload_from_prompt(prompts[0], "TITLE_UNIVERSE_JSON:")
     article_records = [
         item for item in title_universe["candidates"] if item["kind"] == "article"
@@ -224,25 +301,70 @@ def test_all_fresh_titles_reach_pass_1_and_only_valid_shortlist_reaches_pass_2(
         {"id", "article_key", "source", "published", "title"} <= item.keys()
         for item in article_records
     )
+    market_news_records = [
+        item
+        for item in title_universe["candidates"]
+        if item.get("event_type") == "market-news"
+    ]
+    assert len(market_news_records) == 1
+    assert market_news_records[0]["article_candidate_class"] == (
+        "secondary_prepared_market_news"
+    )
+    assert title_universe["candidate_count"] == 4
+    assert "PORT reports before the open" not in prompts[0]
+    assert "WATCH schedules an investor day" not in prompts[0]
+    assert "SPY moved 1.25%" not in prompts[0]
+    assert "Employment report due at 08:30 ET" not in prompts[0]
     assert "UNSELECTED-SUMMARY" not in prompts[0]
     assert "UNSELECTED-CONTENT" not in prompts[0]
+    assert "targeting 15-25" in prompts[0]
+    assert "HARD MAXIMUM: select no more than 30 IDs" in prompts[0]
+    assert "Semantically deduplicate" in prompts[0]
+    assert "Reject lifestyle" in prompts[0]
 
     shortlisted = _payload_from_prompt(prompts[1], "SHORTLISTED_EVIDENCE_JSON:")
     assert shortlisted["shortlisted_count"] == 2
-    assert [item["kind"] for item in shortlisted["evidence"]] == ["article", "event"]
-    assert {item["id"] for item in shortlisted["evidence"]} == {
-        "article:key-ir",
-        next(
-            item["id"]
-            for item in title_universe["candidates"]
-            if item["kind"] == "event"
-        ),
+    assert shortlisted["automatic_event_count"] == 4
+    assert shortlisted["evidence_count"] == 6
+    evidence = shortlisted["evidence"]
+    assert [item["routing_class"] for item in evidence[:2]] == [
+        "selected_article",
+        "selected_article",
+    ]
+    auto_by_title = {item["title"]: item for item in evidence[2:]}
+    assert set(auto_by_title) == {
+        "PORT reports before the open",
+        "WATCH schedules an investor day",
+        "SPY moved 1.25%",
+        "Employment report due at 08:30 ET",
     }
+    assert auto_by_title["PORT reports before the open"]["routing_class"] == (
+        "auto_portfolio_watchlist"
+    )
+    assert auto_by_title["WATCH schedules an investor day"]["routing_class"] == (
+        "auto_portfolio_watchlist"
+    )
+    assert auto_by_title["SPY moved 1.25%"]["routing_class"] == "auto_market_move"
+    assert auto_by_title["Employment report due at 08:30 ET"]["routing_class"] == (
+        "other_auto_event"
+    )
+    selected_market_news = next(
+        item
+        for item in evidence
+        if item.get("article_candidate_class") == "secondary_prepared_market_news"
+    )
+    assert selected_market_news["url"] == "https://example.com/market-news"
+    assert selected_market_news["evidence"] == (
+        "A short prepared summary of the merger report."
+    )
+    assert selected_market_news["evidence_kind"] == "prepared_event"
     assert "article:not-in-universe" not in prompts[1]
     assert "UNSELECTED-SUMMARY" not in prompts[1]
-    fallback = shortlisted["evidence"][0]
+    fallback = evidence[0]
     assert fallback["evidence_kind"] == "bounded_content_fallback"
     assert len(fallback["evidence"]) <= MAX_ARTICLE_CONTENT_CHARS + 50
+    assert "represent EVERY record" in prompts[1]
+    assert "exactly ONE compact bullet/line" in prompts[1]
 
 
 @pytest.mark.parametrize(
@@ -262,10 +384,46 @@ def test_all_fresh_titles_reach_pass_1_and_only_valid_shortlist_reaches_pass_2(
             '{"article_ids":["article:a"],"event_ids":["event:b"]}',
             ["article:a", "event:b"],
         ),
+        (
+            json.dumps(
+                {
+                    "selections": [
+                        {
+                            "id": "article:a",
+                            "reason": 'JSON-safe reason with quotes: "important".',
+                        },
+                        {"id": "event:b", "reason": "Distinct read-through."},
+                    ]
+                }
+            ),
+            ["article:a", "event:b"],
+        ),
     ],
 )
 def test_broad_shortlist_parsing_is_robust(raw: str, expected: list[str]) -> None:
     assert parse_shortlist_output(raw) == expected
+
+
+def test_shortlist_validation_rejects_more_than_hard_maximum() -> None:
+    candidates = [
+        CandidateTitle(
+            id=f"article:{index}",
+            kind="article",
+            title=f"Article {index}",
+            source="wire",
+            published=RUN_DATE.isoformat(),
+            article_key=str(index),
+        )
+        for index in range(MAX_SHORTLIST_IDS + 5)
+    ]
+
+    with pytest.raises(
+        SynthesisError,
+        match=rf"returned {MAX_SHORTLIST_IDS + 5} valid IDs; hard maximum is {MAX_SHORTLIST_IDS}",
+    ):
+        validate_shortlist_ids(
+            [candidate.id for candidate in reversed(candidates)], candidates
+        )
 
 
 def test_invalid_pass_1_output_is_retried_once(tmp_path: Path) -> None:
@@ -278,9 +436,7 @@ def test_invalid_pass_1_output_is_retried_once(tmp_path: Path) -> None:
             pass_1_attempts += 1
             if pass_1_attempts == 1:
                 return "not JSON"
-            universe = _payload_from_prompt(
-                kwargs["prompt"], "TITLE_UNIVERSE_JSON:"
-            )
+            universe = _payload_from_prompt(kwargs["prompt"], "TITLE_UNIVERSE_JSON:")
             return json.dumps({"ids": [universe["candidates"][0]["id"]]})
         return FINAL_BRIEF
 
@@ -295,7 +451,9 @@ def test_invalid_pass_1_output_is_retried_once(tmp_path: Path) -> None:
     assert pass_1_attempts == 2
 
 
-def test_empty_shortlist_for_nonempty_universe_fails_after_retry(tmp_path: Path) -> None:
+def test_empty_shortlist_for_nonempty_universe_fails_after_retry(
+    tmp_path: Path,
+) -> None:
     db_path, prepared_path = _make_inputs(tmp_path)
     calls = 0
 
@@ -326,8 +484,7 @@ def test_empty_universe_preserves_explicit_evidence_thin_brief(tmp_path: Path) -
     prepared_path.write_text(json.dumps(prepared), encoding="utf-8")
     prompts: list[str] = []
     thin_brief = (
-        "*Worth Knowing Today*\n"
-        "• Evidence is thin; no supported material items."
+        "*Worth Knowing Today*\n• Evidence is thin; no supported material items."
     )
 
     def model_call(**kwargs) -> str:
@@ -348,6 +505,8 @@ def test_empty_universe_preserves_explicit_evidence_thin_brief(tmp_path: Path) -
     assert shortlisted == {
         "run_date": RUN_DATE.isoformat(),
         "shortlisted_count": 0,
+        "automatic_event_count": 0,
+        "evidence_count": 0,
         "evidence": [],
     }
 
@@ -458,7 +617,9 @@ def test_default_workflow_uses_two_main_agent_turns_in_one_session(
             stdout = json.dumps(
                 {"status": "ok", "result": {"payloads": [{"text": FINAL_BRIEF}]}}
             )
-        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="diagnostic")
+        return subprocess.CompletedProcess(
+            command, 0, stdout=stdout, stderr="diagnostic"
+        )
 
     monkeypatch.setattr("harness.morning_brief_synthesis.subprocess.run", fake_run)
 
@@ -495,9 +656,7 @@ def test_openclaw_subprocess_failure_surfaces_stderr(
 
     monkeypatch.setattr("harness.morning_brief_synthesis.subprocess.run", fake_run)
 
-    with pytest.raises(
-        SynthesisError, match="status 17: gateway connection failed"
-    ):
+    with pytest.raises(SynthesisError, match="status 17: gateway connection failed"):
         synthesize_morning_brief(
             db_path=db_path,
             prepared_path=prepared_path,
@@ -506,17 +665,19 @@ def test_openclaw_subprocess_failure_surfaces_stderr(
         )
 
 
-def _write_fake_wrapper_commands(tmp_path: Path, *, pipeline_status: int) -> tuple[Path, Path]:
+def _write_fake_wrapper_commands(
+    tmp_path: Path, *, pipeline_status: int
+) -> tuple[Path, Path]:
     pipeline = tmp_path / "fake-pipeline.sh"
     pipeline.write_text(
         "#!/usr/bin/env bash\n"
-        "echo pipeline >> \"$ORDER_LOG\"\n"
+        'echo pipeline >> "$ORDER_LOG"\n'
         "echo collection-log-line\n"
         + (
-            "mkdir -p \"$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/"
-            f"{RUN_DATE.isoformat()}/data/rendered\"\n"
-            "echo evidence > \"$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/"
-            f"{RUN_DATE.isoformat()}/data/rendered/test.md\"\n"
+            'mkdir -p "$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/'
+            f'{RUN_DATE.isoformat()}/data/rendered"\n'
+            'echo evidence > "$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/'
+            f'{RUN_DATE.isoformat()}/data/rendered/test.md"\n'
             if pipeline_status == 0
             else ""
         )
@@ -528,7 +689,7 @@ def _write_fake_wrapper_commands(tmp_path: Path, *, pipeline_status: int) -> tup
     synthesis = tmp_path / "fake-synthesis.sh"
     synthesis.write_text(
         "#!/usr/bin/env bash\n"
-        "echo sol >> \"$ORDER_LOG\"\n"
+        'echo sol >> "$ORDER_LOG"\n'
         "printf '%s\\n' '*Worth Knowing Today*' '• item'\n",
         encoding="utf-8",
     )
@@ -590,15 +751,15 @@ def test_wrapper_retries_pipeline_once_before_invoking_sol(tmp_path: Path) -> No
     pipeline = tmp_path / "flaky-pipeline.sh"
     pipeline.write_text(
         "#!/usr/bin/env bash\n"
-        "echo pipeline >> \"$ORDER_LOG\"\n"
+        'echo pipeline >> "$ORDER_LOG"\n'
         "attempt=1\n"
-        "[[ -f \"$ATTEMPT_FILE\" ]] && attempt=2\n"
-        "touch \"$ATTEMPT_FILE\"\n"
-        "if [[ \"$attempt\" -eq 1 ]]; then exit 17; fi\n"
-        "mkdir -p \"$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/"
-        f"{RUN_DATE.isoformat()}/data/rendered\"\n"
-        "echo evidence > \"$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/"
-        f"{RUN_DATE.isoformat()}/data/rendered/test.md\"\n",
+        '[[ -f "$ATTEMPT_FILE" ]] && attempt=2\n'
+        'touch "$ATTEMPT_FILE"\n'
+        'if [[ "$attempt" -eq 1 ]]; then exit 17; fi\n'
+        'mkdir -p "$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/'
+        f'{RUN_DATE.isoformat()}/data/rendered"\n'
+        'echo evidence > "$MINERVA_WORKSPACE_ROOT/reports/03-daily-news/'
+        f'{RUN_DATE.isoformat()}/data/rendered/test.md"\n',
         encoding="utf-8",
     )
     pipeline.chmod(0o755)
