@@ -448,11 +448,9 @@ class MorningBriefTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        # V2 prints output paths relative to ROOT_DIR/hard-disk, not MINERVA_WORKSPACE_ROOT.
         self.assertIn("prepared_evidence:", result.stdout)
         self.assertIn("manifest:", result.stdout)
-        # V2 creates dirs under ROOT_DIR/hard-disk.
-        report_dir = REPO_ROOT / "hard-disk" / "reports" / "03-daily-news" / RUN_DATE.isoformat()
+        report_dir = self.workspace / "workspace" / "reports" / "03-daily-news" / RUN_DATE.isoformat()
         self.assertTrue(report_dir.is_dir())
         self.assertEqual(
             call_log.read_text(encoding="utf-8").splitlines(),

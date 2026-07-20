@@ -1,0 +1,699 @@
+"""Post-ingest, two-pass model synthesis for the daily morning brief.
+
+The collection pipeline owns all network/tool work and SQLite ingestion.  This
+module starts at the resulting SQLite database and prepared evidence file.  It
+makes two plain model calls: a title-only broad shortlist, followed by final
+synthesis from evidence fetched only for validated shortlist IDs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import sys
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Sequence
+
+from harness.commands.extract import _generate_answer
+from harness.config import get_settings
+
+DEFAULT_MODEL = "gpt-5.6-sol"
+DEFAULT_REASONING = "high"
+DEFAULT_PASS_1_TOKENS = 16_384
+DEFAULT_PASS_2_TOKENS = 12_000
+MAX_ARTICLE_CONTENT_CHARS = 4_000
+MAX_EVENT_DETAIL_CHARS = 2_000
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+ModelCall = Callable[..., str]
+
+
+class SynthesisError(RuntimeError):
+    """Raised when deterministic synthesis prerequisites or outputs are invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateTitle:
+    """One stable title/headline candidate shown to the first model pass."""
+
+    id: str
+    kind: str
+    title: str
+    source: str
+    published: str
+    article_key: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
+
+    def title_record(self) -> dict[str, Any]:
+        """Return the compact, summary-free representation for pass 1."""
+        record: dict[str, Any] = {
+            "id": self.id,
+            "kind": self.kind,
+            "source": self.source,
+            "published": self.published,
+            "title": self.title,
+        }
+        if self.article_key is not None:
+            record["article_key"] = self.article_key
+        for key in (
+            "event_type",
+            "security_id",
+            "relationship",
+            "portfolio_role",
+            "group",
+            "release_time",
+        ):
+            value = self.metadata.get(key)
+            if value not in (None, ""):
+                record[key] = value
+        return record
+
+
+def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateTitle]:
+    """Read every article first collected on ``run_date`` without reading its body.
+
+    ``collected_at`` is canonical ISO text written by ``ingest_news.py``.  Its
+    leading calendar date is the collection run's date even when the timestamp
+    includes an offset, so a prefix comparison avoids silently shifting a local
+    collection into another UTC date.
+    """
+    if not db_path.is_file():
+        raise SynthesisError(f"news database does not exist: {db_path}")
+
+    uri = f"file:{db_path.resolve()}?mode=ro"
+    try:
+        connection = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error as exc:
+        raise SynthesisError(f"could not open news database read-only: {exc}") from exc
+
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute(
+            """
+            SELECT article_key, source, published_at, published_at_raw, title
+            FROM news
+            WHERE substr(collected_at, 1, 10) = ?
+            ORDER BY source COLLATE NOCASE,
+                     published_at,
+                     title COLLATE NOCASE,
+                     article_key
+            """,
+            (run_date.isoformat(),),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise SynthesisError(f"could not query fresh news titles: {exc}") from exc
+    finally:
+        connection.close()
+
+    candidates: list[CandidateTitle] = []
+    for row in rows:
+        article_key = str(row["article_key"])
+        published_iso = _epoch_as_iso(row["published_at"])
+        published_raw = str(row["published_at_raw"] or "").strip()
+        candidates.append(
+            CandidateTitle(
+                id=f"article:{article_key}",
+                kind="article",
+                article_key=article_key,
+                source=str(row["source"]),
+                published=published_raw or published_iso,
+                title=str(row["title"]),
+                metadata={"published_at": published_iso},
+            )
+        )
+    return candidates
+
+
+def load_prepared_event_titles(prepared_path: Path, run_date: date) -> list[CandidateTitle]:
+    """Load compact prepared-evidence headlines and assign deterministic IDs."""
+    if not prepared_path.is_file():
+        raise SynthesisError(f"prepared evidence does not exist: {prepared_path}")
+    try:
+        payload = json.loads(prepared_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SynthesisError(f"could not read prepared evidence: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SynthesisError("prepared evidence must be a JSON object")
+
+    universe_roles = _universe_role_map(payload.get("universe"))
+    events = payload.get("events", [])
+    if not isinstance(events, list):
+        raise SynthesisError("prepared evidence `events` must be a list")
+
+    candidates: list[CandidateTitle] = []
+    seen_ids: set[str] = set()
+    for raw_event in events:
+        if not isinstance(raw_event, dict):
+            continue
+        title = str(raw_event.get("headline") or raw_event.get("title") or "").strip()
+        event_date = str(raw_event.get("event_date") or run_date.isoformat()).strip()
+        if not title or event_date not in {"", run_date.isoformat()}:
+            continue
+        source = str(raw_event.get("source_name") or raw_event.get("source") or "prepared-evidence").strip()
+        security_id = str(raw_event.get("security_id") or raw_event.get("ticker") or "").strip()
+        stable_key = "|".join((source, security_id, title, event_date))
+        candidate_id = f"event:{hashlib.sha256(stable_key.encode('utf-8')).hexdigest()}"
+        if candidate_id in seen_ids:
+            continue
+        seen_ids.add(candidate_id)
+        metadata = dict(raw_event)
+        role = universe_roles.get(security_id.upper())
+        if role:
+            metadata["portfolio_role"] = role
+        candidates.append(
+            CandidateTitle(
+                id=candidate_id,
+                kind="event",
+                source=source,
+                published=event_date or run_date.isoformat(),
+                title=title,
+                metadata=metadata,
+            )
+        )
+
+    return sorted(
+        candidates,
+        key=lambda item: (
+            item.source.casefold(),
+            item.published,
+            item.title.casefold(),
+            item.id,
+        ),
+    )
+
+
+def build_title_universe(
+    db_path: Path, prepared_path: Path, run_date: date
+) -> list[CandidateTitle]:
+    """Build the complete, stable pass-1 universe (articles first, then events)."""
+    return query_fresh_article_titles(db_path, run_date) + load_prepared_event_titles(
+        prepared_path, run_date
+    )
+
+
+def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date) -> str:
+    """Render the first-pass prompt containing every title and no article body."""
+    payload = {
+        "run_date": run_date.isoformat(),
+        "candidate_count": len(candidates),
+        "candidates": [candidate.title_record() for candidate in candidates],
+    }
+    return (
+        "You are Sol performing PASS 1 of a deterministic morning-brief workflow.\n"
+        "You have no tools and must not request tools, browse, or write files. The JSON below is the "
+        "complete title/headline universe for this run.\n\n"
+        "Select a BROAD shortlist for a long-only investor. Cast a wide net: retain anything plausibly "
+        "market-moving, company-specific, portfolio-relevant, useful as a read-through, materially "
+        "economic/political/geopolitical, or a significant scheduled event. Include relevant IR and "
+        "prepared-evidence events. Prefer false positives over false negatives at this stage. Source "
+        "balance must follow merit, not quotas. Do not draft, summarize, filter to a tiny final list, "
+        "or invent IDs.\n\n"
+        "Return exactly one strict JSON object and no markdown or commentary:\n"
+        '{"ids":["exact-stable-id", "..."]}\n\n'
+        "TITLE_UNIVERSE_JSON:\n"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
+def parse_shortlist_output(raw: str) -> list[str]:
+    """Parse common harmless wrappers around the required strict shortlist JSON."""
+    text = raw.strip()
+    if not text:
+        raise SynthesisError("pass 1 returned an empty response")
+
+    decoded_values: list[Any] = []
+    unwrapped = _strip_outer_code_fence(text)
+    for candidate_text in (unwrapped, text):
+        try:
+            decoded_values.append(json.loads(candidate_text))
+        except json.JSONDecodeError:
+            pass
+
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(text):
+        if character not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        decoded_values.append(value)
+
+    for value in decoded_values:
+        extracted = _extract_id_list(value)
+        if extracted is None:
+            continue
+        unique: list[str] = []
+        seen: set[str] = set()
+        for item in extracted:
+            identifier = ""
+            if isinstance(item, str):
+                identifier = item.strip()
+            elif isinstance(item, dict) and isinstance(item.get("id"), str):
+                identifier = item["id"].strip()
+            if identifier and identifier not in seen:
+                seen.add(identifier)
+                unique.append(identifier)
+        return unique
+
+    raise SynthesisError("pass 1 did not return a JSON shortlist with an `ids` array")
+
+
+def validate_shortlist_ids(
+    requested_ids: Sequence[str], candidates: Sequence[CandidateTitle]
+) -> list[str]:
+    """Drop unknown/duplicate IDs and return valid IDs in stable universe order."""
+    requested = set(requested_ids)
+    valid = [candidate.id for candidate in candidates if candidate.id in requested]
+    if candidates and not valid:
+        raise SynthesisError(
+            "pass 1 returned no valid IDs from the non-empty title universe"
+        )
+    return valid
+
+
+def query_shortlisted_evidence(
+    db_path: Path,
+    candidates: Sequence[CandidateTitle],
+    shortlist_ids: Sequence[str],
+    *,
+    max_content_chars: int = MAX_ARTICLE_CONTENT_CHARS,
+) -> list[dict[str, Any]]:
+    """Fetch summaries/bounded content only for validated shortlist candidates."""
+    candidate_by_id = {candidate.id: candidate for candidate in candidates}
+    selected = [candidate_by_id[item_id] for item_id in shortlist_ids]
+    selected_article_keys = [
+        candidate.article_key
+        for candidate in selected
+        if candidate.kind == "article" and candidate.article_key is not None
+    ]
+    article_rows = _query_article_evidence(db_path, selected_article_keys)
+
+    evidence: list[dict[str, Any]] = []
+    for candidate in selected:
+        if candidate.kind == "article":
+            row = article_rows.get(candidate.article_key or "")
+            if row is None:
+                raise SynthesisError(f"shortlisted article disappeared from SQLite: {candidate.id}")
+            summary = str(row["summary"] or "").strip()
+            content = str(row["content"] or "").strip()
+            if summary:
+                evidence_text = summary
+                evidence_kind = "summary"
+            else:
+                evidence_text = _bounded_text(content, max_content_chars)
+                evidence_kind = "bounded_content_fallback"
+            evidence.append(
+                {
+                    "id": candidate.id,
+                    "kind": "article",
+                    "article_key": candidate.article_key,
+                    "source": str(row["source"]),
+                    "published": str(row["published_at_raw"] or "").strip()
+                    or _epoch_as_iso(row["published_at"]),
+                    "title": str(row["title"]),
+                    "url": str(row["url"] or "").strip(),
+                    "section": str(row["section"] or "").strip(),
+                    "evidence_kind": evidence_kind,
+                    "evidence": evidence_text,
+                }
+            )
+        else:
+            evidence.append(_event_evidence(candidate))
+    return evidence
+
+
+def build_final_prompt(evidence: Sequence[dict[str, Any]], run_date: date) -> str:
+    """Render the second-pass prompt with all and only shortlisted evidence."""
+    payload = {
+        "run_date": run_date.isoformat(),
+        "shortlisted_count": len(evidence),
+        "evidence": list(evidence),
+    }
+    return (
+        "You are Sol performing PASS 2 of a deterministic morning-brief workflow.\n"
+        "You have no tools and must not request tools, browse, or write files. All available shortlisted "
+        "evidence is included below. Filter and rank it now; do not rely on outside facts.\n\n"
+        "Return ONLY the final Slack-formatted daily-news brief as plain text (Slack mrkdwn), with no "
+        "JSON, code fence, preamble, postscript, or file instructions. Use this section order:\n"
+        "1. *Worth Knowing Today* — required; ranked, concise news bullets.\n"
+        "2. *Portfolio / Watchlist Events* — optional; include only direct, material portfolio or "
+        "watchlist developments. Omit it entirely when none are supported.\n\n"
+        "Preserve source links using Slack links such as <https://example.com|Source> wherever a supplied "
+        "URL supports a claim. Use concise labels such as Reuters, WSJ, Economist, or TICKER IR rather "
+        "than internal source IDs. Rank and balance sources on merit; do not enforce quotas and do not repeat "
+        "the same development from multiple outlets. Never fabricate a fact, link, date, portfolio "
+        "relationship, or event. If evidence is thin, say so briefly rather than padding the brief.\n\n"
+        "SHORTLISTED_EVIDENCE_JSON:\n"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
+def normalize_final_brief(raw: str) -> str:
+    """Normalize harmless outer fencing and validate required plain-text sections."""
+    brief = _strip_outer_code_fence(raw.strip()).strip()
+    if not brief:
+        raise SynthesisError("pass 2 returned an empty brief")
+    if "```" in brief:
+        raise SynthesisError("pass 2 returned a code fence instead of plain Slack text")
+    try:
+        decoded = json.loads(brief)
+    except json.JSONDecodeError:
+        decoded = None
+    if isinstance(decoded, (dict, list)):
+        raise SynthesisError("pass 2 returned JSON instead of a text-only Slack brief")
+
+    worth_position = _section_heading_position(brief, "Worth Knowing Today")
+    portfolio_position = _section_heading_position(brief, "Portfolio / Watchlist Events")
+    if worth_position is None:
+        raise SynthesisError("pass 2 omitted required Worth Knowing Today section")
+    if portfolio_position is not None and worth_position >= portfolio_position:
+        raise SynthesisError("pass 2 returned the optional portfolio/watchlist section out of order")
+    return brief
+
+
+def synthesize_morning_brief(
+    *,
+    db_path: Path,
+    prepared_path: Path,
+    run_date: date,
+    model_call: ModelCall | None = None,
+    model: str = DEFAULT_MODEL,
+    reasoning: str = DEFAULT_REASONING,
+    output_path: Path | None = None,
+    retry_count: int = 1,
+) -> str:
+    """Run both in-memory model passes and optionally persist the final text artifact."""
+    candidates = build_title_universe(db_path, prepared_path, run_date)
+    call_model = model_call or _default_model_call
+    pass_1_prompt = build_shortlist_prompt(candidates, run_date)
+
+    shortlist_ids = _with_retries(
+        lambda: validate_shortlist_ids(
+            parse_shortlist_output(
+                call_model(
+                    prompt=pass_1_prompt,
+                    model=model,
+                    reasoning=reasoning,
+                    max_tokens=DEFAULT_PASS_1_TOKENS,
+                )
+            ),
+            candidates,
+        ),
+        attempts=retry_count + 1,
+        stage="pass 1 shortlist",
+    )
+    evidence = query_shortlisted_evidence(db_path, candidates, shortlist_ids)
+    pass_2_prompt = build_final_prompt(evidence, run_date)
+    brief = _with_retries(
+        lambda: normalize_final_brief(
+            call_model(
+                prompt=pass_2_prompt,
+                model=model,
+                reasoning=reasoning,
+                max_tokens=DEFAULT_PASS_2_TOKENS,
+            )
+        ),
+        attempts=retry_count + 1,
+        stage="pass 2 synthesis",
+    )
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(f"{brief}\n", encoding="utf-8")
+    return brief
+
+
+def _default_model_call(
+    *, prompt: str, model: str, reasoning: str, max_tokens: int
+) -> str:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        raise SynthesisError("OPENAI_API_KEY is not set for morning-brief synthesis")
+    return _generate_answer(
+        prompt=prompt,
+        document_text="",
+        model=model,
+        max_tokens=max_tokens,
+        thinking=reasoning,
+        api_key=settings.openai_api_key,
+    )
+
+
+def _query_article_evidence(
+    db_path: Path, article_keys: Sequence[str]
+) -> dict[str, sqlite3.Row]:
+    if not article_keys:
+        return {}
+    uri = f"file:{db_path.resolve()}?mode=ro"
+    try:
+        connection = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error as exc:
+        raise SynthesisError(f"could not open news database read-only: {exc}") from exc
+    connection.row_factory = sqlite3.Row
+    rows: dict[str, sqlite3.Row] = {}
+    try:
+        for start in range(0, len(article_keys), 500):
+            chunk = article_keys[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            query = (
+                "SELECT article_key, published_at, published_at_raw, title, content, summary, "
+                f"source, url, section FROM news WHERE article_key IN ({placeholders})"
+            )
+            for row in connection.execute(query, tuple(chunk)):
+                rows[str(row["article_key"])] = row
+    except sqlite3.Error as exc:
+        raise SynthesisError(f"could not query shortlisted news evidence: {exc}") from exc
+    finally:
+        connection.close()
+    return rows
+
+
+def _event_evidence(candidate: CandidateTitle) -> dict[str, Any]:
+    event = candidate.metadata
+    url = str(event.get("reference_url") or event.get("source_url") or "").strip()
+    summary = _first_nonempty_text(
+        event.get("summary"),
+        event.get("description"),
+        _nested_value(event, "metadata", "summary"),
+        _nested_value(event, "metadata", "description"),
+    )
+    compact_details: dict[str, Any] = {}
+    for key in (
+        "event_type",
+        "security_id",
+        "ticker",
+        "relationship",
+        "portfolio_role",
+        "group",
+        "status",
+        "timing",
+        "release_time",
+        "category",
+        "importance",
+        "form",
+        "change_pct",
+        "material",
+    ):
+        value = event.get(key)
+        if value not in (None, "", [], {}):
+            compact_details[key] = value
+    metadata = event.get("metadata")
+    if isinstance(metadata, dict):
+        for key in (
+            "actual",
+            "estimate",
+            "previous",
+            "period",
+            "fiscal_period",
+            "fiscal_year",
+        ):
+            value = metadata.get(key)
+            if value not in (None, "", [], {}) and key not in compact_details:
+                compact_details[key] = value
+
+    return {
+        "id": candidate.id,
+        "kind": "event",
+        "source": candidate.source,
+        "published": candidate.published,
+        "title": candidate.title,
+        "url": url,
+        "details": compact_details,
+        "evidence_kind": "prepared_event",
+        "evidence": _bounded_text(summary, MAX_EVENT_DETAIL_CHARS),
+    }
+
+
+def _universe_role_map(raw_universe: Any) -> dict[str, str]:
+    if not isinstance(raw_universe, list):
+        return {}
+    roles: dict[str, str] = {}
+    for item in raw_universe:
+        if not isinstance(item, dict):
+            continue
+        security_id = str(item.get("security_id") or item.get("ticker") or "").strip().upper()
+        role = str(item.get("source_kind") or item.get("relationship") or "").strip()
+        if security_id and role:
+            roles[security_id] = role
+    return roles
+
+
+def _epoch_as_iso(raw_epoch: Any) -> str:
+    try:
+        epoch = int(raw_epoch)
+        return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def _bounded_text(text: str, limit: int) -> str:
+    normalized = text.strip()
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}\n[content truncated deterministically]"
+
+
+def _first_nonempty_text(*values: Any) -> str:
+    for value in values:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _nested_value(payload: dict[str, Any], parent: str, child: str) -> Any:
+    nested = payload.get(parent)
+    return nested.get(child) if isinstance(nested, dict) else None
+
+
+def _extract_id_list(value: Any) -> list[Any] | None:
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return None
+    normalized = {
+        str(key).casefold().replace("-", "_"): item for key, item in value.items()
+    }
+    for key in ("ids", "shortlist_ids", "selected_ids"):
+        selected = normalized.get(key)
+        if isinstance(selected, list):
+            return selected
+
+    split_ids: list[Any] = []
+    found_split_list = False
+    for key in ("article_ids", "event_ids"):
+        selected = normalized.get(key)
+        if isinstance(selected, list):
+            found_split_list = True
+            split_ids.extend(selected)
+    return split_ids if found_split_list else None
+
+
+def _strip_outer_code_fence(text: str) -> str:
+    match = re.fullmatch(
+        r"\s*```[^\n`]*\n(.*?)\n?```\s*",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return match.group(1).strip() if match else text
+
+
+def _section_heading_position(text: str, heading: str) -> int | None:
+    pattern = re.compile(
+        rf"(?im)^\s*(?:#{{1,3}}\s*)?(?:\*{{1,2}})?{re.escape(heading)}"
+        rf"(?:\*{{1,2}})?\s*:?\s*$"
+    )
+    match = pattern.search(text)
+    return match.start() if match else None
+
+
+def _with_retries(
+    operation: Callable[[], Any], *, attempts: int, stage: str
+) -> Any:
+    if attempts < 1:
+        raise ValueError("attempts must be at least one")
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as exc:  # model/API and output-validation errors retry once
+            last_error = exc
+            if attempt < attempts:
+                print(
+                    f"morning-brief synthesis: {stage} attempt {attempt} failed; retrying once: {exc}",
+                    file=sys.stderr,
+                )
+    assert last_error is not None
+    raise SynthesisError(
+        f"{stage} failed after {attempts} attempt{'s' if attempts != 1 else ''}: {last_error}"
+    ) from last_error
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--date", required=True, help="Morning-brief run date (YYYY-MM-DD).")
+    parser.add_argument("--db", type=Path, help="Path to invest.db.")
+    parser.add_argument(
+        "--prepared-evidence", type=Path, help="Path to prepared-evidence.json."
+    )
+    parser.add_argument("--output", type=Path, help="Final Slack brief output path.")
+    parser.add_argument("--workspace-root", type=Path, help="Minerva hard-disk workspace root.")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Pure model-call model name.")
+    return parser
+
+
+def main(argv: list[str] | None = None, *, model_call: ModelCall | None = None) -> int:
+    """CLI entry point; stdout is reserved exclusively for the final Slack brief."""
+    args = _build_parser().parse_args(argv)
+    try:
+        run_date = date.fromisoformat(args.date)
+    except ValueError:
+        print(f"invalid --date value: {args.date!r}", file=sys.stderr)
+        return 2
+
+    workspace_root = (
+        args.workspace_root
+        or Path(os.getenv("MINERVA_WORKSPACE_ROOT", REPO_ROOT / "hard-disk"))
+    ).resolve()
+    db_path = (
+        args.db
+        or Path(
+            os.getenv(
+                "INVEST_DB", workspace_root / "data" / "04-database" / "invest.db"
+            )
+        )
+    ).resolve()
+    report_root = workspace_root / "reports" / "03-daily-news" / run_date.isoformat()
+    prepared_path = (
+        args.prepared_evidence
+        or report_root / "data" / "structured" / "prepared-evidence.json"
+    ).resolve()
+    output_path = (args.output or report_root / "notes" / "slack-brief.md").resolve()
+
+    try:
+        brief = synthesize_morning_brief(
+            db_path=db_path,
+            prepared_path=prepared_path,
+            run_date=run_date,
+            model_call=model_call,
+            model=args.model,
+            output_path=output_path,
+        )
+    except Exception as exc:
+        print(f"morning-brief synthesis failed: {exc}", file=sys.stderr)
+        return 1
+
+    sys.stdout.write(f"{brief}\n")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

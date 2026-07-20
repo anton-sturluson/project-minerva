@@ -8,6 +8,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 RUN_DATE="${1:-$(date +%F)}"
+WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
 # Ephemeral run directory: raw articles + per-article summaries live here for
 # the duration of one run, get ingested into invest.db, then are removed.
 # Parallel collector agents write markdown here; only the final ingest process
@@ -16,8 +17,8 @@ NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 # NEWS_DIR is what collector prompts and extract-files see. Point it at the
 # temp run dir so their outputs are ephemeral.
 NEWS_DIR="${NEWS_RUN_DIR}"
-REPORT_DIR="${ROOT_DIR}/hard-disk/reports/03-daily-news/${RUN_DATE}"
-INVEST_DB="${INVEST_DB:-${ROOT_DIR}/hard-disk/data/04-database/invest.db}"
+REPORT_DIR="${WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}"
+INVEST_DB="${INVEST_DB:-${WORKSPACE_ROOT}/data/04-database/invest.db}"
 INGEST_OK=0
 DEDUP_FILE=""
 cleanup_run_dir() {
@@ -33,7 +34,7 @@ cleanup_run_dir() {
 trap cleanup_run_dir EXIT
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
-export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
+export MINERVA_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
 
 MINERVA_RUNNER="${MINERVA_RUNNER:-uv run minerva}"
 MINERVA_BRIEF_EARNINGS_PROVIDER="${MINERVA_BRIEF_EARNINGS_PROVIDER:-finnhub}"
