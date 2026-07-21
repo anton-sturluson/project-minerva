@@ -462,16 +462,18 @@ def build_final_prompt(
         "summary and URL and must not be treated as equally complete reporting.\n"
         "- auto_portfolio_watchlist: represent EVERY record in *Portfolio / Watchlist Events*. "
         "Consolidate overlapping records by ticker into one coherent bullet rather than producing "
-        "one bullet per record. Do not drop a record merely because it seems less newsworthy.\n"
+        "one bullet per record. Do not drop a record merely because it seems less newsworthy. Emit "
+        "this section if and only if auto_portfolio_watchlist evidence exists.\n"
         "- auto_market_move: represent ALL such records in exactly ONE compact bullet/line under "
-        "*Market Snapshot*. Never emit multiple market-move bullets. Omit the section only when no "
-        "auto_market_move evidence exists.\n"
+        "*Market Snapshot*. Never emit multiple market-move bullets. Emit this section if and only "
+        "if auto_market_move evidence exists.\n"
         "- other_auto_event: include EVERY record appropriately and concisely, consolidating true "
-        "duplicates; use *Other Events* after Market Snapshot when a separate section is clearest.\n\n"
+        "duplicates; use *Other Events* when a separate section is clearest.\n\n"
         "Return ONLY the final Slack-formatted daily-news brief as plain text (Slack mrkdwn), with no "
-        "JSON, code fence, preamble, postscript, or file instructions. Use section order: *Worth "
-        "Knowing Today* (required), then *Portfolio / Watchlist Events*, *Market Snapshot*, and "
-        "*Other Events* when their routed evidence exists. Preserve supplied URLs when representing "
+        "JSON, code fence, preamble, postscript, or file instructions. Use section order: *Market "
+        "Snapshot* first when its routed evidence exists, then *Portfolio / Watchlist Events* when "
+        "its routed evidence exists, then *Worth Knowing Today* (required), and finally *Other "
+        "Events* when its routed evidence exists. Preserve supplied URLs when representing "
         "their evidence, using Slack links such as <https://example.com|Source>; never replace or "
         "invent a link. Use concise source labels such as Reuters, WSJ, Economist, or TICKER IR rather "
         "than internal IDs. Rank and balance selected articles on merit, not quotas. If selected-article "
@@ -482,8 +484,17 @@ def build_final_prompt(
     )
 
 
-def normalize_final_brief(raw: str) -> str:
-    """Normalize harmless outer fencing and validate required plain-text sections."""
+def normalize_final_brief(
+    raw: str,
+    *,
+    has_market_move_evidence: bool | None = None,
+    has_portfolio_watchlist_evidence: bool | None = None,
+) -> str:
+    """Normalize pass 2 and validate its evidence-aware Slack section order.
+
+    Evidence-presence checks are optional for standalone callers; the synthesis
+    workflow always supplies them from the deterministic automatic routes.
+    """
     brief = _strip_outer_code_fence(raw.strip()).strip()
     if not brief:
         raise SynthesisError("pass 2 returned an empty brief")
@@ -496,15 +507,36 @@ def normalize_final_brief(raw: str) -> str:
     if isinstance(decoded, (dict, list)):
         raise SynthesisError("pass 2 returned JSON instead of a text-only Slack brief")
 
-    worth_position = _section_heading_position(brief, "Worth Knowing Today")
-    portfolio_position = _section_heading_position(
-        brief, "Portfolio / Watchlist Events"
-    )
-    if worth_position is None:
+    section_positions = {
+        "Market Snapshot": _section_heading_position(brief, "Market Snapshot"),
+        "Portfolio / Watchlist Events": _section_heading_position(
+            brief, "Portfolio / Watchlist Events"
+        ),
+        "Worth Knowing Today": _section_heading_position(brief, "Worth Knowing Today"),
+    }
+    if section_positions["Worth Knowing Today"] is None:
         raise SynthesisError("pass 2 omitted required Worth Knowing Today section")
-    if portfolio_position is not None and worth_position >= portfolio_position:
+
+    _validate_evidence_section_presence(
+        section_positions,
+        "Market Snapshot",
+        has_evidence=has_market_move_evidence,
+        routing_class=ROUTING_AUTO_MARKET,
+    )
+    _validate_evidence_section_presence(
+        section_positions,
+        "Portfolio / Watchlist Events",
+        has_evidence=has_portfolio_watchlist_evidence,
+        routing_class=ROUTING_AUTO_PORTFOLIO,
+    )
+
+    present_positions = [
+        position for position in section_positions.values() if position is not None
+    ]
+    if present_positions != sorted(present_positions):
         raise SynthesisError(
-            "pass 2 returned the optional portfolio/watchlist section out of order"
+            "pass 2 returned sections out of order; expected Market Snapshot, "
+            "Portfolio / Watchlist Events, then Worth Knowing Today"
         )
     return brief
 
@@ -556,6 +588,14 @@ def synthesize_morning_brief(
         shortlisted_count=len(selected_evidence),
         automatic_event_count=len(automatic_evidence),
     )
+    has_market_move_evidence = any(
+        item.get("routing_class") == ROUTING_AUTO_MARKET
+        for item in automatic_evidence
+    )
+    has_portfolio_watchlist_evidence = any(
+        item.get("routing_class") == ROUTING_AUTO_PORTFOLIO
+        for item in automatic_evidence
+    )
     brief = _with_retries(
         lambda: normalize_final_brief(
             call_model(
@@ -563,7 +603,9 @@ def synthesize_morning_brief(
                 model=model,
                 reasoning=reasoning,
                 session_key=active_session_key,
-            )
+            ),
+            has_market_move_evidence=has_market_move_evidence,
+            has_portfolio_watchlist_evidence=has_portfolio_watchlist_evidence,
         ),
         attempts=retry_count + 1,
         stage="pass 2 synthesis",
@@ -879,6 +921,26 @@ def _section_heading_position(text: str, heading: str) -> int | None:
     )
     match = pattern.search(text)
     return match.start() if match else None
+
+
+def _validate_evidence_section_presence(
+    section_positions: dict[str, int | None],
+    heading: str,
+    *,
+    has_evidence: bool | None,
+    routing_class: str,
+) -> None:
+    if has_evidence is None:
+        return
+    section_is_present = section_positions[heading] is not None
+    if has_evidence and not section_is_present:
+        raise SynthesisError(
+            f"pass 2 omitted required {heading} section for {routing_class} evidence"
+        )
+    if not has_evidence and section_is_present:
+        raise SynthesisError(
+            f"pass 2 included {heading} section without {routing_class} evidence"
+        )
 
 
 def _with_retries(operation: Callable[[], Any], *, attempts: int, stage: str) -> Any:

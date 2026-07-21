@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 from datetime import date, datetime
@@ -17,6 +18,7 @@ from harness.morning_brief_synthesis import (
     CandidateTitle,
     SynthesisError,
     main,
+    normalize_final_brief,
     parse_openclaw_json_output,
     parse_shortlist_output,
     synthesize_morning_brief,
@@ -26,10 +28,12 @@ from harness.morning_brief_synthesis import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_DATE = date(2026, 7, 19)
 FINAL_BRIEF = (
-    "*Worth Knowing Today*\n"
-    "• Material development <https://example.com/story|Reuters>\n\n"
+    "*Market Snapshot*\n"
+    "• SPY moved 1.25% <https://example.com/spy|Market>\n\n"
     "*Portfolio / Watchlist Events*\n"
-    "• Portfolio item <https://example.com/ir|PORT IR>"
+    "• Portfolio item <https://example.com/ir|PORT IR>\n\n"
+    "*Worth Knowing Today*\n"
+    "• Material development <https://example.com/story|Reuters>"
 )
 
 
@@ -365,6 +369,98 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     assert len(fallback["evidence"]) <= MAX_ARTICLE_CONTENT_CHARS + 50
     assert "represent EVERY record" in prompts[1]
     assert "exactly ONE compact bullet/line" in prompts[1]
+    assert (
+        "Use section order: *Market Snapshot* first when its routed evidence exists, "
+        "then *Portfolio / Watchlist Events* when its routed evidence exists, then "
+        "*Worth Knowing Today* (required)"
+    ) in prompts[1]
+    assert (
+        "Emit this section if and only if auto_portfolio_watchlist evidence exists."
+        in prompts[1]
+    )
+    assert (
+        "Emit this section if and only if auto_market_move evidence exists."
+        in prompts[1]
+    )
+
+
+def test_final_brief_validation_enforces_market_portfolio_worth_order() -> None:
+    assert (
+        normalize_final_brief(
+            FINAL_BRIEF,
+            has_market_move_evidence=True,
+            has_portfolio_watchlist_evidence=True,
+        )
+        == FINAL_BRIEF
+    )
+    prior_order = (
+        "*Worth Knowing Today*\n• Article\n\n"
+        "*Portfolio / Watchlist Events*\n• Portfolio event\n\n"
+        "*Market Snapshot*\n• Market move"
+    )
+
+    with pytest.raises(
+        SynthesisError,
+        match=(
+            "expected Market Snapshot, Portfolio / Watchlist Events, then Worth "
+            "Knowing Today"
+        ),
+    ):
+        normalize_final_brief(
+            prior_order,
+            has_market_move_evidence=True,
+            has_portfolio_watchlist_evidence=True,
+        )
+
+
+@pytest.mark.parametrize(
+    (
+        "brief",
+        "has_market_move_evidence",
+        "has_portfolio_watchlist_evidence",
+        "message",
+    ),
+    [
+        (
+            "*Worth Knowing Today*\n• Article",
+            True,
+            False,
+            "omitted required Market Snapshot section",
+        ),
+        (
+            "*Market Snapshot*\n• Move\n\n*Worth Knowing Today*\n• Article",
+            False,
+            False,
+            "included Market Snapshot section without auto_market_move evidence",
+        ),
+        (
+            "*Worth Knowing Today*\n• Article",
+            False,
+            True,
+            "omitted required Portfolio / Watchlist Events section",
+        ),
+        (
+            "*Portfolio / Watchlist Events*\n• Event\n\n"
+            "*Worth Knowing Today*\n• Article",
+            False,
+            False,
+            "included Portfolio / Watchlist Events section without "
+            "auto_portfolio_watchlist evidence",
+        ),
+    ],
+)
+def test_final_brief_sections_follow_automatic_evidence(
+    brief: str,
+    has_market_move_evidence: bool,
+    has_portfolio_watchlist_evidence: bool,
+    message: str,
+) -> None:
+    with pytest.raises(SynthesisError, match=re.escape(message)):
+        normalize_final_brief(
+            brief,
+            has_market_move_evidence=has_market_move_evidence,
+            has_portfolio_watchlist_evidence=has_portfolio_watchlist_evidence,
+        )
 
 
 @pytest.mark.parametrize(
