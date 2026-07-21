@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 DEFAULT_MODEL = "gpt-5.6-sol"
 DEFAULT_REASONING = "high"
@@ -35,6 +36,18 @@ ROUTING_AUTO_PORTFOLIO = "auto_portfolio_watchlist"
 ROUTING_AUTO_MARKET = "auto_market_move"
 ROUTING_OTHER_AUTO = "other_auto_event"
 PORTFOLIO_ROLES = frozenset({"holding", "watchlist"})
+ARTICLE_EVENT_TYPES = frozenset({"market-news", "company-news"})
+CORE_SOURCE_LABELS = (
+    "Reuters",
+    "Economist",
+    "WSJ",
+    "Company IR",
+    "BLS/BEA/Fed",
+)
+PREFERRED_NEWS_SOURCE_LABELS = ("Reuters", "Yahoo", "CNBC", "Bloomberg")
+SOURCE_COLLECTION_LINE_RE = re.compile(
+    r"(?im)^\s*(?:(?:[•●▪◦-]|\*)\s+)?\*{0,2}Source\s+Collection\s*:\*{0,2}"
+)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 ModelCall = Callable[..., str]
@@ -123,7 +136,7 @@ def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateT
     try:
         rows = connection.execute(
             """
-            SELECT article_key, source, published_at, published_at_raw, title
+            SELECT article_key, source, published_at, published_at_raw, title, url
             FROM news
             WHERE substr(collected_at, 1, 10) = ?
             ORDER BY source COLLATE NOCASE,
@@ -151,7 +164,10 @@ def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateT
                 source=str(row["source"]),
                 published=published_raw or published_iso,
                 title=str(row["title"]),
-                metadata={"published_at": published_iso},
+                metadata={
+                    "published_at": published_iso,
+                    "url": str(row["url"] or "").strip(),
+                },
             )
         )
     return candidates
@@ -264,6 +280,92 @@ def partition_candidates(candidates: Sequence[CandidateTitle]) -> RoutingPlan:
         automatic_events.append(RoutedEvent(candidate, routing_class))
 
     return RoutingPlan(tuple(article_candidates), tuple(automatic_events))
+
+
+def build_source_collection_line(candidates: Sequence[CandidateTitle]) -> str:
+    """Count the run's article records and market observations deterministically.
+
+    Fresh SQLite rows and prepared ``market-news``/``company-news`` events are
+    article records. Prepared ``market`` events are observations instead. Exact
+    repeated records are counted once, with richer SQLite records taking
+    precedence over prepared news records.
+    """
+    counts = {label: 0 for label in CORE_SOURCE_LABELS}
+    prepared_labels: set[str] = set()
+    collected_labels: set[str] = set()
+    seen_candidate_ids: set[str] = set()
+    seen_article_records: set[tuple[str, ...]] = set()
+    seen_market_observations: set[tuple[str, str, str]] = set()
+    article_record_count = 0
+    market_price_observations = 0
+
+    # SQLite rows contain richer evidence and win when the same article also
+    # appears as a prepared Finnhub-style news event.
+    ordered_candidates = sorted(candidates, key=lambda item: item.kind != "article")
+    for candidate in ordered_candidates:
+        event_type = str(candidate.metadata.get("event_type") or "").strip().casefold()
+        if candidate.kind == "event" and event_type == "market":
+            observation_key = (
+                str(
+                    candidate.metadata.get("security_id")
+                    or candidate.metadata.get("ticker")
+                    or ""
+                )
+                .strip()
+                .casefold(),
+                candidate.published,
+                _normalized_title(candidate.title),
+            )
+            if observation_key not in seen_market_observations:
+                seen_market_observations.add(observation_key)
+                market_price_observations += 1
+            continue
+
+        if candidate.kind == "article":
+            source_label = _collected_source_label(candidate.source)
+            source_kind = "collected"
+        elif candidate.kind == "event" and event_type in ARTICLE_EVENT_TYPES:
+            source_label = _prepared_news_source_label(candidate.metadata)
+            source_kind = "prepared"
+        else:
+            continue
+
+        record_key = _article_record_key(candidate, source_label)
+        if candidate.id in seen_candidate_ids:
+            continue
+        # Every fresh SQLite row is an available article record. Prepared news
+        # is the secondary representation and is suppressed when that article
+        # was already counted from SQLite or an earlier prepared event.
+        if candidate.kind == "event" and record_key in seen_article_records:
+            continue
+
+        seen_candidate_ids.add(candidate.id)
+        seen_article_records.add(record_key)
+        counts[source_label] = counts.get(source_label, 0) + 1
+        article_record_count += 1
+        if source_kind == "prepared":
+            prepared_labels.add(source_label)
+        else:
+            collected_labels.add(source_label)
+
+    source_labels = _ordered_source_labels(
+        counts,
+        prepared_labels=prepared_labels,
+        collected_labels=collected_labels,
+    )
+    source_counts = " · ".join(
+        f"{label} {counts[label]}" for label in source_labels
+    )
+    article_noun = "article record" if article_record_count == 1 else "article records"
+    observation_noun = (
+        "market-price observation"
+        if market_price_observations == 1
+        else "market-price observations"
+    )
+    return (
+        f"*Source Collection:* {article_record_count} {article_noun} — {source_counts}; "
+        f"plus {market_price_observations} {observation_noun}."
+    )
 
 
 def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date) -> str:
@@ -469,8 +571,10 @@ def build_final_prompt(
         "if auto_market_move evidence exists.\n"
         "- other_auto_event: include EVERY record appropriately and concisely, consolidating true "
         "duplicates; use *Other Events* when a separate section is clearest.\n\n"
-        "Return ONLY the final Slack-formatted daily-news brief as plain text (Slack mrkdwn), with no "
-        "JSON, code fence, preamble, postscript, or file instructions. Use section order: *Market "
+        "Return ONLY the final Slack-formatted daily-news brief body as plain text (Slack mrkdwn), "
+        "with no JSON, code fence, preamble, postscript, or file instructions. Do not write a Source "
+        "Collection line or any source counts; deterministic code will prepend that line after this "
+        "turn. Use section order: *Market "
         "Snapshot* first when its routed evidence exists, then *Portfolio / Watchlist Events* when "
         "its routed evidence exists, then *Worth Knowing Today* (required), and finally *Other "
         "Events* when its routed evidence exists. Preserve supplied URLs when representing "
@@ -506,6 +610,10 @@ def normalize_final_brief(
         decoded = None
     if isinstance(decoded, (dict, list)):
         raise SynthesisError("pass 2 returned JSON instead of a text-only Slack brief")
+    if SOURCE_COLLECTION_LINE_RE.search(brief):
+        raise SynthesisError(
+            "pass 2 returned a Source Collection line that deterministic code owns"
+        )
 
     section_positions = {
         "Market Snapshot": _section_heading_position(brief, "Market Snapshot"),
@@ -538,6 +646,8 @@ def normalize_final_brief(
             "pass 2 returned sections out of order; expected Market Snapshot, "
             "Portfolio / Watchlist Events, then Worth Knowing Today"
         )
+    if not present_positions or present_positions[0] != 0:
+        raise SynthesisError("pass 2 returned text before its first Slack section")
     return brief
 
 
@@ -555,6 +665,7 @@ def synthesize_morning_brief(
 ) -> str:
     """Run both OpenClaw turns in one session and persist the final artifact."""
     all_candidates = build_title_universe(db_path, prepared_path, run_date)
+    source_collection_line = build_source_collection_line(all_candidates)
     routing_plan = partition_candidates(all_candidates)
     candidates = routing_plan.article_candidates
     call_model = model_call or _default_model_call
@@ -596,7 +707,7 @@ def synthesize_morning_brief(
         item.get("routing_class") == ROUTING_AUTO_PORTFOLIO
         for item in automatic_evidence
     )
-    brief = _with_retries(
+    synthesized_body = _with_retries(
         lambda: normalize_final_brief(
             call_model(
                 prompt=pass_2_prompt,
@@ -610,6 +721,7 @@ def synthesize_morning_brief(
         attempts=retry_count + 1,
         stage="pass 2 synthesis",
     )
+    brief = f"{source_collection_line}\n{synthesized_body}"
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -849,6 +961,179 @@ def _universe_role_map(raw_universe: Any) -> dict[str, str]:
         if security_id and role:
             roles[security_id] = role
     return roles
+
+
+def _collected_source_label(raw_source: str) -> str:
+    normalized = re.sub(r"[\s_]+", "-", raw_source.strip().casefold())
+    if normalized.startswith("ir-") or normalized == "ir":
+        return "Company IR"
+    if normalized.startswith(("bls-", "bea-", "fed-")) or normalized in {
+        "bls",
+        "bea",
+        "fed",
+        "federal-reserve",
+    }:
+        return "BLS/BEA/Fed"
+    return _canonical_news_source_label(raw_source)
+
+
+def _prepared_news_source_label(event: dict[str, Any]) -> str:
+    raw_source = _first_nonempty_text(
+        event.get("news_source"),
+        _nested_value(event, "metadata", "news_source"),
+        _nested_value(event, "metadata", "source"),
+    )
+    return _canonical_news_source_label(raw_source)
+
+
+def _canonical_news_source_label(raw_source: Any) -> str:
+    display = re.sub(r"\s+", " ", str(raw_source or "").strip())
+    if not display:
+        return "Unknown"
+    key = re.sub(r"[\s_-]+", " ", display.casefold()).strip()
+    if key.startswith("reuters"):
+        return "Reuters"
+    if key in {"wsj", "wall street journal", "the wall street journal"} or key.startswith(
+        ("wsj ", "wall street journal ", "the wall street journal ")
+    ):
+        return "WSJ"
+    if key in {"economist", "the economist"} or key.startswith(
+        ("economist ", "the economist ")
+    ):
+        return "Economist"
+    if key.startswith("yahoo"):
+        return "Yahoo"
+    if key.startswith("cnbc"):
+        return "CNBC"
+    if key.startswith("bloomberg"):
+        return "Bloomberg"
+    if key in {"bls", "bea", "fed", "federal reserve"}:
+        return "BLS/BEA/Fed"
+    aliases = {
+        "ap": "AP",
+        "associated press": "AP",
+        "ft": "FT",
+        "financial times": "FT",
+        "seekingalpha": "Seeking Alpha",
+        "seeking alpha": "Seeking Alpha",
+    }
+    if key in aliases:
+        return aliases[key]
+    return display.title() if display.islower() else display
+
+
+def _candidate_article_url(candidate: CandidateTitle) -> str:
+    if candidate.kind == "article":
+        raw_url = candidate.metadata.get("url")
+    else:
+        raw_url = _first_nonempty_text(
+            candidate.metadata.get("reference_url"),
+            candidate.metadata.get("source_url"),
+            _nested_value(candidate.metadata, "metadata", "url"),
+        )
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+        query = urlencode(
+            sorted(
+                (key, value)
+                for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                if not key.casefold().startswith("utm_")
+                and key.casefold()
+                not in {"fbclid", "gclid", "mc_cid", "mc_eid"}
+            )
+        )
+        host = parts.netloc.casefold().removeprefix("www.")
+        return urlunsplit(("", host, parts.path.rstrip("/"), query, ""))
+    except ValueError:
+        return url.partition("#")[0].rstrip("/")
+
+
+def _article_record_key(
+    candidate: CandidateTitle, source_label: str
+) -> tuple[str, ...]:
+    title = _normalized_title(candidate.title)
+    url = _candidate_article_url(candidate)
+    if url:
+        return ("url", url)
+    security_id = str(
+        candidate.metadata.get("security_id")
+        or candidate.metadata.get("ticker")
+        or ""
+    ).strip().casefold()
+    return (
+        "fallback",
+        _source_identity(candidate, source_label),
+        security_id,
+        title,
+        _candidate_publication_day(candidate),
+    )
+
+
+def _candidate_publication_day(candidate: CandidateTitle) -> str:
+    for value in (
+        candidate.metadata.get("published_at"),
+        candidate.metadata.get("event_date"),
+        candidate.published,
+    ):
+        match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", str(value or ""))
+        if match:
+            return match.group(0)
+    return candidate.published.strip().casefold()
+
+
+def _normalized_title(title: str) -> str:
+    return re.sub(r"[^\w]+", " ", title.casefold()).strip()
+
+
+def _source_identity(candidate: CandidateTitle, source_label: str) -> str:
+    if candidate.kind == "article" and source_label in {"Company IR", "BLS/BEA/Fed"}:
+        return f"{source_label}|{candidate.source}".casefold()
+    return source_label.casefold()
+
+
+def _ordered_source_labels(
+    counts: dict[str, int],
+    *,
+    prepared_labels: set[str],
+    collected_labels: set[str],
+) -> list[str]:
+    labels: list[str] = []
+
+    def append(label: str) -> None:
+        if label in counts and label not in labels:
+            labels.append(label)
+
+    # Prepared news feeds dominate volume, so show their familiar outlets
+    # first. Reuters is also a configured full-text source and remains visible
+    # at zero when neither collection path produced a record.
+    append("Reuters")
+    for label in PREFERRED_NEWS_SOURCE_LABELS[1:]:
+        if counts.get(label, 0):
+            append(label)
+    for label in sorted(
+        prepared_labels
+        - set(PREFERRED_NEWS_SOURCE_LABELS)
+        - set(CORE_SOURCE_LABELS),
+        key=str.casefold,
+    ):
+        append(label)
+
+    append("Economist")
+    append("WSJ")
+    for label in sorted(
+        collected_labels - set(CORE_SOURCE_LABELS) - set(PREFERRED_NEWS_SOURCE_LABELS),
+        key=str.casefold,
+    ):
+        append(label)
+    append("Company IR")
+    append("BLS/BEA/Fed")
+
+    for label in sorted(set(counts) - set(labels), key=str.casefold):
+        append(label)
+    return labels
 
 
 def _epoch_as_iso(raw_epoch: Any) -> str:

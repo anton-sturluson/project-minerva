@@ -17,6 +17,7 @@ from harness.morning_brief_synthesis import (
     MAX_SHORTLIST_IDS,
     CandidateTitle,
     SynthesisError,
+    build_source_collection_line,
     main,
     normalize_final_brief,
     parse_openclaw_json_output,
@@ -27,7 +28,7 @@ from harness.morning_brief_synthesis import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_DATE = date(2026, 7, 19)
-FINAL_BRIEF = (
+MODEL_BRIEF = (
     "*Market Snapshot*\n"
     "• SPY moved 1.25% <https://example.com/spy|Market>\n\n"
     "*Portfolio / Watchlist Events*\n"
@@ -35,6 +36,15 @@ FINAL_BRIEF = (
     "*Worth Knowing Today*\n"
     "• Material development <https://example.com/story|Reuters>"
 )
+SOURCE_COLLECTION_LINE = (
+    "*Source Collection:* 5 article records — Reuters 2 · CNBC 1 · Economist 0 · "
+    "WSJ 0 · FT 1 · Company IR 1 · BLS/BEA/Fed 0; plus 1 market-price observation."
+)
+EMPTY_SOURCE_COLLECTION_LINE = (
+    "*Source Collection:* 0 article records — Reuters 0 · Economist 0 · WSJ 0 · "
+    "Company IR 0 · BLS/BEA/Fed 0; plus 0 market-price observations."
+)
+FINAL_BRIEF = f"{SOURCE_COLLECTION_LINE}\n{MODEL_BRIEF}"
 
 
 def _epoch(day: str) -> int:
@@ -164,6 +174,7 @@ def _make_inputs(tmp_path: Path) -> tuple[Path, Path]:
                         "headline": "WATCH schedules an investor day",
                         "reference_url": "https://example.com/watch-ir",
                         "summary": "The prepared event gives the scheduled time.",
+                        "news_source": "CNBC",
                     },
                     {
                         "source": "market",
@@ -200,6 +211,7 @@ def _make_inputs(tmp_path: Path) -> tuple[Path, Path]:
                         "headline": "Thin wire record covers a bank merger",
                         "reference_url": "https://example.com/market-news",
                         "summary": "A short prepared summary of the merger report.",
+                        "news_source": "Reuters",
                     },
                 ],
             }
@@ -211,6 +223,145 @@ def _make_inputs(tmp_path: Path) -> tuple[Path, Path]:
 
 def _payload_from_prompt(prompt: str, marker: str) -> dict:
     return json.loads(prompt.split(marker, 1)[1].strip())
+
+
+def test_source_collection_counts_all_article_records_without_double_counting() -> None:
+    article_url = "https://example.com/reuters-exclusive"
+    candidates = [
+        CandidateTitle(
+            id="article:reuters",
+            kind="article",
+            title="Rates move after inflation data",
+            source="reuters-markets",
+            published=RUN_DATE.isoformat(),
+            article_key="reuters",
+            metadata={"url": article_url, "published_at": RUN_DATE.isoformat()},
+        ),
+        CandidateTitle(
+            id="article:reuters-update",
+            kind="article",
+            title="Rates move after inflation data — update",
+            source="reuters-markets",
+            published=RUN_DATE.isoformat(),
+            article_key="reuters-update",
+            metadata={"url": article_url, "published_at": RUN_DATE.isoformat()},
+        ),
+        CandidateTitle(
+            id="article:economist",
+            kind="article",
+            title="The productivity puzzle",
+            source="economist-business",
+            published=RUN_DATE.isoformat(),
+            article_key="economist",
+            metadata={"url": "https://example.com/economist"},
+        ),
+        CandidateTitle(
+            id="article:ir-port",
+            kind="article",
+            title="PORT announces an acquisition",
+            source="ir-PORT",
+            published=RUN_DATE.isoformat(),
+            article_key="ir-port",
+            metadata={"url": "https://example.com/port"},
+        ),
+        CandidateTitle(
+            id="article:ir-watch",
+            kind="article",
+            title="WATCH schedules an investor day",
+            source="ir-WATCH",
+            published=RUN_DATE.isoformat(),
+            article_key="ir-watch",
+            metadata={"url": "https://example.com/watch"},
+        ),
+        CandidateTitle(
+            id="article:bls",
+            kind="article",
+            title="Employment situation released",
+            source="bls-calendar",
+            published=RUN_DATE.isoformat(),
+            article_key="bls",
+            metadata={"url": "https://example.com/bls"},
+        ),
+        CandidateTitle(
+            id="event:duplicate-reuters",
+            kind="event",
+            title="Rates move after inflation data",
+            source="market",
+            published=RUN_DATE.isoformat(),
+            metadata={
+                "event_type": "market-news",
+                "news_source": "Reuters",
+                "reference_url": f"{article_url}/?utm_source=finnhub",
+            },
+        ),
+        CandidateTitle(
+            id="event:yahoo",
+            kind="event",
+            title="A distinct market story",
+            source="market",
+            published=RUN_DATE.isoformat(),
+            metadata={
+                "event_type": "market-news",
+                "news_source": "Yahoo Finance",
+                "reference_url": "https://example.com/yahoo",
+            },
+        ),
+        CandidateTitle(
+            id="event:bloomberg",
+            kind="event",
+            title="A distinct company story",
+            source="market",
+            published=RUN_DATE.isoformat(),
+            metadata={
+                "event_type": "company-news",
+                "news_source": "Bloomberg News",
+                "reference_url": "https://example.com/bloomberg",
+            },
+        ),
+        CandidateTitle(
+            id="event:spy-one",
+            kind="event",
+            title="SPY moved 1.25%",
+            source="market",
+            published=RUN_DATE.isoformat(),
+            metadata={"event_type": "market", "security_id": "SPY"},
+        ),
+        CandidateTitle(
+            id="event:spy-duplicate",
+            kind="event",
+            title="SPY moved 1.25%",
+            source="market",
+            published=RUN_DATE.isoformat(),
+            metadata={"event_type": "market", "security_id": "SPY"},
+        ),
+        CandidateTitle(
+            id="event:qqq",
+            kind="event",
+            title="QQQ moved 1.50%",
+            source="market",
+            published=RUN_DATE.isoformat(),
+            metadata={"event_type": "market", "security_id": "QQQ"},
+        ),
+        CandidateTitle(
+            id="event:earnings",
+            kind="event",
+            title="PORT reports before the open",
+            source="earnings",
+            published=RUN_DATE.isoformat(),
+            metadata={"event_type": "earnings", "security_id": "PORT"},
+        ),
+    ]
+
+    line = build_source_collection_line(candidates)
+
+    assert line == (
+        "*Source Collection:* 8 article records — Reuters 2 · Yahoo 1 · Bloomberg 1 · "
+        "Economist 1 · WSJ 0 · Company IR 2 · BLS/BEA/Fed 1; plus 2 "
+        "market-price observations."
+    )
+    assert "earnings" not in line.casefold()
+    assert "\n" not in line
+    assert not line.startswith(("•", "-", "* "))
 
 
 def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
@@ -264,7 +415,7 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
                 )
                 + "\n```"
             )
-        return FINAL_BRIEF
+        return MODEL_BRIEF
 
     brief = synthesize_morning_brief(
         db_path=db_path,
@@ -274,6 +425,9 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     )
 
     assert brief == FINAL_BRIEF
+    assert brief.startswith(f"{SOURCE_COLLECTION_LINE}\n*Market Snapshot*")
+    assert brief.count("*Source Collection:*") == 1
+    assert not brief.startswith(("•", "-", "* "))
     assert len(prompts) == 2
     assert {call["model"] for call in model_calls} == {"gpt-5.6-sol"}
     assert {call["reasoning"] for call in model_calls} == {"high"}
@@ -369,6 +523,7 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     assert len(fallback["evidence"]) <= MAX_ARTICLE_CONTENT_CHARS + 50
     assert "represent EVERY record" in prompts[1]
     assert "exactly ONE compact bullet/line" in prompts[1]
+    assert "Do not write a Source Collection line or any source counts" in prompts[1]
     assert (
         "Use section order: *Market Snapshot* first when its routed evidence exists, "
         "then *Portfolio / Watchlist Events* when its routed evidence exists, then "
@@ -387,11 +542,11 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
 def test_final_brief_validation_enforces_market_portfolio_worth_order() -> None:
     assert (
         normalize_final_brief(
-            FINAL_BRIEF,
+            MODEL_BRIEF,
             has_market_move_evidence=True,
             has_portfolio_watchlist_evidence=True,
         )
-        == FINAL_BRIEF
+        == MODEL_BRIEF
     )
     prior_order = (
         "*Worth Knowing Today*\n• Article\n\n"
@@ -408,6 +563,24 @@ def test_final_brief_validation_enforces_market_portfolio_worth_order() -> None:
     ):
         normalize_final_brief(
             prior_order,
+            has_market_move_evidence=True,
+            has_portfolio_watchlist_evidence=True,
+        )
+
+
+def test_model_cannot_add_a_second_source_collection_line() -> None:
+    with pytest.raises(SynthesisError, match="deterministic code owns"):
+        normalize_final_brief(
+            f"*Source Collection:* invented counts\n{MODEL_BRIEF}",
+            has_market_move_evidence=True,
+            has_portfolio_watchlist_evidence=True,
+        )
+
+
+def test_model_cannot_put_a_preamble_between_collection_and_market() -> None:
+    with pytest.raises(SynthesisError, match="text before its first Slack section"):
+        normalize_final_brief(
+            f"Good morning.\n\n{MODEL_BRIEF}",
             has_market_move_evidence=True,
             has_portfolio_watchlist_evidence=True,
         )
@@ -534,7 +707,7 @@ def test_invalid_pass_1_output_is_retried_once(tmp_path: Path) -> None:
                 return "not JSON"
             universe = _payload_from_prompt(kwargs["prompt"], "TITLE_UNIVERSE_JSON:")
             return json.dumps({"ids": [universe["candidates"][0]["id"]]})
-        return FINAL_BRIEF
+        return MODEL_BRIEF
 
     result = synthesize_morning_brief(
         db_path=db_path,
@@ -596,7 +769,7 @@ def test_empty_universe_preserves_explicit_evidence_thin_brief(tmp_path: Path) -
         model_call=model_call,
     )
 
-    assert result == thin_brief
+    assert result == f"{EMPTY_SOURCE_COLLECTION_LINE}\n{thin_brief}"
     shortlisted = _payload_from_prompt(prompts[1], "SHORTLISTED_EVIDENCE_JSON:")
     assert shortlisted == {
         "run_date": RUN_DATE.isoformat(),
@@ -623,7 +796,7 @@ def test_cli_stdout_and_artifact_are_final_text_only_and_no_temp_json(
         if "PASS 1" in kwargs["prompt"]:
             universe = _payload_from_prompt(kwargs["prompt"], "TITLE_UNIVERSE_JSON:")
             return json.dumps({"ids": [universe["candidates"][0]["id"]]})
-        return f"```mrkdwn\n{FINAL_BRIEF}\n```"
+        return f"```mrkdwn\n{MODEL_BRIEF}\n```"
 
     status = main(
         [
@@ -711,7 +884,7 @@ def test_default_workflow_uses_two_main_agent_turns_in_one_session(
             stdout = json.dumps({"payloads": [{"text": reply}]})
         else:
             stdout = json.dumps(
-                {"status": "ok", "result": {"payloads": [{"text": FINAL_BRIEF}]}}
+                {"status": "ok", "result": {"payloads": [{"text": MODEL_BRIEF}]}}
             )
         return subprocess.CompletedProcess(
             command, 0, stdout=stdout, stderr="diagnostic"
