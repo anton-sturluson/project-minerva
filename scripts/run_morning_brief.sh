@@ -10,10 +10,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 RUN_DATE="${1:-$(date +%F)}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
-for timeout_name in MINERVA_BROWSER_TIMEOUT MINERVA_WEBFETCH_TIMEOUT; do
-  timeout_value="${!timeout_name}"
-  if ! [[ "${timeout_value}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "${timeout_name} must be a positive integer" >&2
+MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"
+for integer_name in \
+  MINERVA_BROWSER_TIMEOUT \
+  MINERVA_WEBFETCH_TIMEOUT \
+  MINERVA_MAX_COLLECTORS; do
+  integer_value="${!integer_name}"
+  if ! [[ "${integer_value}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${integer_name} must be a positive integer" >&2
     exit 1
   fi
 done
@@ -266,6 +270,17 @@ PY
 
   # Allocate the physical root before launch so duplicate/unsafe source IDs
   # cannot make two concurrent collectors share files.
+  wait_for_collectors() {
+    if [[ "${#PIDS[@]}" -eq 0 ]]; then
+      return 0
+    fi
+    echo "  waiting for collector batch (${#PIDS[@]} agents)..."
+    for pid in "${PIDS[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+    PIDS=()
+  }
+
   launch_source() {
     local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
     local url="$5" collection_scope="$6"
@@ -287,6 +302,9 @@ PY
       "${source_id}" "${source_name}" "${url}" "${collection_scope}" \
       "${source_root}" &
     PIDS+=("$!")
+    if [[ "${#PIDS[@]}" -ge "${MINERVA_MAX_COLLECTORS}" ]]; then
+      wait_for_collectors
+    fi
   }
 
   # Copy source artifacts in lexical source/file order only after every agent
@@ -329,9 +347,9 @@ PY
     done < <(jq -c '.[]' "${NEWS_SOURCES}")
   fi
 
-  # Launch all configured IR feeds immediately. The full set intentionally
-  # shares the same final wait as the other collectors; there is no batching or
-  # replacement concurrency ceiling.
+  # IR feeds share the same configurable collector pool as standard sources.
+  # The limit protects the Gateway from client-startup contention and can be
+  # raised without changing code as capacity grows.
   if [[ -f "${IR_REGISTRY}" ]]; then
     while IFS= read -r entry; do
       ticker=$(echo "$entry" | jq -r '.security_id')
@@ -348,13 +366,9 @@ PY
     done < <(jq -c '.[]' "${IR_REGISTRY}")
   fi
 
-  # Wait once, after all standard and IR collectors have been launched.
+  # Wait for the final partial collector batch.
   echo "  waiting for news agents..."
-  if [[ "${#PIDS[@]}" -gt 0 ]]; then
-    for pid in "${PIDS[@]}"; do
-      wait "$pid" 2>/dev/null || true
-    done
-  fi
+  wait_for_collectors
 
   aggregate_source_raw
 

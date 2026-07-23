@@ -45,7 +45,7 @@ Promote the morning-brief news ingestion and deterministic duplicate lookup into
 - Give each collector a physically isolated ephemeral source root containing its own `raw/`, `candidates/`, `lookups/`, and `logs/` directories. Render `NEWS_DIR` to that root, and forbid collectors from inspecting or changing any parent, sibling, or other source files. Collectors call `news exist --input` and redirect compact results to files in their own root; no candidate JSON is embedded in shell commands.
 - After all collectors exit, aggregate source `raw/*.md` files into the central run `raw/` directory in deterministic lexical order. Treat duplicate filenames as a fatal collision rather than overwriting; collector-generated and shell-generated error artifacts use this same path.
 - Change ingestion to `run news ingest ...`, preserving the report, JSON stats file, duplicate count, and cleanup rule: delete the temporary run directory only after successful ingestion (or a successful no-input path).
-- Use one shared collector shell helper with one `openclaw agent` invocation and no automatic retries. Launch every configured standard and IR collector before a single shared wait—there is intentionally no IR batch or replacement concurrency ceiling (the current 48 IR feeds are expected). Preserve one window/tab per browser agent.
+- Use one shared collector shell helper with one `openclaw agent` invocation and no automatic retries. Run standard and IR collectors through one configurable global pool: `MINERVA_MAX_COLLECTORS` defaults to 8 and can be raised without changing code as Gateway capacity grows. Preserve one window/tab per browser agent.
 - Configure collector timeouts with positive-integer environment variables validated before temporary state is created: `MINERVA_BROWSER_TIMEOUT` defaults to 900 seconds and `MINERVA_WEBFETCH_TIMEOUT` defaults to 300 seconds, both safely below the 30-minute no-output watchdog by default.
 
 ## Prompt behavior
@@ -72,7 +72,7 @@ Focused tests will cover:
 - existence lookup by URL and article key, unseen candidates, empty URLs, malformed JSON, stdin/`--input`, missing database/table behavior, and deterministic in-batch URL/article-key deduplication;
 - proof that existence checks are read-only/query-only and do not change database files;
 - URL-index creation in new and migrated schemas, plus clear errors for malformed source registries while absent optional registries remain valid;
-- shell and prompt integration: physically isolated per-source roots, behavior under a cross-source deletion attempt, deterministic collision-safe raw aggregation (including errors), direct CLI ingestion, one shared no-retry collector helper, all IR collectors launched before one shared wait with no concurrency ceiling, validated configurable timeout defaults, one-window/one-tab browser instructions, URL fetches before web-fetch writes, no arbitrary item caps, the official `gemini-3.6-flash` summarization model, and successful-cleanup semantics.
+- shell and prompt integration: physically isolated per-source roots, behavior under a cross-source deletion attempt, deterministic collision-safe raw aggregation (including errors), direct CLI ingestion, one shared no-retry collector helper, a validated configurable global collector pool, validated configurable timeout defaults, one-window/one-tab browser instructions, URL fetches before web-fetch writes, no arbitrary item caps, the official `gemini-3.6-flash` summarization model, and successful-cleanup semantics.
 
 ## Verification gates
 
