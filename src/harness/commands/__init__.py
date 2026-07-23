@@ -4,7 +4,19 @@ from __future__ import annotations
 
 import typer
 
-from harness.commands import analyze, brief, evidence, extract, fileinfo, plot, portfolio, research, sec, valuation
+from harness.commands import (
+    analyze,
+    brief,
+    evidence,
+    extract,
+    fileinfo,
+    news,
+    plot,
+    portfolio,
+    research,
+    sec,
+    valuation,
+)
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -13,6 +25,7 @@ def register_commands(app: typer.Typer) -> None:
     app.add_typer(evidence.app, name="evidence")
     app.add_typer(portfolio.app, name="portfolio")
     app.add_typer(brief.app, name="brief")
+    app.add_typer(news.app, name="news")
     app.add_typer(valuation.app, name="valuation")
     app.add_typer(analyze.app, name="analyze")
     app.add_typer(plot.app, name="plot")

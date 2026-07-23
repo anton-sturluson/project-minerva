@@ -1,46 +1,22 @@
-#!/usr/bin/env python3
-"""Ingest collected news articles into invest.db.
+"""News ingestion, stable article identity, and read-only existence lookup.
 
-Reads raw markdown articles produced by the morning-brief collectors, joins
-each with its same-name summary, normalizes the publication date, computes a
-stable identity key, and inserts one row per unique article into the SQLite
-``news`` table.
-
-Usage:
-    python scripts/ingest_news.py --all
-    python scripts/ingest_news.py --date 2026-07-19
-    python scripts/ingest_news.py --raw-dir <dir> --summaries-dir <dir>
-
-The ``article_key`` is SHA-256(source_id + normalized publication DATE +
-normalized title). Exact time-of-day precision on the Published field does
-not change the key, so a re-collected article stays a single row.
+Raw morning-brief markdown is joined to same-name summaries and inserted into
+SQLite with a stable SHA-256 identity based on source ID, normalized source
+publication date, and normalized title. Duplicate lookup imports and reuses
+that exact identity implementation so collection and ingestion cannot drift.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import re
 import sqlite3
-import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal, Mapping, Sequence, TypedDict
 from zoneinfo import ZoneInfo
-
-# ---------------------------------------------------------------------------
-# Default filesystem layout
-# ---------------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parent.parent
-NEWS_ROOT_DEFAULT = REPO_ROOT / "hard-disk" / "data" / "02-news"
-DB_DEFAULT = REPO_ROOT / "hard-disk" / "data" / "04-database" / "invest.db"
-SCHEMA_PATH_DEFAULT = REPO_ROOT / "hard-disk" / "data" / "04-database" / "schema.sql"
-NEWS_SOURCES_JSON = NEWS_ROOT_DEFAULT / "news-sources.json"
-IR_REGISTRY_JSON = (
-    REPO_ROOT / "hard-disk" / "data" / "01-portfolio" / "current" / "ir-registry.json"
-)
 
 # Header keys we care about (case-insensitive on the label).
 META_KEYS = {"source", "url", "published", "collected", "section", "status"}
@@ -51,27 +27,67 @@ DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # ---------------------------------------------------------------------------
 # Source-ID resolution
 # ---------------------------------------------------------------------------
-def load_source_ids(
-    news_sources_path: Path, ir_registry_path: Path
-) -> list[str]:
-    """Build the master list of source IDs, longest first."""
+class SourceRegistryError(ValueError):
+    """Raised when an existing source registry is malformed."""
+
+
+def _load_registry_ids(
+    path: Path,
+    *,
+    registry_name: str,
+    id_field: str,
+    prefix: str = "",
+) -> set[str]:
+    """Load required string IDs while allowing an absent optional registry."""
+    if not path.exists():
+        return set()
+    try:
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SourceRegistryError(
+            f"malformed {registry_name} {path}: invalid JSON at line "
+            f"{exc.lineno}, column {exc.colno}: {exc.msg}"
+        ) from exc
+    if not isinstance(payload, list):
+        raise SourceRegistryError(
+            f"malformed {registry_name} {path}: expected a JSON array"
+        )
+
     ids: set[str] = set()
-    if news_sources_path.is_file():
-        try:
-            for entry in json.loads(news_sources_path.read_text(encoding="utf-8")):
-                sid = entry.get("id")
-                if sid:
-                    ids.add(sid)
-        except json.JSONDecodeError:
-            pass
-    if ir_registry_path.is_file():
-        try:
-            for entry in json.loads(ir_registry_path.read_text(encoding="utf-8")):
-                sid = entry.get("security_id")
-                if sid:
-                    ids.add(f"ir-{sid}")
-        except json.JSONDecodeError:
-            pass
+    for index, entry in enumerate(payload):
+        if not isinstance(entry, dict):
+            raise SourceRegistryError(
+                f"malformed {registry_name} {path}: entry {index} must be an object"
+            )
+        source_id = entry.get(id_field)
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise SourceRegistryError(
+                f"malformed {registry_name} {path}: entry {index} must have a "
+                f"non-empty string {id_field}"
+            )
+        ids.add(f"{prefix}{source_id.strip()}")
+    return ids
+
+
+def load_source_ids(news_sources_path: Path, ir_registry_path: Path) -> list[str]:
+    """Build the master list of source IDs, longest first.
+
+    Both registry files are optional, but an existing malformed file is an
+    operator error rather than an empty registry.
+    """
+    ids = _load_registry_ids(
+        news_sources_path,
+        registry_name="news source registry",
+        id_field="id",
+    )
+    ids.update(
+        _load_registry_ids(
+            ir_registry_path,
+            registry_name="IR registry",
+            id_field="security_id",
+            prefix="ir-",
+        )
+    )
     return sorted(ids, key=len, reverse=True)
 
 
@@ -508,6 +524,196 @@ def article_key(source_id: str, date_only: str, title: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Read-only duplicate lookup
+# ---------------------------------------------------------------------------
+class CandidateInputError(ValueError):
+    """Raised when candidate JSON does not match the lookup contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    """A validated candidate at the JSON/domain boundary."""
+
+    title: str
+    url: str
+    published: str = ""
+
+
+MatchKind = Literal["url", "article_key", "batch_url", "batch_article_key"]
+ExistenceStatus = Literal["ok", "database_missing", "news_table_missing"]
+
+
+class SeenMatch(TypedDict):
+    index: int
+    match: MatchKind
+
+
+class ExistenceResult(TypedDict):
+    status: ExistenceStatus
+    seen: list[SeenMatch]
+    unseen: list[int]
+
+
+CandidateInput = Candidate | Mapping[str, object]
+
+
+def _validated_candidate(item: Mapping[str, object], index: int) -> Candidate:
+    title = item.get("title")
+    url = item.get("url")
+    published = item.get("published", "")
+    if not isinstance(title, str) or not title.strip():
+        raise CandidateInputError(
+            f"candidate {index} must have a non-empty string title"
+        )
+    if not isinstance(url, str):
+        raise CandidateInputError(f"candidate {index} must have a string url")
+    if published is None:
+        published = ""
+    if not isinstance(published, str):
+        raise CandidateInputError(
+            f"candidate {index} published must be a string when provided"
+        )
+    return Candidate(title=title, url=url.strip(), published=published.strip())
+
+
+def _validated_candidates(candidates: Sequence[CandidateInput]) -> list[Candidate]:
+    validated: list[Candidate] = []
+    for index, candidate in enumerate(candidates):
+        if isinstance(candidate, Candidate):
+            if not candidate.title.strip():
+                raise CandidateInputError(
+                    f"candidate {index} must have a non-empty string title"
+                )
+            validated.append(
+                Candidate(
+                    title=candidate.title,
+                    url=candidate.url.strip(),
+                    published=candidate.published.strip(),
+                )
+            )
+        else:
+            validated.append(_validated_candidate(candidate, index))
+    return validated
+
+
+def parse_candidates(text: str) -> list[Candidate]:
+    """Parse and validate a JSON array of candidate news items."""
+    try:
+        payload: object = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CandidateInputError(
+            f"invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
+        ) from exc
+
+    if not isinstance(payload, list):
+        raise CandidateInputError("candidate JSON must be an array")
+
+    candidates: list[Candidate] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise CandidateInputError(f"candidate {index} must be an object")
+        # Ingestion strips metadata values before insertion, so outer transport
+        # whitespace is not part of exact URL identity.
+        candidates.append(_validated_candidate(item, index))
+    return candidates
+
+
+def _batch_matches(
+    source_id: str, candidates: Sequence[Candidate]
+) -> list[MatchKind | None]:
+    """Mark later in-batch duplicates without touching SQLite."""
+    matches: list[MatchKind | None] = [None] * len(candidates)
+    urls: set[str] = set()
+    keys: set[str] = set()
+    for index, candidate in enumerate(candidates):
+        if candidate.url:
+            if candidate.url in urls:
+                matches[index] = "batch_url"
+            urls.add(candidate.url)
+
+        published = normalize_published(candidate.published)
+        if published is None:
+            continue
+        key = article_key(source_id, published.date_only, candidate.title)
+        if matches[index] is None and key in keys:
+            matches[index] = "batch_article_key"
+        keys.add(key)
+    return matches
+
+
+def _existence_result(
+    status: ExistenceStatus, matches: Sequence[MatchKind | None]
+) -> ExistenceResult:
+    seen: list[SeenMatch] = []
+    unseen: list[int] = []
+    for index, match in enumerate(matches):
+        if match is None:
+            unseen.append(index)
+        else:
+            seen.append({"index": index, "match": match})
+    return {"status": status, "seen": seen, "unseen": unseen}
+
+
+def check_candidates(
+    db_path: Path, source_id: str, candidates: Sequence[CandidateInput]
+) -> ExistenceResult:
+    """Classify candidates by exact URL, then by shared article identity.
+
+    Later duplicates in the input are classified before any database access.
+    Existing databases are opened with SQLite ``mode=ro`` and guarded by
+    ``query_only``. A missing database or ``news`` table therefore leaves each
+    first occurrence unseen without creating or mutating filesystem state.
+    """
+    normalized_source_id = source_id.strip()
+    if not normalized_source_id:
+        raise CandidateInputError("source-id must not be empty")
+
+    validated = _validated_candidates(candidates)
+    matches = _batch_matches(normalized_source_id, validated)
+    if not db_path.is_file():
+        return _existence_result("database_missing", matches)
+
+    uri = f"{db_path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as conn:
+        conn.execute("PRAGMA query_only = ON")
+        # Keep the batch on one read snapshot while collectors may run in
+        # parallel with the eventual single ingestion writer.
+        conn.execute("BEGIN")
+        table_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?",
+            ("table", "news"),
+        ).fetchone()
+        if table_exists is None:
+            return _existence_result("news_table_missing", matches)
+
+        for index, candidate in enumerate(validated):
+            if matches[index] is not None:
+                continue
+            if candidate.url:
+                url_match = conn.execute(
+                    "SELECT 1 FROM news WHERE url = ? COLLATE BINARY LIMIT 1",
+                    (candidate.url,),
+                ).fetchone()
+                if url_match is not None:
+                    matches[index] = "url"
+                    continue
+
+            published = normalize_published(candidate.published)
+            if published is not None:
+                key = article_key(
+                    normalized_source_id, published.date_only, candidate.title
+                )
+                key_match = conn.execute(
+                    "SELECT 1 FROM news WHERE article_key = ? COLLATE BINARY LIMIT 1",
+                    (key,),
+                ).fetchone()
+                if key_match is not None:
+                    matches[index] = "article_key"
+
+    return _existence_result("ok", matches)
+
+
+# ---------------------------------------------------------------------------
 # Schema management
 # ---------------------------------------------------------------------------
 NEWS_TABLE_SQL = """
@@ -528,6 +734,7 @@ CREATE TABLE IF NOT EXISTS news (
 NEWS_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_news_published ON news(published_at)",
     "CREATE INDEX IF NOT EXISTS idx_news_collected ON news(collected_at)",
+    "CREATE INDEX IF NOT EXISTS idx_news_url ON news(url)",
 )
 
 _NEWS_COLUMNS = (
@@ -580,6 +787,7 @@ def _migrate_legacy_news(
     try:
         conn.execute("DROP INDEX IF EXISTS idx_news_published")
         conn.execute("DROP INDEX IF EXISTS idx_news_collected")
+        conn.execute("DROP INDEX IF EXISTS idx_news_url")
         conn.execute("ALTER TABLE news RENAME TO news_legacy_migration")
         _create_news_schema(conn)
 
@@ -657,12 +865,20 @@ def load_enrichment(paths: Iterable[Path]) -> dict[str, str]:
                 if not line:
                     continue
                 try:
-                    obj = json.loads(line)
+                    payload: object = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(payload, dict):
+                    continue
+                obj: Mapping[object, object] = payload
                 path = obj.get("path")
                 published = obj.get("published_at")
-                if path and published:
+                if (
+                    isinstance(path, str)
+                    and path
+                    and isinstance(published, (str, int, float))
+                    and not isinstance(published, bool)
+                ):
                     existing = str(obj.get("existing_published", "")).strip()
                     method = str(obj.get("method", "")).lower()
                     status = str(obj.get("status", "")).lower()
@@ -928,59 +1144,3 @@ def _ingest_one(
         stats.inserted += 1
     else:
         stats.duplicates += 1
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description=__doc__)
-    mode = p.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--all", action="store_true", help="Backfill every YYYY-MM-DD dir under --news-root.")
-    mode.add_argument("--date", metavar="YYYY-MM-DD", help="Ingest a single date under --news-root.")
-    mode.add_argument("--raw-dir", type=Path, help="Explicit raw directory (bypasses --news-root).")
-    p.add_argument("--summaries-dir", type=Path, help="Explicit summaries directory (paired with --raw-dir).")
-    p.add_argument("--news-root", type=Path, default=NEWS_ROOT_DEFAULT)
-    p.add_argument("--db", type=Path, default=DB_DEFAULT)
-    p.add_argument("--news-sources", type=Path, default=NEWS_SOURCES_JSON)
-    p.add_argument("--ir-registry", type=Path, default=IR_REGISTRY_JSON)
-    p.add_argument(
-        "--enrich",
-        type=Path,
-        action="append",
-        default=[],
-        help="Optional JSONL file or directory with {path, published_at} overrides. May repeat.",
-    )
-    p.add_argument("--report", type=Path, help="Optional file to write per-file decisions.")
-    return p
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _build_arg_parser().parse_args(argv)
-
-    report_lines: list[str] = []
-    stats = ingest(
-        db_path=args.db,
-        news_root=args.news_root,
-        news_sources_path=args.news_sources,
-        ir_registry_path=args.ir_registry,
-        all_dates=args.all,
-        single_date=args.date,
-        explicit_raw=args.raw_dir,
-        explicit_summaries=args.summaries_dir,
-        enrichment_paths=args.enrich,
-        report=report_lines,
-    )
-
-    if args.report:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
-
-    # Machine-readable one-line JSON on stdout is the contract for callers
-    # (run_morning_brief.sh, tests). Additional human-readable lines go after.
-    print(json.dumps(stats, sort_keys=True))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

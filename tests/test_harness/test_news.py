@@ -1,0 +1,584 @@
+"""Tests for the first-class news CLI and read-only existence lookup."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from harness import news
+from harness.cli import app, dispatch_command
+from harness.commands import news as news_commands
+from harness.config import HarnessSettings
+
+runner = CliRunner()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _create_lookup_db(tmp_path: Path, rows: list[tuple[str, str]]) -> Path:
+    db_path = tmp_path / "invest.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE news (article_key TEXT PRIMARY KEY, url TEXT NOT NULL)"
+        )
+        conn.executemany(
+            "INSERT INTO news (article_key, url) VALUES (?, ?)", rows
+        )
+    return db_path
+
+
+def _candidate(
+    *,
+    title: str = "A Big Story",
+    url: str = "https://example.test/new",
+    published: str = "2026-07-19",
+) -> dict[str, str]:
+    return {"title": title, "url": url, "published": published}
+
+
+def _write_raw(raw_dir: Path, *, title: str = "A   Big Story") -> Path:
+    raw_dir.mkdir(parents=True)
+    raw_path = raw_dir / "wsj-story.md"
+    raw_path.write_text(
+        f"""# {title}
+
+Source: WSJ
+URL: https://example.test/story
+Published:
+Collected: 2026-07-19T04:00:00Z
+Section: markets
+
+Full article body.
+""",
+        encoding="utf-8",
+    )
+    return raw_path
+
+
+def test_news_commands_are_registered_with_exact_help_surface() -> None:
+    root_help = runner.invoke(app, ["--help"])
+    group_help = runner.invoke(app, ["news", "--help"])
+    ingest_help = runner.invoke(app, ["news", "ingest", "--help"])
+    exist_help = runner.invoke(app, ["news", "exist", "--help"])
+
+    assert root_help.exit_code == 0
+    assert "news" in root_help.stdout
+    assert group_help.exit_code == 0
+    assert "ingest" in group_help.stdout
+    assert "exist" in group_help.stdout
+    assert "exists" not in group_help.stdout
+    assert ingest_help.exit_code == 0
+    assert "--raw-dir" in ingest_help.stdout
+    assert "--summaries-dir" in ingest_help.stdout
+    assert exist_help.exit_code == 0
+    assert "--db" in exist_help.stdout
+    assert "--source-id" in exist_help.stdout
+    assert "--input" in exist_help.stdout
+
+
+def test_ingest_cli_preserves_stats_report_summary_and_stable_key(
+    tmp_path: Path,
+) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_path = _write_raw(raw_dir)
+    summaries_dir = tmp_path / "summaries"
+    summaries_dir.mkdir()
+    (summaries_dir / raw_path.name).write_text(
+        "Matching investor summary.", encoding="utf-8"
+    )
+    sources = tmp_path / "news-sources.json"
+    sources.write_text(json.dumps([{"id": "wsj"}]), encoding="utf-8")
+    registry = tmp_path / "ir-registry.json"
+    registry.write_text("[]", encoding="utf-8")
+    db_path = tmp_path / "invest.db"
+    report_path = tmp_path / "logs" / "ingest.log"
+
+    args = [
+        "news",
+        "ingest",
+        "--raw-dir",
+        str(raw_dir),
+        "--summaries-dir",
+        str(summaries_dir),
+        "--db",
+        str(db_path),
+        "--news-sources",
+        str(sources),
+        "--ir-registry",
+        str(registry),
+        "--report",
+        str(report_path),
+    ]
+    first = runner.invoke(app, args)
+
+    assert first.exit_code == 0, first.output
+    assert json.loads(first.stdout) == {
+        "db_total": 1,
+        "duplicates": 0,
+        "eligible": 1,
+        "inserted": 1,
+        "missing_summaries": 0,
+        "publication_fallbacks": 1,
+        "skipped": 0,
+    }
+    assert "fallback:publication-date" in report_path.read_text(encoding="utf-8")
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT article_key, title, summary, content FROM news"
+        ).fetchone()
+    assert row == (
+        "7b8936454d4ca742cc3bc18e9c4d07ff477097563d62aea7f7f46ba723821df2",
+        "A   Big Story",
+        "Matching investor summary.",
+        "Full article body.",
+    )
+
+    lookup = runner.invoke(
+        app,
+        ["news", "exist", "--db", str(db_path), "--source-id", "WSJ"],
+        input=json.dumps(
+            [{"title": "  a BIG story  ", "url": "", "published": "2026-07-19"}]
+        ),
+    )
+    assert lookup.exit_code == 0, lookup.output
+    assert json.loads(lookup.stdout) == {
+        "status": "ok",
+        "seen": [{"index": 0, "match": "article_key"}],
+        "unseen": [],
+    }
+
+    second = runner.invoke(app, args)
+    assert second.exit_code == 0, second.output
+    assert json.loads(second.stdout)["duplicates"] == 1
+    assert json.loads(second.stdout)["inserted"] == 0
+
+
+def test_ingest_cli_reports_malformed_source_registry_without_traceback(
+    tmp_path: Path,
+) -> None:
+    raw_dir = tmp_path / "raw"
+    _write_raw(raw_dir)
+    malformed_sources = tmp_path / "news-sources.json"
+    malformed_sources.write_text("not-json", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "news",
+            "ingest",
+            "--raw-dir",
+            str(raw_dir),
+            "--db",
+            str(tmp_path / "invest.db"),
+            "--news-sources",
+            str(malformed_sources),
+            "--ir-registry",
+            str(tmp_path / "missing-ir.json"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "malformed news source registry" in result.stderr
+    assert "invalid JSON" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not (tmp_path / "invest.db").exists()
+
+
+def test_article_key_and_title_normalization_are_shared_by_exist(
+    tmp_path: Path,
+) -> None:
+    key = news.article_key("wsj", "2026-07-19", "A Big Story")
+    db_path = _create_lookup_db(
+        tmp_path, [(key, "https://example.test/original")]
+    )
+
+    result = news.check_candidates(
+        db_path,
+        "WSJ",
+        [_candidate(title="  a BIG   story  ", url="")],
+    )
+
+    assert news.normalized_title_for_key("  a BIG   story  ") == "a big story"
+    assert result == {
+        "status": "ok",
+        "seen": [{"index": 0, "match": "article_key"}],
+        "unseen": [],
+    }
+
+
+def test_exist_matches_exact_nonempty_url_before_article_key(tmp_path: Path) -> None:
+    key = news.article_key("source", "2026-07-19", "A Big Story")
+    db_path = _create_lookup_db(
+        tmp_path, [(key, "https://example.test/already-collected")]
+    )
+
+    result = news.check_candidates(
+        db_path,
+        "source",
+        [
+            _candidate(
+                title="A Big Story",
+                url="https://example.test/already-collected",
+                published="2026-07-19",
+            ),
+            _candidate(
+                title="Different Story",
+                url="https://EXAMPLE.test/already-collected",
+                published="",
+            ),
+        ],
+    )
+
+    assert result["seen"] == [{"index": 0, "match": "url"}]
+    assert result["unseen"] == [1]
+
+
+def test_exist_returns_unseen_and_allows_empty_url(tmp_path: Path) -> None:
+    db_path = _create_lookup_db(tmp_path, [("other", "https://example.test/old")])
+
+    result = news.check_candidates(
+        db_path,
+        "source",
+        [
+            _candidate(url="", published=""),
+            _candidate(title="Second", url="https://example.test/new", published=""),
+        ],
+    )
+
+    assert result == {"status": "ok", "seen": [], "unseen": [0, 1]}
+
+
+def test_exist_deduplicates_batch_before_missing_database_lookup(
+    tmp_path: Path,
+) -> None:
+    result = news.check_candidates(
+        tmp_path / "missing.db",
+        "source",
+        [
+            _candidate(url="https://example.test/one"),
+            _candidate(url="https://example.test/one"),
+            _candidate(url="https://example.test/two"),
+            _candidate(title="Different", url="", published="2026-07-20"),
+        ],
+    )
+
+    assert result == {
+        "status": "database_missing",
+        "seen": [
+            {"index": 1, "match": "batch_url"},
+            {"index": 2, "match": "batch_article_key"},
+        ],
+        "unseen": [0, 3],
+    }
+
+
+def test_exist_preserves_candidate_order_across_batch_and_database_matches(
+    tmp_path: Path,
+) -> None:
+    key = news.article_key("source", "2026-07-19", "A Big Story")
+    db_path = _create_lookup_db(
+        tmp_path,
+        [
+            (key, "https://example.test/stored-by-key"),
+            ("different-key", "https://example.test/stored-by-url"),
+        ],
+    )
+
+    result = news.check_candidates(
+        db_path,
+        "source",
+        [
+            _candidate(url="https://example.test/new-url"),
+            _candidate(url="https://example.test/new-url"),
+            _candidate(
+                title="Other",
+                url="https://example.test/stored-by-url",
+                published="",
+            ),
+        ],
+    )
+
+    assert result == {
+        "status": "ok",
+        "seen": [
+            {"index": 0, "match": "article_key"},
+            {"index": 1, "match": "batch_url"},
+            {"index": 2, "match": "url"},
+        ],
+        "unseen": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("not JSON", "invalid JSON"),
+        ('{"title":"not an array"}', "must be an array"),
+        ('[{"title":"Missing URL"}]', "string url"),
+        (
+            '[{"title":"Story","url":"https://x","published":123}]',
+            "published must be a string",
+        ),
+    ],
+)
+def test_malformed_candidate_json_is_rejected(raw: str, message: str) -> None:
+    with pytest.raises(news.CandidateInputError, match=message):
+        news.parse_candidates(raw)
+
+    cli_result = runner.invoke(
+        app,
+        [
+            "news",
+            "exist",
+            "--db",
+            "/missing/invest.db",
+            "--source-id",
+            "source",
+        ],
+        input=raw,
+    )
+    assert cli_result.exit_code == 2
+    assert message in cli_result.stderr
+    assert "Traceback" not in cli_result.stderr
+    assert cli_result.stdout == ""
+
+
+def test_missing_database_and_table_are_all_unseen_without_writes(
+    tmp_path: Path,
+) -> None:
+    candidates = [_candidate(), _candidate(title="Second", url="")]
+    missing_db = tmp_path / "does-not-exist.db"
+
+    missing_result = news.check_candidates(missing_db, "source", candidates)
+
+    assert missing_result == {
+        "status": "database_missing",
+        "seen": [],
+        "unseen": [0, 1],
+    }
+    assert not missing_db.exists()
+
+    no_table = tmp_path / "no-news.db"
+    with sqlite3.connect(no_table) as conn:
+        conn.execute("CREATE TABLE other (value TEXT)")
+    before = no_table.stat().st_mtime_ns
+
+    no_table_result = news.check_candidates(no_table, "source", candidates)
+
+    assert no_table_result == {
+        "status": "news_table_missing",
+        "seen": [],
+        "unseen": [0, 1],
+    }
+    assert no_table.stat().st_mtime_ns == before
+    with sqlite3.connect(no_table) as conn:
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall() == [("other",)]
+
+
+def test_exist_cli_reads_stdin_or_input_and_emits_compact_json(
+    tmp_path: Path,
+) -> None:
+    missing_db = tmp_path / "missing.db"
+    raw = json.dumps([_candidate()])
+    input_file = tmp_path / "candidates.json"
+    input_file.write_text(raw, encoding="utf-8")
+
+    for extra_args, stdin in [([], raw), (["--input", str(input_file)], None)]:
+        result = runner.invoke(
+            app,
+            [
+                "news",
+                "exist",
+                "--db",
+                str(missing_db),
+                "--source-id",
+                "source",
+                *extra_args,
+            ],
+            input=stdin,
+        )
+        assert result.exit_code == 0, result.output
+        assert result.stdout == (
+            '{"status":"database_missing","seen":[],"unseen":[0]}\n'
+        )
+    assert not missing_db.exists()
+
+
+def test_exist_uses_read_only_query_only_database_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = _create_lookup_db(
+        tmp_path,
+        [("other", "https://example.test/already-collected")],
+    )
+    before_bytes = db_path.read_bytes()
+    before_mtime = db_path.stat().st_mtime_ns
+    real_connect = sqlite3.connect
+    connect_calls: list[tuple[str, dict[str, object]]] = []
+    executed: list[tuple[str, object]] = []
+
+    class ConnectionProxy:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self.connection = connection
+
+        def __enter__(self) -> ConnectionProxy:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self.connection.__exit__(*args)
+
+        def execute(self, statement: str, parameters: object = ()) -> sqlite3.Cursor:
+            executed.append((statement, parameters))
+            return self.connection.execute(statement, parameters)
+
+    def recording_connect(
+        database: str, *args: object, **kwargs: object
+    ) -> ConnectionProxy:
+        connect_calls.append((database, kwargs))
+        return ConnectionProxy(real_connect(database, *args, **kwargs))
+
+    monkeypatch.setattr(news.sqlite3, "connect", recording_connect)
+    db_path.chmod(0o444)
+    try:
+        result = news.check_candidates(
+            db_path,
+            "source",
+            [_candidate(url="https://example.test/already-collected")],
+        )
+    finally:
+        db_path.chmod(0o644)
+
+    assert result["seen"] == [{"index": 0, "match": "url"}]
+    assert connect_calls == [
+        (f"{db_path.resolve().as_uri()}?mode=ro", {"uri": True})
+    ]
+    assert ("PRAGMA query_only = ON", ()) in executed
+    assert any(
+        "WHERE url = ?" in statement
+        and parameters == ("https://example.test/already-collected",)
+        for statement, parameters in executed
+    )
+    assert all(
+        "https://example.test/already-collected" not in statement
+        for statement, _ in executed
+    )
+    assert db_path.read_bytes() == before_bytes
+    assert db_path.stat().st_mtime_ns == before_mtime
+    assert not Path(f"{db_path}-journal").exists()
+    assert not Path(f"{db_path}-wal").exists()
+
+
+def test_news_is_not_available_to_internal_run_dispatch(tmp_path: Path) -> None:
+    result = dispatch_command(
+        ["news", "exist"],
+        settings=HarnessSettings(workspace_root=tmp_path),
+        stdin=b"[]",
+    )
+
+    assert result.exit_code == 1
+    assert b"unknown command `news`" in result.stderr
+
+
+def test_ingest_cli_defaults_resolve_from_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    raw_dir = tmp_path / "raw"
+    _write_raw(raw_dir)
+    monkeypatch.setattr(
+        news_commands,
+        "get_settings",
+        lambda: HarnessSettings(workspace_root=workspace),
+    )
+
+    result = runner.invoke(app, ["news", "ingest", "--raw-dir", str(raw_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["skipped"] == 1
+    assert (workspace / "data" / "04-database" / "invest.db").is_file()
+
+
+def test_morning_brief_shell_and_prompts_use_news_cli_contract() -> None:
+    script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
+        encoding="utf-8"
+    )
+    browser_prompt = (
+        REPO_ROOT / "scripts" / "prompts" / "collect_news.md"
+    ).read_text(encoding="utf-8")
+    webfetch_prompt = (
+        REPO_ROOT / "scripts" / "prompts" / "collect_news_webfetch.md"
+    ).read_text(encoding="utf-8")
+    combined = "\n".join((script, browser_prompt, webfetch_prompt))
+
+    assert "DEDUP_SLUGS" not in combined
+    assert "DEDUP_FILE" not in combined
+    assert "check_news_dedup.py" not in combined
+    assert "scripts/ingest_news.py" not in combined
+    assert "sqlite3" not in script
+    assert 'run news ingest \\' in script
+    assert "NEWS_EXIST_COMMAND" in script
+    assert '"${MINERVA_RUNNER_ARR[@]}" news exist' in script
+    assert "printf -v NEWS_EXIST_COMMAND 'cd %q && %s'" in script
+    assert "Collector agents run from their OpenClaw workspace" in script
+    assert 'mkdir -p \\' in script
+    assert '"${NEWS_DIR}/candidates"' in script
+    assert '"${NEWS_DIR}/lookups"' in script
+    assert script.count("openclaw agent") == 1
+    assert "collect_source()" in script
+    assert 'local prompt_template="$1" timeout="$2"' in script
+    assert "retry" not in script.lower()
+    assert 'MINERVA_IR_BATCH_SIZE="${MINERVA_IR_BATCH_SIZE:-5}"' in script
+    assert "MINERVA_IR_BATCH_SIZE must be a positive integer" in script
+    assert '"${#IR_PIDS[@]}" -ge "${MINERVA_IR_BATCH_SIZE}"' in script
+    assert "browser tabs" not in script
+    assert '--concurrency 4' in script
+
+    for prompt in (browser_prompt, webfetch_prompt):
+        assert '{{NEWS_EXIST_COMMAND}} --db "{{INVEST_DB}}"' in prompt
+        assert '--input "{{CANDIDATE_FILE}}" > "{{LOOKUP_FILE}}"' in prompt
+        assert "one JSON array" in prompt
+        assert "overwriting" in prompt
+        assert "read-only" in prompt
+        assert "<<'JSON'" not in prompt
+        assert "maximum 10" not in prompt.lower()
+        assert "maximum 15" not in prompt.lower()
+        assert "up to 10" not in prompt.lower()
+        assert "no more than 5" not in prompt.lower()
+
+    assert "scan the full landing page" in browser_prompt.lower()
+    assert "only browser window and tab" in browser_prompt
+    assert "Do not run `browser open` again" in browser_prompt
+    assert "Never open a new tab or window" in browser_prompt
+    assert "one-item array" in browser_prompt
+    assert "rerun the same lookup command" in browser_prompt
+    assert "matching ingestion's collection-date fallback" in browser_prompt
+    assert "before body extraction" in browser_prompt.lower()
+    assert "Navigate the same tab back" in browser_prompt
+    assert "use an empty string" in webfetch_prompt
+    assert "matching ingestion's collection-date fallback" in webfetch_prompt
+    assert "fetch that URL with the web_fetch tool before writing anything" in webfetch_prompt
+    assert "calendar row without a distinct URL" in webfetch_prompt
+
+
+def test_morning_brief_summarization_uses_official_gemini_model() -> None:
+    script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
+        encoding="utf-8"
+    )
+    extract_block = script.split("run extract-files", 1)[1].split(
+        '"${EXTRACT_PROMPT}"', 1
+    )[0]
+
+    assert "--model gemini-3.6-flash" in extract_block
+    assert "--thinking high" in extract_block
+    assert "gemini-3.5-flash" not in script
+
+
+def test_obsolete_news_scripts_are_absent() -> None:
+    assert not (REPO_ROOT / "scripts" / "ingest_news.py").exists()
+    assert not (REPO_ROOT / "scripts" / "check_news_dedup.py").exists()

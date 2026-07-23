@@ -1,19 +1,15 @@
-"""Focused tests for scripts/ingest_news.py."""
+"""Focused tests for the importable news ingestion domain."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
-
-import ingest_news  # noqa: E402
+from harness import news as ingest_news
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +71,35 @@ def _ingest(tmp_path: Path, raw_dir: Path, *, summaries_dir=None, enrichment=Non
 
 
 # ---------------------------------------------------------------------------
-# 1. schema idempotency
+# 1. source registries and schema idempotency
 # ---------------------------------------------------------------------------
+def test_absent_optional_source_registries_are_empty(tmp_path: Path) -> None:
+    assert ingest_news.load_source_ids(
+        tmp_path / "missing-news.json", tmp_path / "missing-ir.json"
+    ) == []
+
+
+@pytest.mark.parametrize(
+    ("registry", "payload", "message"),
+    [
+        ("news", "not-json", "invalid JSON"),
+        ("news", '{}', "expected a JSON array"),
+        ("news", '[{"id": 123}]', "non-empty string id"),
+        ("ir", '[{"security_id": null}]', "non-empty string security_id"),
+    ],
+)
+def test_malformed_source_registry_fails_clearly(
+    tmp_path: Path, registry: str, payload: str, message: str
+) -> None:
+    news_path = tmp_path / "news-sources.json"
+    ir_path = tmp_path / "ir-registry.json"
+    target = news_path if registry == "news" else ir_path
+    target.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(ingest_news.SourceRegistryError, match=message):
+        ingest_news.load_source_ids(news_path, ir_path)
+
+
 def test_schema_ensure_is_idempotent(tmp_path: Path) -> None:
     db = tmp_path / "s.db"
     conn = sqlite3.connect(db)
@@ -84,6 +107,13 @@ def test_schema_ensure_is_idempotent(tmp_path: Path) -> None:
         ingest_news.ensure_schema(conn)
         ingest_news.ensure_schema(conn)  # second call must not raise
         column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
+        indexes = {
+            row[1] for row in conn.execute("PRAGMA index_list(news)").fetchall()
+        }
+        url_query_plan = conn.execute(
+            "EXPLAIN QUERY PLAN SELECT 1 FROM news WHERE url = ? COLLATE BINARY LIMIT 1",
+            ("https://example.test/article",),
+        ).fetchall()
     finally:
         conn.close()
 
@@ -104,6 +134,8 @@ def test_schema_ensure_is_idempotent(tmp_path: Path) -> None:
     assert columns["published_at"][3] == 1
     assert columns["published_at_raw"][2].upper() == "TEXT"
     assert columns["published_at_raw"][3] == 1
+    assert "idx_news_url" in indexes
+    assert any("idx_news_url" in str(row[3]) for row in url_query_plan)
 
 
 def test_schema_migrates_legacy_text_rows_and_is_idempotent(tmp_path: Path) -> None:
@@ -164,12 +196,16 @@ def test_schema_migrates_legacy_text_rows_and_is_idempotent(tmp_path: Path) -> N
             "SELECT article_key, published_at, published_at_raw, title, content, "
             "summary, source, url, section, collected_at FROM news ORDER BY article_key"
         ).fetchall()
+        indexes = {
+            row[1] for row in conn.execute("PRAGMA index_list(news)").fetchall()
+        }
     finally:
         conn.close()
 
     columns = {row[1]: row for row in column_rows}
     assert columns["published_at"][2].upper() == "INTEGER"
     assert columns["published_at_raw"][3] == 1
+    assert "idx_news_url" in indexes
     assert rows == [
         (
             "one",

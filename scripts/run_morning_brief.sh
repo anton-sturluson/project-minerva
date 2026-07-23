@@ -8,6 +8,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 RUN_DATE="${1:-$(date +%F)}"
+MINERVA_IR_BATCH_SIZE="${MINERVA_IR_BATCH_SIZE:-5}"
+if ! [[ "${MINERVA_IR_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "MINERVA_IR_BATCH_SIZE must be a positive integer" >&2
+  exit 1
+fi
+
 # Ephemeral run directory: raw articles + per-article summaries live here for
 # the duration of one run, get ingested into invest.db, then are removed.
 # Parallel collector agents write markdown here; only the final ingest process
@@ -19,15 +25,11 @@ NEWS_DIR="${NEWS_RUN_DIR}"
 REPORT_DIR="${ROOT_DIR}/hard-disk/reports/03-daily-news/${RUN_DATE}"
 INVEST_DB="${INVEST_DB:-${ROOT_DIR}/hard-disk/data/04-database/invest.db}"
 INGEST_OK=0
-DEDUP_FILE=""
 cleanup_run_dir() {
   # Remove the temp run dir only when ingest into invest.db succeeded.
   # Otherwise leave it for debugging.
   if [[ "${INGEST_OK}" == "1" && -d "${NEWS_RUN_DIR}" ]]; then
     rm -rf "${NEWS_RUN_DIR}"
-  fi
-  if [[ -n "${DEDUP_FILE}" && -f "${DEDUP_FILE}" ]]; then
-    rm -f "${DEDUP_FILE}"
   fi
 }
 trap cleanup_run_dir EXIT
@@ -43,10 +45,22 @@ MINERVA_SKIP_NEWS="${MINERVA_SKIP_NEWS:-0}"
 MINERVA_ALLOW_THIN_BRIEF="${MINERVA_ALLOW_THIN_BRIEF:-0}"
 
 IFS=' ' read -r -a MINERVA_RUNNER_ARR <<< "${MINERVA_RUNNER}"
+printf -v NEWS_EXIST_RUNNER '%q ' "${MINERVA_RUNNER_ARR[@]}" news exist
+NEWS_EXIST_RUNNER="${NEWS_EXIST_RUNNER% }"
+# Collector agents run from their OpenClaw workspace, not necessarily this
+# repository. Anchor the CLI command here so `uv run minerva` resolves the
+# checked-out project rather than a stale globally installed Minerva tool.
+printf -v NEWS_EXIST_COMMAND 'cd %q && %s' "${ROOT_DIR}" "${NEWS_EXIST_RUNNER}"
 
 run() { "${MINERVA_RUNNER_ARR[@]}" "$@"; }
 
-mkdir -p "${REPORT_DIR}" "${NEWS_DIR}/raw" "${NEWS_DIR}/summaries" "${NEWS_DIR}/logs"
+mkdir -p \
+  "${REPORT_DIR}" \
+  "${NEWS_DIR}/raw" \
+  "${NEWS_DIR}/summaries" \
+  "${NEWS_DIR}/logs" \
+  "${NEWS_DIR}/candidates" \
+  "${NEWS_DIR}/lookups"
 
 echo "=== Morning Brief Pipeline ==="
 echo "date: ${RUN_DATE}"
@@ -89,6 +103,32 @@ else
   NEWS_LOG_DIR="${NEWS_RUN_DIR}/logs"
   PIDS=()
 
+  if [[ -f "${NEWS_SOURCES}" ]] && ! jq -e '
+    type == "array" and all(.[];
+      type == "object" and
+      (.id | type == "string" and length > 0) and
+      (.name | type == "string" and length > 0) and
+      (.url | type == "string" and length > 0) and
+      (.access == "browser" or .access == "web_fetch") and
+      ((has("collect") | not) or (.collect | type == "string"))
+    )
+  ' "${NEWS_SOURCES}" >/dev/null; then
+    echo "news: malformed source registry: ${NEWS_SOURCES}" >&2
+    exit 1
+  fi
+  if [[ -f "${IR_REGISTRY}" ]] && ! jq -e '
+    type == "array" and all(.[];
+      type == "object" and
+      (.security_id | type == "string" and length > 0) and
+      (.company_name | type == "string" and length > 0) and
+      (.feeds | type == "array") and
+      all(.feeds[]; type == "object" and (.url | type == "string" and length > 0))
+    )
+  ' "${IR_REGISTRY}" >/dev/null; then
+    echo "news: malformed IR registry: ${IR_REGISTRY}" >&2
+    exit 1
+  fi
+
   write_collection_error() {
     local source_id="$1" source_name="$2" url="$3" sessid="$4" status="$5" log_file="$6"
     local error_file="${NEWS_DIR}/raw/${source_id}-error.md"
@@ -107,7 +147,7 @@ Exit status: ${status}
 Session: ${sessid}
 Log: ${log_file}
 
-The collector exited non-zero. See the log file above for stdout/stderr from the child openclaw agent run.
+The collector exited non-zero. See the log file above for stdout/stderr from the child collector process.
 EOF
   }
 
@@ -139,96 +179,60 @@ EOF
     echo "  portfolio tickers (no names): ${PORTFOLIO_TICKERS}"
   fi
 
-  # ── Build recent-item dedup list from SQLite ──
-  DEDUP_FILE=$(mktemp)
-  if [[ -f "${INVEST_DB}" ]] && [[ "$(sqlite3 "${INVEST_DB}" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='news';" 2>/dev/null || echo 0)" == "1" ]]; then
-    sqlite3 -separator ' | ' "${INVEST_DB}" \
-      "SELECT title, url FROM news WHERE date(collected_at) >= date('${RUN_DATE}', '-3 days') ORDER BY collected_at DESC;" \
-      > "${DEDUP_FILE}" || true
-    dedup_count=$(wc -l < "$DEDUP_FILE" | tr -d ' ')
-    echo "  dedup list: ${dedup_count} recent titles/URLs from SQLite"
-  else
-    echo "(none)" > "$DEDUP_FILE"
-    echo "  dedup list: empty (news table not initialized)"
-  fi
+  render_collection_prompt() {
+    local template="$1" source_name="$2" source_id="$3" url="$4" collection_scope="$5"
+    local candidate_file="${NEWS_DIR}/candidates/${source_id}.json"
+    local lookup_file="${NEWS_DIR}/lookups/${source_id}.json"
+    python3 - "$template" "$RUN_DATE" "$source_name" "$source_id" "$url" \
+      "$NEWS_DIR" "$INVEST_DB" "$NEWS_EXIST_COMMAND" "$PORTFOLIO_TICKERS" \
+      "$collection_scope" "$candidate_file" "$lookup_file" <<'PY'
+import sys
+from pathlib import Path
 
-  # Helper: spawn one browser-based collection agent
-  collect_browser() {
-    local source_id="$1" source_name="$2" url="$3" collection_scope="$4"
-    local sessid="news-${source_id}-$(date +%s)"
-    local log_file="${NEWS_LOG_DIR}/${source_id}.log"
-    local prompt
-    prompt=$(sed \
-      -e "s|{{DATE}}|${RUN_DATE}|g" \
-      -e "s|{{SOURCE_NAME}}|${source_name}|g" \
-      -e "s|{{SOURCE_ID}}|${source_id}|g" \
-      -e "s|{{URL}}|${url}|g" \
-      -e "s|{{NEWS_DIR}}|${NEWS_DIR}|g" \
-      "${BROWSER_PROMPT_TEMPLATE}")
-
-    # Inject dedup slugs from temp file
-    local dedup_content
-    dedup_content=$(cat "$DEDUP_FILE")
-    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); t=t.replace('{{COLLECT_SCOPE}}', sys.argv[3]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" "$collection_scope" <<< "$prompt")
-
-    {
-      echo "source_id: ${source_id}"
-      echo "source_name: ${source_name}"
-      echo "url: ${url}"
-      echo "session_id: ${sessid}"
-      echo "started_at: $(date -u +%FT%TZ)"
-      echo ""
-    } > "${log_file}"
-
-    if openclaw agent \
-      --agent main \
-      --timeout 2400 \
-      --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
-      --thinking high \
-      --session-id "${sessid}" \
-      --message "${prompt}" >>"${log_file}" 2>&1; then
-      echo "news: ${source_id} ok (log: ${log_file})"
-    else
-      local status=$?
-      echo "news: ${source_id} failed (status ${status}); retrying once (log: ${log_file})"
-      local retry_sessid="${sessid}-retry"
-      echo "" >>"${log_file}"
-      echo "--- retry (session ${retry_sessid}) at $(date -u +%FT%TZ) ---" >>"${log_file}"
-      if openclaw agent \
-        --agent main \
-        --timeout 2400 \
-        --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
-        --thinking high \
-        --session-id "${retry_sessid}" \
-        --message "${prompt}" >>"${log_file}" 2>&1; then
-        echo "news: ${source_id} ok on retry (log: ${log_file})"
-      else
-        status=$?
-        echo "news: ${source_id} failed after retry (status ${status}, log: ${log_file})"
-        write_collection_error "${source_id}" "${source_name}" "${url}" "${retry_sessid}" "${status}" "${log_file}"
-        return "${status}"
-      fi
-    fi
+(
+    template,
+    run_date,
+    source_name,
+    source_id,
+    url,
+    news_dir,
+    invest_db,
+    news_exist_command,
+    portfolio_tickers,
+    collection_scope,
+    candidate_file,
+    lookup_file,
+) = sys.argv[1:]
+text = Path(template).read_text(encoding="utf-8")
+replacements = {
+    "DATE": run_date,
+    "SOURCE_NAME": source_name,
+    "SOURCE_ID": source_id,
+    "URL": url,
+    "NEWS_DIR": news_dir,
+    "INVEST_DB": invest_db,
+    "NEWS_EXIST_COMMAND": news_exist_command,
+    "PORTFOLIO_TICKERS": portfolio_tickers,
+    "COLLECT_SCOPE": collection_scope,
+    "CANDIDATE_FILE": candidate_file,
+    "LOOKUP_FILE": lookup_file,
+}
+for name, value in replacements.items():
+    text = text.replace("{{" + name + "}}", value)
+sys.stdout.write(text)
+PY
   }
 
-  # Helper: spawn one web_fetch-based collection agent
-  collect_webfetch() {
-    local source_id="$1" source_name="$2" url="$3" collection_scope="$4"
+  # Spawn one collector. Prompt template and timeout preserve the browser and
+  # web_fetch collectors' different behavior without duplicating process logic.
+  collect_source() {
+    local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
+    local url="$5" collection_scope="$6"
     local sessid="news-${source_id}-$(date +%s)"
     local log_file="${NEWS_LOG_DIR}/${source_id}.log"
     local prompt
-    prompt=$(sed \
-      -e "s|{{DATE}}|${RUN_DATE}|g" \
-      -e "s|{{SOURCE_NAME}}|${source_name}|g" \
-      -e "s|{{SOURCE_ID}}|${source_id}|g" \
-      -e "s|{{URL}}|${url}|g" \
-      -e "s|{{NEWS_DIR}}|${NEWS_DIR}|g" \
-      "${WEBFETCH_PROMPT_TEMPLATE}")
-
-    # Inject dedup slugs from temp file
-    local dedup_content
-    dedup_content=$(cat "$DEDUP_FILE")
-    prompt=$(python3 -c "import sys; t=sys.stdin.read(); t=t.replace('{{DEDUP_SLUGS}}', sys.argv[1]); t=t.replace('{{PORTFOLIO_TICKERS}}', sys.argv[2]); t=t.replace('{{COLLECT_SCOPE}}', sys.argv[3]); print(t)" "$dedup_content" "$PORTFOLIO_TICKERS" "$collection_scope" <<< "$prompt")
+    prompt=$(render_collection_prompt "${prompt_template}" \
+      "$source_name" "$source_id" "$url" "$collection_scope")
 
     {
       echo "source_id: ${source_id}"
@@ -241,32 +245,19 @@ EOF
 
     if openclaw agent \
       --agent main \
-      --timeout 300 \
+      --timeout "${timeout}" \
       --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
       --thinking high \
       --session-id "${sessid}" \
       --message "${prompt}" >>"${log_file}" 2>&1; then
       echo "news: ${source_id} ok (log: ${log_file})"
+      return 0
     else
       local status=$?
-      echo "news: ${source_id} failed (status ${status}); retrying once (log: ${log_file})"
-      local retry_sessid="${sessid}-retry"
-      echo "" >>"${log_file}"
-      echo "--- retry (session ${retry_sessid}) at $(date -u +%FT%TZ) ---" >>"${log_file}"
-      if openclaw agent \
-        --agent main \
-        --timeout 300 \
-        --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
-        --thinking high \
-        --session-id "${retry_sessid}" \
-        --message "${prompt}" >>"${log_file}" 2>&1; then
-        echo "news: ${source_id} ok on retry (log: ${log_file})"
-      else
-        status=$?
-        echo "news: ${source_id} failed after retry (status ${status}, log: ${log_file})"
-        write_collection_error "${source_id}" "${source_name}" "${url}" "${retry_sessid}" "${status}" "${log_file}"
-        return "${status}"
-      fi
+      echo "news: ${source_id} failed (status ${status}, log: ${log_file})"
+      write_collection_error \
+        "${source_id}" "${source_name}" "${url}" "${sessid}" "${status}" "${log_file}"
+      return "${status}"
     fi
   }
 
@@ -281,25 +272,24 @@ EOF
 
       if [[ "$access" == "browser" ]]; then
         echo "  spawning browser agent: ${source_id}"
-        collect_browser "$source_id" "$source_name" "$url" "$collection_scope" &
+        collect_source "${BROWSER_PROMPT_TEMPLATE}" 2400 \
+          "$source_id" "$source_name" "$url" "$collection_scope" &
         PIDS+=($!)
       elif [[ "$access" == "web_fetch" ]]; then
         echo "  spawning web_fetch agent: ${source_id}"
-        collect_webfetch "$source_id" "$source_name" "$url" "$collection_scope" &
+        collect_source "${WEBFETCH_PROMPT_TEMPLATE}" 300 \
+          "$source_id" "$source_name" "$url" "$collection_scope" &
         PIDS+=($!)
       fi
     done < <(jq -c '.[]' "${NEWS_SOURCES}")
   fi
 
-  # Read ir-registry.json and spawn browser agents (batched in groups of 5)
+  # Read ir-registry.json in configurable batches. This avoids a hard-coded
+  # global browser ceiling while allowing operators to increase parallelism.
   if [[ -f "${IR_REGISTRY}" ]]; then
-    IR_BATCH_SIZE=5
-    IR_COUNT=0
     IR_PIDS=()
-
     while IFS= read -r entry; do
       ticker=$(echo "$entry" | jq -r '.security_id')
-      company=$(echo "$entry" | jq -r '.company_name')
       url=$(echo "$entry" | jq -r '.feeds[0].url // empty')
 
       if [[ -z "$url" ]]; then
@@ -307,13 +297,13 @@ EOF
       fi
 
       echo "  spawning IR browser agent: ${ticker}"
-      collect_browser "ir-${ticker}" "IR — ${ticker}" "$url" "New investor-relations releases, filings, earnings materials, capital-allocation announcements, or other material company updates published within the last 3 days." &
+      collect_source "${BROWSER_PROMPT_TEMPLATE}" 2400 \
+        "ir-${ticker}" "IR — ${ticker}" "$url" \
+        "New investor-relations releases, filings, earnings materials, capital-allocation announcements, or other material company updates published within the last 3 days." &
       IR_PIDS+=($!)
-      IR_COUNT=$((IR_COUNT + 1))
 
-      # Wait for batch to complete
-      if [[ $((IR_COUNT % IR_BATCH_SIZE)) -eq 0 ]]; then
-        echo "  waiting for IR batch..."
+      if [[ "${#IR_PIDS[@]}" -ge "${MINERVA_IR_BATCH_SIZE}" ]]; then
+        echo "  waiting for IR batch (${#IR_PIDS[@]} collectors)..."
         for pid in "${IR_PIDS[@]}"; do
           wait "$pid" 2>/dev/null || true
         done
@@ -321,24 +311,20 @@ EOF
       fi
     done < <(jq -c '.[]' "${IR_REGISTRY}")
 
-    # Wait for remaining IR agents
-    if [[ $((IR_COUNT % IR_BATCH_SIZE)) -ne 0 ]]; then
+    if [[ "${#IR_PIDS[@]}" -gt 0 ]]; then
       for pid in "${IR_PIDS[@]}"; do
         wait "$pid" 2>/dev/null || true
       done
     fi
   fi
 
-  # Wait for all editorial/calendar agents
+  # Wait for all collectors.
   echo "  waiting for news agents..."
-  for pid in "${PIDS[@]}"; do
-    wait "$pid" 2>/dev/null || true
-  done
-
-  # Close any leftover browser tabs from collection
-  for alias in $(browser tabs 2>/dev/null | grep -oE 't[0-9]+'); do
-    browser close "$alias" 2>/dev/null || true
-  done
+  if [[ "${#PIDS[@]}" -gt 0 ]]; then
+    for pid in "${PIDS[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  fi
 
   COLLECTION_ERROR_COUNT=$(find "${NEWS_DIR}/raw" -name "*-error.md" 2>/dev/null | wc -l | tr -d ' ')
   if [[ "${COLLECTION_ERROR_COUNT}" -gt 0 ]]; then
@@ -360,7 +346,7 @@ if [[ "${RAW_COUNT}" -gt 0 ]]; then
   run extract-files \
     -f "${NEWS_DIR}/raw/*.md" \
     -o "${NEWS_DIR}/summaries" \
-    --model gemini-3.5-flash \
+    --model gemini-3.6-flash \
     --thinking high \
     --concurrency 4 \
     --force \
@@ -374,27 +360,24 @@ fi
 echo ""
 
 # ── PHASE 2c: Ingest raw + summaries into invest.db ──
-# One writer, single SQLite transaction. Parallel collector agents never
-# open the DB — they only produce markdown into NEWS_RUN_DIR.
+# One writer, single SQLite transaction. Parallel collectors only perform
+# read-only existence checks; they produce markdown into NEWS_RUN_DIR.
 echo "── Phase 2c: Ingest into invest.db ──"
 
-INGEST_SCRIPT="${ROOT_DIR}/scripts/ingest_news.py"
 ingest_report="${NEWS_RUN_DIR}/logs/ingest.log"
 ingest_stats="${NEWS_RUN_DIR}/logs/ingest.json"
 if [[ "${RAW_COUNT}" -gt 0 ]]; then
-  if [[ ! -f "${INGEST_SCRIPT}" ]]; then
-    echo "ingest_news: script not found at ${INGEST_SCRIPT}" >&2
-    exit 1
-  fi
-  if uv run python "${INGEST_SCRIPT}" \
+  if run news ingest \
       --raw-dir "${NEWS_RUN_DIR}/raw" \
       --summaries-dir "${NEWS_RUN_DIR}/summaries" \
       --db "${INVEST_DB}" \
+      --news-sources "${NEWS_SOURCES}" \
+      --ir-registry "${IR_REGISTRY}" \
       --report "${ingest_report}" > "${ingest_stats}"; then
     INGEST_OK=1
     echo "  ingest stats: $(cat "${ingest_stats}")"
   else
-    echo "ingest_news: failed (temp run dir preserved at ${NEWS_RUN_DIR})" >&2
+    echo "news ingest: failed (temp run dir preserved at ${NEWS_RUN_DIR})" >&2
     exit 1
   fi
 else
