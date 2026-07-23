@@ -581,10 +581,11 @@ def test_morning_brief_shell_and_prompts_use_news_cli_contract() -> None:
     assert 'local prompt_template="$1" timeout="$2"' in script
     assert 'MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"' in script
     assert 'MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"' in script
+    assert 'MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"' in script
     assert 'launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}"' in script
     assert 'launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_WEBFETCH_TIMEOUT}"' in script
-    assert "there is no batching or" in script
-    assert "replacement concurrency ceiling" in script
+    assert '"${#PIDS[@]}" -ge "${MINERVA_MAX_COLLECTORS}"' in script
+    assert "wait_for_collectors()" in script
     assert '--concurrency 4' in script
 
     for prompt in (browser_prompt, webfetch_prompt):

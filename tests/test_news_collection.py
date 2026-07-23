@@ -192,6 +192,7 @@ def _run_wrapper(
         ("MINERVA_BROWSER_TIMEOUT", "0"),
         ("MINERVA_BROWSER_TIMEOUT", "not-a-number"),
         ("MINERVA_WEBFETCH_TIMEOUT", "-1"),
+        ("MINERVA_MAX_COLLECTORS", "0"),
     ],
 )
 def test_collector_timeout_validation_precedes_temp_state(
@@ -253,6 +254,7 @@ def test_collectors_are_isolated_launch_all_ir_and_aggregate_every_artifact(
         extra_env={
             "EXPECTED_IR_COUNT": str(len(tickers)),
             "BROKEN_SOURCE": "broken-feed",
+            "MINERVA_MAX_COLLECTORS": "8",
         },
     )
 
