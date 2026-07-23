@@ -19,6 +19,7 @@
 | [17-analyze-business-v2-improvement-plan.md](./17-analyze-business-v2-improvement-plan.md) | file | Improvement plan for analyze-business v2 based on Oracle deep-dive trace analysis. |
 | [18-minerva-extract-cli-tdd-plan.md](./18-minerva-extract-cli-tdd-plan.md) | file | TDD plan for `minerva extract`, legacy multi-question command removal, and new `extract-files`. |
 | [19-bare-invocation-help-plan.md](./19-bare-invocation-help-plan.md) | file | TDD plan: bare `minerva <command>` shows clean help (no error), exit 0. |
+| [21-news-cli-plan.md](./21-news-cli-plan.md) | file | Implementation plan for `minerva news ingest`, deterministic read-only `news exist`, and morning-brief integration. |
 | [analysis/](./analysis/INDEX.md) | folder | Trace analyses and deeper implementation reviews. |
 | [plans/](./plans/) | folder | Additional planning documents. |
 
@@ -28,3 +29,4 @@
 - The evidence starter guide documents current behavior as-tested, including places where coverage and inventory count artifacts rather than logical sources.
 - The V2 redesign doc is the clean-sheet proposal for replacing deterministic bookkeeping with a smaller agentic interface.
 - `18-minerva-extract-cli-tdd-plan.md` is the current plan for fixing the extraction CLI shape before implementation.
+- `21-news-cli-plan.md` defines the approved first-class news CLI, shared article identity, and collector migration.
