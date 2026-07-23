@@ -1,6 +1,7 @@
 Collect news articles from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
 
 Save each article as a separate markdown file in `{{NEWS_DIR}}/raw/`.
+Your isolated source root is `{{NEWS_DIR}}`. Only write within this rendered root.
 
 ## Portfolio context
 
@@ -14,6 +15,7 @@ Our current holdings and watchlist tickers (prioritize articles mentioning these
 
 ## Constraints
 
+- **Source ownership:** never list, read, count, rename, modify, or delete another source's files. Do not inspect parent or sibling directories. For collector working files, use only this source's `raw/`, `candidates/`, and `lookups/` directories under `{{NEWS_DIR}}`, and every file you write must stay within `{{NEWS_DIR}}`.
 - Scan the full landing page and collect every qualifying relevant article. Prioritize: (1) direct relevance to portfolio companies above, (2) macro/market significance, (3) industry trends, (4) geopolitics or politics that affects the economy or markets, (5) genuinely interesting business, technology, science, or world stories a thoughtful investor would want to know. Skip lifestyle, sports, entertainment, and celebrity fluff.
 - **Skip articles older than 3 days** based on the visible publish date. If no date is visible, keep the article as a candidate for the URL-first check below.
 - **Skip database duplicates before opening an article.** Use the deterministic batch lookup below; do not estimate title similarity or calculate article hashes yourself.
@@ -78,6 +80,6 @@ Section: {section if applicable}
 
 - One file per article. Do NOT combine articles into one file.
 - Save the FULL article text, not a summary.
-- Do NOT spawn subagents. Collect all articles yourself in exactly one browser window containing exactly one tab.
+- Do NOT spawn subagents. Collect all articles yourself in exactly one browser window containing exactly one tab. Same-tab navigation is allowed; no additional windows or tabs are allowed.
 - If you detect slug collision (two articles would get the same filename), append a number: `{slug}-2`.
 - Your reply should be brief. All content goes into the files.

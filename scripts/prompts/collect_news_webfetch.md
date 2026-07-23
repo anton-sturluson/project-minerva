@@ -1,6 +1,7 @@
 Collect data from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
 
 Save each item as a separate markdown file in `{{NEWS_DIR}}/raw/`.
+Your isolated source root is `{{NEWS_DIR}}`. Only write within this rendered root.
 
 ## Portfolio context
 
@@ -14,6 +15,7 @@ Our current holdings and watchlist tickers (prioritize items mentioning these):
 
 ## Constraints
 
+- **Source ownership:** never list, read, count, rename, modify, or delete another source's files. Do not inspect parent or sibling directories. For collector working files, use only this source's `raw/`, `candidates/`, and `lookups/` directories under `{{NEWS_DIR}}`, and every file you write must stay within `{{NEWS_DIR}}`.
 - **Skip items older than 3 days** based on the visible date.
 - **Calendar pages:** collect only releases dated from 3 days before {{DATE}} through 7 days after {{DATE}}. Never collect later future entries merely because they appear on the schedule.
 - **Skip database duplicates.** Use the deterministic batch lookup below; do not estimate title similarity or calculate article hashes yourself.
@@ -70,4 +72,5 @@ Section: {category if applicable}
 
 - One file per item. Do NOT combine items into one file.
 - Save the full content, not a summary.
+- Use web_fetch only. Do not open browser windows or tabs; no additional windows or tabs are allowed.
 - Your reply should be brief. All content goes into the files.

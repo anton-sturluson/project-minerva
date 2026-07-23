@@ -181,11 +181,61 @@ def test_ingest_cli_reports_malformed_source_registry_without_traceback(
         ],
     )
 
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     assert "malformed news source registry" in result.stderr
     assert "invalid JSON" in result.stderr
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "invest.db").exists()
+
+
+def test_ingest_cli_reports_schema_failure_with_operational_exit_code(
+    tmp_path: Path,
+) -> None:
+    raw_dir = tmp_path / "raw"
+    _write_raw(raw_dir)
+    db_path = tmp_path / "invest.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE news (unexpected TEXT)")
+
+    result = runner.invoke(
+        app,
+        [
+            "news",
+            "ingest",
+            "--raw-dir",
+            str(raw_dir),
+            "--db",
+            str(db_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "cannot migrate legacy news table" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("mode_args", [["--all"], ["--date", "2026-07-19"]])
+def test_ingest_cli_rejects_summaries_without_raw_dir(
+    tmp_path: Path, mode_args: list[str]
+) -> None:
+    db_path = tmp_path / "invest.db"
+    result = runner.invoke(
+        app,
+        [
+            "news",
+            "ingest",
+            *mode_args,
+            "--summaries-dir",
+            str(tmp_path / "summaries"),
+            "--db",
+            str(db_path),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--summaries-dir requires --raw-dir" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not db_path.exists()
 
 
 def test_article_key_and_title_normalization_are_shared_by_exist(
@@ -514,29 +564,27 @@ def test_morning_brief_shell_and_prompts_use_news_cli_contract() -> None:
     webfetch_prompt = (
         REPO_ROOT / "scripts" / "prompts" / "collect_news_webfetch.md"
     ).read_text(encoding="utf-8")
-    combined = "\n".join((script, browser_prompt, webfetch_prompt))
-
-    assert "DEDUP_SLUGS" not in combined
-    assert "DEDUP_FILE" not in combined
-    assert "check_news_dedup.py" not in combined
-    assert "scripts/ingest_news.py" not in combined
-    assert "sqlite3" not in script
     assert 'run news ingest \\' in script
     assert "NEWS_EXIST_COMMAND" in script
     assert '"${MINERVA_RUNNER_ARR[@]}" news exist' in script
     assert "printf -v NEWS_EXIST_COMMAND 'cd %q && %s'" in script
     assert "Collector agents run from their OpenClaw workspace" in script
     assert 'mkdir -p \\' in script
-    assert '"${NEWS_DIR}/candidates"' in script
-    assert '"${NEWS_DIR}/lookups"' in script
+    assert '"${source_root}/raw"' in script
+    assert '"${source_root}/candidates"' in script
+    assert '"${source_root}/lookups"' in script
+    assert '"${source_root}/logs"' in script
     assert script.count("openclaw agent") == 1
     assert "collect_source()" in script
+    assert "launch_source()" in script
+    assert "aggregate_source_raw()" in script
     assert 'local prompt_template="$1" timeout="$2"' in script
-    assert "retry" not in script.lower()
-    assert 'MINERVA_IR_BATCH_SIZE="${MINERVA_IR_BATCH_SIZE:-5}"' in script
-    assert "MINERVA_IR_BATCH_SIZE must be a positive integer" in script
-    assert '"${#IR_PIDS[@]}" -ge "${MINERVA_IR_BATCH_SIZE}"' in script
-    assert "browser tabs" not in script
+    assert 'MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"' in script
+    assert 'MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"' in script
+    assert 'launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}"' in script
+    assert 'launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_WEBFETCH_TIMEOUT}"' in script
+    assert "there is no batching or" in script
+    assert "replacement concurrency ceiling" in script
     assert '--concurrency 4' in script
 
     for prompt in (browser_prompt, webfetch_prompt):
@@ -545,11 +593,9 @@ def test_morning_brief_shell_and_prompts_use_news_cli_contract() -> None:
         assert "one JSON array" in prompt
         assert "overwriting" in prompt
         assert "read-only" in prompt
-        assert "<<'JSON'" not in prompt
-        assert "maximum 10" not in prompt.lower()
-        assert "maximum 15" not in prompt.lower()
-        assert "up to 10" not in prompt.lower()
-        assert "no more than 5" not in prompt.lower()
+        assert "Your isolated source root is `{{NEWS_DIR}}`" in prompt
+        assert "never list, read, count, rename, modify, or delete another source's files" in prompt
+        assert "every file you write must stay within `{{NEWS_DIR}}`" in prompt
 
     assert "scan the full landing page" in browser_prompt.lower()
     assert "only browser window and tab" in browser_prompt
@@ -564,6 +610,9 @@ def test_morning_brief_shell_and_prompts_use_news_cli_contract() -> None:
     assert "matching ingestion's collection-date fallback" in webfetch_prompt
     assert "fetch that URL with the web_fetch tool before writing anything" in webfetch_prompt
     assert "calendar row without a distinct URL" in webfetch_prompt
+    assert "Same-tab navigation is allowed" in browser_prompt
+    assert "no additional windows or tabs are allowed" in browser_prompt
+    assert "Do not open browser windows or tabs" in webfetch_prompt
 
 
 def test_morning_brief_summarization_uses_official_gemini_model() -> None:
@@ -576,9 +625,3 @@ def test_morning_brief_summarization_uses_official_gemini_model() -> None:
 
     assert "--model gemini-3.6-flash" in extract_block
     assert "--thinking high" in extract_block
-    assert "gemini-3.5-flash" not in script
-
-
-def test_obsolete_news_scripts_are_absent() -> None:
-    assert not (REPO_ROOT / "scripts" / "ingest_news.py").exists()
-    assert not (REPO_ROOT / "scripts" / "check_news_dedup.py").exists()

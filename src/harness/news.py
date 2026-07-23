@@ -24,11 +24,25 @@ META_KEYS = {"source", "url", "published", "collected", "section", "status"}
 DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+class NewsError(Exception):
+    """Base class for expected news-domain failures."""
+
+
+class CandidateInputError(NewsError):
+    """Raised when candidate JSON does not match the lookup contract."""
+
+
+class SourceRegistryError(NewsError):
+    """Raised when an existing source registry is malformed."""
+
+
+class NewsSchemaError(NewsError):
+    """Raised when the news schema cannot be created or migrated safely."""
+
+
 # ---------------------------------------------------------------------------
 # Source-ID resolution
 # ---------------------------------------------------------------------------
-class SourceRegistryError(ValueError):
-    """Raised when an existing source registry is malformed."""
 
 
 def _load_registry_ids(
@@ -526,10 +540,6 @@ def article_key(source_id: str, date_only: str, title: str) -> str:
 # ---------------------------------------------------------------------------
 # Read-only duplicate lookup
 # ---------------------------------------------------------------------------
-class CandidateInputError(ValueError):
-    """Raised when candidate JSON does not match the lookup contract."""
-
-
 @dataclass(frozen=True, slots=True)
 class Candidate:
     """A validated candidate at the JSON/domain boundary."""
@@ -777,7 +787,9 @@ def _migrate_legacy_news(
     missing = required - legacy_columns
     if missing:
         names = ", ".join(sorted(missing))
-        raise RuntimeError(f"cannot migrate legacy news table; missing columns: {names}")
+        raise NewsSchemaError(
+            f"cannot migrate legacy news table; missing columns: {names}"
+        )
 
     select_columns = tuple(column for column in _NEWS_COLUMNS if column != "published_at_raw")
     cursor = conn.execute(f"SELECT {', '.join(select_columns)} FROM news")
@@ -827,13 +839,20 @@ def _migrate_legacy_news(
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create the news schema or atomically migrate the legacy TEXT schema."""
+    """Stage schema creation or migration in the caller-owned transaction.
+
+    The function deliberately never commits. If the caller has not started a
+    transaction, one is opened so even SQLite DDL remains subject to the
+    caller's eventual commit or rollback.
+    """
+    if not conn.in_transaction:
+        conn.execute("BEGIN")
+
     table_exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'news'"
     ).fetchone()
     if table_exists is None:
         _create_news_schema(conn)
-        conn.commit()
         return
 
     column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
@@ -843,12 +862,20 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         _migrate_legacy_news(conn, set(columns))
     else:
         _create_news_schema(conn)
-    conn.commit()
 
 
 # ---------------------------------------------------------------------------
 # Enrichment
 # ---------------------------------------------------------------------------
+def _is_partial_publication(value: str) -> bool:
+    """Return whether a publication value has a year/month but no day."""
+    normalized = value.strip()
+    if re.fullmatch(r"\d{4}(?:-\d{2})?", normalized):
+        return True
+    month_year = re.fullmatch(r"([A-Za-z]+)\.?\s+(\d{4})", normalized)
+    return month_year is not None and _month(month_year.group(1)) is not None
+
+
 def load_enrichment(paths: Iterable[Path]) -> dict[str, str]:
     """Return normalized article-path → published_at from JSONL inputs."""
     out: dict[str, str] = {}
@@ -882,16 +909,7 @@ def load_enrichment(paths: Iterable[Path]) -> dict[str, str]:
                     existing = str(obj.get("existing_published", "")).strip()
                     method = str(obj.get("method", "")).lower()
                     status = str(obj.get("status", "")).lower()
-                    partial_existing = bool(
-                        re.fullmatch(r"\d{4}(?:-\d{2})?", existing)
-                        or re.fullmatch(
-                            r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
-                            r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
-                            r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{4}",
-                            existing,
-                            flags=re.IGNORECASE,
-                        )
-                    )
+                    partial_existing = _is_partial_publication(existing)
                     if partial_existing and (
                         status.startswith("fallback") or "fallback" in method
                     ):
@@ -931,6 +949,14 @@ class Stats:
             "publication_fallbacks": self.publication_fallbacks,
             "db_total": db_total,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class IngestResult:
+    """Reusable ingestion output with statistics and per-file decisions."""
+
+    stats: dict[str, int]
+    report_lines: tuple[str, ...]
 
 
 def _summary_path_for(raw_path: Path, summaries_dir: Path | None) -> Path | None:
@@ -982,17 +1008,17 @@ def ingest(
     explicit_raw: Path | None = None,
     explicit_summaries: Path | None = None,
     enrichment_paths: list[Path] | None = None,
-    report: list[str] | None = None,
-) -> dict[str, int]:
-    """Run the ingestion; return stats dict."""
+) -> IngestResult:
+    """Run one atomic ingestion and return stats plus per-file decisions."""
     known_ids = load_source_ids(news_sources_path, ir_registry_path)
     enrichment = load_enrichment(enrichment_paths or [])
     stats = Stats()
-    report_lines = report if report is not None else []
+    report_lines: list[str] = []
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
+        conn.execute("BEGIN")
         ensure_schema(conn)
         for raw_dir, summaries_dir in _iter_raw_dirs(
             news_root,
@@ -1015,7 +1041,10 @@ def ingest(
         db_total = conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
     finally:
         conn.close()
-    return stats.as_dict(db_total)
+    return IngestResult(
+        stats=stats.as_dict(db_total),
+        report_lines=tuple(report_lines),
+    )
 
 
 def _ingest_one(

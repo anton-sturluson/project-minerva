@@ -85,7 +85,9 @@ def ingest_cli(
         int(all_dates) + int(single_date is not None) + int(raw_dir is not None)
     )
     if selected_modes != 1:
-        _fail("exactly one of --all, --date, or --raw-dir is required")
+        _fail("exactly one of --all, --date, or --raw-dir is required", exit_code=2)
+    if summaries_dir is not None and raw_dir is None:
+        _fail("--summaries-dir requires --raw-dir", exit_code=2)
 
     workspace_root = get_settings().resolved_workspace_root
     resolved_news_root = news_root or workspace_root / "data" / "02-news"
@@ -105,25 +107,29 @@ def ingest_cli(
     )
 
     try:
-        stats, report_lines = _ingest(
+        result = news.ingest(
+            db_path=resolved_db_path,
+            news_root=resolved_news_root,
+            news_sources_path=resolved_news_sources,
+            ir_registry_path=resolved_ir_registry,
             all_dates=all_dates,
             single_date=single_date,
-            raw_dir=raw_dir,
-            summaries_dir=summaries_dir,
-            news_root=resolved_news_root,
-            db_path=resolved_db_path,
-            news_sources=resolved_news_sources,
-            ir_registry=resolved_ir_registry,
-            enrich=enrich,
+            explicit_raw=raw_dir,
+            explicit_summaries=summaries_dir,
+            enrichment_paths=enrich,
         )
         if report is not None:
             report.parent.mkdir(parents=True, exist_ok=True)
-            report.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
-    except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
-        _fail(str(exc))
+            report.write_text(
+                "\n".join(result.report_lines) + "\n", encoding="utf-8"
+            )
+    except news.NewsError as exc:
+        _fail(str(exc), exit_code=1)
+    except (OSError, sqlite3.Error) as exc:
+        _fail(str(exc), exit_code=1)
 
     # Preserve the ingestion script's one-line, sorted JSON stdout contract.
-    typer.echo(json.dumps(stats, sort_keys=True))
+    typer.echo(json.dumps(result.stats, sort_keys=True))
 
 
 @app.command("exist")
@@ -146,38 +152,14 @@ def exist_cli(
         raw = _read_candidate_input(input_path)
         candidates = news.parse_candidates(raw)
         result = news.check_candidates(db_path, source_id, candidates)
-    except (OSError, ValueError, sqlite3.Error) as exc:
-        _fail(str(exc))
+    except news.CandidateInputError as exc:
+        _fail(str(exc), exit_code=2)
+    except news.NewsError as exc:
+        _fail(str(exc), exit_code=1)
+    except (OSError, sqlite3.Error) as exc:
+        _fail(str(exc), exit_code=1)
 
     typer.echo(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
-
-
-def _ingest(
-    *,
-    all_dates: bool,
-    single_date: str | None,
-    raw_dir: Path | None,
-    summaries_dir: Path | None,
-    news_root: Path,
-    db_path: Path,
-    news_sources: Path,
-    ir_registry: Path,
-    enrich: list[Path],
-) -> tuple[dict[str, int], list[str]]:
-    report_lines: list[str] = []
-    stats = news.ingest(
-        db_path=db_path,
-        news_root=news_root,
-        news_sources_path=news_sources,
-        ir_registry_path=ir_registry,
-        all_dates=all_dates,
-        single_date=single_date,
-        explicit_raw=raw_dir,
-        explicit_summaries=summaries_dir,
-        enrichment_paths=enrich,
-        report=report_lines,
-    )
-    return stats, report_lines
 
 
 def _read_candidate_input(input_path: str) -> str:
@@ -186,6 +168,6 @@ def _read_candidate_input(input_path: str) -> str:
     return Path(input_path).read_text(encoding="utf-8")
 
 
-def _fail(message: str) -> NoReturn:
+def _fail(message: str, *, exit_code: int) -> NoReturn:
     typer.echo(f"error: {message}", err=True)
-    raise typer.Exit(2)
+    raise typer.Exit(exit_code)

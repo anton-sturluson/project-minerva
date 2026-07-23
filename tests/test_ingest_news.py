@@ -58,7 +58,7 @@ def _epoch(iso_utc: str) -> int:
 
 def _ingest(tmp_path: Path, raw_dir: Path, *, summaries_dir=None, enrichment=None) -> tuple[dict[str, int], Path]:
     db = tmp_path / "test.db"
-    stats = ingest_news.ingest(
+    result = ingest_news.ingest(
         db_path=db,
         news_root=tmp_path,
         news_sources_path=_sources_json(tmp_path),
@@ -67,12 +67,18 @@ def _ingest(tmp_path: Path, raw_dir: Path, *, summaries_dir=None, enrichment=Non
         explicit_summaries=summaries_dir,
         enrichment_paths=enrichment or [],
     )
-    return stats, db
+    return result.stats, db
 
 
 # ---------------------------------------------------------------------------
 # 1. source registries and schema idempotency
 # ---------------------------------------------------------------------------
+def test_news_errors_have_domain_specific_types() -> None:
+    assert issubclass(ingest_news.CandidateInputError, ingest_news.NewsError)
+    assert issubclass(ingest_news.SourceRegistryError, ingest_news.NewsError)
+    assert issubclass(ingest_news.NewsSchemaError, ingest_news.NewsError)
+
+
 def test_absent_optional_source_registries_are_empty(tmp_path: Path) -> None:
     assert ingest_news.load_source_ids(
         tmp_path / "missing-news.json", tmp_path / "missing-ir.json"
@@ -106,6 +112,7 @@ def test_schema_ensure_is_idempotent(tmp_path: Path) -> None:
     try:
         ingest_news.ensure_schema(conn)
         ingest_news.ensure_schema(conn)  # second call must not raise
+        conn.commit()
         column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
         indexes = {
             row[1] for row in conn.execute("PRAGMA index_list(news)").fetchall()
@@ -136,6 +143,22 @@ def test_schema_ensure_is_idempotent(tmp_path: Path) -> None:
     assert columns["published_at_raw"][3] == 1
     assert "idx_news_url" in indexes
     assert any("idx_news_url" in str(row[3]) for row in url_query_plan)
+
+
+def test_ensure_schema_does_not_commit_callers_pending_write(tmp_path: Path) -> None:
+    db = tmp_path / "transaction.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE unrelated (value TEXT NOT NULL)")
+        conn.commit()
+        conn.execute("INSERT INTO unrelated VALUES ('pending')")
+
+        ingest_news.ensure_schema(conn)
+        conn.rollback()
+
+        assert conn.execute("SELECT value FROM unrelated").fetchall() == []
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'news'"
+        ).fetchone() is None
 
 
 def test_schema_migrates_legacy_text_rows_and_is_idempotent(tmp_path: Path) -> None:
@@ -190,6 +213,7 @@ def test_schema_migrates_legacy_text_rows_and_is_idempotent(tmp_path: Path) -> N
 
         ingest_news.ensure_schema(conn)
         ingest_news.ensure_schema(conn)
+        conn.commit()
 
         column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
         rows = conn.execute(
@@ -482,8 +506,36 @@ def test_missing_publication_day_falls_back_to_collection_date(tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
-# 5. nullable summary
+# 5. reusable result and nullable summary
 # ---------------------------------------------------------------------------
+def test_ingest_returns_stats_and_report_lines(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    _write_raw(
+        raw,
+        "wsj-fallback.md",
+        {
+            "Source": "WSJ",
+            "URL": "https://x",
+            "Published": "",
+            "Collected": "2026-07-19T04:00:00Z",
+        },
+        "Fallback Story",
+        "Article body.",
+    )
+
+    result = ingest_news.ingest(
+        db_path=tmp_path / "result.db",
+        news_root=tmp_path,
+        news_sources_path=_sources_json(tmp_path),
+        ir_registry_path=_ir_json(tmp_path),
+        explicit_raw=raw,
+    )
+
+    assert isinstance(result, ingest_news.IngestResult)
+    assert result.stats["inserted"] == 1
+    assert result.report_lines == (f"fallback:publication-date\t{raw / 'wsj-fallback.md'}",)
+
+
 def test_summary_is_nullable(tmp_path: Path) -> None:
     raw = tmp_path / "raw"
     _write_raw(
@@ -544,16 +596,16 @@ def test_duplicate_reingest_keeps_one_row(tmp_path: Path) -> None:
         "Story X",
         "Body v2.",
     )
-    stats2 = ingest_news.ingest(
+    result2 = ingest_news.ingest(
         db_path=db,
         news_root=tmp_path,
         news_sources_path=_sources_json(tmp_path),
         ir_registry_path=_ir_json(tmp_path),
         explicit_raw=raw,
     )
-    assert stats2["inserted"] == 0
-    assert stats2["duplicates"] == 1
-    assert stats2["db_total"] == 1
+    assert result2.stats["inserted"] == 0
+    assert result2.stats["duplicates"] == 1
+    assert result2.stats["db_total"] == 1
 
     with sqlite3.connect(db) as conn:
         collected, published, published_raw, content = conn.execute(
@@ -650,12 +702,20 @@ def test_enrichment_does_not_fabricate_midnight_time(tmp_path: Path) -> None:
     assert published_raw == "2026-07-14T00:00:00"
 
 
-def test_fallback_enrichment_does_not_expand_partial_date(tmp_path: Path) -> None:
+@pytest.mark.parametrize("partial_month", ["Sept 2026", "Sept. 2026"])
+def test_fallback_enrichment_does_not_expand_partial_month(
+    tmp_path: Path, partial_month: str
+) -> None:
     raw = tmp_path / "raw"
     path = _write_raw(
         raw,
         "ir-AMZN-month-only.md",
-        {"Source": "IR", "URL": "https://x", "Published": "March 2026", "Collected": "2026-07-15T04:00:00Z"},
+        {
+            "Source": "IR",
+            "URL": "https://x",
+            "Published": partial_month,
+            "Collected": "2026-07-15T04:00:00Z",
+        },
         "Month Only",
         "Body.",
     )
@@ -664,8 +724,8 @@ def test_fallback_enrichment_does_not_expand_partial_date(tmp_path: Path) -> Non
         json.dumps(
             {
                 "path": str(path),
-                "existing_published": "March 2026",
-                "published_at": "2026-03-01",
+                "existing_published": partial_month,
+                "published_at": "2026-09-01",
                 "precision": "date",
                 "method": "fallback:existing_no_meta",
                 "status": "fallback",
@@ -681,7 +741,7 @@ def test_fallback_enrichment_does_not_expand_partial_date(tmp_path: Path) -> Non
             "SELECT published_at, published_at_raw FROM news"
         ).fetchone()
     assert published == _epoch("2026-07-15T00:00:00Z")
-    assert published_raw == "March 2026"
+    assert published_raw == partial_month
 
 
 # ---------------------------------------------------------------------------
@@ -709,18 +769,18 @@ def test_end_to_end_backfill(tmp_path: Path) -> None:
         (summaries / filename).write_text(f"Summary of {title}.", encoding="utf-8")
 
     db = tmp_path / "backfill.db"
-    stats = ingest_news.ingest(
+    result = ingest_news.ingest(
         db_path=db,
         news_root=tmp_path,
         news_sources_path=_sources_json(tmp_path),
         ir_registry_path=_ir_json(tmp_path),
         all_dates=True,
     )
-    assert stats["eligible"] == 4
-    assert stats["inserted"] == 4
-    assert stats["duplicates"] == 0
-    assert stats["missing_summaries"] == 0
-    assert stats["db_total"] == 4
+    assert result.stats["eligible"] == 4
+    assert result.stats["inserted"] == 4
+    assert result.stats["duplicates"] == 0
+    assert result.stats["missing_summaries"] == 0
+    assert result.stats["db_total"] == 4
 
     with sqlite3.connect(db) as conn:
         sources = {row[0] for row in conn.execute("SELECT source FROM news")}
@@ -767,6 +827,6 @@ def test_end_to_end_backfill(tmp_path: Path) -> None:
         ir_registry_path=_ir_json(tmp_path),
         all_dates=True,
     )
-    assert rerun["inserted"] == 0
-    assert rerun["duplicates"] == 4
-    assert rerun["db_total"] == 4
+    assert rerun.stats["inserted"] == 0
+    assert rerun.stats["duplicates"] == 4
+    assert rerun.stats["db_total"] == 4
