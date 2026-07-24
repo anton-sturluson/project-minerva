@@ -121,6 +121,101 @@ def test_irr_cli_rejects_negative_cash_distribution(tmp_path: Path) -> None:
     assert "cash_distributions must be non-negative" in result.stderr.decode("utf-8")
 
 
+def test_irr_cli_generates_cash_flows_from_year_zero_base_with_default_years(
+    tmp_path: Path,
+) -> None:
+    result = dispatch(
+        [
+            "irr",
+            "--value",
+            "78.85714285714286",
+            "--base-cash-flow",
+            "4",
+            "--growth",
+            "0.10",
+            "--terminal-growth",
+            "0.03",
+        ],
+        settings=HarnessSettings(workspace_root=tmp_path),
+    )
+
+    assert result.exit_code == 0
+    assert "implied_return: 10.0%" in result.stdout.decode("utf-8")
+
+
+def test_irr_cli_rejects_mixed_cash_flow_input_modes(tmp_path: Path) -> None:
+    result = dispatch(
+        [
+            "irr",
+            "--value",
+            "100",
+            "--cash-flows",
+            "5,6,7",
+            "--base-cash-flow",
+            "5",
+            "--growth",
+            "0.10",
+            "--terminal-growth",
+            "0.03",
+        ],
+        settings=HarnessSettings(workspace_root=tmp_path),
+    )
+
+    assert result.exit_code == 1
+    assert (
+        "--cash-flows cannot be combined with --base-cash-flow or --growth"
+        in result.stderr.decode("utf-8")
+    )
+
+
+def test_irr_cli_requires_base_cash_flow_and_growth_together(tmp_path: Path) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path)
+
+    for incomplete_mode in (
+        ["--base-cash-flow", "5"],
+        ["--growth", "0.10"],
+    ):
+        result = dispatch(
+            [
+                "irr",
+                "--value",
+                "100",
+                *incomplete_mode,
+                "--terminal-growth",
+                "0.03",
+            ],
+            settings=settings,
+        )
+
+        assert result.exit_code == 1
+        assert (
+            "generated cash flows require both --base-cash-flow and --growth"
+            in result.stderr.decode("utf-8")
+        )
+
+
+def test_irr_cli_requires_positive_years_for_generated_cash_flows(tmp_path: Path) -> None:
+    result = dispatch(
+        [
+            "irr",
+            "--value",
+            "100",
+            "--base-cash-flow",
+            "5",
+            "--growth",
+            "0.10",
+            "--years",
+            "0",
+            "--terminal-growth",
+            "0.03",
+        ],
+        settings=HarnessSettings(workspace_root=tmp_path),
+    )
+
+    assert result.exit_code == 1
+    assert "--years must be greater than zero" in result.stderr.decode("utf-8")
+
+
 def test_sotp_command_returns_expected_summary_and_table(tmp_path: Path) -> None:
     settings = HarnessSettings(workspace_root=tmp_path)
     segments = json.dumps(
