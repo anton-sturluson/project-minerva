@@ -26,7 +26,7 @@ VALUATION_HELP = (
     "Examples:\n"
     "  minerva valuation dcf --revenue 394e9 --growth 0.06,0.05,0.04 --margins 0.28,0.29,0.30 --wacc 0.10 --terminal-growth 0.03 --shares 15.5e9 --net-cash 57e9\n"
     "  minerva valuation comps --ntm-revenue 420e9 --ntm-ebitda 140e9 --ntm-fcf 110e9 --shares 15.5e9 --net-cash 57e9 --ev-rev 8.5 --ev-ebitda 25 --p-fcf 30\n"
-    "  minerva valuation implied-return --value 5000 --cash-flows 180,190,205 --terminal-growth 0.04 --risk-free 0.043\n"
+    "  minerva valuation irr --value 5000 --cash-flows 180,190,205 --terminal-growth 0.04 --risk-free 0.043\n"
     "  minerva valuation report --ticker AAPL --config valuation.json --output valuation.md\n"
 )
 
@@ -108,11 +108,11 @@ def dispatch(
             export_path=str(parsed["export"]) if "export" in parsed else None,
             settings=settings,
         )
-    if subcommand == "implied-return":
+    if subcommand == "irr":
         required = ["value", "cash-flows", "terminal-growth"]
         if missing := [name for name in required if name not in parsed]:
-            return _dispatch_help("implied-return", missing)
-        return run_implied_return_command(
+            return _dispatch_help("irr", missing)
+        return run_irr_command(
             value=float(parsed["value"]),
             cash_flows_csv=str(parsed["cash-flows"]),
             terminal_growth=float(parsed["terminal-growth"]),
@@ -344,7 +344,7 @@ def run_reverse_dcf_command(
     output += maybe_export_text(output, export_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
 
-def run_implied_return_command(
+def run_irr_command(
     *,
     value: float,
     cash_flows_csv: str,
@@ -366,14 +366,14 @@ def run_implied_return_command(
         )
     except Exception as exc:
         return error_result(
-            f"failed to solve implied return: {exc}",
+            f"failed to solve valuation IRR: {exc}",
             "provide a positive value, non-negative annual cash flows, and a valid terminal growth rate",
             ["`valuation reverse-dcf --price ...`", "`valuation dcf --revenue ...`"],
             start,
         )
 
     lines: list[str] = [
-        "## Market-Implied Equity Return",
+        "## Implied Equity IRR",
         "",
         f"current_value: {result.current_value:,.2f}",
         f"implied_return: {format_pct(result.implied_return * 100)}",
@@ -686,15 +686,15 @@ def reverse_dcf_command(
     )
 
 @app.command(
-    "implied-return",
+    "irr",
     help=(
-        "Solve for the annual equity return implied by current value and shareholder cash distributions.\n\n"
+        "Solve for the equity IRR implied by current value and shareholder cash distributions.\n\n"
         "Example:\n"
-        "  minerva valuation implied-return --value 5000 --cash-flows 180,190,205 "
+        "  minerva valuation irr --value 5000 --cash-flows 180,190,205 "
         "--terminal-growth 0.04 --risk-free 0.043"
     ),
 )
-def implied_return_command(
+def irr_command(
     ctx: typer.Context,
     value: float | None = typer.Option(
         None,
@@ -722,15 +722,15 @@ def implied_return_command(
     if None in {value, cash_flows, terminal_growth}:
         abort_with_help(
             ctx,
-            what_went_wrong="missing required implied-return inputs",
+            what_went_wrong="missing required IRR inputs",
             what_to_do="provide current value, annual cash distributions, and terminal growth",
             alternatives=[
-                "`minerva valuation implied-return --value 5000 --cash-flows 180,190,205 --terminal-growth 0.04`",
+                "`minerva valuation irr --value 5000 --cash-flows 180,190,205 --terminal-growth 0.04`",
                 "`minerva valuation reverse-dcf --price 220 ...`",
             ],
         )
     _print(
-        run_implied_return_command(
+        run_irr_command(
             value=float(value),
             cash_flows_csv=str(cash_flows),
             terminal_growth=float(terminal_growth),
@@ -790,7 +790,7 @@ def _dispatch_help(subcommand: str, missing: list[str]) -> CommandResult:
         "dcf": "valuation dcf --revenue <float> --growth <csv> --margins <csv> --wacc <float> --terminal-growth <float> --shares <float> --net-cash <float> [--fcf <float>] [--export PATH]",
         "comps": "valuation comps --ntm-revenue <float> --ntm-ebitda <float> --ntm-fcf <float> --shares <float> --net-cash <float> --ev-rev <float> --ev-ebitda <float> --p-fcf <float> [--export PATH]",
         "reverse-dcf": "valuation reverse-dcf --price <float> --shares <float> --net-cash <float> --base-revenue <float> --margins <csv> --wacc <float> --terminal-growth <float> [--export PATH]",
-        "implied-return": "valuation implied-return --value <float> --cash-flows <csv> --terminal-growth <float> [--risk-free <float>] [--export PATH]",
+        "irr": "valuation irr --value <float> --cash-flows <csv> --terminal-growth <float> [--risk-free <float>] [--export PATH]",
         "sotp": "valuation sotp --segments <json-or-path> --net-cash <float> --shares <float> [--export PATH]",
         "report": "valuation report --ticker <ticker> --config <json-file> --output <markdown-file>",
     }

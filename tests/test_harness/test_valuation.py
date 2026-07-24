@@ -76,10 +76,10 @@ def test_reverse_dcf_command_returns_expected_summary(tmp_path: Path) -> None:
     assert "implied_revenue_growth: 35.0%" in output
 
 
-def test_implied_return_cli_reports_known_return_and_optional_erp(tmp_path: Path) -> None:
+def test_irr_cli_reports_known_return_and_optional_erp(tmp_path: Path) -> None:
     settings = HarnessSettings(workspace_root=tmp_path)
     args = [
-        "implied-return",
+        "irr",
         "--value",
         "78.60684769775676",
         "--cash-flows",
@@ -102,10 +102,10 @@ def test_implied_return_cli_reports_known_return_and_optional_erp(tmp_path: Path
     assert "equity_risk_premium" not in output_without_risk_free
 
 
-def test_implied_return_cli_rejects_negative_cash_distribution(tmp_path: Path) -> None:
+def test_irr_cli_rejects_negative_cash_distribution(tmp_path: Path) -> None:
     result = dispatch(
         [
-            "implied-return",
+            "irr",
             "--value",
             "100",
             "--cash-flows",
@@ -117,7 +117,7 @@ def test_implied_return_cli_rejects_negative_cash_distribution(tmp_path: Path) -
     )
 
     assert result.exit_code == 1
-    assert "What went wrong: failed to solve implied return" in result.stderr.decode("utf-8")
+    assert "What went wrong: failed to solve valuation IRR" in result.stderr.decode("utf-8")
     assert "cash_distributions must be non-negative" in result.stderr.decode("utf-8")
 
 
