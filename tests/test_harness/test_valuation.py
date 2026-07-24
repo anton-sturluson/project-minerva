@@ -5,6 +5,7 @@ from pathlib import Path
 
 from harness.commands.valuation import (
     _load_segments_payload,
+    dispatch,
     run_comps_command,
     run_dcf_command,
     run_report_command,
@@ -73,6 +74,51 @@ def test_reverse_dcf_command_returns_expected_summary(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "current_price: $25.00" in output
     assert "implied_revenue_growth: 35.0%" in output
+
+
+def test_implied_return_cli_reports_known_return_and_optional_erp(tmp_path: Path) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path)
+    args = [
+        "implied-return",
+        "--value",
+        "78.60684769775676",
+        "--cash-flows",
+        "4,5,6",
+        "--terminal-growth",
+        "0.03",
+    ]
+
+    without_risk_free = dispatch(args, settings=settings)
+    with_risk_free = dispatch([*args, "--risk-free", "0.04"], settings=settings)
+
+    output_without_risk_free = without_risk_free.stdout.decode("utf-8")
+    output = with_risk_free.stdout.decode("utf-8")
+    assert without_risk_free.exit_code == 0
+    assert "implied_return: 10.0%" in output_without_risk_free
+    assert with_risk_free.exit_code == 0
+    assert "current_value: 78.61" in output
+    assert "implied_return: 10.0%" in output
+    assert "equity_risk_premium: 6.0%" in output
+    assert "equity_risk_premium" not in output_without_risk_free
+
+
+def test_implied_return_cli_rejects_negative_cash_distribution(tmp_path: Path) -> None:
+    result = dispatch(
+        [
+            "implied-return",
+            "--value",
+            "100",
+            "--cash-flows",
+            "5,-1,6",
+            "--terminal-growth",
+            "0.03",
+        ],
+        settings=HarnessSettings(workspace_root=tmp_path),
+    )
+
+    assert result.exit_code == 1
+    assert "What went wrong: failed to solve implied return" in result.stderr.decode("utf-8")
+    assert "cash_distributions must be non-negative" in result.stderr.decode("utf-8")
 
 
 def test_sotp_command_returns_expected_summary_and_table(tmp_path: Path) -> None:
