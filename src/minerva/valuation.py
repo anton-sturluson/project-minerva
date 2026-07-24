@@ -1,7 +1,10 @@
 """Valuation models and calculation engine for equity analysis.
 
-Supports DCF, comparable company analysis, reverse DCF, and sum-of-the-parts.
+Supports DCF, comparable company analysis, reverse DCF, market-implied returns,
+and sum-of-the-parts.
 """
+
+import math
 
 from pydantic import BaseModel, Field
 
@@ -101,6 +104,15 @@ class ReverseDCFResult(BaseModel):
     implied_revenue_growth: float = Field(description="Constant annual growth rate implied")
     implied_year5_revenue: float
     implied_year5_fcf: float
+    assumptions_note: str
+
+
+class ImpliedReturnResult(BaseModel):
+    """Annual equity return implied by value and shareholder distributions."""
+
+    current_value: float
+    implied_return: float
+    equity_risk_premium: float | None = None
     assumptions_note: str
 
 
@@ -270,6 +282,93 @@ def run_reverse_dcf(
         assumptions_note=(
             f"Assumes FCF margins expanding to {final_margin:.0%} by year {projection_years}, "
             f"WACC={wacc:.1%}, terminal growth={terminal_growth:.1%}"
+        ),
+    )
+
+
+def run_implied_return(
+    current_value: float,
+    cash_distributions: list[float],
+    terminal_growth: float,
+    risk_free_rate: float | None = None,
+) -> ImpliedReturnResult:
+    """Solve for the annual equity return implied by shareholder distributions."""
+    inputs: list[float] = [current_value, terminal_growth, *cash_distributions]
+    if risk_free_rate is not None:
+        inputs.append(risk_free_rate)
+    if not all(math.isfinite(value) for value in inputs):
+        raise ValueError("all inputs must be finite")
+    if current_value <= 0:
+        raise ValueError("current_value must be greater than zero")
+    if not cash_distributions:
+        raise ValueError("cash_distributions must contain at least one annual value")
+    if any(distribution < 0 for distribution in cash_distributions):
+        raise ValueError("cash_distributions must be non-negative")
+    if not any(cash_distributions):
+        raise ValueError("cash_distributions must contain at least one positive value")
+    if terminal_growth <= -1:
+        raise ValueError("terminal_growth must be greater than -100%")
+    if risk_free_rate is not None and risk_free_rate <= -1:
+        raise ValueError("risk_free_rate must be greater than -100%")
+
+    final_distribution: float = cash_distributions[-1]
+
+    def _present_value(equity_return: float) -> float:
+        discount_factor: float = 1.0
+        present_value: float = 0.0
+        for distribution in cash_distributions:
+            discount_factor /= 1 + equity_return
+            if distribution:
+                present_value += distribution * discount_factor
+        if final_distribution:
+            terminal_distribution: float = final_distribution * (1 + terminal_growth)
+            present_value += (
+                terminal_distribution
+                / (equity_return - terminal_growth)
+                * discount_factor
+            )
+        return present_value
+
+    low: float = math.nextafter(terminal_growth, math.inf)
+    if _present_value(low) <= current_value:
+        raise ValueError(
+            "no implied return greater than terminal_growth satisfies the supplied value"
+        )
+
+    high: float = max(
+        0.10,
+        terminal_growth + max(0.01, abs(1 + terminal_growth) * 0.01),
+    )
+    for _ in range(256):
+        if _present_value(high) <= current_value:
+            break
+        high = (1 + high) * 2 - 1
+        if not math.isfinite(high):
+            raise ValueError("could not bracket an implied return for the supplied inputs")
+    else:
+        raise ValueError("could not bracket an implied return for the supplied inputs")
+
+    for _ in range(200):
+        mid: float = low + (high - low) / 2
+        if _present_value(mid) > current_value:
+            low = mid
+        else:
+            high = mid
+        if high - low <= 1e-12 * max(1.0, abs(mid)):
+            break
+
+    implied_return: float = low + (high - low) / 2
+    equity_risk_premium: float | None = (
+        implied_return - risk_free_rate if risk_free_rate is not None else None
+    )
+    return ImpliedReturnResult(
+        current_value=current_value,
+        implied_return=implied_return,
+        equity_risk_premium=equity_risk_premium,
+        assumptions_note=(
+            f"Assumes {len(cash_distributions)} annual year-end cash distributions, "
+            f"a perpetuity growing at {terminal_growth:.1%} after year "
+            f"{len(cash_distributions)}, and a constant annual equity return."
         ),
     )
 

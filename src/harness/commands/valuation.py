@@ -26,6 +26,8 @@ VALUATION_HELP = (
     "Examples:\n"
     "  minerva valuation dcf --revenue 394e9 --growth 0.06,0.05,0.04 --margins 0.28,0.29,0.30 --wacc 0.10 --terminal-growth 0.03 --shares 15.5e9 --net-cash 57e9\n"
     "  minerva valuation comps --ntm-revenue 420e9 --ntm-ebitda 140e9 --ntm-fcf 110e9 --shares 15.5e9 --net-cash 57e9 --ev-rev 8.5 --ev-ebitda 25 --p-fcf 30\n"
+    "  minerva valuation irr --value 5000 --cash-flows 180,190,205 --terminal-growth 0.04 --risk-free 0.043\n"
+    "  minerva valuation irr --value 5000 --base-cash-flow 170 --growth 0.06 --years 5 --terminal-growth 0.04\n"
     "  minerva valuation report --ticker AAPL --config valuation.json --output valuation.md\n"
 )
 
@@ -104,6 +106,21 @@ def dispatch(
             wacc=float(parsed["wacc"]),
             terminal_growth=float(parsed["terminal-growth"]),
             years=int(parsed.get("years", 5)),
+            export_path=str(parsed["export"]) if "export" in parsed else None,
+            settings=settings,
+        )
+    if subcommand == "irr":
+        required = ["value", "terminal-growth"]
+        if missing := [name for name in required if name not in parsed]:
+            return _dispatch_help("irr", missing)
+        return run_irr_command(
+            value=float(parsed["value"]),
+            terminal_growth=float(parsed["terminal-growth"]),
+            cash_flows_csv=str(parsed["cash-flows"]) if "cash-flows" in parsed else None,
+            base_cash_flow=float(parsed["base-cash-flow"]) if "base-cash-flow" in parsed else None,
+            growth=float(parsed["growth"]) if "growth" in parsed else None,
+            years=int(parsed.get("years", 5)),
+            risk_free=float(parsed["risk-free"]) if "risk-free" in parsed else None,
             export_path=str(parsed["export"]) if "export" in parsed else None,
             settings=settings,
         )
@@ -328,6 +345,74 @@ def run_reverse_dcf_command(
             f"assumptions_note: {result.assumptions_note}",
         ]
     )
+    output += maybe_export_text(output, export_path)
+    return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
+
+def run_irr_command(
+    *,
+    value: float,
+    terminal_growth: float,
+    cash_flows_csv: str | None = None,
+    base_cash_flow: float | None = None,
+    growth: float | None = None,
+    years: int = 5,
+    risk_free: float | None = None,
+    export_path: str | None = None,
+    settings: HarnessSettings,
+) -> CommandResult:
+    start: float = time.perf_counter()
+    try:
+        from minerva.formatting import format_pct
+        from minerva.valuation import run_implied_return
+
+        if years <= 0:
+            raise ValueError("--years must be greater than zero")
+        generated_input_supplied: bool = base_cash_flow is not None or growth is not None
+        if cash_flows_csv is not None and generated_input_supplied:
+            raise ValueError(
+                "--cash-flows cannot be combined with --base-cash-flow or --growth"
+            )
+        if cash_flows_csv is not None:
+            cash_distributions: list[float] = parse_csv_floats(cash_flows_csv)
+        else:
+            if base_cash_flow is None or growth is None:
+                raise ValueError(
+                    "generated cash flows require both --base-cash-flow and --growth"
+                )
+            cash_distributions = [
+                base_cash_flow * (1 + growth) ** year
+                for year in range(1, years + 1)
+            ]
+
+        result = run_implied_return(
+            current_value=value,
+            cash_distributions=cash_distributions,
+            terminal_growth=terminal_growth,
+            risk_free_rate=risk_free,
+        )
+    except Exception as exc:
+        return error_result(
+            f"failed to solve valuation IRR: {exc}",
+            "provide either annual cash flows or a base cash flow with growth, plus a positive value and valid terminal growth rate",
+            [
+                "`valuation irr --value 5000 --cash-flows 180,190,205 --terminal-growth 0.04`",
+                "`valuation irr --value 5000 --base-cash-flow 170 --growth 0.06 --terminal-growth 0.04`",
+            ],
+            start,
+        )
+
+    lines: list[str] = [
+        "## Implied Equity IRR",
+        "",
+        f"current_value: {result.current_value:,.2f}",
+        f"implied_return: {format_pct(result.implied_return * 100)}",
+    ]
+    if result.equity_risk_premium is not None:
+        lines.append(
+            f"equity_risk_premium: {format_pct(result.equity_risk_premium * 100)}"
+        )
+    lines.append(f"assumptions_note: {result.assumptions_note}")
+    output: str = "\n".join(lines)
     output += maybe_export_text(output, export_path)
     return CommandResult.from_text(output, duration_ms=elapsed_ms(start))
 
@@ -629,6 +714,82 @@ def reverse_dcf_command(
         )
     )
 
+@app.command(
+    "irr",
+    help=(
+        "Solve for the equity IRR implied by current value and shareholder cash distributions.\n\n"
+        "Examples:\n"
+        "  minerva valuation irr --value 5000 --cash-flows 180,190,205 "
+        "--terminal-growth 0.04 --risk-free 0.043\n"
+        "  minerva valuation irr --value 5000 --base-cash-flow 170 --growth 0.06 "
+        "--years 5 --terminal-growth 0.04"
+    ),
+)
+def irr_command(
+    ctx: typer.Context,
+    value: float | None = typer.Option(
+        None,
+        "--value",
+        help="Current index or equity value in the same units as cash flows.",
+    ),
+    cash_flows: str | None = typer.Option(
+        None,
+        "--cash-flows",
+        help="Annual shareholder cash distributions (e.g. dividends plus buybacks) as CSV values.",
+    ),
+    base_cash_flow: float | None = typer.Option(
+        None,
+        "--base-cash-flow",
+        help="Year 0 shareholder cash distribution used with --growth.",
+    ),
+    growth: float | None = typer.Option(
+        None,
+        "--growth",
+        help="Annual cash distribution growth rate as a decimal, used with --base-cash-flow.",
+    ),
+    years: int = typer.Option(
+        5,
+        "--years",
+        help="Number of annual cash distributions to generate (default: 5).",
+    ),
+    terminal_growth: float | None = typer.Option(
+        None,
+        "--terminal-growth",
+        help="Perpetual growth rate after the final cash distribution.",
+    ),
+    risk_free: float | None = typer.Option(
+        None,
+        "--risk-free",
+        help="Optional risk-free rate used to calculate equity risk premium.",
+    ),
+    export: str | None = typer.Option(None, "--export", help="Save full output to file."),
+) -> None:
+    settings = get_settings()
+    if None in {value, terminal_growth}:
+        abort_with_help(
+            ctx,
+            what_went_wrong="missing required IRR inputs",
+            what_to_do="provide current value, terminal growth, and one cash flow input mode",
+            alternatives=[
+                "`minerva valuation irr --value 5000 --cash-flows 180,190,205 --terminal-growth 0.04`",
+                "`minerva valuation irr --value 5000 --base-cash-flow 170 --growth 0.06 --terminal-growth 0.04`",
+            ],
+        )
+    result: CommandResult = run_irr_command(
+        value=float(value),
+        terminal_growth=float(terminal_growth),
+        cash_flows_csv=cash_flows,
+        base_cash_flow=base_cash_flow,
+        growth=growth,
+        years=years,
+        risk_free=risk_free,
+        export_path=export,
+        settings=settings,
+    )
+    _print(result)
+    if result.exit_code:
+        raise typer.Exit(result.exit_code)
+
 @app.command("sotp", help="Run a sum-of-the-parts valuation.\n\nExample:\n  minerva valuation sotp --segments segments.json --net-cash 57e9 --shares 15.5e9")
 def sotp_command(
     ctx: typer.Context,
@@ -679,6 +840,7 @@ def _dispatch_help(subcommand: str, missing: list[str]) -> CommandResult:
         "dcf": "valuation dcf --revenue <float> --growth <csv> --margins <csv> --wacc <float> --terminal-growth <float> --shares <float> --net-cash <float> [--fcf <float>] [--export PATH]",
         "comps": "valuation comps --ntm-revenue <float> --ntm-ebitda <float> --ntm-fcf <float> --shares <float> --net-cash <float> --ev-rev <float> --ev-ebitda <float> --p-fcf <float> [--export PATH]",
         "reverse-dcf": "valuation reverse-dcf --price <float> --shares <float> --net-cash <float> --base-revenue <float> --margins <csv> --wacc <float> --terminal-growth <float> [--export PATH]",
+        "irr": "valuation irr --value <float> (--cash-flows <csv> | --base-cash-flow <float> --growth <decimal> [--years <int>]) --terminal-growth <float> [--risk-free <float>] [--export PATH]",
         "sotp": "valuation sotp --segments <json-or-path> --net-cash <float> --shares <float> [--export PATH]",
         "report": "valuation report --ticker <ticker> --config <json-file> --output <markdown-file>",
     }
