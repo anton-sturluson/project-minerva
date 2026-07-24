@@ -31,6 +31,7 @@ NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 NEWS_SOURCE_ROOTS_DIR="${NEWS_RUN_DIR}/sources"
 REPORT_DIR="${WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}"
 INVEST_DB="${INVEST_DB:-${WORKSPACE_ROOT}/data/04-database/invest.db}"
+export INVEST_DB
 INGEST_OK=0
 cleanup_run_dir() {
   # Remove the temp run dir only when ingest into invest.db succeeded.
@@ -50,6 +51,8 @@ MINERVA_BRIEF_MARKET_PROVIDER="${MINERVA_BRIEF_MARKET_PROVIDER:-finnhub}"
 MINERVA_SKIP_STATUS_CHECK="${MINERVA_SKIP_STATUS_CHECK:-0}"
 MINERVA_SKIP_NEWS="${MINERVA_SKIP_NEWS:-0}"
 MINERVA_ALLOW_THIN_BRIEF="${MINERVA_ALLOW_THIN_BRIEF:-0}"
+NEWS_SOURCES="${MINERVA_NEWS_SOURCES:-${ROOT_DIR}/hard-disk/data/02-news/news-sources.json}"
+IR_REGISTRY="${MINERVA_IR_REGISTRY:-${ROOT_DIR}/hard-disk/data/01-portfolio/current/ir-registry.json}"
 
 IFS=' ' read -r -a MINERVA_RUNNER_ARR <<< "${MINERVA_RUNNER}"
 printf -v NEWS_EXIST_RUNNER '%q ' "${MINERVA_RUNNER_ARR[@]}" news exist
@@ -104,8 +107,6 @@ else
 
   BROWSER_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news.md"
   WEBFETCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news_webfetch.md"
-  NEWS_SOURCES="${MINERVA_NEWS_SOURCES:-${ROOT_DIR}/hard-disk/data/02-news/news-sources.json}"
-  IR_REGISTRY="${MINERVA_IR_REGISTRY:-${ROOT_DIR}/hard-disk/data/01-portfolio/current/ir-registry.json}"
   PIDS=()
 
   if [[ -f "${NEWS_SOURCES}" ]] && ! jq -e '
@@ -414,32 +415,43 @@ echo "── Phase 2c: Ingest into invest.db ──"
 
 ingest_report="${NEWS_RUN_DIR}/logs/ingest.log"
 ingest_stats="${NEWS_RUN_DIR}/logs/ingest.json"
-if [[ "${RAW_COUNT}" -gt 0 ]]; then
-  if run news ingest \
-      --raw-dir "${NEWS_RUN_DIR}/raw" \
-      --summaries-dir "${NEWS_RUN_DIR}/summaries" \
-      --db "${INVEST_DB}" \
-      --news-sources "${NEWS_SOURCES}" \
-      --ir-registry "${IR_REGISTRY}" \
-      --report "${ingest_report}" > "${ingest_stats}"; then
-    INGEST_OK=1
-    echo "  ingest stats: $(cat "${ingest_stats}")"
-  else
-    echo "news ingest: failed (temp run dir preserved at ${NEWS_RUN_DIR})" >&2
-    exit 1
-  fi
-else
-  # Nothing to ingest, but the temp dir is safe to remove.
-  echo '{"eligible": 0}' > "${ingest_stats}"
+# Run even when collection produced no raw articles. Besides ingestion, this
+# creates or migrates the supported news schema before Phase 4 persistence.
+if run news ingest \
+    --raw-dir "${NEWS_RUN_DIR}/raw" \
+    --summaries-dir "${NEWS_RUN_DIR}/summaries" \
+    --db "${INVEST_DB}" \
+    --news-sources "${NEWS_SOURCES}" \
+    --ir-registry "${IR_REGISTRY}" \
+    --report "${ingest_report}" > "${ingest_stats}"; then
   INGEST_OK=1
+  echo "  ingest stats: $(cat "${ingest_stats}")"
+else
+  echo "news ingest: failed (temp run dir preserved at ${NEWS_RUN_DIR})" >&2
+  exit 1
 fi
 
 echo ""
 
 if [[ "${MINERVA_SKIP_NEWS}" != "1" && "${MINERVA_ALLOW_THIN_BRIEF}" != "1" ]]; then
   eligible_count=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("eligible", 0))' "${ingest_stats}" 2>/dev/null || echo 0)
-  if [[ "${eligible_count}" -eq 0 ]]; then
-    echo "news: no eligible articles were ingested" >&2
+  market_raw="${REPORT_DIR}/data/raw/market.json"
+  finnhub_news_count=$(python3 - "${market_raw}" <<'PY' 2>/dev/null || echo 0
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+print(sum(
+    isinstance(event, dict)
+    and event.get("event_type") in {"market-news", "company-news"}
+    for event in payload.get("events", [])
+))
+PY
+)
+  if [[ "${eligible_count}" -eq 0 && "${finnhub_news_count}" -eq 0 ]]; then
+    echo "news: no eligible crawler articles or Finnhub news summaries were collected" >&2
     echo "news: refusing to continue without article evidence; set MINERVA_ALLOW_THIN_BRIEF=1 to allow a thin brief" >&2
     echo "news: temp run directory preserved at ${NEWS_RUN_DIR}" >&2
     INGEST_OK=0
@@ -452,7 +464,7 @@ echo ""
 # ── PHASE 4: Evidence preparation ──
 echo "── Phase 4: Evidence preparation ──"
 
-run brief prep --date "${RUN_DATE}"
+run brief prep --date "${RUN_DATE}" --db "${INVEST_DB}"
 
 # Manifest check (relaxed: macro and ir no longer required)
 MANIFEST_PATH="${REPORT_DIR}/data/raw/manifest.json"

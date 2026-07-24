@@ -1,3 +1,4 @@
+# ruff: noqa: DTZ001, FURB162
 """News ingestion, stable article identity, and read-only existence lookup.
 
 Raw morning-brief markdown is joined to same-name summaries and inserted into
@@ -12,11 +13,15 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Literal, Mapping, Sequence, TypedDict
+from typing import Literal, TypedDict
 from zoneinfo import ZoneInfo
+
+from harness.news_store import NEWS_COLUMNS as _NEWS_COLUMNS
+from harness.news_store import create_news_schema, ensure_canonical_news_schema
 
 # Header keys we care about (case-insensitive on the label).
 META_KEYS = {"source", "url", "published", "collected", "section", "status"}
@@ -113,7 +118,7 @@ def resolve_source_id(filename: str, known_ids: list[str]) -> str | None:
 
     Falls back to a regex for ir-* files when the registry is missing.
     """
-    stem = filename[:-3] if filename.endswith(".md") else filename
+    stem = filename.removesuffix(".md")
     for sid in known_ids:
         if stem == sid or stem.startswith(sid + "-"):
             return sid
@@ -225,7 +230,7 @@ def _month(token: str) -> int | None:
 
 
 def _midnight_utc(value: date) -> ParsedPublished:
-    dt = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    dt = datetime(value.year, value.month, value.day, tzinfo=UTC)
     return ParsedPublished(epoch=int(dt.timestamp()), date_only=value.isoformat())
 
 
@@ -269,7 +274,7 @@ def _with_time(
     if not zone:
         return _midnight_utc(value)
     if zone in {"UTC", "GMT", "Z"}:
-        tz = timezone.utc
+        tz = UTC
     elif zone in _GENERIC_US_ZONES:
         tz = ZoneInfo(_GENERIC_US_ZONES[zone])
     else:
@@ -486,7 +491,7 @@ def is_excluded_filename(name: str) -> str | None:
     """Return an exclusion reason for filenames we never ingest."""
     if name.endswith("-error.md"):
         return "error"
-    stem = name[:-3] if name.endswith(".md") else name
+    stem = name.removesuffix(".md")
     if stem.upper().startswith("INDEX"):
         return "index"
     if stem == "ad-hoc-saas-market-signal":
@@ -726,45 +731,9 @@ def check_candidates(
 # ---------------------------------------------------------------------------
 # Schema management
 # ---------------------------------------------------------------------------
-NEWS_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS news (
-    article_key       TEXT PRIMARY KEY,
-    published_at      INTEGER NOT NULL,
-    published_at_raw  TEXT NOT NULL,
-    title             TEXT NOT NULL,
-    content           TEXT NOT NULL,
-    summary           TEXT,
-    source            TEXT NOT NULL,
-    url               TEXT NOT NULL,
-    section           TEXT,
-    collected_at      TEXT NOT NULL
-)
-"""
-
-NEWS_INDEX_SQL = (
-    "CREATE INDEX IF NOT EXISTS idx_news_published ON news(published_at)",
-    "CREATE INDEX IF NOT EXISTS idx_news_collected ON news(collected_at)",
-    "CREATE INDEX IF NOT EXISTS idx_news_url ON news(url)",
-)
-
-_NEWS_COLUMNS = (
-    "article_key",
-    "published_at",
-    "published_at_raw",
-    "title",
-    "content",
-    "summary",
-    "source",
-    "url",
-    "section",
-    "collected_at",
-)
-
-
 def _create_news_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(NEWS_TABLE_SQL)
-    for statement in NEWS_INDEX_SQL:
-        conn.execute(statement)
+    """Compatibility wrapper around the shared canonical schema helper."""
+    create_news_schema(conn)
 
 
 def _legacy_publication_epoch(raw: str, collected_at: str) -> int:
@@ -862,6 +831,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         _migrate_legacy_news(conn, set(columns))
     else:
         _create_news_schema(conn)
+    try:
+        ensure_canonical_news_schema(conn)
+    except RuntimeError as exc:
+        raise NewsSchemaError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1098,7 +1071,7 @@ def _ingest_one(
 
     collected = parsed.meta.get("collected", "").strip()
     if not collected:
-        collected = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+        collected = datetime.now(UTC).isoformat(timespec="seconds").replace(
             "+00:00", "Z"
         )
     else:

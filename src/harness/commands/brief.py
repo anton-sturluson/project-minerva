@@ -1,3 +1,4 @@
+# ruff: noqa: BLE001
 """Morning brief evidence collection commands."""
 
 from __future__ import annotations
@@ -95,7 +96,11 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
             )
         if subcommand == "prep":
             parsed = parse_flag_args(args[1:])
-            return prep_command(run_date=parse_iso_date(str(parsed.get("date") or "")), settings=settings)
+            return prep_command(
+                run_date=parse_iso_date(str(parsed.get("date") or "")),
+                db_path=Path(str(parsed["db"])) if "db" in parsed else None,
+                settings=settings,
+            )
         if subcommand == "audit":
             parsed = parse_flag_args(args[1:])
             return audit_command(run_date=parse_iso_date(str(parsed.get("date") or "")), settings=settings)
@@ -282,12 +287,32 @@ def market_command(
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
 
-def prep_command(*, run_date, settings: HarnessSettings) -> CommandResult:
+def prep_command(
+    *, run_date, settings: HarnessSettings, db_path: Path | None = None
+) -> CommandResult:
     """Prepare agent-ready evidence from collected sources."""
     start = time.perf_counter()
-    
+
     try:
-        summary = prepare_evidence(settings.ensure_workspace_root(), run_date=run_date)
+        summary = prepare_evidence(
+            settings.ensure_workspace_root(),
+            run_date=run_date,
+            db_path=db_path or settings.resolved_invest_db,
+        )
+    except RuntimeError as exc:
+        if "news table has an unsupported schema" in str(exc):
+            return error_result(
+                f"failed to prepare evidence: {exc}",
+                "repair or recreate the malformed news database, then retry",
+                ["back up the database before repairing its `news` table"],
+                start,
+            )
+        return error_result(
+            f"failed to prepare evidence: {exc}",
+            "run the collection commands first, then retry",
+            ["`brief filings --date 2026-04-08`", "`brief prep --date 2026-04-08`"],
+            start,
+        )
     except Exception as exc:
         return error_result(
             f"failed to prepare evidence: {exc}",
@@ -394,9 +419,20 @@ def market_cli(
     _print(market_command(run_date=parse_iso_date(date_arg), source=source, provider=provider, settings=settings))
 
 @app.command("prep", help="Prepare the agent-ready evidence pack.")
-def prep_cli(date_arg: str | None = typer.Option(None, "--date", help="Run date.")) -> None:
+def prep_cli(
+    date_arg: str | None = typer.Option(None, "--date", help="Run date."),
+    db_path: Path | None = typer.Option(  # noqa: B008
+        None, "--db", help="Path to invest.db."
+    ),
+) -> None:
     settings = get_settings()
-    _print(prep_command(run_date=parse_iso_date(date_arg), settings=settings))
+    _print(
+        prep_command(
+            run_date=parse_iso_date(date_arg),
+            db_path=db_path,
+            settings=settings,
+        )
+    )
 
 @app.command("audit", help="Run a bounded miss-check after prep.")
 def audit_cli(date_arg: str | None = typer.Option(None, "--date", help="Run date.")) -> None:

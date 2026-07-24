@@ -7,7 +7,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from datetime import date
+from datetime import UTC, date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -38,7 +38,6 @@ from harness.portfolio_state import (
     sync_portfolio,
     write_json,
 )
-
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "morning_brief"
 RUN_DATE = date(2026, 4, 8)
@@ -452,15 +451,29 @@ class MorningBriefTests(unittest.TestCase):
         self.assertIn("manifest:", result.stdout)
         report_dir = self.workspace / "workspace" / "reports" / "03-daily-news" / RUN_DATE.isoformat()
         self.assertTrue(report_dir.is_dir())
+        calls = call_log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(
-            call_log.read_text(encoding="utf-8").splitlines(),
+            calls[:4],
             [
                 f"portfolio sync --date {RUN_DATE.isoformat()} --holdings-source {FIXTURE_DIR / 'holdings.csv'} --transactions-source {FIXTURE_DIR / 'transactions.csv'} --watchlist-source {FIXTURE_DIR / 'watchlist.json'}",
                 f"brief filings --date {RUN_DATE.isoformat()}",
                 f"brief earnings --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
                 f"brief market --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
-                f"brief prep --date {RUN_DATE.isoformat()}",
             ],
+        )
+        self.assertEqual(len(calls), 6)
+        self.assertTrue(calls[4].startswith("news ingest --raw-dir "))
+        self.assertIn(" --summaries-dir ", calls[4])
+        self.assertIn(
+            f" --db {self.workspace / 'workspace' / 'data' / '04-database' / 'invest.db'}",
+            calls[4],
+        )
+        self.assertIn(" --news-sources ", calls[4])
+        self.assertIn(" --ir-registry ", calls[4])
+        self.assertIn(" --report ", calls[4])
+        self.assertEqual(
+            calls[5],
+            f"brief prep --date {RUN_DATE.isoformat()} --db {self.workspace / 'workspace' / 'data' / '04-database' / 'invest.db'}",
         )
 
     def test_wrapper_skips_news_collection_when_env_set(self) -> None:
@@ -507,7 +520,12 @@ class MorningBriefTests(unittest.TestCase):
         self.assertIn("News collection (skipped)", result.stdout)
         # No openclaw agent or news-related minerva calls in the log.
         logged_commands = call_log.read_text(encoding="utf-8")
-        self.assertNotIn("openclaw", logged_commands)
+        self.assertFalse(
+            any(
+                line.startswith("openclaw ")
+                for line in logged_commands.splitlines()
+            )
+        )
         self.assertNotIn("extract-files", logged_commands)
 
 
@@ -607,9 +625,9 @@ class MorningBriefTests(unittest.TestCase):
         self.assertIn("XLK", symbols)
 
     def test_normalize_news_events_filters_by_time(self) -> None:
-        from datetime import datetime as _dt, timezone as _tz
+        from datetime import datetime as _dt
         # Use timestamps relative to RUN_DATE so the 18h window works
-        run_date_midnight = int(_dt.combine(RUN_DATE, _dt.min.time(), tzinfo=_tz.utc).timestamp())
+        run_date_midnight = int(_dt.combine(RUN_DATE, _dt.min.time(), tzinfo=UTC).timestamp())
         recent_ts = run_date_midnight + 6 * 3600  # 6 AM on run date
         old_ts = run_date_midnight - 24 * 3600  # 24 hours before run date (outside 18h window)
 
@@ -625,8 +643,8 @@ class MorningBriefTests(unittest.TestCase):
         self.assertEqual(events[0]["news_source"], "Reuters")
 
     def test_normalize_company_news_events(self) -> None:
-        from datetime import datetime as _dt, timezone as _tz
-        run_date_midnight = int(_dt.combine(RUN_DATE, _dt.min.time(), tzinfo=_tz.utc).timestamp())
+        from datetime import datetime as _dt
+        run_date_midnight = int(_dt.combine(RUN_DATE, _dt.min.time(), tzinfo=UTC).timestamp())
         recent_ts = run_date_midnight + 6 * 3600
         news_items = [
             {
@@ -689,7 +707,7 @@ class MorningBriefTests(unittest.TestCase):
         (self.workspace / "empty-ir.json").write_text("[]", encoding="utf-8")
         collect_market(self.workspace, run_date=RUN_DATE, source=str(market_file))
 
-        summary = prepare_evidence(self.workspace, run_date=RUN_DATE)
+        prepare_evidence(self.workspace, run_date=RUN_DATE)
         run_paths = ensure_daily_run_layout(self.workspace, RUN_DATE)
         prepared = load_json(run_paths.structured_dir / "prepared-evidence.json", default={})
 

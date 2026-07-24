@@ -18,12 +18,20 @@ class HarnessSettings(BaseModel):
     gemini_api_key: str | None = None
     openai_api_key: str | None = None
     finnhub_api_key: str | None = None
+    invest_db: Path | None = None
     minerva_plot_theme: str = "minerva-classic"
 
     @property
     def resolved_workspace_root(self) -> Path:
         """Return the absolute workspace root."""
         return self.workspace_root.resolve()
+
+    @property
+    def resolved_invest_db(self) -> Path:
+        """Return the configured invest DB or the workspace-local default."""
+        if self.invest_db is not None:
+            return self.invest_db.expanduser().resolve()
+        return self.resolved_workspace_root / "data" / "04-database" / "invest.db"
 
     def ensure_workspace_root(self) -> Path:
         """Create the workspace root if it does not exist yet."""
@@ -42,5 +50,6 @@ def get_settings() -> HarnessSettings:
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         finnhub_api_key=os.getenv("FINNHUB_API_KEY"),
+        invest_db=(Path(value) if (value := os.getenv("INVEST_DB")) else None),
         minerva_plot_theme=os.getenv("MINERVA_PLOT_THEME", "minerva-classic"),
     )

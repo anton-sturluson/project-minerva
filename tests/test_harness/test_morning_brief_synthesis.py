@@ -502,6 +502,12 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     assert auto_by_title["WATCH schedules an investor day"]["routing_class"] == (
         "auto_portfolio_watchlist"
     )
+    assert auto_by_title["WATCH schedules an investor day"][
+        "article_candidate_class"
+    ] == "secondary_prepared_company_news"
+    assert auto_by_title["WATCH schedules an investor day"]["evidence_depth"] == (
+        "summary_only"
+    )
     assert auto_by_title["SPY moved 1.25%"]["routing_class"] == "auto_market_move"
     assert auto_by_title["Employment report due at 08:30 ET"]["routing_class"] == (
         "other_auto_event"
@@ -613,12 +619,16 @@ def test_model_cannot_put_a_preamble_between_collection_and_market() -> None:
             "omitted required Portfolio / Watchlist Events section",
         ),
         (
-            "*Portfolio / Watchlist Events*\n• Event\n\n"
-            "*Worth Knowing Today*\n• Article",
+            (
+                "*Portfolio / Watchlist Events*\n• Event\n\n"
+                "*Worth Knowing Today*\n• Article"
+            ),
             False,
             False,
-            "included Portfolio / Watchlist Events section without "
-            "auto_portfolio_watchlist evidence",
+            (
+                "included Portfolio / Watchlist Events section without "
+                "auto_portfolio_watchlist evidence"
+            ),
         ),
     ],
 )

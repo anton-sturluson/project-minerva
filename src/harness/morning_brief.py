@@ -1,13 +1,17 @@
+# ruff: noqa: BLE001, DTZ007, TRY004
 """Morning market brief evidence collection and preparation."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import math
 import re
+import sqlite3
 import time as time_mod
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -16,8 +20,13 @@ from xml.etree import ElementTree
 import requests
 from lxml import html as lxml_html
 
-logger = logging.getLogger(__name__)
-
+from harness.news_store import (
+    FINNHUB_SUMMARY_ONLY_SECTION,
+    canonical_news_url,
+    ensure_canonical_news_schema,
+    is_finnhub_summary_only_section,
+    resolve_news_db_path,
+)
 from harness.portfolio_state import (
     NON_SECURITY_TICKERS,
     append_jsonl,
@@ -26,13 +35,14 @@ from harness.portfolio_state import (
     load_json,
     load_payload,
     now_utc_iso,
-    parse_iso_date,
     portfolio_paths,
     read_text_source,
     write_json,
 )
 from minerva.formatting import to_float
 from minerva.sec import get_recent_filings
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_FILING_FORMS = ["8-K", "10-K", "10-Q", "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"]
@@ -42,6 +52,7 @@ DEFAULT_QUOTE_SYMBOLS = [
     "XLK", "XLF", "XLE", "XLV",
 ]
 FINNHUB_CALL_DELAY_SECONDS = 0.1
+MAX_FINNHUB_SUMMARY_CHARS = 4_000
 IR_HTML_NAV_PATTERNS = (
     r"home",
     r"about(?: us)?",
@@ -519,6 +530,7 @@ def collect_market(
     )
     events = normalize_market_events(payload, run_date)
     sorted_events = sorted(events, key=lambda item: (item["event_date"], item.get("category", ""), item["headline"]))
+    collected_at = now_utc_iso()
 
     raw_path = run_paths.raw_dir / "market.json"
     rendered_path = run_paths.rendered_dir / "market.md"
@@ -526,7 +538,7 @@ def collect_market(
         raw_path,
         {
             "date": run_date.isoformat(),
-            "collected_at": now_utc_iso(),
+            "collected_at": collected_at,
             "provider": provider,
             "source": source,
             "payload": payload,
@@ -548,11 +560,233 @@ def collect_market(
             "degraded_reasons": degraded_reasons,
         },
     )
-    return {"status": status, "event_count": len(sorted_events), "raw_path": raw_path}
+    return {
+        "status": status,
+        "event_count": len(sorted_events),
+        "raw_path": raw_path,
+    }
 
 
-def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
-    """Build an agent-ready evidence pack from collected sources."""
+def persist_market_news(
+    workspace_root: Path,
+    events: list[dict[str, Any]],
+    *,
+    run_date: date,
+    collected_at: str | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Persist normalized Finnhub-style news events into the canonical store.
+
+    Market-price observations and every other event type are deliberately
+    excluded. Finnhub supplies only a summary, so the same bounded summary is
+    stored in ``content`` and ``summary`` and identified as such by ``section``.
+    """
+    resolved_db_path = resolve_news_db_path(workspace_root, db_path)
+    news_events = [
+        event
+        for event in events
+        if str(event.get("event_type") or "").strip().casefold()
+        in {"market-news", "company-news"}
+        and str(event.get("headline") or "").strip()
+    ]
+    stats: dict[str, Any] = {
+        "eligible": len(news_events),
+        "inserted": 0,
+        "duplicates": 0,
+        "db_path": str(resolved_db_path),
+    }
+    if not news_events:
+        return stats
+
+    collection_timestamp = _collection_timestamp_for_run(
+        collected_at or now_utc_iso(), run_date
+    )
+    resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(resolved_db_path)
+    try:
+        ensure_canonical_news_schema(connection)
+        existing_articles_by_url: dict[str, str] = {}
+        existing_quality_by_url: dict[str, tuple[int, int]] = {}
+        for stored_key, stored_url, section, content_length in connection.execute(
+            "SELECT article_key, url, section, length(content) FROM news "
+            "WHERE url != '' ORDER BY article_key"
+        ):
+            normalized_existing_url = canonical_news_url(stored_url)
+            if not normalized_existing_url:
+                continue
+            quality = (
+                int(not is_finnhub_summary_only_section(section)),
+                int(content_length or 0),
+            )
+            prior_quality = existing_quality_by_url.get(normalized_existing_url)
+            prior_key = existing_articles_by_url.get(normalized_existing_url, "")
+            if (
+                prior_quality is None
+                or quality > prior_quality
+                or (quality == prior_quality and str(stored_key) < prior_key)
+            ):
+                existing_articles_by_url[normalized_existing_url] = str(stored_key)
+                existing_quality_by_url[normalized_existing_url] = quality
+        for event in sorted(news_events, key=_finnhub_news_persistence_sort_key):
+            title = str(event.get("headline") or "").strip()
+            publisher = (
+                str(
+                    event.get("news_source")
+                    or _event_metadata_value(event, "source")
+                    or "Finnhub"
+                ).strip()
+                or "Finnhub"
+            )
+            url = str(
+                event.get("reference_url")
+                or _event_metadata_value(event, "url")
+                or ""
+            ).strip()
+            normalized_url = canonical_news_url(url)
+            if normalized_url and normalized_url in existing_articles_by_url:
+                event["persisted_article_key"] = existing_articles_by_url[
+                    normalized_url
+                ]
+                stats["duplicates"] += 1
+                continue
+
+            published_at, published_at_raw = _finnhub_publication(event, run_date)
+            summary = _bounded_finnhub_summary(
+                event.get("summary") or _event_metadata_value(event, "summary")
+            )
+            article_key = _finnhub_article_key(
+                normalized_url=normalized_url,
+                publisher=publisher,
+                published_at=published_at,
+                title=title,
+            )
+            event["persisted_article_key"] = article_key
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO news "
+                "(article_key, published_at, published_at_raw, title, content, summary, "
+                "source, url, section, collected_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    article_key,
+                    published_at,
+                    published_at_raw,
+                    title,
+                    summary,
+                    summary,
+                    publisher,
+                    url,
+                    FINNHUB_SUMMARY_ONLY_SECTION,
+                    collection_timestamp,
+                ),
+            )
+            if cursor.rowcount == 1:
+                stats["inserted"] += 1
+                if normalized_url:
+                    existing_articles_by_url[normalized_url] = article_key
+            else:
+                stats["duplicates"] += 1
+        connection.commit()
+    finally:
+        connection.close()
+    return stats
+
+
+def _event_metadata_value(event: dict[str, Any], key: str) -> Any:
+    metadata = event.get("metadata")
+    return metadata.get(key) if isinstance(metadata, dict) else None
+
+
+def _finnhub_news_persistence_sort_key(event: dict[str, Any]) -> tuple[Any, ...]:
+    event_type = str(event.get("event_type") or "").strip().casefold()
+    raw_url = str(
+        event.get("reference_url") or _event_metadata_value(event, "url") or ""
+    ).strip()
+    # Prefer company routing context, then the cleanest supplied URL. Remaining
+    # fields make the winner deterministic even if provider response order moves.
+    type_rank = 0 if event_type == "company-news" else 1
+    return (
+        canonical_news_url(raw_url),
+        type_rank,
+        len(raw_url),
+        raw_url.casefold(),
+        str(event.get("security_id") or "").casefold(),
+        str(event.get("headline") or "").casefold(),
+        str(event.get("news_source") or _event_metadata_value(event, "source") or "").casefold(),
+        str(event.get("summary") or _event_metadata_value(event, "summary") or ""),
+    )
+
+
+def _finnhub_publication(event: dict[str, Any], run_date: date) -> tuple[int, str]:
+    raw_value = _event_metadata_value(event, "datetime")
+    if raw_value not in (None, ""):
+        raw_text = str(raw_value).strip()
+        try:
+            numeric_value = float(raw_text)
+            if math.isfinite(numeric_value) and numeric_value >= 0:
+                return int(numeric_value), raw_text
+        except (TypeError, ValueError):
+            pass
+        try:
+            parsed = datetime.fromisoformat(raw_text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return int(parsed.timestamp()), raw_text
+        except ValueError:
+            pass
+
+    event_day = _coerce_event_date(event.get("event_date")) or run_date.isoformat()
+    fallback = datetime.combine(
+        date.fromisoformat(event_day), datetime.min.time(), tzinfo=UTC
+    )
+    return int(fallback.timestamp()), event_day
+
+
+def _collection_timestamp_for_run(raw_timestamp: str, run_date: date) -> str:
+    """Keep collection time/offset while making the date match the brief run."""
+    try:
+        parsed = datetime.fromisoformat(raw_timestamp.strip())
+    except ValueError:
+        parsed = datetime.combine(run_date, datetime.min.time(), tzinfo=UTC)
+    else:
+        parsed = datetime.combine(run_date, parsed.timetz())
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+    return parsed.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _bounded_finnhub_summary(raw_summary: Any) -> str:
+    summary = str(raw_summary or "").strip()
+    if len(summary) <= MAX_FINNHUB_SUMMARY_CHARS:
+        return summary
+    marker = "\n[Finnhub summary truncated deterministically]"
+    prefix_limit = MAX_FINNHUB_SUMMARY_CHARS - len(marker)
+    return f"{summary[:prefix_limit].rstrip()}{marker}"
+
+
+def _finnhub_article_key(
+    *,
+    normalized_url: str,
+    publisher: str,
+    published_at: int,
+    title: str,
+) -> str:
+    if normalized_url:
+        identity = f"url|{normalized_url}"
+    else:
+        normalized_title = re.sub(r"\s+", " ", title.strip().casefold())
+        identity = (
+            f"fallback|{publisher.strip().casefold()}|{published_at}|{normalized_title}"
+        )
+    return hashlib.sha256(f"finnhub|{identity}".encode()).hexdigest()
+
+
+def prepare_evidence(
+    workspace_root: Path,
+    *,
+    run_date: date,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Build an agent-ready evidence pack and persist Finnhub summaries."""
     ensure_portfolio_layout(workspace_root)
     run_paths = ensure_daily_run_layout(workspace_root, run_date)
     paths = portfolio_paths(workspace_root)
@@ -561,36 +795,83 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
     adjacency_map = load_json(paths.adjacency_map, default=[])
     thesis_cards = load_json(paths.thesis_cards, default=[])
 
-    source_payloads = {name: _load_raw_source(run_paths, name) for name in ("filings", "earnings", "macro", "ir", "market")}
-    source_events = {name: payload.get("events", []) for name, payload in source_payloads.items()}
+    source_payloads = {
+        name: _load_raw_source(run_paths, name)
+        for name in ("filings", "earnings", "macro", "ir", "market")
+    }
+    market_payload = source_payloads["market"]
+    market_events = [
+        event for event in market_payload.get("events", []) if isinstance(event, dict)
+    ]
+    news_persistence = persist_market_news(
+        workspace_root,
+        market_events,
+        run_date=run_date,
+        collected_at=str(market_payload.get("collected_at") or "") or None,
+        db_path=db_path,
+    )
+    market_payload["events"] = market_events
+    market_payload["news_persistence"] = news_persistence
+    write_json(run_paths.raw_dir / "market.json", market_payload)
 
+    source_events = {
+        name: payload.get("events", []) for name, payload in source_payloads.items()
+    }
+    enriched_source_events: list[tuple[str, dict[str, Any]]] = []
+    for source_name, events in source_events.items():
+        for event in events:
+            if isinstance(event, dict):
+                enriched_source_events.append(
+                    (
+                        source_name,
+                        enrich_event_relationships(
+                            dict(event), universe, adjacency_map
+                        ),
+                    )
+                )
+
+    linked_news_urls = {
+        canonical_news_url(event.get("reference_url"))
+        for _, event in enriched_source_events
+        if _is_current_news_event(event, run_date)
+        and str(event.get("security_id") or "").strip()
+        and canonical_news_url(event.get("reference_url"))
+    }
     all_events: list[dict[str, Any]] = []
     suppressed: list[dict[str, Any]] = []
     seen: set[str] = set()
-    seen_news_urls: set[str] = set()
-    for source_name, events in source_events.items():
-        for event in events:
-            enriched = enrich_event_relationships(dict(event), universe, adjacency_map)
-            dedupe_key = build_event_key(enriched)
-            if dedupe_key in seen:
-                suppressed.append({"reason": "duplicate", "event": enriched})
+    seen_news_contexts: set[tuple[str, str]] = set()
+    for source_name, enriched in enriched_source_events:
+        if enriched.get("event_date") not in {"", run_date.isoformat()}:
+            suppressed.append({"reason": "stale", "event": enriched})
+            continue
+        if not enriched.get("headline"):
+            suppressed.append({"reason": "missing-headline", "event": enriched})
+            continue
+        dedupe_key = build_event_key(enriched)
+        if dedupe_key in seen:
+            suppressed.append({"reason": "duplicate", "event": enriched})
+            continue
+        event_type = str(enriched.get("event_type") or "").strip().casefold()
+        if event_type in {"market-news", "company-news"}:
+            news_url = canonical_news_url(enriched.get("reference_url"))
+            security_id = str(enriched.get("security_id") or "").strip().casefold()
+            if news_url and not security_id and news_url in linked_news_urls:
+                suppressed.append(
+                    {"reason": "duplicate-url-unlinked", "event": enriched}
+                )
                 continue
-            news_url = str(enriched.get("reference_url") or "").strip()
-            event_type = str(enriched.get("event_type") or "").lower()
-            if event_type in {"market-news", "company-news"} and news_url:
-                if news_url in seen_news_urls:
-                    suppressed.append({"reason": "duplicate-url", "event": enriched})
-                    continue
-                seen_news_urls.add(news_url)
-            if enriched.get("event_date") not in {"", run_date.isoformat()}:
-                suppressed.append({"reason": "stale", "event": enriched})
+            news_context = (news_url, security_id)
+            if news_url and news_context in seen_news_contexts:
+                suppressed.append(
+                    {"reason": "duplicate-url-association", "event": enriched}
+                )
                 continue
-            if not enriched.get("headline"):
-                suppressed.append({"reason": "missing-headline", "event": enriched})
-                continue
-            seen.add(dedupe_key)
-            enriched["source_name"] = source_name
-            all_events.append(enriched)
+            if news_url:
+                seen_news_contexts.add(news_context)
+        seen.add(dedupe_key)
+        enriched["source_name"] = source_name
+        all_events.append(enriched)
 
     sorted_events = sorted(
         all_events,
@@ -620,6 +901,7 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
         "thesis_cards": {key: thesis_map[key] for key in sorted(thesis_map)},
         "thesis_ticker_index": thesis_ticker_index,
         "source_status": manifest.get("sources", {}),
+        "news_persistence": news_persistence,
     }
 
     universe_path = run_paths.structured_dir / "universe.json"
@@ -645,9 +927,16 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
             "source_status_path": str(source_status_path),
             "evidence_path": str(evidence_path),
             "universe_path": str(universe_path),
+            "news_persistence": news_persistence,
         },
     )
-    return {"status": "success", "event_count": len(sorted_events), "prepared_path": prepared_path}
+    return {
+        "status": "success",
+        "event_count": len(sorted_events),
+        "news_inserted_count": news_persistence["inserted"],
+        "news_duplicate_count": news_persistence["duplicates"],
+        "prepared_path": prepared_path,
+    }
 
 
 def audit_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
@@ -937,6 +1226,15 @@ def enrich_event_relationships(
     event.setdefault("relationship", relationship_for_security(security_id, universe, adjacency_map))
     event.setdefault("group", group_for_event(event))
     return event
+
+
+def _is_current_news_event(event: dict[str, Any], run_date: date) -> bool:
+    event_type = str(event.get("event_type") or "").strip().casefold()
+    return (
+        event_type in {"market-news", "company-news"}
+        and event.get("event_date") in {"", run_date.isoformat()}
+        and bool(str(event.get("headline") or "").strip())
+    )
 
 
 def build_event_key(event: dict[str, Any]) -> str:
@@ -1592,7 +1890,10 @@ def _normalize_market_event(
 def normalize_news_events(news_items: list[dict[str, Any]], run_date: date) -> list[dict[str, Any]]:
     """Convert Finnhub general news items into shared event schema."""
     events: list[dict[str, Any]] = []
-    cutoff_ts = datetime.combine(run_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() - 18 * 3600
+    cutoff_ts = (
+        datetime.combine(run_date, datetime.min.time(), tzinfo=UTC).timestamp()
+        - 18 * 3600
+    )
     for item in news_items:
         ts = item.get("datetime", 0)
         if isinstance(ts, (int, float)) and ts < cutoff_ts:
@@ -1619,7 +1920,10 @@ def normalize_news_events(news_items: list[dict[str, Any]], run_date: date) -> l
 def normalize_company_news_events(news_items: list[dict[str, Any]], run_date: date) -> list[dict[str, Any]]:
     """Convert Finnhub company news items into shared event schema."""
     events: list[dict[str, Any]] = []
-    cutoff_ts = datetime.combine(run_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() - 18 * 3600
+    cutoff_ts = (
+        datetime.combine(run_date, datetime.min.time(), tzinfo=UTC).timestamp()
+        - 18 * 3600
+    )
     for item in news_items:
         ts = item.get("datetime", 0)
         if isinstance(ts, (int, float)) and ts < cutoff_ts:
@@ -1891,7 +2195,7 @@ def _coerce_event_date(value: Any) -> str | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date().isoformat()
+        return datetime.fromisoformat(raw).date().isoformat()
     except ValueError:
         pass
     for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%Y-%m-%d"):

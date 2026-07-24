@@ -20,11 +20,16 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Callable, Sequence
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from typing import Any
+
+from harness.news_store import (
+    canonical_news_url,
+    is_finnhub_summary_only_section,
+)
 
 DEFAULT_MODEL = "gpt-5.6-sol"
 DEFAULT_REASONING = "high"
@@ -71,18 +76,30 @@ class CandidateTitle:
 
     def title_record(self) -> dict[str, Any]:
         """Return the compact, summary-free article-choice record for pass 1."""
+        summary_only = bool(self.metadata.get("summary_only"))
+        if self.kind == "article":
+            candidate_class = (
+                "secondary_finnhub_summary_only"
+                if summary_only
+                else "collected_sqlite_article"
+            )
+        else:
+            event_type = str(self.metadata.get("event_type") or "").casefold()
+            candidate_class = (
+                "secondary_prepared_company_news"
+                if event_type == "company-news"
+                else "secondary_prepared_market_news"
+            )
         record: dict[str, Any] = {
             "id": self.id,
             "kind": self.kind,
             "source": self.source,
             "published": self.published,
             "title": self.title,
-            "article_candidate_class": (
-                "collected_sqlite_article"
-                if self.kind == "article"
-                else "secondary_prepared_market_news"
-            ),
+            "article_candidate_class": candidate_class,
         }
+        if summary_only:
+            record["evidence_depth"] = "summary_only"
         if self.article_key is not None:
             record["article_key"] = self.article_key
         for key in (
@@ -118,7 +135,7 @@ class RoutingPlan:
 def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateTitle]:
     """Read every article first collected on ``run_date`` without reading its body.
 
-    ``collected_at`` is canonical ISO text written by ``ingest_news.py``.  Its
+    ``collected_at`` is canonical ISO text written by ``harness.news``. Its
     leading calendar date is the collection run's date even when the timestamp
     includes an offset, so a prefix comparison avoids silently shifting a local
     collection into another UTC date.
@@ -136,7 +153,8 @@ def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateT
     try:
         rows = connection.execute(
             """
-            SELECT article_key, source, published_at, published_at_raw, title, url
+            SELECT article_key, source, published_at, published_at_raw, title, url,
+                   section
             FROM news
             WHERE substr(collected_at, 1, 10) = ?
             ORDER BY source COLLATE NOCASE,
@@ -162,11 +180,14 @@ def query_fresh_article_titles(db_path: Path, run_date: date) -> list[CandidateT
                 kind="article",
                 article_key=article_key,
                 source=str(row["source"]),
-                published=published_raw or published_iso,
+                published=_publication_display(published_raw, published_iso),
                 title=str(row["title"]),
                 metadata={
                     "published_at": published_iso,
+                    "published_at_raw": published_raw,
                     "url": str(row["url"] or "").strip(),
+                    "section": str(row["section"] or "").strip(),
+                    "summary_only": is_finnhub_summary_only_section(row["section"]),
                 },
             )
         )
@@ -208,7 +229,22 @@ def load_prepared_event_titles(
         security_id = str(
             raw_event.get("security_id") or raw_event.get("ticker") or ""
         ).strip()
-        stable_key = "|".join((source, security_id, title, event_date))
+        event_type = str(raw_event.get("event_type") or "").strip().casefold()
+        stable_identity: list[str] = [source, security_id, title, event_date]
+        if event_type in ARTICLE_EVENT_TYPES:
+            stable_identity.extend(
+                (
+                    event_type,
+                    str(raw_event.get("persisted_article_key") or "").strip(),
+                    canonical_news_url(
+                        raw_event.get("reference_url")
+                        or raw_event.get("source_url")
+                        or _nested_value(raw_event, "metadata", "url")
+                    ),
+                    _prepared_news_source_label(raw_event),
+                )
+            )
+        stable_key = "|".join(stable_identity)
         candidate_id = f"event:{hashlib.sha256(stable_key.encode('utf-8')).hexdigest()}"
         if candidate_id in seen_ids:
             continue
@@ -242,34 +278,151 @@ def load_prepared_event_titles(
 def build_title_universe(
     db_path: Path, prepared_path: Path, run_date: date
 ) -> list[CandidateTitle]:
-    """Build all fresh collected articles and current prepared events."""
-    return query_fresh_article_titles(db_path, run_date) + load_prepared_event_titles(
-        prepared_path, run_date
+    """Build one candidate per article plus unmatched prepared events.
+
+    A Finnhub article is represented in both SQLite and prepared evidence. The
+    SQLite candidate is the durable record (and may itself be summary-only),
+    while the prepared event contributes ticker/portfolio routing metadata.
+    """
+    articles = query_fresh_article_titles(db_path, run_date)
+    prepared_events = load_prepared_event_titles(prepared_path, run_date)
+    article_by_record = {
+        _article_record_key(article, _collected_source_label(article.source)): article
+        for article in articles
+    }
+    article_by_key = {
+        article.article_key: article
+        for article in articles
+        if article.article_key is not None
+    }
+    merged_by_id = {article.id: article for article in articles}
+    unmatched_events: list[CandidateTitle] = []
+
+    for event in prepared_events:
+        event_type = str(event.metadata.get("event_type") or "").strip().casefold()
+        if event_type not in ARTICLE_EVENT_TYPES:
+            unmatched_events.append(event)
+            continue
+        source_label = _prepared_news_source_label(event.metadata)
+        persisted_key = str(
+            event.metadata.get("persisted_article_key") or ""
+        ).strip()
+        matching_article = article_by_key.get(persisted_key)
+        if matching_article is None:
+            matching_article = article_by_record.get(
+                _article_record_key(event, source_label)
+            )
+        if matching_article is None:
+            unmatched_events.append(event)
+            continue
+        current = merged_by_id[matching_article.id]
+        merged_by_id[matching_article.id] = _merge_article_with_prepared_event(
+            current, event
+        )
+
+    merged_articles = [merged_by_id[article.id] for article in articles]
+    return [*merged_articles, *unmatched_events]
+
+
+def _merge_article_with_prepared_event(
+    article: CandidateTitle, event: CandidateTitle
+) -> CandidateTitle:
+    durable_metadata = {
+        key: article.metadata.get(key)
+        for key in (
+            "url",
+            "published_at",
+            "published_at_raw",
+            "section",
+            "summary_only",
+        )
+    }
+    metadata = dict(article.metadata)
+    contexts = [
+        dict(context)
+        for context in metadata.get("prepared_event_contexts", [])
+        if isinstance(context, dict)
+    ]
+    existing_rank = int(metadata.get("_prepared_routing_rank") or 0)
+    event_rank = _prepared_event_routing_rank(event)
+    if event_rank > existing_rank:
+        metadata.update(event.metadata)
+    else:
+        for key, value in event.metadata.items():
+            if value not in (None, "", [], {}):
+                metadata.setdefault(key, value)
+    metadata.update(durable_metadata)
+    context = _prepared_event_context(event)
+    context_identity = json.dumps(context, ensure_ascii=False, sort_keys=True)
+    existing_context_identities = {
+        json.dumps(item, ensure_ascii=False, sort_keys=True) for item in contexts
+    }
+    if context_identity not in existing_context_identities:
+        contexts.append(context)
+    metadata["prepared_event_contexts"] = contexts
+    metadata["_prepared_routing_rank"] = max(existing_rank, event_rank)
+    prepared_event_ids = [
+        str(item)
+        for item in metadata.get("persisted_prepared_event_ids", [])
+        if str(item)
+    ]
+    if event.id not in prepared_event_ids:
+        prepared_event_ids.append(event.id)
+    metadata["persisted_prepared_event_ids"] = prepared_event_ids
+    return CandidateTitle(
+        id=article.id,
+        kind="article",
+        title=article.title,
+        source=article.source,
+        published=article.published,
+        article_key=article.article_key,
+        metadata=metadata,
     )
+
+
+def _prepared_event_routing_rank(candidate: CandidateTitle) -> int:
+    role = str(candidate.metadata.get("portfolio_role") or "").strip().casefold()
+    if role in PORTFOLIO_ROLES:
+        return 3
+    event_type = str(candidate.metadata.get("event_type") or "").strip().casefold()
+    return 2 if event_type == "company-news" else 1
+
+
+def _prepared_event_context(candidate: CandidateTitle) -> dict[str, Any]:
+    event = candidate.metadata
+    context = _compact_event_details(event)
+    context["prepared_event_id"] = candidate.id
+    context["title"] = candidate.title
+    source = _prepared_news_source_label(event)
+    if source != "Unknown":
+        context["news_source"] = source
+    url = str(event.get("reference_url") or event.get("source_url") or "").strip()
+    if url:
+        context["url"] = url
+    return context
 
 
 def partition_candidates(candidates: Sequence[CandidateTitle]) -> RoutingPlan:
     """Partition candidates before pass 1 using the approved routing hierarchy.
 
-    Collected SQLite articles always compete in pass 1. A prepared event linked
-    to a holding/watchlist security bypasses pass 1 even when it is article-like;
-    otherwise market moves bypass, unlinked ``market-news`` records compete as
-    secondary article candidates, and every remaining prepared event advances as
-    an ``other_auto_event``.
+    SQLite articles normally compete in pass 1. An article enriched from its
+    matching prepared event retains holding/watchlist routing and bypasses pass
+    1; otherwise market moves bypass, unlinked ``market-news`` records compete
+    as secondary article candidates, and every remaining prepared event advances
+    as an ``other_auto_event``.
     """
     article_candidates: list[CandidateTitle] = []
     automatic_events: list[RoutedEvent] = []
     for candidate in candidates:
-        if candidate.kind == "article":
-            article_candidates.append(candidate)
-            continue
-
         event_type = str(candidate.metadata.get("event_type") or "").strip().casefold()
         portfolio_role = (
             str(candidate.metadata.get("portfolio_role") or "").strip().casefold()
         )
         if portfolio_role in PORTFOLIO_ROLES:
             routing_class = ROUTING_AUTO_PORTFOLIO
+        elif candidate.kind == "article":
+            article_candidates.append(candidate)
+            continue
         elif event_type == "market":
             routing_class = ROUTING_AUTO_MARKET
         elif event_type == "market-news":
@@ -388,9 +541,11 @@ def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date)
         "read-through, or materially economic, political, or geopolitical. Reject lifestyle, "
         "sports, celebrity, and other non-investor fluff. Semantically deduplicate overlapping "
         "headlines: select one representative of the same development, preferring a "
-        "collected_sqlite_article over a secondary_prepared_market_news record because the former "
-        "has richer collected evidence. A secondary market-news record may be selected when it is "
-        "the only coverage or is materially distinct. Rank and balance sources on merit, not quotas. "
+        "collected_sqlite_article over secondary_finnhub_summary_only or "
+        "secondary_prepared_market_news because only collected_sqlite_article represents richer "
+        "crawler-collected reporting. Finnhub summary-only rows contain only a provider summary "
+        "despite being stored in SQLite. A secondary record may be selected when it is the only "
+        "coverage or is materially distinct. Rank and balance sources on merit, not quotas. "
         "Do not draft the brief, summarize unsupported details, or invent IDs.\n\n"
         "Return exactly one strict JSON object and no markdown or commentary. Include exactly one "
         "concise editorial reason with every selected ID:\n"
@@ -489,34 +644,55 @@ def query_shortlisted_evidence(
                 raise SynthesisError(
                     f"shortlisted article disappeared from SQLite: {candidate.id}"
                 )
-            summary = str(row["summary"] or "").strip()
-            content = str(row["content"] or "").strip()
-            if summary:
-                evidence_text = summary
-                evidence_kind = "summary"
-            else:
-                evidence_text = _bounded_text(content, max_content_chars)
-                evidence_kind = "bounded_content_fallback"
             evidence.append(
-                {
-                    "id": candidate.id,
-                    "kind": "article",
-                    "article_key": candidate.article_key,
-                    "source": str(row["source"]),
-                    "published": str(row["published_at_raw"] or "").strip()
-                    or _epoch_as_iso(row["published_at"]),
-                    "title": str(row["title"]),
-                    "url": str(row["url"] or "").strip(),
-                    "section": str(row["section"] or "").strip(),
-                    "evidence_kind": evidence_kind,
-                    "routing_class": ROUTING_SELECTED_ARTICLE,
-                    "article_candidate_class": "collected_sqlite_article",
-                    "evidence": evidence_text,
-                }
+                _article_evidence(
+                    candidate,
+                    row,
+                    routing_class=ROUTING_SELECTED_ARTICLE,
+                    max_content_chars=max_content_chars,
+                )
             )
         else:
             evidence.append(
                 _event_evidence(candidate, routing_class=ROUTING_SELECTED_ARTICLE)
+            )
+    return evidence
+
+
+def query_automatic_evidence(
+    db_path: Path,
+    routed_events: Sequence[RoutedEvent],
+    *,
+    max_content_chars: int = MAX_ARTICLE_CONTENT_CHARS,
+) -> list[dict[str, Any]]:
+    """Load SQLite evidence for persisted automatic articles when available."""
+    article_keys = [
+        item.candidate.article_key
+        for item in routed_events
+        if item.candidate.kind == "article"
+        and item.candidate.article_key is not None
+    ]
+    article_rows = _query_article_evidence(db_path, article_keys)
+    evidence: list[dict[str, Any]] = []
+    for item in routed_events:
+        candidate = item.candidate
+        if candidate.kind == "article":
+            row = article_rows.get(candidate.article_key or "")
+            if row is None:
+                raise SynthesisError(
+                    f"automatically routed article disappeared from SQLite: {candidate.id}"
+                )
+            evidence.append(
+                _article_evidence(
+                    candidate,
+                    row,
+                    routing_class=item.routing_class,
+                    max_content_chars=max_content_chars,
+                )
+            )
+        else:
+            evidence.append(
+                _event_evidence(candidate, routing_class=item.routing_class)
             )
     return evidence
 
@@ -559,12 +735,16 @@ def build_final_prompt(
         "Every evidence record has an explicit routing_class. Apply this hierarchy exactly:\n"
         "- selected_article: editorially rank the strongest items as concise bullets in *Worth "
         "Knowing Today*. Semantically deduplicate overlapping stories and do not repeat one "
-        "development from multiple outlets. Collected SQLite articles are richer than "
-        "secondary_prepared_market_news records; the latter retain only their supplied prepared "
-        "summary and URL and must not be treated as equally complete reporting.\n"
+        "development from multiple outlets. Only collected_sqlite_article records represent richer "
+        "crawler-collected reporting. secondary_finnhub_summary_only, "
+        "secondary_prepared_market_news, and secondary_prepared_company_news records retain only "
+        "a provider/prepared summary and URL; do not treat any as full-text reporting merely "
+        "because one is stored in SQLite.\n"
         "- auto_portfolio_watchlist: represent EVERY record in *Portfolio / Watchlist Events*. "
-        "Consolidate overlapping records by ticker into one coherent bullet rather than producing "
-        "one bullet per record. Do not drop a record merely because it seems less newsworthy. Emit "
+        "When one persisted article has multiple prepared_event_contexts, represent every listed "
+        "security association while consolidating the article into one coherent bullet. Consolidate "
+        "overlapping records by ticker rather than producing one bullet per record. Do not drop a "
+        "record merely because it seems less newsworthy. Emit "
         "this section if and only if auto_portfolio_watchlist evidence exists.\n"
         "- auto_market_move: represent ALL such records in exactly ONE compact bullet/line under "
         "*Market Snapshot*. Never emit multiple market-move bullets. Emit this section if and only "
@@ -688,10 +868,9 @@ def synthesize_morning_brief(
         stage="pass 1 shortlist",
     )
     selected_evidence = query_shortlisted_evidence(db_path, candidates, shortlist_ids)
-    automatic_evidence = [
-        _event_evidence(item.candidate, routing_class=item.routing_class)
-        for item in routing_plan.automatic_events
-    ]
+    automatic_evidence = query_automatic_evidence(
+        db_path, routing_plan.automatic_events
+    )
     evidence = [*selected_evidence, *automatic_evidence]
     pass_2_prompt = build_final_prompt(
         evidence,
@@ -886,6 +1065,54 @@ def _query_article_evidence(
     return rows
 
 
+def _article_evidence(
+    candidate: CandidateTitle,
+    row: sqlite3.Row,
+    *,
+    routing_class: str,
+    max_content_chars: int,
+) -> dict[str, Any]:
+    """Build evidence from the durable SQLite row for one article candidate."""
+    summary = str(row["summary"] or "").strip()
+    content = str(row["content"] or "").strip()
+    summary_only = is_finnhub_summary_only_section(row["section"])
+    if summary_only:
+        evidence_text = _bounded_text(summary or content, max_content_chars)
+        evidence_kind = "summary_only"
+    elif summary:
+        evidence_text = summary
+        evidence_kind = "summary"
+    else:
+        evidence_text = _bounded_text(content, max_content_chars)
+        evidence_kind = "bounded_content_fallback"
+    published_raw = str(row["published_at_raw"] or "").strip()
+    published_iso = _epoch_as_iso(row["published_at"])
+    record: dict[str, Any] = {
+        "id": candidate.id,
+        "kind": "article",
+        "article_key": candidate.article_key,
+        "source": str(row["source"]),
+        "published": _publication_display(published_raw, published_iso),
+        "published_at_raw": published_raw,
+        "title": str(row["title"]),
+        "url": str(row["url"] or "").strip(),
+        "section": str(row["section"] or "").strip(),
+        "evidence_kind": evidence_kind,
+        "routing_class": routing_class,
+        "article_candidate_class": (
+            "secondary_finnhub_summary_only"
+            if summary_only
+            else "collected_sqlite_article"
+        ),
+        "evidence_depth": "summary_only" if summary_only else "collected_article",
+        "evidence": evidence_text,
+    }
+    details = _compact_event_details(candidate.metadata)
+    if details:
+        record["details"] = details
+    return record
+
+
 def _event_evidence(candidate: CandidateTitle, *, routing_class: str) -> dict[str, Any]:
     """Preserve one prepared event's own bounded summary and supplied URL."""
     event = candidate.metadata
@@ -896,7 +1123,31 @@ def _event_evidence(candidate: CandidateTitle, *, routing_class: str) -> dict[st
         _nested_value(event, "metadata", "summary"),
         _nested_value(event, "metadata", "description"),
     )
-    compact_details: dict[str, Any] = {}
+    event_type = str(event.get("event_type") or "").strip().casefold()
+    evidence_record = {
+        "id": candidate.id,
+        "kind": "event",
+        "source": candidate.source,
+        "published": candidate.published,
+        "title": candidate.title,
+        "url": url,
+        "details": _compact_event_details(event),
+        "evidence_kind": "prepared_event",
+        "routing_class": routing_class,
+        "evidence": _bounded_text(summary, MAX_EVENT_DETAIL_CHARS),
+    }
+    if event_type in ARTICLE_EVENT_TYPES:
+        evidence_record["article_candidate_class"] = (
+            "secondary_prepared_company_news"
+            if event_type == "company-news"
+            else "secondary_prepared_market_news"
+        )
+        evidence_record["evidence_depth"] = "summary_only"
+    return evidence_record
+
+
+def _compact_event_details(event: dict[str, Any]) -> dict[str, Any]:
+    details: dict[str, Any] = {}
     for key in (
         "event_type",
         "security_id",
@@ -915,7 +1166,12 @@ def _event_evidence(candidate: CandidateTitle, *, routing_class: str) -> dict[st
     ):
         value = event.get(key)
         if value not in (None, "", [], {}):
-            compact_details[key] = value
+            details[key] = value
+    contexts = event.get("prepared_event_contexts")
+    if isinstance(contexts, list) and contexts:
+        details["prepared_event_contexts"] = [
+            dict(context) for context in contexts if isinstance(context, dict)
+        ]
     metadata = event.get("metadata")
     if isinstance(metadata, dict):
         for key in (
@@ -927,24 +1183,9 @@ def _event_evidence(candidate: CandidateTitle, *, routing_class: str) -> dict[st
             "fiscal_year",
         ):
             value = metadata.get(key)
-            if value not in (None, "", [], {}) and key not in compact_details:
-                compact_details[key] = value
-
-    evidence_record = {
-        "id": candidate.id,
-        "kind": "event",
-        "source": candidate.source,
-        "published": candidate.published,
-        "title": candidate.title,
-        "url": url,
-        "details": compact_details,
-        "evidence_kind": "prepared_event",
-        "routing_class": routing_class,
-        "evidence": _bounded_text(summary, MAX_EVENT_DETAIL_CHARS),
-    }
-    if str(event.get("event_type") or "").strip().casefold() == "market-news":
-        evidence_record["article_candidate_class"] = "secondary_prepared_market_news"
-    return evidence_record
+            if value not in (None, "", [], {}) and key not in details:
+                details[key] = value
+    return details
 
 
 def _universe_role_map(raw_universe: Any) -> dict[str, str]:
@@ -1031,24 +1272,7 @@ def _candidate_article_url(candidate: CandidateTitle) -> str:
             candidate.metadata.get("source_url"),
             _nested_value(candidate.metadata, "metadata", "url"),
         )
-    url = str(raw_url or "").strip()
-    if not url:
-        return ""
-    try:
-        parts = urlsplit(url)
-        query = urlencode(
-            sorted(
-                (key, value)
-                for key, value in parse_qsl(parts.query, keep_blank_values=True)
-                if not key.casefold().startswith("utm_")
-                and key.casefold()
-                not in {"fbclid", "gclid", "mc_cid", "mc_eid"}
-            )
-        )
-        host = parts.netloc.casefold().removeprefix("www.")
-        return urlunsplit(("", host, parts.path.rstrip("/"), query, ""))
-    except ValueError:
-        return url.partition("#")[0].rstrip("/")
+    return canonical_news_url(raw_url)
 
 
 def _article_record_key(
@@ -1058,15 +1282,9 @@ def _article_record_key(
     url = _candidate_article_url(candidate)
     if url:
         return ("url", url)
-    security_id = str(
-        candidate.metadata.get("security_id")
-        or candidate.metadata.get("ticker")
-        or ""
-    ).strip().casefold()
     return (
         "fallback",
         _source_identity(candidate, source_label),
-        security_id,
         title,
         _candidate_publication_day(candidate),
     )
@@ -1136,11 +1354,18 @@ def _ordered_source_labels(
     return labels
 
 
+def _publication_display(published_raw: str, published_iso: str) -> str:
+    """Prefer readable source dates while retaining numeric raw values elsewhere."""
+    if published_raw and not re.fullmatch(r"\d+(?:\.\d+)?", published_raw):
+        return published_raw
+    return published_iso or published_raw
+
+
 def _epoch_as_iso(raw_epoch: Any) -> str:
     try:
         epoch = int(raw_epoch)
         return (
-            datetime.fromtimestamp(epoch, timezone.utc)
+            datetime.fromtimestamp(epoch, UTC)
             .isoformat()
             .replace("+00:00", "Z")
         )
@@ -1235,7 +1460,7 @@ def _with_retries(operation: Callable[[], Any], *, attempts: int, stage: str) ->
     for attempt in range(1, attempts + 1):
         try:
             return operation()
-        except Exception as exc:  # OpenClaw and output-validation errors retry once
+        except Exception as exc:  # noqa: BLE001 - retry model and validation failures
             last_error = exc
             if attempt < attempts:
                 print(
@@ -1312,7 +1537,7 @@ def main(argv: list[str] | None = None, *, model_call: ModelCall | None = None) 
             session_key=args.session_key,
             output_path=output_path,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary reports all failures
         print(f"morning-brief synthesis failed: {exc}", file=sys.stderr)
         return 1
 
