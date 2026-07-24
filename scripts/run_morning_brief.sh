@@ -11,6 +11,7 @@ RUN_DATE="${1:-$(date +%F)}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
 MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"
+MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-main}"
 for integer_name in \
   MINERVA_BROWSER_TIMEOUT \
   MINERVA_WEBFETCH_TIMEOUT \
@@ -250,7 +251,7 @@ PY
     } > "${log_file}"
 
     if openclaw agent \
-      --agent main \
+      --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
       --timeout "${timeout}" \
       --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
       --thinking high \

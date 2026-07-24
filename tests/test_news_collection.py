@@ -58,6 +58,7 @@ def _fake_openclaw(tmp_path: Path) -> Path:
 set -euo pipefail
 message=""
 timeout=""
+agent=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --message)
@@ -68,6 +69,10 @@ while [[ "$#" -gt 0 ]]; do
       timeout="$2"
       shift 2
       ;;
+    --agent)
+      agent="$2"
+      shift 2
+      ;;
     *)
       shift
       ;;
@@ -76,6 +81,7 @@ done
 source_root=$(printf '%s\n' "${message}" | sed -n 's/^Your isolated source root is `\([^`]*\)`.*/\1/p' | head -n 1)
 source_id="${source_root##*/}"
 printf '%s|%s\n' "${source_id}" "${timeout}" >> "${TIMEOUT_LOG}"
+printf '%s\n' "${agent}" >> "${AGENT_LOG}"
 
 if [[ "${source_id}" == "${BROKEN_SOURCE:-}" ]]; then
   exit 7
@@ -146,6 +152,7 @@ def _run_wrapper(
     fake_runner = _fake_runner(tmp_path)
 
     env = os.environ.copy()
+    env.pop("MINERVA_NEWS_COLLECTOR_AGENT", None)
     env.update(
         {
             "HOME": str(fake_home),
@@ -160,6 +167,7 @@ def _run_wrapper(
             "INVEST_DB": str(tmp_path / "invest.db"),
             "CAPTURE_DIR": str(capture_dir),
             "TIMEOUT_LOG": str(coordinator / "timeouts.log"),
+            "AGENT_LOG": str(coordinator / "agents.log"),
             "IR_START_LOG": str(coordinator / "ir-starts.log"),
             "AMD_READY": str(coordinator / "amd-ready"),
             "DELETION_ROOT_LOG": str(coordinator / "deletion-root.log"),
@@ -218,6 +226,38 @@ def test_collector_timeout_validation_precedes_temp_state(
     assert result.returncode == 1
     assert f"{variable} must be a positive integer" in result.stderr
     assert list(temp_state.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("collector_agent", "expected"),
+    [(None, "main"), ("news-collector", "news-collector")],
+)
+def test_collector_agent_defaults_and_can_be_overridden(
+    tmp_path: Path, collector_agent: str | None, expected: str
+) -> None:
+    extra_env = (
+        {"MINERVA_NEWS_COLLECTOR_AGENT": collector_agent}
+        if collector_agent is not None
+        else None
+    )
+    result = _run_wrapper(
+        tmp_path,
+        sources=[
+            {
+                "id": "test-source",
+                "name": "Test Source",
+                "url": "https://example.test/news",
+                "access": "web_fetch",
+            }
+        ],
+        ir_entries=[],
+        extra_env=extra_env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "coordinator" / "agents.log").read_text(
+        encoding="utf-8"
+    ).splitlines() == [expected]
 
 
 def test_collectors_are_isolated_launch_all_ir_and_aggregate_every_artifact(
