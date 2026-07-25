@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date
 from pathlib import Path
 from typing import NoReturn
 
@@ -11,16 +12,74 @@ import typer
 
 from harness import news
 from harness.config import get_settings
+from harness.portfolio_state import load_json, portfolio_paths
 
 NEWS_HELP = (
-    "Ingest collected news and check candidate article existence.\n\n"
+    "Download Finnhub news, ingest collected articles, and check candidate existence.\n\n"
     "Examples:\n"
+    "  minerva news download-finnhub --date 2026-07-19\n"
     "  minerva news ingest --raw-dir ./raw --summaries-dir ./summaries\n"
     "  minerva news ingest --date 2026-07-19\n"
     "  minerva news exist --db invest.db --source-id example --input candidates.json\n"
 )
 
 app = typer.Typer(help=NEWS_HELP, no_args_is_help=True)
+
+
+@app.command("download-finnhub")
+def download_finnhub_cli(
+    date_arg: str = typer.Option(
+        ...,
+        "--date",
+        metavar="YYYY-MM-DD",
+        help="America/New_York publication day to download.",
+    ),
+    db_path: Path | None = typer.Option(
+        None,
+        "--db",
+        help="SQLite database (default: <workspace>/data/04-database/invest.db).",
+    ),
+    symbols: list[str] = typer.Option(
+        [],
+        "--symbol",
+        help=(
+            "Only download company news for this Finnhub symbol; may repeat. "
+            "Default: all current holdings and watchlist symbols."
+        ),
+    ),
+) -> None:
+    """Download Finnhub records directly into the canonical news table."""
+    try:
+        if not news.DATE_ONLY_RE.fullmatch(date_arg):
+            raise ValueError
+        publication_date = date.fromisoformat(date_arg)
+    except ValueError:
+        _fail("--date must be a valid YYYY-MM-DD date", exit_code=2)
+
+    settings = get_settings()
+    if not settings.finnhub_api_key:
+        _fail("FINNHUB_API_KEY is not configured", exit_code=1)
+    workspace_root = settings.resolved_workspace_root
+    resolved_db_path = (
+        db_path or workspace_root / "data" / "04-database" / "invest.db"
+    )
+    try:
+        universe = load_json(portfolio_paths(workspace_root).universe, default=[])
+        if not isinstance(universe, list):
+            _fail("portfolio universe must be a JSON array", exit_code=1)
+        result = news.download_finnhub(
+            db_path=resolved_db_path,
+            api_key=settings.finnhub_api_key,
+            publication_date=publication_date,
+            universe=universe,
+            requested_symbols=symbols,
+        )
+    except news.NewsError as exc:
+        _fail(str(exc), exit_code=1)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        _fail(str(exc), exit_code=1)
+
+    typer.echo(json.dumps(result, sort_keys=True, separators=(",", ":")))
 
 
 @app.command("ingest")

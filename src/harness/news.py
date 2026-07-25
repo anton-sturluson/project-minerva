@@ -18,6 +18,9 @@ from pathlib import Path
 from typing import Iterable, Literal, Mapping, Sequence, TypedDict
 from zoneinfo import ZoneInfo
 
+from harness.finnhub import fetch_finnhub_news
+from harness.portfolio_state import NON_SECURITY_TICKERS
+
 # Header keys we care about (case-insensitive on the label).
 META_KEYS = {"source", "url", "published", "collected", "section", "status"}
 
@@ -925,6 +928,180 @@ def load_enrichment(paths: Iterable[Path]) -> dict[str, str]:
                     if len(article_path.parts) >= 3:
                         out["/".join(article_path.parts[-3:])] = publication_input
     return out
+
+
+# ---------------------------------------------------------------------------
+# Direct Finnhub download
+# ---------------------------------------------------------------------------
+FINNHUB_PUBLICATION_TIMEZONE = ZoneInfo("America/New_York")
+
+
+def resolve_finnhub_symbols(
+    universe: Sequence[Mapping[str, object]],
+    requested_symbols: Sequence[str] = (),
+) -> dict[str, str]:
+    """Map Finnhub symbols to security IDs for the selected company universe.
+
+    Explicit symbols replace the portfolio universe. Otherwise every current
+    holding/watchlist row with a usable Finnhub symbol or ticker is included;
+    SEC registration is intentionally irrelevant to news availability.
+    """
+    if requested_symbols:
+        selected = {
+            symbol.strip().upper(): symbol.strip().upper()
+            for symbol in requested_symbols
+            if symbol.strip()
+        }
+        return dict(sorted(selected.items()))
+
+    selected: dict[str, str] = {}
+    for security in universe:
+        if not isinstance(security, Mapping):
+            continue
+        security_id = str(
+            security.get("security_id") or security.get("ticker") or ""
+        ).strip().upper()
+        symbol = str(
+            security.get("finnhub_symbol")
+            or security.get("ticker")
+            or security.get("security_id")
+            or ""
+        ).strip().upper()
+        if not symbol or symbol in NON_SECURITY_TICKERS:
+            continue
+        selected[symbol] = security_id or symbol
+    return dict(sorted(selected.items()))
+
+
+def _finnhub_source_id(value: object) -> str:
+    source_id = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower())
+    return source_id.strip("-") or "finnhub"
+
+
+def _normalize_finnhub_article(
+    item: Mapping[str, object],
+    *,
+    publication_date: date,
+    section: str,
+) -> tuple[str, int, str, str, str, str, str, str] | None:
+    timestamp = item.get("datetime")
+    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+        return None
+    try:
+        published = datetime.fromtimestamp(
+            timestamp, timezone.utc
+        ).astimezone(FINNHUB_PUBLICATION_TIMEZONE)
+    except (OSError, OverflowError, ValueError):
+        return None
+    if published.date() != publication_date:
+        return None
+
+    title = str(item.get("headline") or "").strip()
+    if not title:
+        return None
+    source_id = _finnhub_source_id(item.get("source"))
+    published_at_raw = published.isoformat(timespec="seconds")
+    content = str(item.get("summary") or "").strip() or title
+    url = str(item.get("url") or "").strip()
+    key = article_key(source_id, publication_date.isoformat(), title)
+    return (
+        key,
+        int(timestamp),
+        published_at_raw,
+        title,
+        content,
+        source_id,
+        url,
+        section,
+    )
+
+
+def download_finnhub(
+    *,
+    db_path: Path,
+    api_key: str,
+    publication_date: date,
+    universe: Sequence[Mapping[str, object]],
+    requested_symbols: Sequence[str] = (),
+) -> dict[str, int | str]:
+    """Download one New York publication day and persist canonical news rows."""
+    symbols = resolve_finnhub_symbols(universe, requested_symbols)
+    payload = fetch_finnhub_news(
+        api_key=api_key,
+        publication_date=publication_date,
+        symbols=symbols,
+    )
+    scoped_items = [
+        (item, "finnhub-general") for item in payload.general
+    ] + [(item, "finnhub-company") for item in payload.company]
+    stats = {
+        "date": publication_date.isoformat(),
+        "timezone": str(FINNHUB_PUBLICATION_TIMEZONE),
+        "symbols": len(symbols),
+        "fetched": len(scoped_items),
+        "eligible": 0,
+        "inserted": 0,
+        "duplicates": 0,
+        "skipped": 0,
+        "errors": payload.errors,
+    }
+    collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("BEGIN")
+        ensure_schema(conn)
+        for item, section in scoped_items:
+            normalized = _normalize_finnhub_article(
+                item,
+                publication_date=publication_date,
+                section=section,
+            )
+            if normalized is None:
+                stats["skipped"] += 1
+                continue
+            stats["eligible"] += 1
+            key, epoch, raw, title, content, source, url, row_section = normalized
+            existing = None
+            if url:
+                existing = conn.execute(
+                    "SELECT 1 FROM news WHERE url = ? COLLATE BINARY LIMIT 1",
+                    (url,),
+                ).fetchone()
+            if existing is None:
+                existing = conn.execute(
+                    "SELECT 1 FROM news WHERE article_key = ? COLLATE BINARY LIMIT 1",
+                    (key,),
+                ).fetchone()
+            if existing is not None:
+                stats["duplicates"] += 1
+                continue
+            conn.execute(
+                "INSERT INTO news "
+                "(article_key, published_at, published_at_raw, title, content, "
+                "summary, source, url, section, collected_at) "
+                "VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+                (
+                    key,
+                    epoch,
+                    raw,
+                    title,
+                    content,
+                    source,
+                    url,
+                    row_section,
+                    collected_at,
+                ),
+            )
+            stats["inserted"] += 1
+        conn.commit()
+        stats["db_total"] = conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
+    finally:
+        conn.close()
+    return stats
 
 
 # ---------------------------------------------------------------------------

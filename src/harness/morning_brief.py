@@ -18,6 +18,7 @@ from lxml import html as lxml_html
 
 logger = logging.getLogger(__name__)
 
+from harness.finnhub import fetch_finnhub_news
 from harness.portfolio_state import (
     NON_SECURITY_TICKERS,
     append_jsonl,
@@ -1794,60 +1795,32 @@ def _load_finnhub_payload(
             }
         )
 
-    # General market news
-    news: list[dict[str, Any]] = []
-    try:
-        time_mod.sleep(delay)
-        news_response = session.get(
-            f"{base_url}/news",
-            params={"category": "general", "token": api_key},
-            timeout=30,
-        )
-        news_response.raise_for_status()
-        news = news_response.json() if isinstance(news_response.json(), list) else []
-    except Exception as exc:
-        logger.warning("failed to fetch general market news: %s", exc)
-
-    # Company-specific news
-    company_news: list[dict[str, Any]] = []
-    if universe:
-        date_str = run_date.isoformat()
-        for security in universe:
-            finnhub_sym = str(
-                security.get("finnhub_symbol") or security.get("ticker") or security.get("security_id") or ""
+    company_symbols: dict[str, str] = {}
+    for security in universe or []:
+        finnhub_symbol = str(
+            security.get("finnhub_symbol")
+            or security.get("ticker")
+            or security.get("security_id")
+            or ""
+        ).strip()
+        if finnhub_symbol and security.get("sec_registered"):
+            company_symbols[finnhub_symbol] = str(
+                security.get("security_id") or finnhub_symbol
             ).strip()
-            if not finnhub_sym:
-                continue
-            if not security.get("sec_registered"):
-                continue
-            try:
-                time_mod.sleep(delay)
-                cn_response = session.get(
-                    f"{base_url}/company-news",
-                    params={"symbol": finnhub_sym, "from": date_str, "to": date_str, "token": api_key},
-                    timeout=30,
-                )
-                cn_response.raise_for_status()
-                items = cn_response.json() if isinstance(cn_response.json(), list) else []
-                for item in items:
-                    item["_security_id"] = str(security.get("security_id") or finnhub_sym).strip()
-                    item["_finnhub_symbol"] = finnhub_sym
-                company_news.extend(items)
-            except Exception as exc:
-                status = getattr(getattr(exc, "response", None), "status_code", None)
-                logger.warning(
-                    "skipping company-news for %s: %s",
-                    finnhub_sym,
-                    f"HTTP {status}" if status else type(exc).__name__,
-                )
+    news_payload = fetch_finnhub_news(
+        api_key=api_key,
+        publication_date=run_date,
+        symbols=company_symbols,
+        delay=delay,
+    )
 
     return {
         "earnings": earnings_payload.get("earningsCalendar", earnings_payload.get("earnings", [])),
         "indexes": indexes,
         "rates": [],
         "fx": [],
-        "news": news,
-        "company_news": company_news,
+        "news": news_payload.general,
+        "company_news": news_payload.company,
     }
 
 
