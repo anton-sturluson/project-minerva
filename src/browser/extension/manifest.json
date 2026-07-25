@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "121",
+  "name": "Browser CLI Bridge",
+  "version": "0.1.0",
+  "description": "Bridge Browser CLI commands to a dedicated Chrome automation window.",
+  "permissions": [
+    "tabs",
+    "windows",
+    "scripting",
+    "debugger",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://127.0.0.1:19224 ws://localhost:19224"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Browser CLI Bridge"
+  }
+}

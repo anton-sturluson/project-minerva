@@ -1,0 +1,40 @@
+{
+  "name": "browser-cli",
+  "version": "0.1.0",
+  "description": "Browser CLI that controls Chrome through a local extension bridge",
+  "type": "module",
+  "bin": {
+    "browser": "./bin/browser"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "extension",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "check:extension": "node --check extension/service-worker.js && node --check extension/browser-boundaries.js && node --check extension/close-idle.js && node --check extension/runtime-state.js",
+    "check": "npm run typecheck && npm run check:extension",
+    "test": "node --import tsx --test test/*.test.ts test/*.test.js",
+    "smoke": "node --import tsx --test test/smoke.test.ts",
+    "dev": "tsx src/client.ts",
+    "start:server": "tsx src/server.ts",
+    "prepublishOnly": "npm run check && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
