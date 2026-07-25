@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from minerva.prices import (
     PriceRow,
     RateLimiter,
+    daily_change_pct,
+    download_market_data,
     ensure_schema,
+    market_movement_from_chart,
     range_pct,
     read_positions,
     refresh_prices,
@@ -25,6 +29,26 @@ from minerva.prices import (
 
 def _row(ticker: str, current: float, low: float, high: float, as_of: str = "2026-07-01") -> PriceRow:
     return PriceRow(ticker=ticker, as_of=as_of, current=current, wk52_low=low, wk52_high=high, currency="USD")
+
+
+YAHOO_DAILY_RESPONSE = {
+    "chart": {
+        "result": [
+            {
+                "meta": {
+                    "currency": "USD",
+                    "exchangeTimezoneName": "America/New_York",
+                    "fiftyTwoWeekLow": 80.0,
+                    "fiftyTwoWeekHigh": 130.0,
+                    "currentTradingPeriod": {"regular": {"end": 1783368000}},
+                },
+                "timestamp": [1782912600, 1782999000, 1783344600],
+                "indicators": {"quote": [{"close": [100.0, 110.0, 121.0]}]},
+            }
+        ],
+        "error": None,
+    }
+}
 
 
 class TestRangePct:
@@ -64,6 +88,33 @@ class TestYahooSymbol:
         assert yahoo_symbol("FOO", "NOPE") == "FOO"
 
 
+class TestMarketMovement:
+    def test_uses_actual_sessions_and_excludes_an_incomplete_current_day(self):
+        weekend = market_movement_from_chart(
+            "AAPL",
+            date(2026, 7, 5),
+            YAHOO_DAILY_RESPONSE,
+            now=datetime(2026, 7, 6, 14, tzinfo=UTC),
+        )
+        current_session = market_movement_from_chart(
+            "AAPL",
+            date(2026, 7, 6),
+            YAHOO_DAILY_RESPONSE,
+            now=datetime(2026, 7, 6, 14, tzinfo=UTC),
+        )
+
+        assert (weekend.as_of, weekend.current, weekend.previous_close) == (
+            "2026-07-02",
+            110.0,
+            100.0,
+        )
+        assert current_session.as_of == "2026-07-02"
+
+    def test_percentage_math_is_stored_in_percentage_points(self):
+        assert daily_change_pct(97.5, 100.0) == -2.5
+        assert daily_change_pct(10.0, 0.0) is None
+
+
 class TestSchemaAndPersistence:
     def test_ensure_schema_creates_table_and_view(self, tmp_path: Path):
         db = tmp_path / "test.db"
@@ -76,10 +127,43 @@ class TestSchemaAndPersistence:
             }
         assert objects == {"prices", "price_position"}
 
-    def test_ensure_schema_is_idempotent(self, tmp_path: Path):
-        db = tmp_path / "test.db"
+    def test_migrates_legacy_schema_and_preserves_price_position(self, tmp_path: Path):
+        db = tmp_path / "legacy.db"
+        with sqlite3.connect(db) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE prices (
+                    id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, as_of TEXT NOT NULL,
+                    current REAL, wk52_low REAL, wk52_high REAL, currency TEXT,
+                    source TEXT NOT NULL DEFAULT 'yahoo', fetched_at TEXT NOT NULL,
+                    UNIQUE (ticker, as_of)
+                );
+                CREATE VIEW price_position AS
+                SELECT ticker, as_of, current, wk52_low, wk52_high, currency,
+                       ROUND((current - wk52_low) / NULLIF(wk52_high - wk52_low, 0), 4) AS range_pct
+                FROM prices;
+                INSERT INTO prices
+                    (ticker, as_of, current, wk52_low, wk52_high, currency, fetched_at)
+                VALUES ('AAPL', '2026-07-01', 150, 100, 200, 'USD', datetime('now'));
+                """
+            )
+
         ensure_schema(db)
         ensure_schema(db)
+
+        with sqlite3.connect(db) as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(prices)")}
+            view_columns = [
+                row[1] for row in conn.execute("PRAGMA table_info(price_position)")
+            ]
+            position = conn.execute(
+                "SELECT range_pct, previous_close, instrument_type FROM price_position"
+            ).fetchone()
+        assert {"previous_close", "change_pct", "instrument_type"} <= columns
+        assert view_columns[:7] == [
+            "ticker", "as_of", "current", "wk52_low", "wk52_high", "currency", "range_pct"
+        ]
+        assert position == (0.5, None, "security")
 
     def test_upsert_then_read(self, tmp_path: Path):
         db = tmp_path / "test.db"
@@ -139,6 +223,47 @@ class TestTrackedCompanies:
 
 
 class TestRefreshPrices:
+    def test_download_market_data_is_idempotent_and_reports_errors(
+        self, tmp_path: Path
+    ):
+        db = tmp_path / "test.db"
+
+        def fake_fetcher(ticker: str, *, target_date: date, **_kw) -> PriceRow:
+            if ticker == "BAD":
+                raise ValueError("no chart data")
+            return market_movement_from_chart(
+                ticker,
+                target_date,
+                YAHOO_DAILY_RESPONSE,
+                now=datetime(2026, 7, 6, 14, tzinfo=UTC),
+            )
+
+        instruments = [("AAPL", None, "security"), ("BAD", None, "security")]
+        first = download_market_data(
+            db, instruments, date(2026, 7, 5), fetcher=fake_fetcher
+        )
+        second = download_market_data(
+            db, instruments, date(2026, 7, 5), fetcher=fake_fetcher
+        )
+        # The legacy portfolio refresh path must not erase stored movement fields.
+        upsert_prices(db, [_row("AAPL", 110, 80, 130, as_of="2026-07-02")])
+
+        with sqlite3.connect(db) as conn:
+            rows = conn.execute(
+                "SELECT ticker, as_of, current, previous_close, change_pct FROM prices"
+            ).fetchall()
+        assert rows == [("AAPL", "2026-07-02", 110.0, 100.0, 10.0)]
+        assert (
+            first
+            == second
+            == {
+                "requested": 2,
+                "written": 1,
+                "trading_dates": ["2026-07-02"],
+                "errors": [{"symbol": "BAD", "error": "no chart data"}],
+            }
+        )
+
     def test_refresh_persists_all_with_fake_fetcher(self, tmp_path: Path):
         db = tmp_path / "test.db"
         ensure_schema(db)

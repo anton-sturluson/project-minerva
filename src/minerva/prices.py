@@ -1,7 +1,7 @@
-"""52-week price position tracking.
+"""Yahoo price snapshots and completed daily market movements.
 
-Pulls current price and 52-week high/low from Yahoo Finance, persists dated
-snapshots to invest.db, and reports where each ticker sits in its 52-week band:
+Pulls prices from Yahoo Finance, persists dated snapshots to invest.db, and
+reports where each ticker sits in its 52-week band:
 
     range_pct = (current - low) / (high - low)   # 0 = on 52w low, 1 = on 52w high
 
@@ -9,8 +9,8 @@ Yahoo covers US and international listings with one keyless call per ticker.
 range_pct is computed on read (via the ``price_position`` view), never stored, so a
 corrected input never leaves a stale value behind.
 
-Network access is isolated in ``fetch_price`` and injected into ``refresh_prices`` as
-a ``fetcher`` callable, which keeps the orchestration testable without mocking HTTP.
+Network access stays behind injectable fetchers, keeping orchestration testable
+without live HTTP.
 """
 
 from __future__ import annotations
@@ -18,10 +18,13 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as datetime_time
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -51,29 +54,43 @@ _EXCHANGE_SUFFIX = {
     "BME": ".MC",    # Madrid
 }
 
-# Mirrored in hard-disk/data/04-database/schema.sql. Kept here so tests and the CLI
-# can materialize the table + view into any database without reading that file.
-_SCHEMA_SQL = """
+# Runtime source of truth for the prices schema. ``ensure_schema`` creates fresh
+# databases and migrates existing workspace databases without an external file.
+_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS prices (
-    id          INTEGER PRIMARY KEY,
-    ticker      TEXT NOT NULL,
-    as_of       TEXT NOT NULL,
-    current     REAL,
-    wk52_low    REAL,
-    wk52_high   REAL,
-    currency    TEXT,
-    source      TEXT NOT NULL DEFAULT 'yahoo',
-    fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    id              INTEGER PRIMARY KEY,
+    ticker          TEXT NOT NULL,
+    as_of           TEXT NOT NULL,
+    current         REAL,
+    wk52_low        REAL,
+    wk52_high       REAL,
+    currency        TEXT,
+    source          TEXT NOT NULL DEFAULT 'yahoo',
+    fetched_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    previous_close  REAL,
+    change_pct      REAL,
+    instrument_type TEXT NOT NULL DEFAULT 'security',
     UNIQUE (ticker, as_of)
 );
-CREATE VIEW IF NOT EXISTS price_position AS
-SELECT
-    ticker, as_of, current, wk52_low, wk52_high, currency,
-    ROUND((current - wk52_low) / NULLIF(wk52_high - wk52_low, 0), 4) AS range_pct
-FROM prices;
 CREATE INDEX IF NOT EXISTS idx_prices_ticker ON prices(ticker);
 CREATE INDEX IF NOT EXISTS idx_prices_asof   ON prices(as_of);
 """
+
+_PRICE_POSITION_SQL = """
+DROP VIEW IF EXISTS price_position;
+CREATE VIEW price_position AS
+SELECT
+    ticker, as_of, current, wk52_low, wk52_high, currency,
+    ROUND((current - wk52_low) / NULLIF(wk52_high - wk52_low, 0), 4) AS range_pct,
+    previous_close, change_pct, instrument_type
+FROM prices;
+"""
+
+_MIGRATION_COLUMNS = {
+    "previous_close": "REAL",
+    "change_pct": "REAL",
+    "instrument_type": "TEXT NOT NULL DEFAULT 'security'",
+}
 
 
 @dataclass(slots=True)
@@ -87,6 +104,9 @@ class PriceRow:
     wk52_high: float | None
     currency: str | None = None
     source: str = "yahoo"
+    previous_close: float | None = None
+    change_pct: float | None = None
+    instrument_type: str = "security"
 
 
 def range_pct(row: PriceRow) -> float | None:
@@ -98,6 +118,13 @@ def range_pct(row: PriceRow) -> float | None:
     if span == 0:
         return None
     return (current - low) / span
+
+
+def daily_change_pct(current: float | None, previous: float | None) -> float | None:
+    """Return close-to-close change in percentage points, rounded deterministically."""
+    if current is None or previous in {None, 0}:
+        return None
+    return round((current - previous) / previous * 100, 6)
 
 
 def yahoo_symbol(ticker: str, exchange: str | None) -> str:
@@ -145,9 +172,16 @@ def tracked_companies(db_path: str | Path) -> list[tuple[str, str | None]]:
 
 
 def ensure_schema(db_path: str | Path) -> None:
-    """Create the prices table + view if absent. Idempotent."""
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(_SCHEMA_SQL)
+    """Create or minimally migrate the prices table and compatible view."""
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(path)) as conn:
+        conn.executescript(_TABLE_SQL)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(prices)")}
+        for name, declaration in _MIGRATION_COLUMNS.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE prices ADD COLUMN {name} {declaration}")
+        conn.executescript(_PRICE_POSITION_SQL)
         conn.commit()
 
 
@@ -159,15 +193,22 @@ def upsert_prices(db_path: str | Path, rows: Iterable[PriceRow]) -> int:
             conn.execute(
                 """
                 INSERT INTO prices
-                    (ticker, as_of, current, wk52_low, wk52_high, currency, source, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    (ticker, as_of, current, wk52_low, wk52_high, currency, source,
+                     fetched_at, previous_close, change_pct, instrument_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
                 ON CONFLICT(ticker, as_of) DO UPDATE SET
-                    current    = excluded.current,
-                    wk52_low   = excluded.wk52_low,
-                    wk52_high  = excluded.wk52_high,
-                    currency   = excluded.currency,
-                    source     = excluded.source,
-                    fetched_at = excluded.fetched_at
+                    current         = excluded.current,
+                    wk52_low        = excluded.wk52_low,
+                    wk52_high       = excluded.wk52_high,
+                    currency        = excluded.currency,
+                    source          = excluded.source,
+                    fetched_at      = excluded.fetched_at,
+                    previous_close  = COALESCE(excluded.previous_close, prices.previous_close),
+                    change_pct      = CASE
+                        WHEN excluded.previous_close IS NULL THEN prices.change_pct
+                        ELSE excluded.change_pct
+                    END,
+                    instrument_type = excluded.instrument_type
                 """,
                 (
                     row.ticker,
@@ -177,6 +218,9 @@ def upsert_prices(db_path: str | Path, rows: Iterable[PriceRow]) -> int:
                     row.wk52_high,
                     row.currency,
                     row.source,
+                    row.previous_close,
+                    row.change_pct,
+                    row.instrument_type,
                 ),
             )
             written += 1
@@ -252,12 +296,169 @@ def fetch_price(
 
     return PriceRow(
         ticker=ticker.upper(),
-        as_of=datetime.now(timezone.utc).date().isoformat(),
+        as_of=datetime.now(UTC).date().isoformat(),
         current=price,
         wk52_low=to_float(meta.get("fiftyTwoWeekLow")),
         wk52_high=to_float(meta.get("fiftyTwoWeekHigh")),
         currency=meta.get("currency"),
     )
+
+
+def market_movement_from_chart(
+    ticker: str,
+    target_date: date,
+    payload: dict[str, Any],
+    *,
+    instrument_type: str = "security",
+    now: datetime | None = None,
+) -> PriceRow:
+    """Select the latest two completed Yahoo sessions on or before a date."""
+    results = (payload.get("chart") or {}).get("result") or []
+    if not results:
+        raise ValueError(f"no chart data for {ticker}")
+    chart = results[0]
+    meta = chart.get("meta") or {}
+    timezone_name = str(meta.get("exchangeTimezoneName") or "UTC")
+    try:
+        exchange_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"unknown exchange timezone {timezone_name}") from exc
+
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=UTC)
+    local_today = current_time.astimezone(exchange_timezone).date()
+    completed_through = min(target_date, local_today)
+    if completed_through == local_today:
+        regular_end = to_float(
+            ((meta.get("currentTradingPeriod") or {}).get("regular") or {}).get("end")
+        )
+        if regular_end is None or current_time.timestamp() < regular_end:
+            completed_through -= timedelta(days=1)
+
+    timestamps = chart.get("timestamp") or []
+    quotes = ((chart.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = quotes.get("close") or []
+    sessions: dict[date, float] = {}
+    for timestamp, raw_close in zip(timestamps, closes, strict=False):
+        close = to_float(raw_close)
+        if close is None:
+            continue
+        session_date = (
+            datetime.fromtimestamp(float(timestamp), tz=UTC)
+            .astimezone(exchange_timezone)
+            .date()
+        )
+        if session_date <= completed_through:
+            sessions[session_date] = close
+
+    selected = sorted(sessions.items())[-2:]
+    if len(selected) < 2:
+        raise ValueError(f"fewer than two completed trading sessions for {ticker}")
+    (_, previous_close), (as_of, current_close) = selected
+
+    return PriceRow(
+        ticker=ticker.strip().upper(),
+        as_of=as_of.isoformat(),
+        current=current_close,
+        wk52_low=to_float(meta.get("fiftyTwoWeekLow")),
+        wk52_high=to_float(meta.get("fiftyTwoWeekHigh")),
+        currency=meta.get("currency"),
+        previous_close=previous_close,
+        change_pct=daily_change_pct(current_close, previous_close),
+        instrument_type=instrument_type,
+    )
+
+
+def fetch_market_movement(
+    ticker: str,
+    *,
+    target_date: date,
+    exchange: str | None = None,
+    instrument_type: str = "security",
+    session: requests.Session | None = None,
+    limiter: RateLimiter | None = None,
+) -> PriceRow:
+    """Fetch Yahoo daily history and return one completed close-to-close movement."""
+    session = session or requests.Session()
+    symbol = yahoo_symbol(ticker, exchange)
+    if limiter is not None:
+        limiter.acquire()
+
+    # Thirty-two calendar days comfortably spans ordinary exchange closures while
+    # Yahoo timestamps, rather than calendar arithmetic, determine the two sessions.
+    query_end = min(
+        target_date + timedelta(days=1),
+        datetime.now(UTC).date() + timedelta(days=1),
+    )
+    query_start = query_end - timedelta(days=32)
+    response = session.get(
+        YAHOO_CHART_URL.format(symbol=symbol),
+        params={
+            "interval": "1d",
+            "period1": int(
+                datetime.combine(query_start, datetime_time(), tzinfo=UTC).timestamp()
+            ),
+            "period2": int(
+                datetime.combine(query_end, datetime_time(), tzinfo=UTC).timestamp()
+            ),
+        },
+        headers=YAHOO_HEADERS,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return market_movement_from_chart(
+        ticker,
+        target_date,
+        response.json(),
+        instrument_type=instrument_type,
+    )
+
+
+def download_market_data(
+    db_path: str | Path,
+    instruments: Sequence[tuple[str, str | None, str]],
+    target_date: date,
+    *,
+    fetcher: Callable[..., PriceRow] | None = None,
+    limiter: RateLimiter | None = None,
+) -> dict[str, Any]:
+    """Fetch and upsert daily movements with compact per-symbol accounting."""
+    ensure_schema(db_path)
+    active_fetcher = fetcher or fetch_market_movement
+    limiter = limiter or RateLimiter()
+    session = requests.Session()
+    fetched: list[PriceRow] = []
+    errors: list[dict[str, str]] = []
+
+    for ticker, exchange, instrument_type in instruments:
+        try:
+            row = active_fetcher(
+                ticker,
+                target_date=target_date,
+                exchange=exchange,
+                instrument_type=instrument_type,
+                session=session,
+                limiter=limiter,
+            )
+            row.instrument_type = instrument_type
+            row.change_pct = daily_change_pct(row.current, row.previous_close)
+            fetched.append(row)
+        except Exception as exc:  # noqa: BLE001 — isolate one symbol's failure
+            logger.warning("market data fetch failed for %s: %s", ticker, exc)
+            message = str(exc)
+            if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                message = f"HTTP {exc.response.status_code}"
+            errors.append({"symbol": ticker, "error": message})
+
+    if fetched:
+        upsert_prices(db_path, fetched)
+    return {
+        "requested": len(instruments),
+        "written": len(fetched),
+        "trading_dates": sorted({row.as_of for row in fetched}),
+        "errors": errors,
+    }
 
 
 def refresh_prices(
@@ -288,4 +489,3 @@ def refresh_prices(
         upsert_prices(db_path, fetched)
 
     return {"fetched": len(fetched), "errors": errors}
-
