@@ -15,6 +15,7 @@ from harness.config import get_settings
 NEWS_HELP = (
     "Ingest collected news and check candidate article existence.\n\n"
     "Examples:\n"
+    "  minerva news ingest --input article.json\n"
     "  minerva news ingest --raw-dir ./raw --summaries-dir ./summaries\n"
     "  minerva news ingest --date 2026-07-19\n"
     "  minerva news exist --db invest.db --source-id example --input candidates.json\n"
@@ -40,6 +41,15 @@ def ingest_cli(
         None,
         "--raw-dir",
         help="Explicit raw directory (bypasses --news-root).",
+    ),
+    input_path: str | None = typer.Option(
+        None,
+        "--input",
+        metavar="FILE",
+        help=(
+            "One normalized article JSON object with title, source_id, url, "
+            "published_at, and content (use - for stdin)."
+        ),
     ),
     summaries_dir: Path | None = typer.Option(
         None,
@@ -80,14 +90,41 @@ def ingest_cli(
         help="Optional file to write per-file decisions.",
     ),
 ) -> None:
-    """Ingest raw markdown and matching summaries into the news table."""
-    selected_modes = (
-        int(all_dates) + int(single_date is not None) + int(raw_dir is not None)
+    """Ingest one normalized article or a file-based news batch."""
+    selected_modes = sum(
+        (
+            int(input_path is not None),
+            int(all_dates),
+            int(single_date is not None),
+            int(raw_dir is not None),
+        )
     )
     if selected_modes != 1:
-        _fail("exactly one of --all, --date, or --raw-dir is required", exit_code=2)
+        _fail(
+            "exactly one of --input, --all, --date, or --raw-dir is required",
+            exit_code=2,
+        )
     if summaries_dir is not None and raw_dir is None:
         _fail("--summaries-dir requires --raw-dir", exit_code=2)
+    if input_path is not None:
+        incompatible = [
+            flag
+            for flag, selected in (
+                ("--summaries-dir", summaries_dir is not None),
+                ("--news-root", news_root is not None),
+                ("--news-sources", news_sources is not None),
+                ("--ir-registry", ir_registry is not None),
+                ("--enrich", bool(enrich)),
+                ("--report", report is not None),
+            )
+            if selected
+        ]
+        if incompatible:
+            _fail(
+                "--input cannot be combined with batch option(s): "
+                + ", ".join(incompatible),
+                exit_code=2,
+            )
 
     workspace_root = get_settings().resolved_workspace_root
     resolved_news_root = news_root or workspace_root / "data" / "02-news"
@@ -107,6 +144,19 @@ def ingest_cli(
     )
 
     try:
+        if input_path is not None:
+            article = news.parse_article_input(_read_json_input(input_path))
+            article_result = news.ingest_article(resolved_db_path, article)
+            typer.echo(
+                json.dumps(
+                    article_result,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            return
+
         result = news.ingest(
             db_path=resolved_db_path,
             news_root=resolved_news_root,
@@ -123,6 +173,8 @@ def ingest_cli(
             report.write_text(
                 "\n".join(result.report_lines) + "\n", encoding="utf-8"
             )
+    except news.ArticleInputError as exc:
+        _fail(str(exc), exit_code=2)
     except news.NewsError as exc:
         _fail(str(exc), exit_code=1)
     except (OSError, sqlite3.Error) as exc:
@@ -149,7 +201,7 @@ def exist_cli(
 ) -> None:
     """Return which candidate news items already exist in SQLite."""
     try:
-        raw = _read_candidate_input(input_path)
+        raw = _read_json_input(input_path)
         candidates = news.parse_candidates(raw)
         result = news.check_candidates(db_path, source_id, candidates)
     except news.CandidateInputError as exc:
@@ -162,7 +214,7 @@ def exist_cli(
     typer.echo(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
 
-def _read_candidate_input(input_path: str) -> str:
+def _read_json_input(input_path: str) -> str:
     if input_path == "-":
         return typer.get_text_stream("stdin").read()
     return Path(input_path).read_text(encoding="utf-8")

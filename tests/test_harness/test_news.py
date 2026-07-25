@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from typer.testing import CliRunner
@@ -37,6 +39,18 @@ def _candidate(
     published: str = "2026-07-19",
 ) -> dict[str, str]:
     return {"title": title, "url": url, "published": published}
+
+
+def _article(**overrides: object) -> dict[str, object]:
+    article: dict[str, object] = {
+        "title": "A Big Story",
+        "source_id": "reuters-markets",
+        "url": "https://example.test/story",
+        "published_at": "2026-07-19T09:30:00-04:00",
+        "content": "Normalized article body.",
+    }
+    article.update(overrides)
+    return article
 
 
 def _write_raw(raw_dir: Path, *, title: str = "A   Big Story") -> Path:
@@ -73,6 +87,7 @@ def test_news_commands_are_registered_with_exact_help_surface() -> None:
     assert ingest_help.exit_code == 0
     assert "--raw-dir" in ingest_help.stdout
     assert "--summaries-dir" in ingest_help.stdout
+    assert "--input" in ingest_help.stdout
     assert exist_help.exit_code == 0
     assert "--db" in exist_help.stdout
     assert "--source-id" in exist_help.stdout
@@ -155,6 +170,144 @@ def test_ingest_cli_preserves_stats_report_summary_and_stable_key(
     assert second.exit_code == 0, second.output
     assert json.loads(second.stdout)["duplicates"] == 1
     assert json.loads(second.stdout)["inserted"] == 0
+
+
+def test_ingest_cli_accepts_one_article_from_stdin_or_file_and_upserts(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "invest.db"
+    article = _article(summary="Investor summary.", section="markets")
+    args = ["news", "ingest", "--input", "-", "--db", str(db_path)]
+
+    inserted = runner.invoke(app, args, input=json.dumps(article))
+
+    assert inserted.exit_code == 0, inserted.output
+    inserted_result = json.loads(inserted.stdout)
+    assert inserted_result["status"] == "inserted"
+    assert inserted_result["article_key"] == news.article_key(
+        "reuters-markets", "2026-07-19", "A Big Story"
+    )
+
+    input_file = tmp_path / "article.json"
+    input_file.write_text(json.dumps(article), encoding="utf-8")
+    duplicate = runner.invoke(
+        app,
+        ["news", "ingest", "--input", str(input_file), "--db", str(db_path)],
+    )
+    assert duplicate.exit_code == 0, duplicate.output
+    assert json.loads(duplicate.stdout)["status"] == "duplicate"
+
+    article["content"] = "Corrected normalized body."
+    input_file.write_text(json.dumps(article), encoding="utf-8")
+    updated = runner.invoke(
+        app,
+        ["news", "ingest", "--input", str(input_file), "--db", str(db_path)],
+    )
+    assert updated.exit_code == 0, updated.output
+    assert json.loads(updated.stdout)["status"] == "updated"
+
+    article.update(title="Retitled Story", content="Retitled normalized body.")
+    input_file.write_text(json.dumps(article), encoding="utf-8")
+    rekeyed = runner.invoke(
+        app,
+        ["news", "ingest", "--input", str(input_file), "--db", str(db_path)],
+    )
+    assert rekeyed.exit_code == 0, rekeyed.output
+    assert json.loads(rekeyed.stdout) == {
+        "article_key": news.article_key(
+            "reuters-markets", "2026-07-19", "Retitled Story"
+        ),
+        "status": "updated",
+    }
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT title, content, summary, section, collected_at FROM news"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][:4] == (
+        "Retitled Story",
+        "Retitled normalized body.",
+        "Investor summary.",
+        "markets",
+    )
+    assert rows[0][4].endswith("Z")
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ([], "must be an object"),
+        (_article(content=""), "non-empty string content"),
+        (_article(published_at="July 2026"), "parseable published_at"),
+        (_article(content="<!doctype html><html></html>"), "raw HTML"),
+        (_article(browser_html="<html>raw</html>"), "unknown field"),
+    ],
+)
+def test_ingest_cli_rejects_invalid_single_article_input(
+    tmp_path: Path, payload: object, message: str
+) -> None:
+    db_path = tmp_path / "invest.db"
+
+    result = runner.invoke(
+        app,
+        ["news", "ingest", "--input", "-", "--db", str(db_path)],
+        input=json.dumps(payload),
+    )
+
+    assert result.exit_code == 2
+    assert message in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not db_path.exists()
+
+
+def test_ingest_cli_rejects_conflicting_single_and_batch_modes(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "news",
+            "ingest",
+            "--input",
+            "-",
+            "--raw-dir",
+            str(tmp_path / "raw"),
+            "--db",
+            str(tmp_path / "invest.db"),
+        ],
+        input=json.dumps(_article()),
+    )
+
+    assert result.exit_code == 2
+    assert "exactly one of --input, --all, --date, or --raw-dir" in result.stderr
+    assert not (tmp_path / "invest.db").exists()
+
+
+def test_single_article_ingest_allows_concurrent_writers(tmp_path: Path) -> None:
+    db_path = tmp_path / "invest.db"
+    count = 4
+    barrier = Barrier(count)
+
+    def write(index: int) -> str:
+        article = news.parse_article_input(
+            json.dumps(
+                _article(
+                    title=f"Story {index}",
+                    url=f"https://example.test/{index}",
+                )
+            )
+        )
+        barrier.wait()
+        return news.ingest_article(db_path, article)["status"]
+
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        statuses = list(pool.map(write, range(count)))
+
+    assert statuses == ["inserted"] * count
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM news").fetchone()[0] == count
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
 def test_ingest_cli_reports_malformed_source_registry_without_traceback(
