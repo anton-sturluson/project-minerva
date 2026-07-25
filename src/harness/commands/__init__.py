@@ -31,5 +31,6 @@ def register_commands(app: typer.Typer) -> None:
     app.add_typer(plot.app, name="plot")
     app.add_typer(extract.app, name="extract")
     app.add_typer(extract.extract_files_app, name="extract-files")
+    app.add_typer(extract.summarize_app, name="summarize")
     app.add_typer(fileinfo.app, name="fileinfo")
     app.add_typer(research.app, name="research")

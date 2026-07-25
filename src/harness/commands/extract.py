@@ -1,4 +1,4 @@
-"""LLM extraction commands backed by Gemini or OpenAI."""
+"""LLM extraction and summarization commands backed by Gemini or OpenAI."""
 
 from __future__ import annotations
 
@@ -31,6 +31,14 @@ EXTRACT_HELP = (
     "  minerva run \"sec 10k AAPL --items 1A | extract 'What are the top 3 risk factors?'\"\n"
 )
 
+SUMMARIZE_HELP = (
+    "Summarize UTF-8 text from a file or stdin.\n\n"
+    "Examples:\n"
+    "  minerva summarize --file earnings-call.txt\n"
+    "  cat filing.md | minerva summarize --max-tokens 2000\n"
+    "  minerva summarize -f notes.md --model gemini-3.6-flash --thinking high\n"
+)
+
 EXTRACT_FILES_HELP = (
     "Apply one extraction prompt or question pack across many UTF-8 text/markdown files.\n\n"
     "Examples:\n"
@@ -44,15 +52,16 @@ EXTRACT_FILES_HELP = (
     "    -o data/extractions/summary\n"
     "  minerva extract-files --questions-file questions.md \\\n"
     "    --files 'data/sources/**/*.md' --out data/extractions/summary \\\n"
-    "    --model gemini-3-flash --thinking minimal --concurrency 4\n"
+    "    --model gemini-3.6-flash --thinking minimal --concurrency 4\n"
     "  minerva extract-files -q questions.md -f 'data/**/*.md' -o out \\\n"
     "    --model gpt-5.5 --concurrency 2\n"
 )
 
-DEFAULT_MODEL = "gemini-3-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_MAX_TOKENS = 16384
 DEFAULT_CONCURRENCY = 4
 MODEL_ALIASES: dict[str, str] = {
+    # Gemini 3.6 Flash already uses Google's stable provider model code; no alias needed.
     # OpenClaw/user-facing shorthand; Google GenAI expects the preview model id today.
     "gemini-3-flash": "gemini-3-flash-preview",
     # Accept provider-qualified OpenClaw-style names while sending OpenAI its model id.
@@ -84,10 +93,17 @@ SYSTEM_PROMPT = (
     "Cite section/page numbers when possible. If the prompt contains multiple "
     "questions, answer each under a clearly labeled markdown heading."
 )
+SUMMARY_PROMPT = (
+    "Summarize the document below concisely and accurately. Preserve material facts, "
+    "figures, qualifications, and conclusions. Return only the summary without a preamble."
+)
 
 VALID_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "adaptive"})
 
 app = typer.Typer(help=EXTRACT_HELP, no_args_is_help=False, invoke_without_command=True)
+summarize_app = typer.Typer(
+    help=SUMMARIZE_HELP, no_args_is_help=False, invoke_without_command=True
+)
 extract_files_app = typer.Typer(help=EXTRACT_FILES_HELP, no_args_is_help=False, invoke_without_command=True)
 # ---------------------------------------------------------------------------
 # `extract`
@@ -227,6 +243,100 @@ def extract_cli_command(
             settings=settings,
         )
     )
+# ---------------------------------------------------------------------------
+# `summarize`
+# ---------------------------------------------------------------------------
+
+
+def summarize_command(
+    *,
+    file_path: str | None = None,
+    model: str = DEFAULT_MODEL,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    thinking: str | None = None,
+    stdin: bytes = b"",
+    settings: HarnessSettings,
+) -> CommandResult:
+    """Summarize one UTF-8 text input using the shared extraction model backend."""
+    start = time.perf_counter()
+    try:
+        document_text = _read_summary_text(file_path=file_path, stdin=stdin)
+        resolved_thinking = _resolve_default_thinking(model, thinking)
+        _build_thinking_config(model, resolved_thinking)
+        api_key = _api_key_for_model(settings, model)
+        if not api_key:
+            return _missing_api_key_result(model, start)
+        prompt = f"{SUMMARY_PROMPT}\n\nDocument:\n{document_text}"
+        answer = _generate_answer(
+            prompt=prompt,
+            document_text=document_text,
+            model=model,
+            max_tokens=max_tokens,
+            thinking=resolved_thinking,
+            api_key=api_key,
+        )
+    except _UsageError as exc:
+        return error_result(exc.what, exc.what_to_do, exc.alternatives, start)
+    except ValueError as exc:
+        return error_result(
+            f"invalid summarization configuration: {exc}",
+            "use a supported model/thinking combination, or omit `--thinking`",
+            [
+                "`--thinking minimal` for gemini-3-*",
+                "`--thinking adaptive` for gemini-2.5-*",
+            ],
+            start,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return error_result(
+            f"summarization failed: {exc}",
+            "verify the input, API key, and model name, then retry",
+            [
+                "`minerva summarize --file document.txt`",
+                "`cat document.txt | minerva summarize`",
+            ],
+            start,
+        )
+    return CommandResult.from_text(answer.strip(), duration_ms=elapsed_ms(start))
+
+
+@summarize_app.callback()
+def summarize_cli_command(
+    ctx: typer.Context,
+    file_path: str | None = typer.Option(
+        None,
+        "--file",
+        "-f",
+        help="Path to a UTF-8 text file. Omit to read from stdin.",
+    ),
+    model: str = typer.Option(
+        DEFAULT_MODEL, "--model", help="Model to use (Gemini or OpenAI)."
+    ),
+    max_tokens: int = typer.Option(
+        DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum summary output tokens."
+    ),
+    thinking: str | None = typer.Option(
+        None,
+        "--thinking",
+        help="Thinking level: off|minimal|low|medium|high|adaptive (model-aware).",
+    ),
+) -> None:
+    """Summarize one UTF-8 text input and print only the summary."""
+    stdin = b"" if file_path else typer.get_binary_stream("stdin").read()
+    if not file_path and not stdin:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+    result = summarize_command(
+        file_path=file_path,
+        model=model,
+        max_tokens=max_tokens,
+        thinking=thinking,
+        stdin=stdin,
+        settings=get_settings(),
+    )
+    _print_summary(result)
+
+
 # ---------------------------------------------------------------------------
 # `extract-files`
 # ---------------------------------------------------------------------------
@@ -623,6 +733,46 @@ def _build_prompt_pack(*, question: str | None, questions_file: str | None) -> s
         ]
     )
 
+
+def _read_summary_text(*, file_path: str | None, stdin: bytes) -> str:
+    if file_path:
+        path = resolve_path(file_path)
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise _UsageError(
+                f"could not read input file `{file_path}`: {exc}",
+                "pass a readable UTF-8 text file",
+                ["`minerva summarize --file path/to/document.txt`"],
+            ) from exc
+    elif stdin:
+        raw = stdin
+    else:
+        raise _UsageError(
+            "no input text was provided for `summarize`",
+            "pass `--file PATH` or pipe UTF-8 text into the command",
+            [
+                "`minerva summarize --file document.txt`",
+                "`cat document.txt | minerva summarize`",
+            ],
+        )
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _UsageError(
+            "input is not valid UTF-8 text",
+            "convert the input to UTF-8 text before summarizing it",
+            ["`iconv -f <source-encoding> -t UTF-8 input.txt > input-utf8.txt`"],
+        ) from exc
+    if not text.strip():
+        raise _UsageError(
+            "input text is empty",
+            "provide non-empty UTF-8 text to summarize",
+            ["`minerva summarize --file document.txt`"],
+        )
+    return text
+
+
 def _read_document_text(*, file_path: str | None, stdin: bytes) -> str:
     if file_path:
         return resolve_path(file_path).read_text(encoding="utf-8")
@@ -702,7 +852,7 @@ def _is_gemini_3(model: str) -> bool:
     return model.startswith("gemini-3")
 
 def _is_gemini_3_flash(model: str) -> bool:
-    return model.startswith("gemini-3-flash")
+    return model.startswith(("gemini-3-flash", "gemini-3.6-flash"))
 
 def _is_gemini_25(model: str) -> bool:
     return model.startswith("gemini-2.5")
@@ -724,7 +874,7 @@ def _missing_api_key_result(model: str, start: float) -> CommandResult:
         return error_result(
             "OPENAI_API_KEY is not set",
             "set OPENAI_API_KEY and retry, or choose a Gemini model with GEMINI_API_KEY configured",
-            ["`export OPENAI_API_KEY=...`", "`--model gemini-3-flash`"],
+            ["`export OPENAI_API_KEY=...`", "`--model gemini-3.6-flash`"],
             start,
         )
     return error_result(
@@ -982,6 +1132,17 @@ async def _run_extractions(
 # ---------------------------------------------------------------------------
 # CLI plumbing
 # ---------------------------------------------------------------------------
+def _print_summary(result: CommandResult) -> None:
+    if result.exit_code == 0:
+        typer.echo(result.stdout.decode("utf-8"))
+        return
+    envelope = OutputEnvelope.from_result(
+        result, workspace_root=get_settings().ensure_workspace_root()
+    )
+    typer.echo(envelope.render())
+    raise typer.Exit(result.exit_code)
+
+
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())
