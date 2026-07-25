@@ -39,6 +39,7 @@ app = typer.Typer(
         "Examples:\n"
         "  minerva sec 10k AAPL --items 7\n"
         "  minerva extract -f apple-10k.md \"What are the key risks?\"\n"
+        "  minerva summarize -f earnings-call.txt\n"
         "  minerva extract-files -q questions.md -F selected-files.txt -o data/extractions/summary\n"
         "  minerva run \"sec 10k AAPL --items 1A | extract 'What are the top 3 risk factors?'\"\n"
     ),

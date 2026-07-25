@@ -279,9 +279,10 @@ def test_build_thinking_config_unknown_model_with_thinking_raises() -> None:
         extract._build_thinking_config("some-other-model", "minimal")
 
 
-def test_api_model_name_maps_user_facing_gemini_3_flash_alias() -> None:
+def test_api_model_name_maps_only_legacy_gemini_3_flash_alias() -> None:
     assert extract._api_model_name("gemini-3-flash") == "gemini-3-flash-preview"
     assert extract._api_model_name("gemini-3-flash-preview") == "gemini-3-flash-preview"
+    assert extract._api_model_name("gemini-3.6-flash") == "gemini-3.6-flash"
 
 
 def test_api_model_name_maps_provider_qualified_openai_alias() -> None:
@@ -289,7 +290,7 @@ def test_api_model_name_maps_provider_qualified_openai_alias() -> None:
     assert extract._api_model_name("gpt-5.5") == "gpt-5.5"
 
 
-def test_extract_command_default_thinking_for_gemini_3_flash(tmp_path: Path, monkeypatch) -> None:
+def test_extract_command_defaults_to_gemini_36_flash_with_minimal_thinking(tmp_path: Path, monkeypatch) -> None:
     settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key")
     file_path = tmp_path / "doc.md"
     file_path.write_text("body", encoding="utf-8")
@@ -303,6 +304,7 @@ def test_extract_command_default_thinking_for_gemini_3_flash(tmp_path: Path, mon
 
     extract.extract_command(question="Q", file_path=str(file_path), settings=settings)
 
+    assert captured["model"] == "gemini-3.6-flash"
     assert captured["thinking"] == "minimal"
 
 
@@ -527,8 +529,8 @@ def test_extract_files_one_call_per_file_writes_outputs(tmp_path: Path, monkeypa
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     assert len(manifest["entries"]) == 2
     assert all(entry["status"] == "ok" for entry in manifest["entries"])
-    assert manifest["model"]
-    assert manifest["api_model"]
+    assert manifest["model"] == "gemini-3.6-flash"
+    assert manifest["api_model"] == "gemini-3.6-flash"
 
 
 def test_extract_files_questions_file_passes_pack(tmp_path: Path, monkeypatch) -> None:
