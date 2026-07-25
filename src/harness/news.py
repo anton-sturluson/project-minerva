@@ -13,8 +13,9 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Iterable, Literal, Mapping, Sequence, TypedDict
 from zoneinfo import ZoneInfo
 
@@ -33,6 +34,10 @@ class NewsError(Exception):
 
 class CandidateInputError(NewsError):
     """Raised when candidate JSON does not match the lookup contract."""
+
+
+class ArticleInputError(NewsError):
+    """Raised when single-article JSON does not match the ingest contract."""
 
 
 class SourceRegistryError(NewsError):
@@ -541,6 +546,104 @@ def article_key(source_id: str, date_only: str, title: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Single-article input
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class ArticleInput:
+    """Validated normalized article supplied directly by a crawler."""
+
+    title: str
+    source_id: str
+    url: str
+    published_at_raw: str
+    published: ParsedPublished
+    content: str
+    summary: str | None = None
+    section: str | None = None
+    collected_at: str | None = None
+
+
+ArticleIngestStatus = Literal["inserted", "duplicate", "updated"]
+
+
+class ArticleIngestResult(TypedDict):
+    status: ArticleIngestStatus
+    article_key: str
+
+
+_ARTICLE_REQUIRED_FIELDS = (
+    "title",
+    "source_id",
+    "url",
+    "published_at",
+    "content",
+)
+_ARTICLE_OPTIONAL_FIELDS = {"summary", "section", "collected_at"}
+
+
+def _required_article_text(payload: Mapping[str, object], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ArticleInputError(f"article must have a non-empty string {field}")
+    return value.strip()
+
+
+def _optional_article_text(payload: Mapping[str, object], field: str) -> str | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ArticleInputError(f"article {field} must be a string or null")
+    return value.strip() or None
+
+
+def parse_article_input(text: str) -> ArticleInput:
+    """Parse one normalized Markdown/text article from a JSON object."""
+    try:
+        payload: object = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ArticleInputError(
+            f"invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ArticleInputError("article JSON must be an object")
+
+    unknown = set(payload) - set(_ARTICLE_REQUIRED_FIELDS) - _ARTICLE_OPTIONAL_FIELDS
+    if unknown:
+        raise ArticleInputError(
+            f"article has unknown field(s): {', '.join(sorted(unknown))}"
+        )
+
+    values = {
+        field: _required_article_text(payload, field)
+        for field in _ARTICLE_REQUIRED_FIELDS
+    }
+    published = normalize_published(values["published_at"])
+    if published is None:
+        raise ArticleInputError("article must have a parseable published_at")
+    if re.match(r"^(?:<!doctype\s+html\b|<html\b)", values["content"], re.IGNORECASE):
+        raise ArticleInputError(
+            "article content must be normalized Markdown/text, not raw HTML"
+        )
+
+    collected_at = _optional_article_text(payload, "collected_at")
+    if collected_at is not None:
+        collected_at = normalize_collected(collected_at)
+
+    return ArticleInput(
+        title=values["title"],
+        source_id=values["source_id"],
+        url=values["url"],
+        published_at_raw=values["published_at"],
+        published=published,
+        content=values["content"],
+        summary=_optional_article_text(payload, "summary"),
+        section=_optional_article_text(payload, "section"),
+        collected_at=collected_at,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Read-only duplicate lookup
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
@@ -865,6 +968,96 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         _migrate_legacy_news(conn, set(columns))
     else:
         _create_news_schema(conn)
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Enable WAL, retrying its lock-sensitive first-time transition."""
+    deadline = monotonic() + 30
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or monotonic() >= deadline:
+                raise
+            sleep(0.05)
+
+
+def ingest_article(db_path: Path, article: ArticleInput) -> ArticleIngestResult:
+    """Insert or update one article in a short, serialized WAL transaction."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    key = article_key(article.source_id, article.published.date_only, article.title)
+    conn = sqlite3.connect(db_path, timeout=30)
+    try:
+        conn.execute("PRAGMA busy_timeout = 30000")
+        _enable_wal(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        ensure_schema(conn)
+        existing = conn.execute(
+            f"SELECT {', '.join(_NEWS_COLUMNS)} FROM news "
+            "WHERE url = ? COLLATE BINARY "
+            "ORDER BY CASE WHEN article_key = ? THEN 0 ELSE 1 END, article_key "
+            "LIMIT 1",
+            (article.url, key),
+        ).fetchone()
+        if existing is None:
+            existing = conn.execute(
+                f"SELECT {', '.join(_NEWS_COLUMNS)} FROM news WHERE article_key = ?",
+                (key,),
+            ).fetchone()
+        collected_at = article.collected_at
+        if collected_at is None:
+            collected_at = (
+                existing[-1]
+                if existing is not None
+                else datetime.now(UTC)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            )
+        values = (
+            key,
+            article.published.epoch,
+            article.published_at_raw,
+            article.title,
+            article.content,
+            article.summary,
+            article.source_id,
+            article.url,
+            article.section,
+            collected_at,
+        )
+
+        if existing is None:
+            placeholders = ", ".join("?" for _ in _NEWS_COLUMNS)
+            conn.execute(
+                f"INSERT INTO news ({', '.join(_NEWS_COLUMNS)}) "
+                f"VALUES ({placeholders})",
+                values,
+            )
+            status: ArticleIngestStatus = "inserted"
+        elif tuple(existing) == values:
+            status = "duplicate"
+        elif existing[0] != key and conn.execute(
+            "SELECT 1 FROM news WHERE article_key = ?", (key,)
+        ).fetchone() is not None:
+            # The database already contains separate URL and article-key
+            # matches. Preserve both rather than guessing which row to merge.
+            status = "duplicate"
+        else:
+            assignments = ", ".join(f"{column} = ?" for column in _NEWS_COLUMNS)
+            conn.execute(
+                f"UPDATE news SET {assignments} WHERE article_key = ?",
+                (*values, existing[0]),
+            )
+            status = "updated"
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return {"status": status, "article_key": key}
 
 
 # ---------------------------------------------------------------------------
