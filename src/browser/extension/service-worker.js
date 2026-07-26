@@ -7,6 +7,7 @@ import {
 import { SerializedStateStore, SerialTaskQueue } from "./runtime-state.js";
 
 const BRIDGE_URL = "ws://127.0.0.1:19224";
+const BRIDGE_PROTOCOL_VERSION = 1;
 const PREVIEW_CHARS = 500;
 const MAX_FULL_PAGE_DIMENSION = 16384;
 const BRIDGE_RECONNECT_ALARM = "browser-v2-bridge-reconnect";
@@ -278,12 +279,20 @@ function connectBridge() {
 
   connection.addEventListener("open", () => {
     reconnectDelayMs = 1000;
-    sendTo(connection, { type: "hello", source: "browser-cli-v2-extension" });
+    sendTo(connection, {
+      type: "hello",
+      source: "browser-cli-extension",
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    });
     if (keepaliveTimer) {
       clearInterval(keepaliveTimer);
     }
     keepaliveTimer = setInterval(() => {
-      sendTo(connection, { type: "keepalive", source: "browser-cli-v2-extension" });
+      sendTo(connection, {
+        type: "keepalive",
+        source: "browser-cli-extension",
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      });
     }, 20_000);
     log("Connected to bridge");
   });

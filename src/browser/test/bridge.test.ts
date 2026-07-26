@@ -32,6 +32,12 @@ function closeSocket(socket: WebSocket): Promise<void> {
   });
 }
 
+const validHello = {
+  type: "hello",
+  source: "browser-cli-extension",
+  protocolVersion: 1,
+};
+
 test("bridge promotes only a valid extension hello and ignores unauthenticated replacements", async () => {
   const port = await unusedPort();
   const bridge = new ExtensionBridge({ port, handshakeTimeoutMs: 100 });
@@ -41,7 +47,7 @@ test("bridge promotes only a valid extension hello and ignores unauthenticated r
 
   try {
     assert.equal(bridge.getStatus().connected, false);
-    first.send(JSON.stringify({ type: "hello", source: "browser-cli-v2-extension" }));
+    first.send(JSON.stringify(validHello));
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(bridge.getStatus().connected, true);
 
@@ -65,7 +71,7 @@ test("aborting a bridge call sends extension cancellation immediately", async ()
   const bridge = new ExtensionBridge({ port });
   await bridge.ready();
   const extension = await openSocket(port);
-  extension.send(JSON.stringify({ type: "hello", source: "browser-cli-v2-extension" }));
+  extension.send(JSON.stringify(validHello));
   await new Promise((resolve) => setTimeout(resolve, 10));
   const cancellationSeen = new Promise<{ type: string; id: string }>((resolve) => {
     extension.on("message", (raw) => {
@@ -104,6 +110,24 @@ test("bridge rejects normal web-page websocket origins", async () => {
   await bridge.ready();
   try {
     await assert.rejects(openSocket(port, "https://example.test"), /403|Unexpected server response/);
+    assert.equal(bridge.getStatus().connected, false);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("bridge rejects stale extension protocol handshakes", async () => {
+  const port = await unusedPort();
+  const bridge = new ExtensionBridge({ port });
+  await bridge.ready();
+  const staleExtension = await openSocket(port);
+  staleExtension.send(JSON.stringify({
+    type: "hello",
+    source: "browser-cli-v2-extension",
+  }));
+
+  try {
+    await new Promise<void>((resolve) => staleExtension.once("close", () => resolve()));
     assert.equal(bridge.getStatus().connected, false);
   } finally {
     await bridge.close();

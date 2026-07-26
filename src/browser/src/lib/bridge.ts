@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
-import { BRIDGE_WS_PORT, DEFAULT_TIMEOUT_MS, FriendlyError } from "./types.js";
+import { BRIDGE_PROTOCOL_VERSION, BRIDGE_WS_PORT, DEFAULT_TIMEOUT_MS, FriendlyError } from "./types.js";
 import type { BridgeAction, BridgeCancelRequest, BridgeHelloMessage, BridgeRequest, BridgeResponse } from "./types.js";
 
 interface PendingRequest {
@@ -21,8 +22,15 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isHelloMessage(value: unknown): value is BridgeHelloMessage {
-  return isObject(value) && value.type === "hello" && value.source === "browser-cli-v2-extension";
+  return (
+    isObject(value) &&
+    value.type === "hello" &&
+    value.source === "browser-cli-extension" &&
+    value.protocolVersion === BRIDGE_PROTOCOL_VERSION
+  );
 }
+
+const EXTENSION_DIR = fileURLToPath(new URL("../../extension", import.meta.url));
 
 function isBridgeResponse(value: unknown): value is BridgeResponse {
   return isObject(value) && typeof value.id === "string" && typeof value.ok === "boolean";
@@ -155,7 +163,7 @@ export class ExtensionBridge {
     }
     if (!this.extensionSocket || this.extensionSocket.readyState !== WebSocket.OPEN) {
       throw new FriendlyError(
-        "Chrome extension bridge is not connected. Load the extension from src/browser/extension and keep a Chrome tab open.",
+        `Chrome extension bridge is not connected. Load the extension from ${EXTENSION_DIR} and keep Chrome open.`,
       );
     }
 
