@@ -1,6 +1,7 @@
 export const SOCKET_PATH = "/tmp/browser-cli-v2.sock";
 export const FALLBACK_PORT = 19223;
 export const BRIDGE_WS_PORT = 19224;
+export const BRIDGE_PROTOCOL_VERSION = 1;
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const BRIDGE_TIMEOUT_GRACE_MS = 5_000;
 export const CLOSE_IDLE_TIMEOUT_MS = 120_000;
@@ -94,7 +95,8 @@ export interface BridgeResponse {
 
 export interface BridgeHelloMessage {
   type: "hello";
-  source?: string;
+  source: "browser-cli-extension";
+  protocolVersion: number;
 }
 
 export class FriendlyError extends Error {

@@ -22,7 +22,7 @@ Requirements: Node.js 20 or newer and Chrome/Chromium 121 or newer. Chrome 121 i
 cd src/browser
 npm install
 npm run build
-npm link                    # optional: installs the `browser` command
+npm install -g .            # installs the `browser` command and extension globally
 ```
 
 Load the extension:
@@ -30,12 +30,12 @@ Load the extension:
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
-4. Select `src/browser/extension`.
+4. Select `src/browser/extension`, or `$(npm root -g)/browser-cli/extension` after a global install.
 5. Keep Chrome running, then check the connection with `browser status`.
 
 The CLI starts its local server on the first command. Concurrent cold starts elect one command-server winner without unlinking a live socket; only that winner binds the extension bridge. Run `browser stop` to stop it. The local Unix socket is owner-only where supported; the TCP and WebSocket fallbacks bind to `127.0.0.1`. The loopback HTTP command endpoint rejects every request carrying an `Origin` header and accepts only `application/json`, preventing browser pages and no-CORS requests from dispatching commands without relying on CORS response policy.
 
-The WebSocket server accepts only `chrome-extension://` origins and promotes a connection only after the expected extension hello handshake; unauthenticated candidates time out. This prevents ordinary web pages from replacing the extension. It is not a shared-secret pairing protocol: another process running as the same local user can still connect to loopback while impersonating an extension origin, so the same-user local-process trust boundary remains.
+The WebSocket server accepts only `chrome-extension://` origins and promotes a connection only after the expected versioned extension hello handshake; stale or unauthenticated candidates are rejected. This prevents ordinary web pages and outdated extension code from replacing the current extension. It is not a shared-secret pairing protocol: another process running as the same local user can still connect to loopback while impersonating an extension origin, so the same-user local-process trust boundary remains.
 
 ## Usage
 
