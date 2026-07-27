@@ -707,7 +707,8 @@ def test_ingest_cli_defaults_resolve_from_workspace(
     assert (workspace / "data" / "04-database" / "invest.db").is_file()
 
 
-def test_morning_brief_shell_and_prompts_use_news_cli_contract() -> None:
+def test_morning_brief_shell_and_prompts_use_direct_ingest_contract() -> None:
+    """The production script uses direct-ingest collectors and aggregate downloads."""
     script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
         encoding="utf-8"
     )
@@ -717,65 +718,97 @@ def test_morning_brief_shell_and_prompts_use_news_cli_contract() -> None:
     webfetch_prompt = (
         REPO_ROOT / "scripts" / "prompts" / "collect_news_webfetch.md"
     ).read_text(encoding="utf-8")
-    assert 'run news ingest \\' in script
+    outer_sol_prompt = (
+        REPO_ROOT / "scripts" / "prompts" / "morning_brief_outer_sol.md"
+    ).read_text(encoding="utf-8")
+
+    # Aggregate direct-download phases run before collectors and share the DB.
+    assert "news download-finnhub" in script
+    assert "news download-market-data" in script
+
+    # Collector stdin ingest command is rendered once and shared with agents.
+    assert "NEWS_INGEST_COMMAND" in script
+    assert "news ingest --input - --db" in script
+    assert "printf -v NEWS_INGEST_COMMAND '(cd %q && %s)'" in script
     assert "NEWS_EXIST_COMMAND" in script
     assert '"${MINERVA_RUNNER_ARR[@]}" news exist' in script
-    assert "printf -v NEWS_EXIST_COMMAND 'cd %q && %s'" in script
-    assert "Collector agents run from their OpenClaw workspace" in script
-    assert 'mkdir -p \\' in script
-    assert '"${source_root}/raw"' in script
-    assert '"${source_root}/candidates"' in script
-    assert '"${source_root}/lookups"' in script
-    assert '"${source_root}/logs"' in script
-    assert script.count("openclaw agent") == 1
-    assert "collect_source()" in script
-    assert "launch_source()" in script
-    assert "aggregate_source_raw()" in script
-    assert 'local prompt_template="$1" timeout="$2"' in script
+
+    # Configurable collector agent for OpenClaw same-agent isolation.
+    assert 'MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-main}"' in script
+    assert '--agent "${MINERVA_NEWS_COLLECTOR_AGENT}"' in script
+
+    # Bounded parallel collectors, isolated source roots, phase artifacts.
     assert 'MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"' in script
     assert 'MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"' in script
     assert 'MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"' in script
-    assert 'launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}"' in script
-    assert 'launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_WEBFETCH_TIMEOUT}"' in script
-    assert '"${#PIDS[@]}" -ge "${MINERVA_MAX_COLLECTORS}"' in script
-    assert "wait_for_collectors()" in script
-    assert '--concurrency 4' in script
+    assert 'wait_for_collectors' in script
+    assert "collectors.json" in script
+    assert "outer-sol-handoff.json" in script
+    assert "current-evidence.json" in script
+
+    # Current-date evidence gate refuses thin briefs unless explicitly allowed.
+    assert 'MINERVA_ALLOW_THIN_BRIEF' in script
+    assert "refusing a thin brief" in script
+    assert 'ZoneInfo("America/New_York")' in script
+
+    # The old batch-ingest architecture has been fully removed.
+    for banned in (
+        "extract-files",
+        "extract_files",
+        "aggregate_source_raw",
+        "--raw-dir",
+        "--summaries-dir",
+    ):
+        assert banned not in script, banned
+
+    # No inner Sol synthesis: reports/slack are written by the outer cron Sol.
+    assert "outer cron Sol" in script or "outer-cron-sol" in script
+    assert 'openclaw agent \\\n' in script or script.count("openclaw agent") == 1
 
     for prompt in (browser_prompt, webfetch_prompt):
+        # Deterministic duplicate check remains a mandatory pre-extraction step.
         assert '{{NEWS_EXIST_COMMAND}} --db "{{INVEST_DB}}"' in prompt
         assert '--input "{{CANDIDATE_FILE}}" > "{{LOOKUP_FILE}}"' in prompt
-        assert "one JSON array" in prompt
-        assert "overwriting" in prompt
-        assert "read-only" in prompt
-        assert "Your isolated source root is `{{NEWS_DIR}}`" in prompt
-        assert "never list, read, count, rename, modify, or delete another source's files" in prompt
-        assert "every file you write must stay within `{{NEWS_DIR}}`" in prompt
+        # Direct-ingest contract: one JSON object per article, piped to stdin.
+        assert "{{NEWS_INGEST_COMMAND}}" in prompt
+        assert "news ingest --input - --db" in prompt
+        # Article/item bodies live in SQLite only. No summary written here.
+        assert "isolated metadata root" in prompt
+        assert "SQLite" in prompt
+        assert "summarizer" in prompt
+        assert "outer Sol" in prompt
+        # Collectors never emit filesystem article/summary artifacts.
+        assert "Do not write article" in prompt
+        for forbidden in (".md`", "/raw/", "extract-files"):
+            assert forbidden not in prompt, forbidden
 
-    assert "scan the full landing page" in browser_prompt.lower()
+    # Browser prompt keeps single-tab, no-additional-window discipline.
     assert "only browser window and tab" in browser_prompt
-    assert "Do not run `browser open` again" in browser_prompt
-    assert "Never open a new tab or window" in browser_prompt
-    assert "one-item array" in browser_prompt
-    assert "rerun the same lookup command" in browser_prompt
-    assert "matching ingestion's collection-date fallback" in browser_prompt
-    assert "before body extraction" in browser_prompt.lower()
-    assert "Navigate the same tab back" in browser_prompt
-    assert "use an empty string" in webfetch_prompt
-    assert "matching ingestion's collection-date fallback" in webfetch_prompt
-    assert "fetch that URL with the web_fetch tool before writing anything" in webfetch_prompt
-    assert "calendar row without a distinct URL" in webfetch_prompt
-    assert "Same-tab navigation is allowed" in browser_prompt
-    assert "no additional windows or tabs are allowed" in browser_prompt
-    assert "Do not open browser windows or tabs" in webfetch_prompt
+    assert "one JSON array" in browser_prompt
+    assert "Never invoke Slack" in browser_prompt
+    assert "web_fetch only" in webfetch_prompt
+    assert "Never open a browser" in webfetch_prompt
+
+    # The versioned outer-Sol contract owns bounded summarization and delivery.
+    assert "at most four subprocesses" in outer_sol_prompt
+    assert "one transaction" in outer_sol_prompt
+    assert "Do not call Slack" in outer_sol_prompt
+    assert "Return the exact contents" in outer_sol_prompt
 
 
-def test_morning_brief_summarization_uses_official_gemini_model() -> None:
+def test_morning_brief_hands_summarization_off_to_outer_sol() -> None:
+    """No inner summarization: outer cron Sol handles minerva summarize + persistence."""
     script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
         encoding="utf-8"
     )
-    extract_block = script.split("run extract-files", 1)[1].split(
-        '"${EXTRACT_PROMPT}"', 1
-    )[0]
-
-    assert "--model gemini-3.6-flash" in extract_block
-    assert "--thinking high" in extract_block
+    # Script emits a handoff artifact naming outer-cron-sol as final agent.
+    assert '"outer-cron-sol"' in script
+    assert "minerva summarize" in script or "`minerva summarize`" in script
+    # The script never invokes `minerva summarize` itself (that's the outer agent).
+    assert "run summarize" not in script
+    assert '"${MINERVA_RUNNER_ARR[@]}" summarize' not in script
+    # Handoff explicitly lists final report artifacts.
+    assert "morning-brief-report.md" in script
+    assert "slack-brief.md" in script
+    # No Slack posting from this script.
+    assert "curl" not in script or "slack" not in script.lower()
