@@ -13,10 +13,14 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Iterable, Literal, Mapping, Sequence, TypedDict
 from zoneinfo import ZoneInfo
+
+from harness.finnhub import fetch_finnhub_news
+from harness.portfolio_state import NON_SECURITY_TICKERS
 
 # Header keys we care about (case-insensitive on the label).
 META_KEYS = {"source", "url", "published", "collected", "section", "status"}
@@ -30,6 +34,10 @@ class NewsError(Exception):
 
 class CandidateInputError(NewsError):
     """Raised when candidate JSON does not match the lookup contract."""
+
+
+class ArticleInputError(NewsError):
+    """Raised when single-article JSON does not match the ingest contract."""
 
 
 class SourceRegistryError(NewsError):
@@ -538,6 +546,104 @@ def article_key(source_id: str, date_only: str, title: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Single-article input
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class ArticleInput:
+    """Validated normalized article supplied directly by a crawler."""
+
+    title: str
+    source_id: str
+    url: str
+    published_at_raw: str
+    published: ParsedPublished
+    content: str
+    summary: str | None = None
+    section: str | None = None
+    collected_at: str | None = None
+
+
+ArticleIngestStatus = Literal["inserted", "duplicate", "updated"]
+
+
+class ArticleIngestResult(TypedDict):
+    status: ArticleIngestStatus
+    article_key: str
+
+
+_ARTICLE_REQUIRED_FIELDS = (
+    "title",
+    "source_id",
+    "url",
+    "published_at",
+    "content",
+)
+_ARTICLE_OPTIONAL_FIELDS = {"summary", "section", "collected_at"}
+
+
+def _required_article_text(payload: Mapping[str, object], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ArticleInputError(f"article must have a non-empty string {field}")
+    return value.strip()
+
+
+def _optional_article_text(payload: Mapping[str, object], field: str) -> str | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ArticleInputError(f"article {field} must be a string or null")
+    return value.strip() or None
+
+
+def parse_article_input(text: str) -> ArticleInput:
+    """Parse one normalized Markdown/text article from a JSON object."""
+    try:
+        payload: object = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ArticleInputError(
+            f"invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ArticleInputError("article JSON must be an object")
+
+    unknown = set(payload) - set(_ARTICLE_REQUIRED_FIELDS) - _ARTICLE_OPTIONAL_FIELDS
+    if unknown:
+        raise ArticleInputError(
+            f"article has unknown field(s): {', '.join(sorted(unknown))}"
+        )
+
+    values = {
+        field: _required_article_text(payload, field)
+        for field in _ARTICLE_REQUIRED_FIELDS
+    }
+    published = normalize_published(values["published_at"])
+    if published is None:
+        raise ArticleInputError("article must have a parseable published_at")
+    if re.match(r"^(?:<!doctype\s+html\b|<html\b)", values["content"], re.IGNORECASE):
+        raise ArticleInputError(
+            "article content must be normalized Markdown/text, not raw HTML"
+        )
+
+    collected_at = _optional_article_text(payload, "collected_at")
+    if collected_at is not None:
+        collected_at = normalize_collected(collected_at)
+
+    return ArticleInput(
+        title=values["title"],
+        source_id=values["source_id"],
+        url=values["url"],
+        published_at_raw=values["published_at"],
+        published=published,
+        content=values["content"],
+        summary=_optional_article_text(payload, "summary"),
+        section=_optional_article_text(payload, "section"),
+        collected_at=collected_at,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Read-only duplicate lookup
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
@@ -864,6 +970,96 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         _create_news_schema(conn)
 
 
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Enable WAL, retrying its lock-sensitive first-time transition."""
+    deadline = monotonic() + 30
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or monotonic() >= deadline:
+                raise
+            sleep(0.05)
+
+
+def ingest_article(db_path: Path, article: ArticleInput) -> ArticleIngestResult:
+    """Insert or update one article in a short, serialized WAL transaction."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    key = article_key(article.source_id, article.published.date_only, article.title)
+    conn = sqlite3.connect(db_path, timeout=30)
+    try:
+        conn.execute("PRAGMA busy_timeout = 30000")
+        _enable_wal(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        ensure_schema(conn)
+        existing = conn.execute(
+            f"SELECT {', '.join(_NEWS_COLUMNS)} FROM news "
+            "WHERE url = ? COLLATE BINARY "
+            "ORDER BY CASE WHEN article_key = ? THEN 0 ELSE 1 END, article_key "
+            "LIMIT 1",
+            (article.url, key),
+        ).fetchone()
+        if existing is None:
+            existing = conn.execute(
+                f"SELECT {', '.join(_NEWS_COLUMNS)} FROM news WHERE article_key = ?",
+                (key,),
+            ).fetchone()
+        collected_at = article.collected_at
+        if collected_at is None:
+            collected_at = (
+                existing[-1]
+                if existing is not None
+                else datetime.now(UTC)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            )
+        values = (
+            key,
+            article.published.epoch,
+            article.published_at_raw,
+            article.title,
+            article.content,
+            article.summary,
+            article.source_id,
+            article.url,
+            article.section,
+            collected_at,
+        )
+
+        if existing is None:
+            placeholders = ", ".join("?" for _ in _NEWS_COLUMNS)
+            conn.execute(
+                f"INSERT INTO news ({', '.join(_NEWS_COLUMNS)}) "
+                f"VALUES ({placeholders})",
+                values,
+            )
+            status: ArticleIngestStatus = "inserted"
+        elif tuple(existing) == values:
+            status = "duplicate"
+        elif existing[0] != key and conn.execute(
+            "SELECT 1 FROM news WHERE article_key = ?", (key,)
+        ).fetchone() is not None:
+            # The database already contains separate URL and article-key
+            # matches. Preserve both rather than guessing which row to merge.
+            status = "duplicate"
+        else:
+            assignments = ", ".join(f"{column} = ?" for column in _NEWS_COLUMNS)
+            conn.execute(
+                f"UPDATE news SET {assignments} WHERE article_key = ?",
+                (*values, existing[0]),
+            )
+            status = "updated"
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return {"status": status, "article_key": key}
+
+
 # ---------------------------------------------------------------------------
 # Enrichment
 # ---------------------------------------------------------------------------
@@ -925,6 +1121,180 @@ def load_enrichment(paths: Iterable[Path]) -> dict[str, str]:
                     if len(article_path.parts) >= 3:
                         out["/".join(article_path.parts[-3:])] = publication_input
     return out
+
+
+# ---------------------------------------------------------------------------
+# Direct Finnhub download
+# ---------------------------------------------------------------------------
+FINNHUB_PUBLICATION_TIMEZONE = ZoneInfo("America/New_York")
+
+
+def resolve_finnhub_symbols(
+    universe: Sequence[Mapping[str, object]],
+    requested_symbols: Sequence[str] = (),
+) -> dict[str, str]:
+    """Map Finnhub symbols to security IDs for the selected company universe.
+
+    Explicit symbols replace the portfolio universe. Otherwise every current
+    holding/watchlist row with a usable Finnhub symbol or ticker is included;
+    SEC registration is intentionally irrelevant to news availability.
+    """
+    if requested_symbols:
+        selected = {
+            symbol.strip().upper(): symbol.strip().upper()
+            for symbol in requested_symbols
+            if symbol.strip()
+        }
+        return dict(sorted(selected.items()))
+
+    selected: dict[str, str] = {}
+    for security in universe:
+        if not isinstance(security, Mapping):
+            continue
+        security_id = str(
+            security.get("security_id") or security.get("ticker") or ""
+        ).strip().upper()
+        symbol = str(
+            security.get("finnhub_symbol")
+            or security.get("ticker")
+            or security.get("security_id")
+            or ""
+        ).strip().upper()
+        if not symbol or symbol in NON_SECURITY_TICKERS:
+            continue
+        selected[symbol] = security_id or symbol
+    return dict(sorted(selected.items()))
+
+
+def _finnhub_source_id(value: object) -> str:
+    source_id = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower())
+    return source_id.strip("-") or "finnhub"
+
+
+def _normalize_finnhub_article(
+    item: Mapping[str, object],
+    *,
+    publication_date: date,
+    section: str,
+) -> tuple[str, int, str, str, str, str, str, str] | None:
+    timestamp = item.get("datetime")
+    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+        return None
+    try:
+        published = datetime.fromtimestamp(
+            timestamp, timezone.utc
+        ).astimezone(FINNHUB_PUBLICATION_TIMEZONE)
+    except (OSError, OverflowError, ValueError):
+        return None
+    if published.date() != publication_date:
+        return None
+
+    title = str(item.get("headline") or "").strip()
+    if not title:
+        return None
+    source_id = _finnhub_source_id(item.get("source"))
+    published_at_raw = published.isoformat(timespec="seconds")
+    content = str(item.get("summary") or "").strip() or title
+    url = str(item.get("url") or "").strip()
+    key = article_key(source_id, publication_date.isoformat(), title)
+    return (
+        key,
+        int(timestamp),
+        published_at_raw,
+        title,
+        content,
+        source_id,
+        url,
+        section,
+    )
+
+
+def download_finnhub(
+    *,
+    db_path: Path,
+    api_key: str,
+    publication_date: date,
+    universe: Sequence[Mapping[str, object]],
+    requested_symbols: Sequence[str] = (),
+) -> dict[str, int | str]:
+    """Download one New York publication day and persist canonical news rows."""
+    symbols = resolve_finnhub_symbols(universe, requested_symbols)
+    payload = fetch_finnhub_news(
+        api_key=api_key,
+        publication_date=publication_date,
+        symbols=symbols,
+    )
+    scoped_items = [
+        (item, "finnhub-general") for item in payload.general
+    ] + [(item, "finnhub-company") for item in payload.company]
+    stats = {
+        "date": publication_date.isoformat(),
+        "timezone": str(FINNHUB_PUBLICATION_TIMEZONE),
+        "symbols": len(symbols),
+        "fetched": len(scoped_items),
+        "eligible": 0,
+        "inserted": 0,
+        "duplicates": 0,
+        "skipped": 0,
+        "errors": payload.errors,
+    }
+    collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("BEGIN")
+        ensure_schema(conn)
+        for item, section in scoped_items:
+            normalized = _normalize_finnhub_article(
+                item,
+                publication_date=publication_date,
+                section=section,
+            )
+            if normalized is None:
+                stats["skipped"] += 1
+                continue
+            stats["eligible"] += 1
+            key, epoch, raw, title, content, source, url, row_section = normalized
+            existing = None
+            if url:
+                existing = conn.execute(
+                    "SELECT 1 FROM news WHERE url = ? COLLATE BINARY LIMIT 1",
+                    (url,),
+                ).fetchone()
+            if existing is None:
+                existing = conn.execute(
+                    "SELECT 1 FROM news WHERE article_key = ? COLLATE BINARY LIMIT 1",
+                    (key,),
+                ).fetchone()
+            if existing is not None:
+                stats["duplicates"] += 1
+                continue
+            conn.execute(
+                "INSERT INTO news "
+                "(article_key, published_at, published_at_raw, title, content, "
+                "summary, source, url, section, collected_at) "
+                "VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+                (
+                    key,
+                    epoch,
+                    raw,
+                    title,
+                    content,
+                    source,
+                    url,
+                    row_section,
+                    collected_at,
+                ),
+            )
+            stats["inserted"] += 1
+        conn.commit()
+        stats["db_total"] = conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
+    finally:
+        conn.close()
+    return stats
 
 
 # ---------------------------------------------------------------------------
