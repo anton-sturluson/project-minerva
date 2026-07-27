@@ -416,10 +416,19 @@ class MorningBriefTests(unittest.TestCase):
         )
         fake_minerva.chmod(0o755)
 
-        # Use a fake HOME so the v2 script's `source ~/.zshrc` is a no-op
-        # and doesn't re-export real env vars over our test overrides.
+        # A sourced zshrc may provide missing secrets, but explicit caller
+        # configuration must win. Poison every important path/runner here to
+        # catch precedence regressions before they can touch canonical data.
         fake_home = self.workspace / "fakehome"
         fake_home.mkdir(exist_ok=True)
+        poisoned_workspace = self.workspace / "poisoned-workspace"
+        (fake_home / ".zshrc").write_text(
+            f"export MINERVA_WORKSPACE_ROOT='{poisoned_workspace}'\n"
+            f"export INVEST_DB='{self.workspace / 'poisoned.db'}'\n"
+            "export MINERVA_RUNNER='/bin/false'\n"
+            "export FINNHUB_API_KEY='zshrc-only-test-key'\n",
+            encoding="utf-8",
+        )
 
         env = os.environ.copy()
         env.update(
@@ -448,12 +457,31 @@ class MorningBriefTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        # V2 prints output paths relative to ROOT_DIR/hard-disk, not MINERVA_WORKSPACE_ROOT.
         self.assertIn("prepared_evidence:", result.stdout)
         self.assertIn("manifest:", result.stdout)
-        # V2 creates dirs under ROOT_DIR/hard-disk.
-        report_dir = REPO_ROOT / "hard-disk" / "reports" / "03-daily-news" / RUN_DATE.isoformat()
+        # Report layout is anchored to MINERVA_WORKSPACE_ROOT so tests never
+        # write into the canonical hard-disk workspace.
+        workspace_root = self.workspace / "workspace"
+        report_dir = (
+            workspace_root / "reports" / "03-daily-news" / RUN_DATE.isoformat()
+        )
         self.assertTrue(report_dir.is_dir())
+        self.assertFalse(poisoned_workspace.exists())
+        self.assertFalse((self.workspace / "poisoned.db").exists())
+        # Outer-Sol handoff artifact is emitted for the cron agent.
+        handoff = (
+            report_dir
+            / "data"
+            / "structured"
+            / "news-pipeline"
+            / "outer-sol-handoff.json"
+        )
+        self.assertTrue(handoff.is_file())
+        handoff_payload = json.loads(handoff.read_text(encoding="utf-8"))
+        self.assertEqual(handoff_payload["final_agent"], "outer-cron-sol")
+        self.assertTrue(
+            any("minerva summarize" in step or "summarize" in step for step in handoff_payload["steps"])
+        )
         self.assertEqual(
             call_log.read_text(encoding="utf-8").splitlines(),
             [

@@ -1,11 +1,10 @@
-Collect data from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
+Collect and directly ingest qualifying items from {{SOURCE_NAME}} ({{URL}}) for {{DATE}} using web_fetch only.
 
-Save each item as a separate markdown file in `{{NEWS_DIR}}/raw/`.
-Your isolated source root is `{{NEWS_DIR}}`. Only write within this rendered root.
+Your isolated metadata root is `{{SOURCE_ROOT}}`. You may write only the candidate and lookup JSON files rendered below. Do not write article, Markdown, text, HTML, summary, or intermediate JSON files. Item bodies must exist only in process memory and in SQLite after a successful direct ingest.
 
 ## Portfolio context
 
-Our current holdings and watchlist tickers (prioritize items mentioning these):
+Prioritize items relevant to these current holdings/watchlist companies:
 
 {{PORTFOLIO_TICKERS}}
 
@@ -13,64 +12,57 @@ Our current holdings and watchlist tickers (prioritize items mentioning these):
 
 {{COLLECT_SCOPE}}
 
-## Constraints
+## Selection constraints
 
-- **Source ownership:** never list, read, count, rename, modify, or delete another source's files. Do not inspect parent or sibling directories. For collector working files, use only this source's `raw/`, `candidates/`, and `lookups/` directories under `{{NEWS_DIR}}`, and every file you write must stay within `{{NEWS_DIR}}`.
-- **Skip items older than 3 days** based on the visible date.
-- **Calendar pages:** collect only releases dated from 3 days before {{DATE}} through 7 days after {{DATE}}. Never collect later future entries merely because they appear on the schedule.
-- **Skip database duplicates.** Use the deterministic batch lookup below; do not estimate title similarity or calculate article hashes yourself.
-- If the fetch succeeds but no items qualify, save no files and report that zero items qualified. Do not create a placeholder or `no new releases` article.
+- Collect relevant data releases, calendar entries, press statements, policy announcements, and other material investor evidence.
+- Skip items older than 3 days based on the visible source date.
+- For calendar pages, collect only releases dated from 3 days before {{DATE}} through 7 days after {{DATE}}. Never collect later future entries merely because they appear on the schedule.
+- Check deterministic database duplicates before fetching distinct item pages or extracting their full bodies. Never estimate title similarity or calculate article hashes yourself.
+- If no unseen qualifying items exist, ingest nothing and report zero. Do not create placeholders.
+- Use web_fetch only. Never open a browser, invoke Slack/webhooks, spawn another agent, or run a summarizer. Leave `summary` absent for the outer Sol agent.
 
-## Deterministic database lookup
+## Deterministic duplicate lookup
 
-Write all candidates as one JSON array to `{{CANDIDATE_FILE}}`, overwriting that file on every lookup. Each object must contain `title`, `url`, and `published`. Use the exact item URL and visible publication value. If an item has no distinct URL, use an empty string rather than the shared landing-page URL. If neither a distinct URL nor a date is available, use `{{DATE}}` as `published`, matching ingestion's collection-date fallback; if the URL exists but the date does not, leave `published` empty for the URL-first check.
+Write candidate metadata only as one JSON array to `{{CANDIDATE_FILE}}`, overwriting it on every lookup. Every object must contain `title`, `url`, and `published`. Use the exact distinct item URL when present; use an empty URL instead of the shared landing URL when no distinct destination exists. If a URL exists but no date is visible, use an empty `published` value for URL-first matching. If neither exists, use `{{DATE}}` as `published`.
 
-Run the lookup below and redirect its compact JSON result to the collector's own lookup file, also overwriting it:
+Run exactly this lookup and overwrite your isolated result file:
 
 ```bash
 {{NEWS_EXIST_COMMAND}} --db "{{INVEST_DB}}" --source-id "{{SOURCE_ID}}" --input "{{CANDIDATE_FILE}}" > "{{LOOKUP_FILE}}"
 ```
 
-Candidate indexes in `seen` are duplicates; only indexes in `unseen` may be collected. The command opens SQLite read-only and applies the same publication-date normalization and article identity code used during ingestion. Run one batch check for all candidates.
+Indexes in `seen` are duplicates. Only `unseen` indexes may be collected. This read-only command uses the same normalized identity as ingestion. Run one batch lookup for all landing-page candidates.
+
+## Direct ingest contract
+
+For each collected item, construct exactly one in-memory JSON object with:
+
+- `title`: exact, non-empty item title
+- `source_id`: exactly `{{SOURCE_ID}}`
+- `url`: the distinct item URL, or `{{URL}}` for an item that genuinely has no distinct destination
+- `published_at`: the most precise visible publication value including timezone; use `{{DATE}}` only if none exists
+- `content`: normalized non-empty Markdown/plain text containing the complete substantive item, excluding navigation, advertisements, cookie text, and page chrome; never raw HTML
+- optional `section`: source category
+- optional `collected_at`: current ISO-8601 UTC timestamp
+
+Pipe that single object directly on stdin to:
+
+```bash
+printf '%s\n' "$article_json" | {{NEWS_INGEST_COMMAND}}
+```
+
+A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place content on a command line. Confirm the result status is `inserted`, `updated`, or `duplicate`; otherwise treat the item as failed and return non-zero.
 
 ## Steps
 
-1. Fetch {{URL}} with the web_fetch tool.
-2. Identify relevant items: data releases, calendar entries, press statements, policy announcements. Record each exact title, destination URL, and visible publication date.
-3. Exclude items outside the date rules. Overwrite `{{CANDIDATE_FILE}}` with every remaining candidate, run the lookup command, read `{{LOOKUP_FILE}}`, and retain only the `unseen` indexes.
+1. Fetch `{{URL}}` with web_fetch.
+2. Identify qualifying candidates and record exact title, distinct destination URL (if any), and visible publication value without extracting distinct item bodies.
+3. Apply the date rules, overwrite `{{CANDIDATE_FILE}}`, run the batch duplicate lookup, read `{{LOOKUP_FILE}}`, and retain only `unseen` indexes.
 4. For each unseen item:
-   a. If it has a distinct item URL, fetch that URL with the web_fetch tool before writing anything and use the fetched item's full content. If that item fetch fails, skip it and continue. A calendar row without a distinct URL may use the already-fetched landing-page content.
-   b. Generate a short slug (lowercase, hyphens, 3-5 words).
-   c. Write to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md` using the format below.
-5. If the fetch itself fails, write one file `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-error.md` with Status: failed. If the fetch succeeds but no items qualify, write no file.
-6. Reply briefly: how many items saved, any skipped.
+   a. If it has a distinct URL, fetch that URL before extracting content. If the fetch fails, skip it. A calendar row without a distinct URL may use substantive content from the landing-page fetch.
+   b. Extract and normalize the full substantive item.
+   c. Build one JSON object in memory and pipe it directly to the ingest command. Never write the object or body to disk.
+5. If the initial fetch fails or the collector cannot complete safely, return non-zero. Do not create an error article.
+6. Reply briefly with counts for inserted/updated/duplicate/skipped/failed. Do not include item bodies in your reply.
 
-## File format
-
-Write this exact format to `{{NEWS_DIR}}/raw/{{SOURCE_ID}}-{slug}.md`:
-
-```
-# {Item Title or Release Name}
-
-Source: {{SOURCE_NAME}}
-URL: {item_url_if_available}
-Published: {most precise publication datetime + timezone visible on the item}
-Collected: {current ISO timestamp}
-Section: {category if applicable}
-
-{Full text of the release, calendar entry, or announcement}
-```
-
-### Recording the Published value
-
-- Copy the most precise publication timestamp visible on the page or in its metadata (`<meta property="article:published_time">`, `<time datetime="...">`, dateline, release header). Prefer machine-readable page metadata over rendered text.
-- Include the timezone or UTC offset exactly as shown (e.g. `2026-07-14T08:30:00-04:00`, `July 14, 2026 8:30 AM ET`).
-- If only a date is visible (no time), record just the date. Never invent, round, or fabricate a time that is not shown.
-- If no publication date is visible anywhere, use `{{DATE}}` as a last resort and flag that in your reply.
-
-## Important
-
-- One file per item. Do NOT combine items into one file.
-- Save the full content, not a summary.
-- Use web_fetch only. Do not open browser windows or tabs; no additional windows or tabs are allowed.
-- Your reply should be brief. All content goes into the files.
+Prefer machine-readable publication metadata over rendered text and preserve exact timezone/offset information. If only a date is present, do not invent a time. No additional browser windows or tabs are allowed because this task uses web_fetch only.
