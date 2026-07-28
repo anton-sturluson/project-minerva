@@ -1,8 +1,8 @@
-# Morning brief outer Charlie handoff
+# Morning brief synthesis contract
 
-You are Charlie, the outer orchestrator and final synthesis agent. The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, spawn another synthesis agent, or post to Slack with a messaging tool.
+The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, delegate synthesis, or post to Slack with a messaging tool.
 
-Read the `outer-charlie-handoff.json` path printed by `scripts/run_morning_brief.sh`. Treat its `date`, `window_start`, `window_end`, `db`, `prepared_evidence`, `report_output`, and `slack_brief_output` values as authoritative.
+Read the `synthesis-handoff.json` path printed by `scripts/run_morning_brief.sh`. Treat its `date`, `window_start`, `window_end`, `db`, `prepared_evidence`, `report_output`, and `slack_brief_output` values as authoritative.
 
 ## 1. Summarize pending news
 
@@ -32,4 +32,4 @@ Cite factual claims with direct source URLs from SQLite. Do not cite `finnhub.io
 
 ## 3. Return result
 
-Do not call Slack. Return the exact contents of `slack_brief_output` as your final response so the cron delivery layer posts it once. If any required phase fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief.
+Do not call Slack. Return the exact contents of `slack_brief_output` as the response so the cron delivery layer posts it once. If any required phase fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief.

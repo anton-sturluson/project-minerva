@@ -404,17 +404,17 @@ class MorningBriefTests(unittest.TestCase):
         self.assertTrue(report_dir.is_dir())
         self.assertFalse(poisoned_workspace.exists())
         self.assertFalse((self.workspace / "poisoned.db").exists())
-        # Outer-Sol handoff artifact is emitted for the cron agent.
+        # A neutral synthesis handoff artifact is emitted for the cron layer.
         handoff = (
             report_dir
             / "data"
             / "structured"
             / "news-pipeline"
-            / "outer-charlie-handoff.json"
+            / "synthesis-handoff.json"
         )
         self.assertTrue(handoff.is_file())
         handoff_payload = json.loads(handoff.read_text(encoding="utf-8"))
-        self.assertEqual(handoff_payload["final_agent"], "charlie")
+        self.assertNotIn("agent", " ".join(handoff_payload).lower())
         self.assertTrue(
             any("minerva summarize" in step or "summarize" in step for step in handoff_payload["steps"])
         )

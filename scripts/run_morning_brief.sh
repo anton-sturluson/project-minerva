@@ -11,6 +11,7 @@ unset _CALLER_ENV_EXPORTS
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
+HELPER="${ROOT_DIR}/scripts/morning_brief_helper.py"
 RUN_DATE="${1:-$(date +%F)}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
@@ -26,28 +27,9 @@ for integer_name in \
     exit 1
   fi
 done
-if ! python3 - "${RUN_DATE}" <<'PY'
-from datetime import date
-import sys
-
-try:
-    parsed = date.fromisoformat(sys.argv[1])
-except ValueError:
-    raise SystemExit(1)
-if parsed.isoformat() != sys.argv[1]:
-    raise SystemExit(1)
-PY
-then
-  echo "RUN_DATE must be an ISO date (YYYY-MM-DD): ${RUN_DATE}" >&2
+if ! PREVIOUS_DATE="$(python3 "${HELPER}" previous-date "${RUN_DATE}")"; then
   exit 1
 fi
-PREVIOUS_DATE="$(python3 - "${RUN_DATE}" <<'PY'
-from datetime import date, timedelta
-import sys
-
-print((date.fromisoformat(sys.argv[1]) - timedelta(days=1)).isoformat())
-PY
-)"
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
 export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
@@ -92,27 +74,9 @@ mkdir -p "${REPORT_DIR}" "${PHASE_DIR}" "${COLLECTOR_ARTIFACT_DIR}" \
 write_status() {
   local destination="$1" phase="$2" status="$3" exit_status="$4"
   local stdout_path="${5:-}" stderr_path="${6:-}"
-  python3 - "${destination}" "${phase}" "${status}" "${exit_status}" \
-    "${stdout_path}" "${stderr_path}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path, phase, status, exit_status, stdout_path, stderr_path = sys.argv[1:]
-payload = {
-    "exit_status": int(exit_status),
-    "phase": phase,
-    "status": status,
-}
-if stdout_path:
-    payload["stdout"] = stdout_path
-if stderr_path:
-    payload["stderr"] = stderr_path
-Path(path).write_text(
-    json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n",
-    encoding="utf-8",
-)
-PY
+  python3 "${HELPER}" write-status \
+    "${destination}" "${phase}" "${status}" "${exit_status}" \
+    "${stdout_path}" "${stderr_path}"
 }
 
 run_minerva_phase() {
@@ -172,29 +136,9 @@ echo ""
 if [[ "${MINERVA_SKIP_NEWS}" == "1" ]]; then
   echo "── Phase 2: News collection (skipped) ──"
   write_status "${PHASE_DIR}/news.status.json" news skipped 0
-  python3 - "${RUN_DATE}" >"${PHASE_DIR}/window-evidence.json" <<'PY'
-import json
-import sys
-from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
-
-day = date.fromisoformat(sys.argv[1])
-market_tz = ZoneInfo("America/New_York")
-start = datetime.combine(day - timedelta(days=1), time(hour=4), tzinfo=market_tz)
-end = datetime.combine(day, time(hour=4), tzinfo=market_tz)
-print(json.dumps({
-    "eligible_rows": 0,
-    "lower_epoch": int(start.timestamp()),
-    "null_or_blank_summaries": 0,
-    "phase": "window-evidence",
-    "run_date": day.isoformat(),
-    "sources": {},
-    "status": "skipped",
-    "upper_epoch": int(end.timestamp()),
-    "window_end": end.isoformat(),
-    "window_start": start.isoformat(),
-}, separators=(",", ":"), sort_keys=True))
-PY
+  python3 "${HELPER}" window-evidence \
+    "${INVEST_DB}" "${RUN_DATE}" "${PHASE_DIR}/window-evidence.json" \
+    --skipped
 else
   # ── PHASE 2a: Direct aggregate downloads ──
   echo "── Phase 2a: Direct Finnhub and market downloads ──"
@@ -278,68 +222,22 @@ else
   render_collection_prompt() {
     local template="$1" source_name="$2" source_id="$3" url="$4"
     local collection_scope="$5" source_root="$6"
-    local candidate_file="${source_root}/candidates.json"
-    local lookup_file="${source_root}/lookup.json"
-    python3 - "${template}" "${RUN_DATE}" "${source_name}" "${source_id}" \
-      "${url}" "${source_root}" "${INVEST_DB}" "${NEWS_EXIST_COMMAND}" \
-      "${NEWS_INGEST_COMMAND}" "${PORTFOLIO_TICKERS}" \
-      "${collection_scope}" "${candidate_file}" "${lookup_file}" <<'PY'
-import sys
-from pathlib import Path
-
-(template, run_date, source_name, source_id, url, source_root, invest_db,
- news_exist_command, news_ingest_command, portfolio_tickers, collection_scope,
- candidate_file, lookup_file) = sys.argv[1:]
-text = Path(template).read_text(encoding="utf-8")
-replacements = {
-    "DATE": run_date,
-    "SOURCE_NAME": source_name,
-    "SOURCE_ID": source_id,
-    "URL": url,
-    "SOURCE_ROOT": source_root,
-    "INVEST_DB": invest_db,
-    "NEWS_EXIST_COMMAND": news_exist_command,
-    "NEWS_INGEST_COMMAND": news_ingest_command,
-    "PORTFOLIO_TICKERS": portfolio_tickers,
-    "COLLECT_SCOPE": collection_scope,
-    "CANDIDATE_FILE": candidate_file,
-    "LOOKUP_FILE": lookup_file,
-    "IR_COMPANIES_JSON": collection_scope,
-}
-for name, value in replacements.items():
-    text = text.replace("{{" + name + "}}", value)
-sys.stdout.write(text)
-PY
+    python3 "${HELPER}" render-prompt \
+      "${template}" "${RUN_DATE}" "${source_name}" "${source_id}" \
+      "${url}" "${source_root}" "${INVEST_DB}" \
+      "${NEWS_EXIST_COMMAND}" "${NEWS_INGEST_COMMAND}" \
+      "${PORTFOLIO_TICKERS}" "${collection_scope}" \
+      "${source_root}/candidates.json" "${source_root}/lookup.json"
   }
 
   write_collector_status() {
     local destination="$1" source_id="$2" source_name="$3" url="$4"
     local session_id="$5" status="$6" exit_status="$7" log_file="$8"
     local output_bytes="$9"
-    python3 - "${destination}" "${source_id}" "${source_name}" "${url}" \
+    python3 "${HELPER}" collector-status \
+      "${destination}" "${source_id}" "${source_name}" "${url}" \
       "${session_id}" "${status}" "${exit_status}" "${log_file}" \
-      "${output_bytes}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-(destination, source_id, source_name, url, session_id, status, exit_status,
- log_file, output_bytes) = sys.argv[1:]
-payload = {
-    "exit_status": int(exit_status),
-    "log": log_file,
-    "openclaw_output_bytes": int(output_bytes),
-    "session_id": session_id,
-    "source_id": source_id,
-    "source_name": source_name,
-    "status": status,
-    "url": url,
-}
-Path(destination).write_text(
-    json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n",
-    encoding="utf-8",
-)
-PY
+      "${output_bytes}"
   }
 
   collect_source() {
@@ -457,49 +355,9 @@ PY
   # IR registry rows are metadata only. Select current-universe companies with
   # configured feeds, sort by security_id, then chunk into sessions of ten.
   if [[ -f "${PORTFOLIO_UNIVERSE}" && -f "${IR_REGISTRY}" ]]; then
-    python3 - "${PORTFOLIO_UNIVERSE}" "${IR_REGISTRY}" <<'PY' \
+    python3 "${HELPER}" ir-batches \
+      "${PORTFOLIO_UNIVERSE}" "${IR_REGISTRY}" \
       >"${NEWS_RUN_DIR}/ir-batches.jsonl"
-import json
-import sys
-from pathlib import Path
-
-universe_path, registry_path = map(Path, sys.argv[1:])
-universe = json.loads(universe_path.read_text(encoding="utf-8"))
-registry = json.loads(registry_path.read_text(encoding="utf-8"))
-registry_by_id = {entry["security_id"]: entry for entry in registry}
-companies = []
-for security in sorted(universe, key=lambda row: row["security_id"]):
-    security_id = security["security_id"]
-    registry_entry = registry_by_id.get(security_id)
-    if registry_entry is None:
-        continue
-    feeds = [
-        {
-            "format": str(feed.get("format") or "html"),
-            "name": str(feed.get("name") or ""),
-            "url": feed["url"],
-        }
-        for feed in registry_entry["feeds"]
-        if feed.get("url")
-    ]
-    if not feeds:
-        continue
-    companies.append(
-        {
-            "company_name": str(
-                security.get("company_name")
-                or registry_entry.get("company_name")
-                or security_id
-            ),
-            "feeds": feeds,
-            "security_id": security_id,
-            "source_id": f"ir-{security_id}",
-            "ticker": str(security.get("ticker") or security_id),
-        }
-    )
-for offset in range(0, len(companies), 10):
-    print(json.dumps(companies[offset : offset + 10], separators=(",", ":"), sort_keys=True))
-PY
     ir_batch_number=0
     while IFS= read -r ir_companies_json; do
       [[ -n "${ir_companies_json}" ]] || continue
@@ -517,48 +375,10 @@ PY
   echo "  waiting for news agents..."
   wait_for_collectors
 
-  python3 - "${NEWS_RUN_DIR}/launched.txt" "${COLLECTOR_ARTIFACT_DIR}" \
-    >"${PHASE_DIR}/collectors.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-launched_path, artifact_root = map(Path, sys.argv[1:])
-launched = (
-    launched_path.read_text(encoding="utf-8").splitlines()
-    if launched_path.is_file()
-    else []
-)
-rows = []
-for source_id in launched:
-    status_path = artifact_root / source_id / "status.json"
-    if status_path.is_file():
-        row = json.loads(status_path.read_text(encoding="utf-8"))
-    else:
-        row = {
-            "exit_status": -1,
-            "source_id": source_id,
-            "status": "failed",
-            "error": "collector exited without a status artifact",
-        }
-    rows.append(row)
-failures = [row for row in rows if row.get("status") != "ok"]
-payload = {
-    "failed": len(failures),
-    "failures": failures,
-    "phase": "collectors",
-    "status": "degraded" if failures else "ok",
-    "succeeded": len(rows) - len(failures),
-    "total": len(rows),
-}
-print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
-PY
-  COLLECTION_ERROR_COUNT=$(python3 - "${PHASE_DIR}/collectors.json" <<'PY'
-import json
-import sys
-print(json.load(open(sys.argv[1], encoding="utf-8"))["failed"])
-PY
-)
+  python3 "${HELPER}" collector-summary \
+    "${NEWS_RUN_DIR}/launched.txt" "${COLLECTOR_ARTIFACT_DIR}" \
+    "${PHASE_DIR}/collectors.json"
+  COLLECTION_ERROR_COUNT=$(jq -r '.failed' "${PHASE_DIR}/collectors.json")
   if [[ "${COLLECTION_ERROR_COUNT}" -gt 0 ]]; then
     echo "  news collection completed with ${COLLECTION_ERROR_COUNT} collector error(s)"
     echo "  collector diagnostics: ${PHASE_DIR}/collectors.json"
@@ -569,74 +389,9 @@ PY
   # ── PHASE 3: Fixed 04:00 America/New_York evidence gate ──
   echo ""
   echo "── Phase 3: Fixed 04:00 evidence gate ──"
-  if python3 - "${INVEST_DB}" "${RUN_DATE}" \
-      >"${PHASE_DIR}/window-evidence.json" \
-      2>"${PHASE_DIR}/window-evidence.stderr.log" <<'PY'
-import json
-import sqlite3
-import sys
-import time as time_module
-from datetime import date, datetime, time, timedelta
-from pathlib import Path
-from zoneinfo import ZoneInfo
-
-raw_db, run_date = sys.argv[1:]
-db = Path(raw_db)
-day = date.fromisoformat(run_date)
-market_tz = ZoneInfo("America/New_York")
-start = datetime.combine(day - timedelta(days=1), time(hour=4), tzinfo=market_tz)
-end = datetime.combine(day, time(hour=4), tzinfo=market_tz)
-lower = int(start.timestamp())
-upper = int(end.timestamp())
-result = {
-    "eligible_rows": 0,
-    "lower_epoch": lower,
-    "null_or_blank_summaries": 0,
-    "phase": "window-evidence",
-    "run_date": run_date,
-    "sources": {},
-    "status": "ok",
-    "upper_epoch": upper,
-    "window_end": end.isoformat(),
-    "window_start": start.isoformat(),
-}
-if db.is_file():
-    uri = f"{db.resolve().as_uri()}?mode=ro"
-    conn = None
-    for attempt in range(5):
-        try:
-            conn = sqlite3.connect(uri, uri=True, timeout=30)
-            break
-        except sqlite3.OperationalError:
-            if attempt == 4:
-                raise
-            time_module.sleep(0.25 * (attempt + 1))
-    assert conn is not None
-    with conn:
-        conn.execute("PRAGMA query_only = ON")
-        table = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='news'"
-        ).fetchone()
-        if table is not None:
-            predicate = (
-                "trim(content) <> '' AND published_at >= ? AND published_at < ?"
-            )
-            params = (lower, upper)
-            result["eligible_rows"] = conn.execute(
-                f"SELECT COUNT(*) FROM news WHERE {predicate}", params
-            ).fetchone()[0]
-            result["null_or_blank_summaries"] = conn.execute(
-                f"SELECT COUNT(*) FROM news WHERE {predicate} "
-                "AND (summary IS NULL OR trim(summary) = '')",
-                params,
-            ).fetchone()[0]
-            result["sources"] = dict(conn.execute(
-                f"SELECT source, COUNT(*) FROM news WHERE {predicate} "
-                "GROUP BY source ORDER BY source",
-                params,
-            ).fetchall())
-print(json.dumps(result, separators=(",", ":"), sort_keys=True))
-PY
+  if python3 "${HELPER}" window-evidence \
+      "${INVEST_DB}" "${RUN_DATE}" "${PHASE_DIR}/window-evidence.json" \
+      2>"${PHASE_DIR}/window-evidence.stderr.log"
   then
     echo "  evidence: $(cat "${PHASE_DIR}/window-evidence.json")"
   else
@@ -650,12 +405,7 @@ PY
     exit "${status}"
   fi
 
-  eligible_count=$(python3 - "${PHASE_DIR}/window-evidence.json" <<'PY'
-import json
-import sys
-print(json.load(open(sys.argv[1], encoding="utf-8"))["eligible_rows"])
-PY
-)
+  eligible_count=$(jq -r '.eligible_rows' "${PHASE_DIR}/window-evidence.json")
   if [[ "${eligible_count}" -eq 0 && "${MINERVA_ALLOW_THIN_BRIEF}" != "1" ]]; then
     echo "news: no eligible evidence exists in the fixed 04:00 New York window for ${RUN_DATE}" >&2
     echo "news: refusing a thin brief; set MINERVA_ALLOW_THIN_BRIEF=1 to override" >&2
@@ -672,24 +422,8 @@ run_minerva_phase prep brief prep --date "${RUN_DATE}"
 
 MANIFEST_PATH="${REPORT_DIR}/data/raw/manifest.json"
 if [[ "${MINERVA_SKIP_STATUS_CHECK}" != "1" ]]; then
-  if python3 - "${MANIFEST_PATH}" 2>"${PHASE_DIR}/manifest-check.stderr.log" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-manifest_path = Path(sys.argv[1])
-manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-sources = manifest.get("sources", {})
-required = ["filings", "earnings", "market", "prep"]
-missing = [name for name in required if name not in sources]
-blocking = [name for name in required if sources.get(name, {}).get("status") == "error"]
-if missing:
-    print(f"missing manifest source entries: {', '.join(missing)}", file=sys.stderr)
-    raise SystemExit(1)
-if blocking:
-    print(f"blocking morning-brief collection errors: {', '.join(blocking)}", file=sys.stderr)
-    raise SystemExit(1)
-PY
+  if python3 "${HELPER}" manifest-check "${MANIFEST_PATH}" \
+      2>"${PHASE_DIR}/manifest-check.stderr.log"
   then
     write_status "${PHASE_DIR}/manifest-check.status.json" manifest-check ok 0
   else
@@ -705,64 +439,19 @@ else
 fi
 
 PREPARED_PATH="${REPORT_DIR}/data/structured/prepared-evidence.json"
-HANDOFF_PATH="${PHASE_DIR}/outer-charlie-handoff.json"
-OUTER_CHARLIE_PROMPT="${ROOT_DIR}/scripts/prompts/morning_brief_outer_charlie.md"
-python3 - "${HANDOFF_PATH}" "${RUN_DATE}" "${INVEST_DB}" "${PREPARED_PATH}" \
+HANDOFF_PATH="${PHASE_DIR}/synthesis-handoff.json"
+SYNTHESIS_PROMPT="${ROOT_DIR}/scripts/prompts/morning_brief_synthesis.md"
+python3 "${HELPER}" write-handoff \
+  "${HANDOFF_PATH}" "${RUN_DATE}" "${INVEST_DB}" "${PREPARED_PATH}" \
   "${REPORT_DIR}/notes/morning-brief-report.md" \
   "${REPORT_DIR}/notes/slack-brief.md" \
-  "${PHASE_DIR}/window-evidence.json" "${OUTER_CHARLIE_PROMPT}" <<'PY'
-import json
-import sys
-from datetime import date, datetime, time, timedelta
-from pathlib import Path
-from zoneinfo import ZoneInfo
-
-(
-    path,
-    run_date,
-    db,
-    prepared,
-    report,
-    slack_brief,
-    evidence_stats,
-    instructions,
-) = sys.argv[1:]
-day = date.fromisoformat(run_date)
-market_tz = ZoneInfo("America/New_York")
-window_start = datetime.combine(
-    day - timedelta(days=1), time(hour=4), tzinfo=market_tz
-).isoformat()
-window_end = datetime.combine(day, time(hour=4), tzinfo=market_tz).isoformat()
-payload = {
-    "date": run_date,
-    "db": db,
-    "evidence_stats": evidence_stats,
-    "final_agent": "charlie",
-    "instructions": instructions,
-    "prepared_evidence": prepared,
-    "report_output": report,
-    "slack_brief_output": slack_brief,
-    "steps": [
-        "Query news in the fixed [previous-run 04:00, run-date 04:00) America/New_York window whose summary is NULL or blank.",
-        "Pipe each row's content through `minerva summarize`; retain generated summaries until all calls succeed.",
-        "Persist summaries with parameter binding in one safe transaction, updating only still-blank rows.",
-        "Synthesize notes/morning-brief-report.md and notes/slack-brief.md from prepared evidence and news in the fixed handoff window.",
-    ],
-    "status": "ready",
-    "window_end": window_end,
-    "window_start": window_start,
-}
-Path(path).write_text(
-    json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n",
-    encoding="utf-8",
-)
-PY
+  "${PHASE_DIR}/window-evidence.json" "${SYNTHESIS_PROMPT}"
 
 echo ""
 echo "prepared_evidence: ${PREPARED_PATH}"
 echo "manifest: ${MANIFEST_PATH}"
 echo "news_db: ${INVEST_DB}"
 echo "phase_artifacts: ${PHASE_DIR}"
-echo "outer_charlie_handoff: ${HANDOFF_PATH}"
-echo "outer_charlie_instructions: ${OUTER_CHARLIE_PROMPT}"
-echo "outer_charlie_step: Charlie (the outer cron orchestrator, not this script) must follow the versioned instructions, summarize rows in the fixed 04:00 New York window with NULL/blank summary, persist all summaries safely in one transaction, synthesize both report artifacts, and return the Slack brief for cron delivery. Do not post Slack from this script."
+echo "synthesis_handoff: ${HANDOFF_PATH}"
+echo "synthesis_instructions: ${SYNTHESIS_PROMPT}"
+echo "synthesis_step: Follow the versioned instructions to summarize rows in the fixed 04:00 New York window with NULL/blank summary, persist all summaries safely in one transaction, synthesize both report artifacts, and return the Slack brief for cron delivery. Do not post Slack from this script."

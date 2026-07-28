@@ -1,6 +1,6 @@
 Collect and directly ingest news articles from {{SOURCE_NAME}} ({{URL}}) for {{DATE}}.
 
-Your isolated metadata root is `{{SOURCE_ROOT}}`. You may write only the candidate and lookup JSON files rendered below. Do not write article, Markdown, text, HTML, summary, or intermediate JSON files. Article bodies must exist only in process memory and in SQLite after a successful direct ingest.
+Your isolated metadata root is `{{SOURCE_ROOT}}`. You may write only `{{CANDIDATE_FILE}}` and `{{LOOKUP_FILE}}`, overwriting them for each lookup. Article bodies must remain in process memory until successful SQLite ingestion; never write article, Markdown, text, HTML, summary, or intermediate JSON files.
 
 ## Portfolio context
 
@@ -12,64 +12,60 @@ Prioritize articles relevant to these current holdings/watchlist companies:
 
 {{COLLECT_SCOPE}}
 
-## Selection constraints
+## Eligibility and safety
 
-- Scan the full landing page and collect every qualifying article. Rank direct portfolio relevance first, then material macro/market news, industry developments, market-relevant geopolitics/politics, and genuinely important business, technology, science, or world news. Skip lifestyle, sports, entertainment, and celebrity stories.
-- Ingest only articles published from the previous calendar date at 04:00 America/New_York inclusive through `{{DATE}}` at 04:00 America/New_York exclusive. If no date is visible on the landing page, retain the item only long enough to inspect article metadata; skip it if the article still has no publication value.
-- Check deterministic database duplicates before expensive article-body extraction. Never estimate title similarity or calculate article hashes yourself.
-- If no unseen qualifying articles exist, ingest nothing and report zero. Do not create placeholders.
-- Never invoke Slack, a webhook, another agent, or a summarizer. Leave `summary` absent so Charlie can summarize later.
+- Scan the full landing page and collect every qualifying article. Rank direct portfolio relevance first, then material macro/market news, industry developments, market-relevant geopolitics/politics, and genuinely important business, technology, science, or world news. Exclude lifestyle, sports, entertainment, and celebrity stories.
+- The publication window is the previous calendar date at 04:00 America/New_York inclusive through `{{DATE}}` at 04:00 America/New_York exclusive.
+- A publication value is mandatory. Prefer machine-readable source metadata such as `article:published_time` or `<time datetime>` over rendered text, and preserve its exact timezone/offset. A date alone is acceptable without an invented time or timezone. When the landing page has no date, inspect article metadata before body extraction; discard the article if no publication value exists.
+- Use the deterministic database lookup before expensive body extraction. Never estimate title similarity or calculate article hashes yourself.
+- If no unseen eligible articles exist, ingest nothing and report zero; never create placeholders or error articles.
+- Never invoke Slack, a webhook, another agent, or a summarizer. Leave `summary` absent for the synthesis step.
 
 ## Deterministic duplicate lookup
 
-Write candidate metadata only as one JSON array to `{{CANDIDATE_FILE}}`, overwriting it on every lookup. Every object must contain `title`, `url`, and `published`. Use the exact destination URL and visible publication value; use an empty `published` string when no date is visible.
+Write candidate metadata as one JSON array to `{{CANDIDATE_FILE}}`. Every object must contain `title`, `url`, and `published`; use the exact destination URL and visible publication value, or an empty `published` string when the landing page shows none.
 
-Run exactly this lookup and overwrite your isolated result file:
+Run this command and overwrite the lookup result:
 
 ```bash
 {{NEWS_EXIST_COMMAND}} --db "{{INVEST_DB}}" --source-id "{{SOURCE_ID}}" --input "{{CANDIDATE_FILE}}" > "{{LOOKUP_FILE}}"
 ```
 
-Indexes in `seen` are duplicates. Only indexes in `unseen` may be visited. This command is read-only and uses the same normalized identity as ingestion. Batch the landing-page candidates in one lookup rather than invoking it once per candidate.
+Indexes in `seen` are duplicates; only `unseen` indexes may proceed. The command is read-only and uses the same normalized identity as ingestion. Submit all landing-page candidates in one lookup. For a candidate whose date is discovered on its article page, repeat the lookup once with a one-item array containing the final URL and discovered publication value before extracting its body.
 
 ## Direct ingest contract
 
-For each extracted article, construct exactly one in-memory JSON object with:
+For each eligible unseen article, construct one in-memory JSON object with:
 
 - `title`: exact, non-empty article headline
 - `source_id`: exactly `{{SOURCE_ID}}`
 - `url`: final, non-empty article URL
-- `published_at`: the most precise source publication value available, including timezone; skip the article when no publication value can be established
+- `published_at`: the most precise source publication value available
 - `content`: normalized non-empty Markdown or plain text containing the complete substantive article body, with navigation, advertisements, cookie text, and page chrome removed; never raw HTML
 - optional `section`: source section/category
 - optional `collected_at`: current ISO-8601 UTC timestamp
 
-Pipe that single object directly on stdin to this command:
+Pipe that object directly on stdin to:
 
 ```bash
 printf '%s\n' "$article_json" | {{NEWS_INGEST_COMMAND}}
 ```
 
-A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place article JSON or content on a command line. Confirm the compact command result has status `inserted`, `updated`, or `duplicate`; otherwise treat that article as failed and return a non-zero collector result.
+A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place article JSON or content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the article as failed and return a non-zero result after continuing safely.
 
-## Browser steps
+## Browser procedure
 
 1. Run exactly once: `browser open "{{URL}}" --new --window`.
-2. Record the returned tab alias. It is your only browser window and tab. Never run `browser open` again and never create another tab/window.
-3. In that tab, scan the complete landing page. Record candidate headline, destination URL, and visible publication value without opening article bodies.
-4. Remove visibly stale candidates. Overwrite `{{CANDIDATE_FILE}}`, run the one batch lookup, read `{{LOOKUP_FILE}}`, and keep only `unseen` indexes.
-5. For each unseen candidate:
-   a. Navigate the same tab to the article.
-   b. If its date was unavailable on the landing page, inspect only date metadata first. Skip the article if no publication value can be established. Otherwise overwrite `{{CANDIDATE_FILE}}` with a one-item array using the final URL and discovered date, rerun the lookup, and skip the article if it is now `seen`.
-   c. Extract and normalize the full substantive article body with `browser extract` or `browser ask`.
-   d. Build one JSON object in memory and pipe it directly to the ingest command above. Do not write it to disk.
-   e. Navigate the same tab back to the landing page.
-   f. On 404, CAPTCHA, video-only content, paywall, or extraction failure, skip the article and continue.
-6. Close your only tab with `browser close {tab_alias}`. Close any accidentally created extra tab/window immediately.
-7. Reply briefly with counts for inserted/updated/duplicate/skipped/failed. Do not include article bodies in your reply.
+2. Record the returned tab alias. It is your only browser window and tab. Never run `browser open` again; close any accidentally created extra tab or window immediately.
+3. In that tab, scan the complete landing page and record candidate headline, destination URL, and visible publication value without opening article bodies.
+4. Remove visibly stale candidates, run the batch duplicate lookup, and retain only `unseen` indexes.
+5. For each remaining candidate, use the same tab to:
+   a. Navigate to the article and resolve missing publication metadata as specified above.
+   b. Extract and normalize the full substantive body with `browser extract` or `browser ask`.
+   c. Build and ingest the in-memory object.
+   d. Navigate back to the landing page.
+   e. On 404, CAPTCHA, video-only content, paywall, or extraction failure, record a skipped item and continue.
+6. Close the tab with `browser close {tab_alias}`.
+7. Reply briefly with counts for inserted/updated/duplicate/skipped/failed. Do not include article bodies.
 
-## Publication value
-
-Prefer machine-readable source metadata such as `article:published_time` or `<time datetime>` over rendered text. Preserve the exact timezone/offset shown. If only a date is available, use that date without inventing a time. If no publication value exists, skip the article.
-
-If the browser bridge is unavailable or the collector cannot complete safely, return non-zero. Do not create an error article or any article-body file. Same-tab navigation is allowed; additional tabs/windows are not.
+If the browser bridge is unavailable or safe completion is impossible, return non-zero. Same-tab navigation is allowed; additional tabs and windows are not.

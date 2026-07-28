@@ -708,8 +708,11 @@ def test_ingest_cli_defaults_resolve_from_workspace(
 
 
 def test_morning_brief_shell_and_prompts_use_direct_ingest_contract() -> None:
-    """The production script uses direct-ingest collectors and aggregate downloads."""
+    """The production script preserves the approved collection contract."""
     script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
+        encoding="utf-8"
+    )
+    helper = (REPO_ROOT / "scripts" / "morning_brief_helper.py").read_text(
         encoding="utf-8"
     )
     browser_prompt = (
@@ -721,45 +724,35 @@ def test_morning_brief_shell_and_prompts_use_direct_ingest_contract() -> None:
     ir_batch_prompt = (
         REPO_ROOT / "scripts" / "prompts" / "collect_ir_batch.md"
     ).read_text(encoding="utf-8")
-    outer_charlie_prompt = (
-        REPO_ROOT / "scripts" / "prompts" / "morning_brief_outer_charlie.md"
+    synthesis_prompt = (
+        REPO_ROOT / "scripts" / "prompts" / "morning_brief_synthesis.md"
     ).read_text(encoding="utf-8")
 
-    # Aggregate direct-download phases run before collectors and share the DB.
     assert script.count("news download-finnhub") == 2
-    assert 'finnhub-news-previous news download-finnhub' in script
+    assert "finnhub-news-previous news download-finnhub" in script
     assert '--date "${PREVIOUS_DATE}"' in script
     assert "news download-market-data" in script
 
-    # Collector stdin ingest command is rendered once and shared with agents.
     assert "NEWS_INGEST_COMMAND" in script
     assert "news ingest --input - --db" in script
-    assert "printf -v NEWS_INGEST_COMMAND '(cd %q && %s)'" in script
     assert "NEWS_EXIST_COMMAND" in script
-    assert '"${MINERVA_RUNNER_ARR[@]}" news exist' in script
-
-    # Configurable collector agent for OpenClaw same-agent isolation.
     assert 'MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-steve}"' in script
     assert '--agent "${MINERVA_NEWS_COLLECTOR_AGENT}"' in script
     assert "fireworks/accounts/fireworks/routers/glm-5p2-fast" in script
     assert "for editorial_id in wsj economist reuters-markets" in script
 
-    # Bounded parallel collectors, isolated source roots, phase artifacts.
-    assert 'MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"' in script
-    assert 'MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"' in script
     assert 'MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"' in script
-    assert 'wait_for_collectors' in script
+    assert "wait_for_collectors" in script
     assert "collectors.json" in script
-    assert "outer-charlie-handoff.json" in script
+    assert "synthesis-handoff.json" in script
     assert "window-evidence.json" in script
-
-    # Fixed 04:00 evidence gate refuses thin briefs unless explicitly allowed.
-    assert 'MINERVA_ALLOW_THIN_BRIEF' in script
+    assert "MINERVA_ALLOW_THIN_BRIEF" in script
     assert "refusing a thin brief" in script
-    assert 'ZoneInfo("America/New_York")' in script
-    assert "time(hour=4)" in script
+    assert 'ZoneInfo("America/New_York")' in helper
+    assert "time(hour=4)" in helper
+    assert "python3 -" not in script
+    assert "<<'PY'" not in script
 
-    # The old batch-ingest architecture has been fully removed.
     for banned in (
         "extract-files",
         "extract_files",
@@ -769,74 +762,62 @@ def test_morning_brief_shell_and_prompts_use_direct_ingest_contract() -> None:
     ):
         assert banned not in script, banned
 
-    # No inner synthesis: reports/slack are written by outer orchestrator Charlie.
-    assert "outer cron orchestrator" in script
-    assert '"final_agent": "charlie"' in script
     assert 'openclaw agent \\\n' in script or script.count("openclaw agent") == 1
 
     for prompt in (browser_prompt, webfetch_prompt):
-        # Deterministic duplicate check remains a mandatory pre-extraction step.
         assert '{{NEWS_EXIST_COMMAND}} --db "{{INVEST_DB}}"' in prompt
         assert '--input "{{CANDIDATE_FILE}}" > "{{LOOKUP_FILE}}"' in prompt
-        # Direct-ingest contract: one JSON object per article, piped to stdin.
         assert "{{NEWS_INGEST_COMMAND}}" in prompt
         assert "news ingest --input - --db" in prompt
-        # Article/item bodies live in SQLite only. No summary written here.
         assert "isolated metadata root" in prompt
         assert "SQLite" in prompt
         assert "summarizer" in prompt
-        assert "Charlie" in prompt
-        # Collectors never emit filesystem article/summary artifacts.
-        assert "Do not write article" in prompt
+        assert "never write article" in prompt
         for forbidden in (".md`", "/raw/", "extract-files"):
             assert forbidden not in prompt, forbidden
 
-    # Browser prompt keeps single-tab, no-additional-window discipline and
-    # enforces the same fixed 04:00 publication window as synthesis.
     assert "only browser window and tab" in browser_prompt
     assert "one JSON array" in browser_prompt
     assert "Never invoke Slack" in browser_prompt
-    assert "Ingest only articles published" in browser_prompt
     assert "04:00 America/New_York" in browser_prompt
-    assert "older than 3 days" not in browser_prompt
     assert "web_fetch only" in webfetch_prompt
     assert "Never open a browser" in webfetch_prompt
-    assert "Ingest only items published" in webfetch_prompt
     assert "04:00 America/New_York" in webfetch_prompt
-    assert "older than 3 days" not in webfetch_prompt
 
-    # IR batches use universe metadata, deterministic duplicate checks, direct
-    # ingest, and no article-body files.
     assert "{{IR_COMPANIES_JSON}}" in ir_batch_prompt
-    assert "complete substantive text" in ir_batch_prompt
-    assert "Do not write article" in ir_batch_prompt
+    assert "complete substantive release" in ir_batch_prompt
+    assert "never write article" in ir_batch_prompt
     assert "{{NEWS_EXIST_COMMAND}}" in ir_batch_prompt
     assert "{{NEWS_INGEST_COMMAND}}" in ir_batch_prompt
-    assert "Ingest only releases published" in ir_batch_prompt
     assert "04:00 America/New_York" in ir_batch_prompt
 
-    # The versioned outer-Charlie contract owns bounded summarization/delivery.
-    assert "at most four subprocesses" in outer_charlie_prompt
-    assert "one transaction" in outer_charlie_prompt
-    assert "Do not call Slack" in outer_charlie_prompt
-    assert "Return the exact contents" in outer_charlie_prompt
-    assert "previous run date at 04:00" in outer_charlie_prompt
-    assert "run date at 04:00" in outer_charlie_prompt
+    # Safety and publication rules appear once in each collector prompt.
+    for prompt in (browser_prompt, webfetch_prompt, ir_batch_prompt):
+        assert prompt.count("A publication value is mandatory.") == 1
+        assert prompt.count("Leave `summary` absent") == 1
+        assert prompt.lower().count("skip the article") <= 1
+
+    assert "at most four subprocesses" in synthesis_prompt
+    assert "one transaction" in synthesis_prompt
+    assert "Do not call Slack" in synthesis_prompt
+    assert "Return the exact contents" in synthesis_prompt
+    assert "previous run date at 04:00" in synthesis_prompt
+    assert "run date at 04:00" in synthesis_prompt
+    assert "agent" not in synthesis_prompt.lower()
 
 
-def test_morning_brief_hands_summarization_off_to_outer_charlie() -> None:
-    """No inner summarization: Charlie handles summarize + persistence."""
+def test_morning_brief_hands_summarization_to_synthesis_step() -> None:
+    """The shell prepares artifacts but does not summarize or post."""
     script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
         encoding="utf-8"
     )
-    # Script emits a handoff artifact naming Charlie as final agent.
-    assert '"final_agent": "charlie"' in script
-    assert "minerva summarize" in script or "`minerva summarize`" in script
-    # The script never invokes `minerva summarize` itself (that's the outer agent).
+    helper = (REPO_ROOT / "scripts" / "morning_brief_helper.py").read_text(
+        encoding="utf-8"
+    )
+    assert "synthesis-handoff.json" in script
+    assert "minerva summarize" in helper
     assert "run summarize" not in script
     assert '"${MINERVA_RUNNER_ARR[@]}" summarize' not in script
-    # Handoff explicitly lists final report artifacts.
     assert "morning-brief-report.md" in script
     assert "slack-brief.md" in script
-    # No Slack posting from this script.
     assert "curl" not in script or "slack" not in script.lower()

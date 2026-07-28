@@ -1,7 +1,7 @@
 # Browser Fallback for Blocked Web Sources — Improvement Plan
 
 Date: 2026-04-15
-Status: superseded. The HTTP `brief ir` collector and fallback described here were removed; production IR collection now uses universe-selected agent batches.
+Status: proposed
 
 ## Problem
 

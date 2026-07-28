@@ -863,11 +863,11 @@ def test_window_evidence_uses_fixed_four_am_new_york_bounds(
 
 
 # ---------------------------------------------------------------------------
-# Outer-Charlie handoff artifact
+# Synthesis handoff artifact
 # ---------------------------------------------------------------------------
 
 
-def test_outer_charlie_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
+def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     run_date = date.today().isoformat()
     result = _run_wrapper(
         tmp_path,
@@ -884,11 +884,11 @@ def test_outer_charlie_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> N
     assert result.returncode == 0, result.stderr
 
     handoff = json.loads(
-        (_phase_dir(tmp_path, run_date) / "outer-charlie-handoff.json").read_text(
+        (_phase_dir(tmp_path, run_date) / "synthesis-handoff.json").read_text(
             encoding="utf-8"
         )
     )
-    assert handoff["final_agent"] == "charlie"
+    assert "agent" not in " ".join(handoff).lower()
     assert handoff["date"] == run_date
     assert handoff["status"] == "ready"
     assert handoff["window_start"].endswith("T04:00:00-04:00") or handoff[
@@ -897,7 +897,7 @@ def test_outer_charlie_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> N
     assert handoff["window_end"].endswith("T04:00:00-04:00") or handoff[
         "window_end"
     ].endswith("T04:00:00-05:00")
-    assert Path(handoff["instructions"]).name == "morning_brief_outer_charlie.md"
+    assert Path(handoff["instructions"]).name == "morning_brief_synthesis.md"
     assert Path(handoff["instructions"]).is_file()
     # Handoff enumerates the summarize -> persist -> report chain.
     steps_blob = " ".join(handoff["steps"])
@@ -916,7 +916,7 @@ def test_outer_charlie_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> N
 
 def test_prompts_render_direct_ingest_placeholders() -> None:
     """Templates use the shared placeholder set consumed by the wrapper."""
-    for name in ("collect_news.md", "collect_news_webfetch.md"):
+    for name in ("collect_news.md", "collect_news_webfetch.md", "collect_ir_batch.md"):
         text = (REPO_ROOT / "scripts" / "prompts" / name).read_text(
             encoding="utf-8"
         )
@@ -927,8 +927,6 @@ def test_prompts_render_direct_ingest_placeholders() -> None:
             "{{NEWS_EXIST_COMMAND}}",
             "{{NEWS_INGEST_COMMAND}}",
             "{{INVEST_DB}}",
-            "{{SOURCE_ID}}",
-            "{{URL}}",
             "{{DATE}}",
         ):
             assert placeholder in text, f"{name} missing {placeholder}"

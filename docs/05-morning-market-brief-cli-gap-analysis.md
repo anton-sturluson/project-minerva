@@ -1,7 +1,7 @@
 # Morning Market Brief — V1 Implementation Plan
 
 Date: 2026-04-08
-Status: historical and superseded. The deterministic `minerva brief ir` command described below has been removed; production IR collection is universe-selected and agent-batched by `scripts/run_morning_brief.sh`.
+Status: deterministic evidence pipeline implemented; final note-generation step still pending
 
 ## Goal
 
@@ -38,9 +38,9 @@ V1 also includes:
 - bidirectional writes back into the Google Sheet
 - replacing the main agent’s analysis with deterministic scoring
 
-## Historical implementation status
+## Current implementation status
 
-As of 2026-04-09, the then-current deterministic harness surface existed and was fixture-tested:
+As of 2026-04-09, the deterministic harness surface exists and is fixture-tested:
 - `portfolio sync`
 - `portfolio adjacency` (`list`, `add`, `remove`, `render`)
 - `portfolio thesis` (`list`, `show`, `set`, `render`)
