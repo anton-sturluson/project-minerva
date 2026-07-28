@@ -709,3 +709,5 @@ def json_lines(payload: Mapping[str, object]) -> str:
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())
+    if result.exit_code:
+        raise typer.Exit(result.exit_code)

@@ -73,3 +73,15 @@ def test_direct_cli_missing_args_show_full_help_for_research() -> None:
     assert "What went wrong" not in result.stdout
     assert "Usage:" in result.stdout
     assert "Deep web research powered by Parallel.ai." in result.stdout
+
+
+def test_portfolio_sync_failure_exits_nonzero_after_rendering_error(tmp_path: Path, monkeypatch) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path)
+    monkeypatch.setattr("harness.commands.portfolio.get_settings", lambda: settings)
+
+    result = runner.invoke(app, ["portfolio", "sync", "--holdings-source", "missing.csv"])
+
+    assert result.exit_code == 1
+    assert "failed to sync portfolio state:" in result.stdout
+    assert "provide holdings and transaction sources" in result.stdout
+    assert "[exit:1" in result.stdout
