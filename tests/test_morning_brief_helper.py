@@ -111,6 +111,34 @@ def test_window_evidence_is_half_open_and_requires_full_text(tmp_path: Path) -> 
     assert result["upper_epoch"] == upper
 
 
+def test_window_evidence_retries_transient_wal_open_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "invest.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "CREATE TABLE news (published_at INTEGER, content TEXT, summary TEXT, source TEXT)"
+        )
+
+    original_connect = helper.sqlite3.connect
+    attempts: list[str] = []
+
+    def flaky_connect(database: str, *args: object, **kwargs: object):
+        attempts.append(database)
+        if len(attempts) <= 6:
+            raise sqlite3.OperationalError("unable to open database file")
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(helper.sqlite3, "connect", flaky_connect)
+    monkeypatch.setattr(helper.time_module, "sleep", lambda _seconds: None)
+
+    result = helper.window_evidence(db, date(2026, 7, 27))
+
+    assert result["eligible_rows"] == 0
+    assert len(attempts) == 7
+    assert all(path.endswith("?mode=rw") for path in attempts)
+
+
 def test_synthesis_handoff_has_neutral_contract_fields(tmp_path: Path) -> None:
     payload = helper.synthesis_handoff(
         run_date=date(2026, 7, 27),

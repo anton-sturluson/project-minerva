@@ -108,18 +108,23 @@ def window_evidence(
     if skipped or not db.is_file():
         return result
 
-    uri = f"{db.resolve().as_uri()}?mode=ro"
-    connection = None
-    for attempt in range(5):
+    # Use a read-write-capable handle with query-only enforcement. A `mode=ro`
+    # connection can transiently fail while the last parallel collector closes
+    # a WAL database and SQLite recreates/removes its shared-memory files.
+    uri = f"{db.absolute().as_uri()}?mode=rw"
+    deadline = time_module.monotonic() + 30
+    delay = 0.1
+    while True:
         try:
             connection = sqlite3.connect(uri, uri=True, timeout=30)
             break
         except sqlite3.OperationalError:
-            if attempt == 4:
+            if time_module.monotonic() >= deadline:
                 raise
-            time_module.sleep(0.25 * (attempt + 1))
-    assert connection is not None
+            time_module.sleep(delay)
+            delay = min(delay * 2, 1.0)
     try:
+        connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA query_only = ON")
         table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='news'"
