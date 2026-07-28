@@ -603,7 +603,7 @@ Update `~/.openclaw/workspace/shared/TOOLS.md` and its Steve mirror. Verified ag
 | `minerva valuation dcf\|comps\|reverse-dcf\|sotp\|report` | Financial valuation models |
 | `minerva analyze ngrams\|topics` | Deterministic text analysis |
 | `minerva plot bar\|line\|scatter\|wordcloud` | Chart generation from CSV or text |
-| `minerva brief filings\|earnings\|macro\|macro-collect\|ir\|market\|prep\|audit\|review-log` | Morning brief evidence pipeline |
+| `minerva brief filings\|earnings\|macro\|macro-collect\|market\|prep\|audit\|review-log` | Morning brief evidence pipeline |
 | `minerva portfolio sync\|enrich\|adjacency\|thesis` | Portfolio state commands for the morning brief |
 | `minerva run "<chain>"` | Chain Minerva domain commands |
 

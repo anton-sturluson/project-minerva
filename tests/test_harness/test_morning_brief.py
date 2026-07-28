@@ -14,13 +14,10 @@ from unittest.mock import patch
 from harness.commands import brief, portfolio
 from harness.config import HarnessSettings
 from harness.morning_brief import (
-    _parse_ir_feed,
-    _parse_ir_html,
     append_review_log,
     audit_evidence,
     collect_earnings,
     collect_filings,
-    collect_ir,
     collect_macro,
     collect_macro_registry_events,
     collect_market,
@@ -118,29 +115,9 @@ class MorningBriefTests(unittest.TestCase):
             signals=["Cloud capex slows materially"],
         )
 
-        ir_registry = self.workspace / "ir-registry.json"
-        ir_registry.write_text(
-            json.dumps(
-                [
-                    {
-                        "security_id": "NVDA",
-                        "ticker": "NVDA",
-                        "feeds": [
-                            {
-                                "format": "xml",
-                                "url": str(FIXTURE_DIR / "nvda-ir.xml"),
-                            }
-                        ],
-                    }
-                ]
-            ),
-            encoding="utf-8",
-        )
-
         collect_filings(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "filings.json"))
         collect_earnings(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "market-data.json"))
         collect_macro(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "macro-events.json"))
-        collect_ir(self.workspace, run_date=RUN_DATE, registry_path=ir_registry)
         collect_market(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "market-data.json"))
         prepare_evidence(self.workspace, run_date=RUN_DATE)
         audit_evidence(self.workspace, run_date=RUN_DATE)
@@ -156,7 +133,7 @@ class MorningBriefTests(unittest.TestCase):
         ]
 
         self.assertTrue(
-            {"filings", "earnings", "macro", "ir", "market", "prep", "audit", "review-log"}.issubset(manifest["sources"])
+            {"filings", "earnings", "macro", "market", "prep", "audit", "review-log"}.issubset(manifest["sources"])
         )
         self.assertTrue(manifest["outputs"]["notes"]["morning_brief_report"].endswith("notes/morning-brief-report.md"))
         self.assertTrue(manifest["outputs"]["raw"]["filings"].endswith("data/raw/filings.json"))
@@ -230,47 +207,6 @@ class MorningBriefTests(unittest.TestCase):
         self.assertEqual(summary["event_count"], 2)
         self.assertEqual([event["headline"] for event in events], ["S&P 500 was little changed", "US 10Y yield edged lower"])
         self.assertTrue(all(event["material"] is False for event in events))
-
-    def test_parse_ir_html_filters_navigation_links(self) -> None:
-        raw_html = """
-        <html>
-          <body>
-            <nav>
-              <a href="/home">Home</a>
-              <a href="/contact">Contact</a>
-              <a href="/buy">Buy Now</a>
-              <a href="#main">Skip to main content</a>
-            </nav>
-            <main>
-              <a href="/news/q1-2026-results">Acme Corp Announces First Quarter 2026 Financial Results</a>
-              <a href="/newsroom">Newsroom</a>
-            </main>
-          </body>
-        </html>
-        """
-
-        events = _parse_ir_html(raw_html, RUN_DATE, "ACME", "https://investors.example.com/releases")
-
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["headline"], "Acme Corp Announces First Quarter 2026 Financial Results")
-        self.assertEqual(events[0]["reference_url"], "https://investors.example.com/news/q1-2026-results")
-
-    def test_parse_ir_feed_xml_falls_back_to_filtered_html(self) -> None:
-        raw_html = """
-        <html>
-          <body>
-            <a href="/home">Home</a>
-            <a href="/news/april-2026-dividend">Acme Declares April 2026 Quarterly Dividend</a>
-          </body>
-        </html>
-        """
-
-        with patch("harness.morning_brief.read_text_source", return_value=(raw_html, None)):
-            events = _parse_ir_feed("https://investors.example.com/feed.xml", "xml", RUN_DATE, "ACME", {})
-
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["headline"], "Acme Declares April 2026 Quarterly Dividend")
-        self.assertEqual(events[0]["reference_url"], "https://investors.example.com/news/april-2026-dividend")
 
     def test_macro_collect_builds_normalized_events_from_registry_sources(self) -> None:
         sync_portfolio(
@@ -474,11 +410,11 @@ class MorningBriefTests(unittest.TestCase):
             / "data"
             / "structured"
             / "news-pipeline"
-            / "outer-sol-handoff.json"
+            / "outer-charlie-handoff.json"
         )
         self.assertTrue(handoff.is_file())
         handoff_payload = json.loads(handoff.read_text(encoding="utf-8"))
-        self.assertEqual(handoff_payload["final_agent"], "outer-cron-sol")
+        self.assertEqual(handoff_payload["final_agent"], "charlie")
         self.assertTrue(
             any("minerva summarize" in step or "summarize" in step for step in handoff_payload["steps"])
         )
@@ -715,8 +651,6 @@ class MorningBriefTests(unittest.TestCase):
         collect_filings(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "filings.json"))
         collect_earnings(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "market-data.json"))
         collect_macro(self.workspace, run_date=RUN_DATE, source=str(FIXTURE_DIR / "macro-events.json"))
-        collect_ir(self.workspace, run_date=RUN_DATE, registry_path=self.workspace / "empty-ir.json")
-        (self.workspace / "empty-ir.json").write_text("[]", encoding="utf-8")
         collect_market(self.workspace, run_date=RUN_DATE, source=str(market_file))
 
         summary = prepare_evidence(self.workspace, run_date=RUN_DATE)

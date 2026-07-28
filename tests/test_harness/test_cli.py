@@ -57,6 +57,23 @@ def test_dispatch_command_rejects_unknown_commands_without_subprocess(tmp_path: 
     assert "Available alternatives:" in stderr
 
 
+def test_removed_brief_ir_command_is_not_registered(tmp_path: Path) -> None:
+    help_result = runner.invoke(app, ["brief", "--help"])
+    assert help_result.exit_code == 0
+    assert "\nir " not in help_result.stdout
+    assert "Scan configured IR feeds" not in help_result.stdout
+
+    direct_result = runner.invoke(app, ["brief", "ir", "--date", "2026-04-08"])
+    assert direct_result.exit_code != 0
+
+    dispatched = dispatch_command(
+        ["brief", "ir", "--date", "2026-04-08"],
+        settings=HarnessSettings(workspace_root=tmp_path),
+    )
+    assert dispatched.exit_code == 1
+    assert b"unknown `brief` subcommand `ir`" in dispatched.stderr
+
+
 def test_direct_cli_missing_args_show_concise_error_for_valuation_dcf() -> None:
     result = runner.invoke(app, ["valuation", "dcf"])
 

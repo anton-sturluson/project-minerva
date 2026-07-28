@@ -1,12 +1,12 @@
-# Morning brief outer Sol handoff
+# Morning brief outer Charlie handoff
 
-You are the final synthesis agent. The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, spawn another Sol agent, or post to Slack with a messaging tool.
+You are Charlie, the outer orchestrator and final synthesis agent. The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, spawn another synthesis agent, or post to Slack with a messaging tool.
 
-Read the `outer-sol-handoff.json` path printed by `scripts/run_morning_brief.sh`. Treat its `date`, `db`, `prepared_evidence`, `report_output`, and `slack_brief_output` values as authoritative.
+Read the `outer-charlie-handoff.json` path printed by `scripts/run_morning_brief.sh`. Treat its `date`, `window_start`, `window_end`, `db`, `prepared_evidence`, `report_output`, and `slack_brief_output` values as authoritative.
 
 ## 1. Summarize pending news
 
-- Select eligible `news` rows for the handoff date using `published_at` as UTC epoch seconds bounded by the `America/New_York` calendar day. Use `published_at_raw` date-prefix matching only when `published_at` is NULL.
+- Select eligible `news` rows using `published_at` as UTC epoch seconds in the fixed half-open interval from `window_start` inclusive to `window_end` exclusive. The handoff timestamps represent the previous run date at 04:00 through the run date at 04:00 in `America/New_York`. Do not use calendar-date prefix matching or include rows outside these exact bounds.
 - Process only rows where `content` is non-empty and `summary` is NULL or blank.
 - For each row, pipe `content` on stdin to:
 
@@ -17,11 +17,11 @@ uv run minerva summarize --model gemini-3.6-flash --thinking high
 - Use bounded parallelism of at most four subprocesses. Keep article content and generated summaries in memory; do not write article or summary files.
 - If any summarization fails, do not write a partial batch. Report the failure count and artifact paths concisely.
 - After all calls succeed, persist summaries with SQLite parameter binding in one transaction. Update by `article_key` only where the summary is still NULL or blank.
-- Re-query and require zero eligible blank summaries before synthesis. Reruns must be idempotent.
+- Re-query the same fixed half-open window and require zero eligible blank summaries before synthesis. Reruns must be idempotent.
 
 ## 2. Synthesize the brief
 
-Read the prepared-evidence JSON, the summarized current-date `news` rows, and relevant `prices` rows. Prefer primary sources and material facts. Deduplicate repeated URLs and syndicated versions. Distinguish facts from interpretation.
+Read the prepared-evidence JSON, the summarized news rows in the fixed handoff window, and relevant `prices` rows. Prefer primary sources and material facts. Deduplicate repeated URLs and syndicated versions. Distinguish facts from interpretation.
 
 Write:
 

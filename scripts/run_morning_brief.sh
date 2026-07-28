@@ -15,7 +15,7 @@ RUN_DATE="${1:-$(date +%F)}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
 MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"
-MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-main}"
+MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-steve}"
 for integer_name in \
   MINERVA_BROWSER_TIMEOUT \
   MINERVA_WEBFETCH_TIMEOUT \
@@ -41,6 +41,13 @@ then
   echo "RUN_DATE must be an ISO date (YYYY-MM-DD): ${RUN_DATE}" >&2
   exit 1
 fi
+PREVIOUS_DATE="$(python3 - "${RUN_DATE}" <<'PY'
+from datetime import date, timedelta
+import sys
+
+print((date.fromisoformat(sys.argv[1]) - timedelta(days=1)).isoformat())
+PY
+)"
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
 export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
@@ -165,13 +172,36 @@ echo ""
 if [[ "${MINERVA_SKIP_NEWS}" == "1" ]]; then
   echo "── Phase 2: News collection (skipped) ──"
   write_status "${PHASE_DIR}/news.status.json" news skipped 0
-  printf '%s\n' \
-    '{"current_date":"'"${RUN_DATE}"'","current_rows":0,"null_or_blank_summaries":0,"phase":"current-evidence","sources":{},"status":"skipped"}' \
-    >"${PHASE_DIR}/current-evidence.json"
+  python3 - "${RUN_DATE}" >"${PHASE_DIR}/window-evidence.json" <<'PY'
+import json
+import sys
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+day = date.fromisoformat(sys.argv[1])
+market_tz = ZoneInfo("America/New_York")
+start = datetime.combine(day - timedelta(days=1), time(hour=4), tzinfo=market_tz)
+end = datetime.combine(day, time(hour=4), tzinfo=market_tz)
+print(json.dumps({
+    "eligible_rows": 0,
+    "lower_epoch": int(start.timestamp()),
+    "null_or_blank_summaries": 0,
+    "phase": "window-evidence",
+    "run_date": day.isoformat(),
+    "sources": {},
+    "status": "skipped",
+    "upper_epoch": int(end.timestamp()),
+    "window_end": end.isoformat(),
+    "window_start": start.isoformat(),
+}, separators=(",", ":"), sort_keys=True))
+PY
 else
   # ── PHASE 2a: Direct aggregate downloads ──
   echo "── Phase 2a: Direct Finnhub and market downloads ──"
-  # With no --symbol override, Finnhub uses current holdings + watchlist.
+  # Fetch both publication dates that intersect the fixed 04:00-to-04:00
+  # window. Direct ingestion deduplicates overlapping provider results.
+  run_minerva_phase finnhub-news-previous news download-finnhub \
+    --date "${PREVIOUS_DATE}" --db "${INVEST_DB}"
   run_minerva_phase finnhub-news news download-finnhub \
     --date "${RUN_DATE}" --db "${INVEST_DB}"
   # With no --index/--symbol overrides, market data uses default indexes plus
@@ -185,7 +215,9 @@ else
 
   BROWSER_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news.md"
   WEBFETCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news_webfetch.md"
+  IR_BATCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_ir_batch.md"
   NEWS_SOURCES="${MINERVA_NEWS_SOURCES:-${MINERVA_WORKSPACE_ROOT}/data/02-news/news-sources.json}"
+  PORTFOLIO_UNIVERSE="${MINERVA_PORTFOLIO_UNIVERSE:-${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/universe.json}"
   IR_REGISTRY="${MINERVA_IR_REGISTRY:-${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/ir-registry.json}"
   PIDS=()
 
@@ -202,11 +234,19 @@ else
     echo "error[collectors]: malformed source registry: ${NEWS_SOURCES}" >&2
     exit 1
   fi
+  if [[ -f "${PORTFOLIO_UNIVERSE}" ]] && ! jq -e '
+    type == "array" and all(.[];
+      type == "object" and
+      (.security_id | type == "string" and length > 0)
+    )
+  ' "${PORTFOLIO_UNIVERSE}" >/dev/null; then
+    echo "error[collectors]: malformed portfolio universe: ${PORTFOLIO_UNIVERSE}" >&2
+    exit 1
+  fi
   if [[ -f "${IR_REGISTRY}" ]] && ! jq -e '
     type == "array" and all(.[];
       type == "object" and
       (.security_id | type == "string" and length > 0) and
-      (.company_name | type == "string" and length > 0) and
       (.feeds | type == "array") and
       all(.feeds[]; type == "object" and (.url | type == "string" and length > 0))
     )
@@ -264,6 +304,7 @@ replacements = {
     "COLLECT_SCOPE": collection_scope,
     "CANDIDATE_FILE": candidate_file,
     "LOOKUP_FILE": lookup_file,
+    "IR_COMPANIES_JSON": collection_scope,
 }
 for name, value in replacements.items():
     text = text.replace("{{" + name + "}}", value)
@@ -306,7 +347,6 @@ PY
     local url="$5" collection_scope="$6" source_root="$7"
     local artifact_root="${COLLECTOR_ARTIFACT_DIR}/${source_id}"
     local session_id="news-${source_id}-${RUN_DATE}-$$-${RANDOM}"
-    local temp_output="${source_root}/openclaw-output.log"
     local lifecycle_log="${artifact_root}/collector.log"
     local status_file="${artifact_root}/status.json"
     local prompt exit_status output_bytes result_status
@@ -322,20 +362,22 @@ PY
       echo "started_at: $(date -u +%FT%TZ)"
     } >"${lifecycle_log}"
 
-    if openclaw agent \
+    # Count and discard agent output as a stream. Even if an agent violates the
+    # reply contract, an article body is never materialized in a temp file.
+    if output_bytes=$(openclaw agent \
       --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
       --timeout "${timeout}" \
       --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
       --thinking high \
       --session-id "${session_id}" \
-      --message "${prompt}" >"${temp_output}" 2>&1; then
+      --message "${prompt}" 2>&1 | wc -c); then
       exit_status=0
       result_status=ok
     else
       exit_status=$?
       result_status=failed
     fi
-    output_bytes=$(wc -c <"${temp_output}" | tr -d ' ')
+    output_bytes=$(echo "${output_bytes}" | tr -d ' ')
     {
       echo "finished_at: $(date -u +%FT%TZ)"
       echo "status: ${result_status}"
@@ -346,7 +388,6 @@ PY
     write_collector_status "${status_file}" "${source_id}" "${source_name}" \
       "${url}" "${session_id}" "${result_status}" "${exit_status}" \
       "${lifecycle_log}" "${output_bytes}"
-    rm -f "${temp_output}"
 
     if [[ "${exit_status}" -eq 0 ]]; then
       echo "news: ${source_id} ok (status: ${status_file})"
@@ -389,8 +430,13 @@ PY
     fi
   }
 
+  # The daily workflow has exactly three editorial collector slots. Official
+  # macro sources are handled by structured phases, not news-agent sessions.
   if [[ -f "${NEWS_SOURCES}" ]]; then
-    while IFS= read -r entry; do
+    for editorial_id in wsj economist reuters-markets; do
+      entry=$(jq -c --arg id "${editorial_id}" \
+        'map(select(.id == $id)) | first // empty' "${NEWS_SOURCES}")
+      [[ -n "${entry}" ]] || continue
       source_id=$(echo "${entry}" | jq -r '.id')
       source_name=$(echo "${entry}" | jq -r '.name')
       url=$(echo "${entry}" | jq -r '.url')
@@ -405,19 +451,67 @@ PY
         launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_WEBFETCH_TIMEOUT}" \
           "${source_id}" "${source_name}" "${url}" "${collection_scope}"
       fi
-    done < <(jq -c '.[]' "${NEWS_SOURCES}")
+    done
   fi
 
-  if [[ -f "${IR_REGISTRY}" ]]; then
-    while IFS= read -r entry; do
-      ticker=$(echo "${entry}" | jq -r '.security_id')
-      url=$(echo "${entry}" | jq -r '.feeds[0].url // empty')
-      [[ -n "${url}" ]] || continue
-      echo "  spawning IR browser agent: ${ticker}"
-      launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}" \
-        "ir-${ticker}" "IR — ${ticker}" "${url}" \
-        "New investor-relations releases, filings, earnings materials, capital-allocation announcements, or other material company updates published within the last 3 days."
-    done < <(jq -c '.[]' "${IR_REGISTRY}")
+  # IR registry rows are metadata only. Select current-universe companies with
+  # configured feeds, sort by security_id, then chunk into sessions of ten.
+  if [[ -f "${PORTFOLIO_UNIVERSE}" && -f "${IR_REGISTRY}" ]]; then
+    python3 - "${PORTFOLIO_UNIVERSE}" "${IR_REGISTRY}" <<'PY' \
+      >"${NEWS_RUN_DIR}/ir-batches.jsonl"
+import json
+import sys
+from pathlib import Path
+
+universe_path, registry_path = map(Path, sys.argv[1:])
+universe = json.loads(universe_path.read_text(encoding="utf-8"))
+registry = json.loads(registry_path.read_text(encoding="utf-8"))
+registry_by_id = {entry["security_id"]: entry for entry in registry}
+companies = []
+for security in sorted(universe, key=lambda row: row["security_id"]):
+    security_id = security["security_id"]
+    registry_entry = registry_by_id.get(security_id)
+    if registry_entry is None:
+        continue
+    feeds = [
+        {
+            "format": str(feed.get("format") or "html"),
+            "name": str(feed.get("name") or ""),
+            "url": feed["url"],
+        }
+        for feed in registry_entry["feeds"]
+        if feed.get("url")
+    ]
+    if not feeds:
+        continue
+    companies.append(
+        {
+            "company_name": str(
+                security.get("company_name")
+                or registry_entry.get("company_name")
+                or security_id
+            ),
+            "feeds": feeds,
+            "security_id": security_id,
+            "source_id": f"ir-{security_id}",
+            "ticker": str(security.get("ticker") or security_id),
+        }
+    )
+for offset in range(0, len(companies), 10):
+    print(json.dumps(companies[offset : offset + 10], separators=(",", ":"), sort_keys=True))
+PY
+    ir_batch_number=0
+    while IFS= read -r ir_companies_json; do
+      [[ -n "${ir_companies_json}" ]] || continue
+      ir_batch_number=$((ir_batch_number + 1))
+      printf -v ir_batch_id 'ir-batch-%03d' "${ir_batch_number}"
+      company_count=$(echo "${ir_companies_json}" | jq 'length')
+      first_url=$(echo "${ir_companies_json}" | jq -r '.[0].feeds[0].url')
+      echo "  spawning IR browser agent: ${ir_batch_id} (${company_count} companies)"
+      launch_source "${IR_BATCH_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}" \
+        "${ir_batch_id}" "IR batch ${ir_batch_number}" "${first_url}" \
+        "${ir_companies_json}"
+    done <"${NEWS_RUN_DIR}/ir-batches.jsonl"
   fi
 
   echo "  waiting for news agents..."
@@ -472,12 +566,12 @@ PY
     echo "  news collection complete: $(cat "${PHASE_DIR}/collectors.json")"
   fi
 
-  # ── PHASE 3: Current-date evidence gate ──
+  # ── PHASE 3: Fixed 04:00 America/New_York evidence gate ──
   echo ""
-  echo "── Phase 3: Current-date evidence gate ──"
+  echo "── Phase 3: Fixed 04:00 evidence gate ──"
   if python3 - "${INVEST_DB}" "${RUN_DATE}" \
-      >"${PHASE_DIR}/current-evidence.json" \
-      2>"${PHASE_DIR}/current-evidence.stderr.log" <<'PY'
+      >"${PHASE_DIR}/window-evidence.json" \
+      2>"${PHASE_DIR}/window-evidence.stderr.log" <<'PY'
 import json
 import sqlite3
 import sys
@@ -488,21 +582,25 @@ from zoneinfo import ZoneInfo
 
 raw_db, run_date = sys.argv[1:]
 db = Path(raw_db)
+day = date.fromisoformat(run_date)
+market_tz = ZoneInfo("America/New_York")
+start = datetime.combine(day - timedelta(days=1), time(hour=4), tzinfo=market_tz)
+end = datetime.combine(day, time(hour=4), tzinfo=market_tz)
+lower = int(start.timestamp())
+upper = int(end.timestamp())
 result = {
-    "current_date": run_date,
-    "current_rows": 0,
+    "eligible_rows": 0,
+    "lower_epoch": lower,
     "null_or_blank_summaries": 0,
-    "phase": "current-evidence",
+    "phase": "window-evidence",
+    "run_date": run_date,
     "sources": {},
     "status": "ok",
+    "upper_epoch": upper,
+    "window_end": end.isoformat(),
+    "window_start": start.isoformat(),
 }
 if db.is_file():
-    day = date.fromisoformat(run_date)
-    market_tz = ZoneInfo("America/New_York")
-    start = datetime.combine(day, time.min, tzinfo=market_tz)
-    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=market_tz)
-    lower = int(start.timestamp())
-    upper = int(end.timestamp())
     uri = f"{db.resolve().as_uri()}?mode=ro"
     conn = None
     for attempt in range(5):
@@ -521,12 +619,10 @@ if db.is_file():
         ).fetchone()
         if table is not None:
             predicate = (
-                "trim(content) <> '' AND ("
-                "(published_at IS NOT NULL AND published_at >= ? AND published_at < ?) "
-                "OR (published_at IS NULL AND substr(trim(published_at_raw), 1, 10) = ?))"
+                "trim(content) <> '' AND published_at >= ? AND published_at < ?"
             )
-            params = (lower, upper, run_date)
-            result["current_rows"] = conn.execute(
+            params = (lower, upper)
+            result["eligible_rows"] = conn.execute(
                 f"SELECT COUNT(*) FROM news WHERE {predicate}", params
             ).fetchone()[0]
             result["null_or_blank_summaries"] = conn.execute(
@@ -542,28 +638,28 @@ if db.is_file():
 print(json.dumps(result, separators=(",", ":"), sort_keys=True))
 PY
   then
-    echo "  evidence: $(cat "${PHASE_DIR}/current-evidence.json")"
+    echo "  evidence: $(cat "${PHASE_DIR}/window-evidence.json")"
   else
     status=$?
-    write_status "${PHASE_DIR}/current-evidence.status.json" \
-      current-evidence failed "${status}" \
-      "${PHASE_DIR}/current-evidence.json" \
-      "${PHASE_DIR}/current-evidence.stderr.log"
-    echo "error[current-evidence]: unable to inspect ${INVEST_DB}" >&2
-    tail -n 20 "${PHASE_DIR}/current-evidence.stderr.log" >&2 || true
+    write_status "${PHASE_DIR}/window-evidence.status.json" \
+      window-evidence failed "${status}" \
+      "${PHASE_DIR}/window-evidence.json" \
+      "${PHASE_DIR}/window-evidence.stderr.log"
+    echo "error[window-evidence]: unable to inspect ${INVEST_DB}" >&2
+    tail -n 20 "${PHASE_DIR}/window-evidence.stderr.log" >&2 || true
     exit "${status}"
   fi
 
-  eligible_count=$(python3 - "${PHASE_DIR}/current-evidence.json" <<'PY'
+  eligible_count=$(python3 - "${PHASE_DIR}/window-evidence.json" <<'PY'
 import json
 import sys
-print(json.load(open(sys.argv[1], encoding="utf-8"))["current_rows"])
+print(json.load(open(sys.argv[1], encoding="utf-8"))["eligible_rows"])
 PY
 )
   if [[ "${eligible_count}" -eq 0 && "${MINERVA_ALLOW_THIN_BRIEF}" != "1" ]]; then
-    echo "news: no eligible current-date news evidence exists for ${RUN_DATE}" >&2
+    echo "news: no eligible evidence exists in the fixed 04:00 New York window for ${RUN_DATE}" >&2
     echo "news: refusing a thin brief; set MINERVA_ALLOW_THIN_BRIEF=1 to override" >&2
-    echo "news: evidence diagnostics: ${PHASE_DIR}/current-evidence.json" >&2
+    echo "news: evidence diagnostics: ${PHASE_DIR}/window-evidence.json" >&2
     exit 1
   fi
 fi
@@ -609,15 +705,17 @@ else
 fi
 
 PREPARED_PATH="${REPORT_DIR}/data/structured/prepared-evidence.json"
-HANDOFF_PATH="${PHASE_DIR}/outer-sol-handoff.json"
-OUTER_SOL_PROMPT="${ROOT_DIR}/scripts/prompts/morning_brief_outer_sol.md"
+HANDOFF_PATH="${PHASE_DIR}/outer-charlie-handoff.json"
+OUTER_CHARLIE_PROMPT="${ROOT_DIR}/scripts/prompts/morning_brief_outer_charlie.md"
 python3 - "${HANDOFF_PATH}" "${RUN_DATE}" "${INVEST_DB}" "${PREPARED_PATH}" \
   "${REPORT_DIR}/notes/morning-brief-report.md" \
   "${REPORT_DIR}/notes/slack-brief.md" \
-  "${PHASE_DIR}/current-evidence.json" "${OUTER_SOL_PROMPT}" <<'PY'
+  "${PHASE_DIR}/window-evidence.json" "${OUTER_CHARLIE_PROMPT}" <<'PY'
 import json
 import sys
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 (
     path,
@@ -629,22 +727,30 @@ from pathlib import Path
     evidence_stats,
     instructions,
 ) = sys.argv[1:]
+day = date.fromisoformat(run_date)
+market_tz = ZoneInfo("America/New_York")
+window_start = datetime.combine(
+    day - timedelta(days=1), time(hour=4), tzinfo=market_tz
+).isoformat()
+window_end = datetime.combine(day, time(hour=4), tzinfo=market_tz).isoformat()
 payload = {
     "date": run_date,
     "db": db,
     "evidence_stats": evidence_stats,
-    "final_agent": "outer-cron-sol",
+    "final_agent": "charlie",
     "instructions": instructions,
     "prepared_evidence": prepared,
     "report_output": report,
     "slack_brief_output": slack_brief,
     "steps": [
-        "Query current-date news rows whose summary is NULL or blank.",
+        "Query news in the fixed [previous-run 04:00, run-date 04:00) America/New_York window whose summary is NULL or blank.",
         "Pipe each row's content through `minerva summarize`; retain generated summaries until all calls succeed.",
         "Persist summaries with parameter binding in one safe transaction, updating only still-blank rows.",
-        "Synthesize notes/morning-brief-report.md and notes/slack-brief.md from prepared evidence and current-date news.",
+        "Synthesize notes/morning-brief-report.md and notes/slack-brief.md from prepared evidence and news in the fixed handoff window.",
     ],
     "status": "ready",
+    "window_end": window_end,
+    "window_start": window_start,
 }
 Path(path).write_text(
     json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n",
@@ -657,6 +763,6 @@ echo "prepared_evidence: ${PREPARED_PATH}"
 echo "manifest: ${MANIFEST_PATH}"
 echo "news_db: ${INVEST_DB}"
 echo "phase_artifacts: ${PHASE_DIR}"
-echo "outer_sol_handoff: ${HANDOFF_PATH}"
-echo "outer_sol_instructions: ${OUTER_SOL_PROMPT}"
-echo "outer_sol_step: The outer cron Sol agent (not this script) must follow the versioned instructions, summarize current-date rows with NULL/blank summary, persist all summaries safely in one transaction, synthesize both report artifacts, and return the Slack brief for cron delivery. Do not post Slack from this script."
+echo "outer_charlie_handoff: ${HANDOFF_PATH}"
+echo "outer_charlie_instructions: ${OUTER_CHARLIE_PROMPT}"
+echo "outer_charlie_step: Charlie (the outer cron orchestrator, not this script) must follow the versioned instructions, summarize rows in the fixed 04:00 New York window with NULL/blank summary, persist all summaries safely in one transaction, synthesize both report artifacts, and return the Slack brief for cron delivery. Do not post Slack from this script."

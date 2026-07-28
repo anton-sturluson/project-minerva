@@ -15,10 +15,10 @@ Prioritize articles relevant to these current holdings/watchlist companies:
 ## Selection constraints
 
 - Scan the full landing page and collect every qualifying article. Rank direct portfolio relevance first, then material macro/market news, industry developments, market-relevant geopolitics/politics, and genuinely important business, technology, science, or world news. Skip lifestyle, sports, entertainment, and celebrity stories.
-- Skip articles older than 3 days based on the visible source publication date. If no date is visible on the landing page, retain the item for the URL-first duplicate check.
+- Ingest only articles published from the previous calendar date at 04:00 America/New_York inclusive through `{{DATE}}` at 04:00 America/New_York exclusive. If no date is visible on the landing page, retain the item only long enough to inspect article metadata; skip it if the article still has no publication value.
 - Check deterministic database duplicates before expensive article-body extraction. Never estimate title similarity or calculate article hashes yourself.
 - If no unseen qualifying articles exist, ingest nothing and report zero. Do not create placeholders.
-- Never invoke Slack, a webhook, another agent, or a summarizer. Leave `summary` absent so the outer Sol agent can summarize later.
+- Never invoke Slack, a webhook, another agent, or a summarizer. Leave `summary` absent so Charlie can summarize later.
 
 ## Deterministic duplicate lookup
 
@@ -39,7 +39,7 @@ For each extracted article, construct exactly one in-memory JSON object with:
 - `title`: exact, non-empty article headline
 - `source_id`: exactly `{{SOURCE_ID}}`
 - `url`: final, non-empty article URL
-- `published_at`: the most precise source publication value available, including timezone; use `{{DATE}}` only when the article exposes no publication date
+- `published_at`: the most precise source publication value available, including timezone; skip the article when no publication value can be established
 - `content`: normalized non-empty Markdown or plain text containing the complete substantive article body, with navigation, advertisements, cookie text, and page chrome removed; never raw HTML
 - optional `section`: source section/category
 - optional `collected_at`: current ISO-8601 UTC timestamp
@@ -60,7 +60,7 @@ A different safe in-memory JSON-producing construct is allowed, but it must end 
 4. Remove visibly stale candidates. Overwrite `{{CANDIDATE_FILE}}`, run the one batch lookup, read `{{LOOKUP_FILE}}`, and keep only `unseen` indexes.
 5. For each unseen candidate:
    a. Navigate the same tab to the article.
-   b. If its date was unavailable on the landing page, inspect only date metadata first. Before body extraction, overwrite `{{CANDIDATE_FILE}}` with a one-item array using the final URL and discovered date (or `{{DATE}}` if no date exists), rerun the lookup, and skip the article if it is now `seen`.
+   b. If its date was unavailable on the landing page, inspect only date metadata first. Skip the article if no publication value can be established. Otherwise overwrite `{{CANDIDATE_FILE}}` with a one-item array using the final URL and discovered date, rerun the lookup, and skip the article if it is now `seen`.
    c. Extract and normalize the full substantive article body with `browser extract` or `browser ask`.
    d. Build one JSON object in memory and pipe it directly to the ingest command above. Do not write it to disk.
    e. Navigate the same tab back to the landing page.
@@ -70,6 +70,6 @@ A different safe in-memory JSON-producing construct is allowed, but it must end 
 
 ## Publication value
 
-Prefer machine-readable source metadata such as `article:published_time` or `<time datetime>` over rendered text. Preserve the exact timezone/offset shown. If only a date is available, use that date without inventing a time. Use `{{DATE}}` only as the last-resort no-date fallback and mention the fallback in your brief reply.
+Prefer machine-readable source metadata such as `article:published_time` or `<time datetime>` over rendered text. Preserve the exact timezone/offset shown. If only a date is available, use that date without inventing a time. If no publication value exists, skip the article.
 
 If the browser bridge is unavailable or the collector cannot complete safely, return non-zero. Do not create an error article or any article-body file. Same-tab navigation is allowed; additional tabs/windows are not.

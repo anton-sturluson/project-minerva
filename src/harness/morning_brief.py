@@ -11,7 +11,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
-from xml.etree import ElementTree
 
 import requests
 from lxml import html as lxml_html
@@ -43,43 +42,6 @@ DEFAULT_QUOTE_SYMBOLS = [
     "XLK", "XLF", "XLE", "XLV",
 ]
 FINNHUB_CALL_DELAY_SECONDS = 0.1
-IR_HTML_NAV_PATTERNS = (
-    r"home",
-    r"about(?: us)?",
-    r"contact(?: us)?",
-    r"skip to(?: main content| content)?",
-    r"go to(?: footer| main content| content)?",
-    r"buy(?: now)?",
-    r"log(?:in| on)",
-    r"sign in",
-    r"sign up",
-    r"register",
-    r"subscribe",
-    r"menu",
-    r"search",
-    r"learn more",
-    r"read more",
-    r"investor relations",
-    r"press releases?",
-    r"news(?:room)?",
-    r"events?",
-)
-IR_HTML_MATERIAL_TITLE_PATTERN = re.compile(
-    r"\b(?:"
-    r"announces?|reports?|reported|files?|filed|completes?|completed|declares?|launches?|publishes?|"
-    r"prices?|priced|acquires?|acquired|acquisition|merger|appoints?|expands?|partners?|partnership|"
-    r"enters?|entered|closes?|closed|closing|commences?|receives?|received|approves?|approved|"
-    r"results?|earnings|revenue|guidance|outlook|quarter|fiscal|annual|investor day|conference call|"
-    r"webcast|presentation|dividend|buyback|repurchase|offering|notes|debt|equity|sec|8-k|10-k|10-q|"
-    r"shareholders?|board|trial|study|data|fda|phase\s+[1234]|agreement"
-    r")\b"
-    r"|"
-    r"\b(?:q[1-4]|fy)\s*(?:20)?\d{2}\b"
-    r"|"
-    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,\s*\d{4})?\b",
-    flags=re.IGNORECASE,
-)
-
 
 @dataclass(slots=True)
 class RunPaths:
@@ -432,74 +394,6 @@ def collect_macro_registry_events(
     }
 
 
-def collect_ir(
-    workspace_root: Path,
-    *,
-    run_date: date,
-    registry_path: Path | None = None,
-) -> dict[str, Any]:
-    """Collect IR releases from a locally curated registry."""
-    ensure_portfolio_layout(workspace_root)
-    run_paths = ensure_daily_run_layout(workspace_root, run_date)
-    paths = portfolio_paths(workspace_root)
-    registry = load_json(registry_path or paths.ir_registry, default=[])
-
-    events: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
-    degraded_reasons: list[str] = []
-    if not registry:
-        degraded_reasons.append("no IR registry configured")
-    configured_feeds = 0
-    for entry in registry:
-        security_id = canonical_security_id(entry.get("security_id") or entry.get("ticker") or entry.get("company_name"))
-        for feed in entry.get("feeds", []):
-            feed_url = str(feed.get("url") or "").strip()
-            feed_format = str(feed.get("format") or "rss").strip().lower()
-            if not feed_url:
-                continue
-            configured_feeds += 1
-            try:
-                feed_events = _parse_ir_feed(feed_url, feed_format, run_date, security_id, entry)
-            except Exception as exc:
-                errors.append({"security_id": security_id, "url": feed_url, "error": str(exc)})
-                continue
-            events.extend(feed_events)
-    if registry and configured_feeds == 0:
-        degraded_reasons.append("IR registry has no configured feeds")
-    sorted_events = sorted(events, key=lambda item: (item["event_date"], item["security_id"], item["headline"]))
-
-    raw_path = run_paths.raw_dir / "ir.json"
-    rendered_path = run_paths.rendered_dir / "ir.md"
-    write_json(
-        raw_path,
-        {
-            "date": run_date.isoformat(),
-            "collected_at": now_utc_iso(),
-            "registry": registry,
-            "events": sorted_events,
-            "errors": errors,
-            "degraded_reasons": degraded_reasons,
-        },
-    )
-    rendered_path.write_text(render_event_markdown("IR", sorted_events), encoding="utf-8")
-    status = "success"
-    if degraded_reasons or errors:
-        status = "degraded" if sorted_events or degraded_reasons else "error"
-    update_manifest_source(
-        run_paths,
-        "ir",
-        {
-            "status": status,
-            "event_count": len(sorted_events),
-            "error_count": len(errors),
-            "raw_path": str(raw_path),
-            "rendered_path": str(rendered_path),
-            "degraded_reasons": degraded_reasons,
-        },
-    )
-    return {"status": status, "event_count": len(sorted_events), "raw_path": raw_path}
-
-
 def collect_market(
     workspace_root: Path,
     *,
@@ -562,7 +456,7 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
     adjacency_map = load_json(paths.adjacency_map, default=[])
     thesis_cards = load_json(paths.thesis_cards, default=[])
 
-    source_payloads = {name: _load_raw_source(run_paths, name) for name in ("filings", "earnings", "macro", "ir", "market")}
+    source_payloads = {name: _load_raw_source(run_paths, name) for name in ("filings", "earnings", "macro", "market")}
     source_events = {name: payload.get("events", []) for name, payload in source_payloads.items()}
 
     all_events: list[dict[str, Any]] = []
@@ -663,7 +557,7 @@ def audit_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
         for item in prepared.get("suppressed", [])
         if isinstance(item, dict) and isinstance(item.get("event"), dict)
     }
-    raw_sources = {name: _load_raw_source(run_paths, name) for name in ("filings", "earnings", "macro", "ir", "market")}
+    raw_sources = {name: _load_raw_source(run_paths, name) for name in ("filings", "earnings", "macro", "market")}
 
     missed_events: list[dict[str, Any]] = []
     for name, payload in raw_sources.items():
@@ -1123,7 +1017,6 @@ def _default_manifest_outputs(run_paths: RunPaths) -> dict[str, Any]:
             "filings": str(run_paths.raw_dir / "filings.json"),
             "earnings": str(run_paths.raw_dir / "earnings.json"),
             "macro": str(run_paths.raw_dir / "macro.json"),
-            "ir": str(run_paths.raw_dir / "ir.json"),
             "market": str(run_paths.raw_dir / "market.json"),
             "manifest": str(run_paths.manifest),
         },
@@ -1136,7 +1029,6 @@ def _default_manifest_outputs(run_paths: RunPaths) -> dict[str, Any]:
             "filings": str(run_paths.rendered_dir / "filings.md"),
             "earnings": str(run_paths.rendered_dir / "earnings.md"),
             "macro": str(run_paths.rendered_dir / "macro.md"),
-            "ir": str(run_paths.rendered_dir / "ir.md"),
             "market": str(run_paths.rendered_dir / "market.md"),
             "evidence": str(run_paths.rendered_dir / "evidence.md"),
             "grouped_events": str(run_paths.rendered_dir / "grouped-events.md"),
@@ -1645,124 +1537,6 @@ def normalize_company_news_events(news_items: list[dict[str, Any]], run_date: da
     return events
 
 
-def _parse_ir_feed(
-    feed_url: str,
-    feed_format: str,
-    run_date: date,
-    security_id: str,
-    entry: dict[str, Any],
-) -> list[dict[str, Any]]:
-    accept_hint = (
-        "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8"
-        if feed_format in {"rss", "atom", "xml"}
-        else "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
-    )
-    raw_text, _ = read_text_source(feed_url, accept=accept_hint)
-    if feed_format in {"rss", "atom", "xml"}:
-        if _looks_like_html_document(raw_text):
-            return _parse_ir_html(raw_text, run_date, security_id, feed_url)
-        return _parse_ir_xml(raw_text, run_date, security_id, entry)
-    if feed_format == "json":
-        payload = json.loads(raw_text)
-        items = payload if isinstance(payload, list) else payload.get("items", [])
-        return [
-            {
-                "source": "ir",
-                "event_type": "ir",
-                "event_date": _event_date(item, run_date),
-                "security_id": security_id,
-                "relationship": "monitored",
-                "headline": str(item.get("title") or item.get("headline") or "").strip(),
-                "reference_url": str(item.get("url") or item.get("link") or "").strip(),
-                "metadata": item,
-            }
-            for item in items
-            if _event_date(item, run_date) == run_date.isoformat() and str(item.get("title") or item.get("headline") or "").strip()
-        ]
-    if feed_format == "html":
-        return _parse_ir_html(raw_text, run_date, security_id, feed_url)
-    raise ValueError(f"unsupported IR feed format: {feed_format}")
-
-
-def _parse_ir_xml(raw_text: str, run_date: date, security_id: str, entry: dict[str, Any]) -> list[dict[str, Any]]:
-    root = ElementTree.fromstring(raw_text)
-    items = root.findall(".//item") or root.findall(".//entry")
-    events: list[dict[str, Any]] = []
-    for item in items:
-        title = _xml_text(item, "title")
-        link = _xml_text(item, "link")
-        if not link:
-            link = item.findtext("{http://www.w3.org/2005/Atom}link") or ""
-            if not link:
-                link_node = item.find("{http://www.w3.org/2005/Atom}link")
-                link = link_node.attrib.get("href", "") if link_node is not None else ""
-        published = _xml_text(item, "pubDate") or _xml_text(item, "published") or _xml_text(item, "updated")
-        item_date = _coerce_event_date(published) or run_date.isoformat()
-        if item_date != run_date.isoformat() or not title:
-            continue
-        events.append(
-            {
-                "source": "ir",
-                "event_type": "ir",
-                "event_date": item_date,
-                "security_id": security_id,
-                "ticker": str(entry.get("ticker") or security_id),
-                "relationship": "monitored",
-                "headline": title,
-                "reference_url": link,
-                "metadata": {"published": published},
-            }
-        )
-    return events
-
-
-def _parse_ir_html(raw_text: str, run_date: date, security_id: str, base_url: str = "") -> list[dict[str, Any]]:
-    document = lxml_html.fromstring(raw_text)
-    events: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for node in document.xpath("//a[@href]"):
-        title = _normalize_whitespace(" ".join(node.itertext()))
-        href = urljoin(base_url, str(node.get("href") or "").strip())
-        if not _looks_like_ir_press_release(title):
-            continue
-        dedupe_key = (title.casefold(), href)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        events.append(
-            {
-                "source": "ir",
-                "event_type": "ir",
-                "event_date": run_date.isoformat(),
-                "security_id": security_id,
-                "relationship": "monitored",
-                "headline": title,
-                "reference_url": href,
-                "metadata": {},
-            }
-        )
-    return events[:10]
-
-
-def _looks_like_html_document(raw_text: str) -> bool:
-    snippet = raw_text.lstrip()[:500]
-    return bool(re.search(r"<!doctype\s+html|<html\b|<body\b|<head\b", snippet, flags=re.IGNORECASE))
-
-
-def _looks_like_ir_press_release(title: str) -> bool:
-    normalized = _normalize_whitespace(title)
-    if len(normalized) < 10:
-        return False
-    if not re.search(r"[A-Za-z]", normalized):
-        return False
-    lowered = normalized.casefold()
-    if any(re.fullmatch(pattern, lowered) for pattern in IR_HTML_NAV_PATTERNS):
-        return False
-    if any(lowered.startswith(prefix) for prefix in ("skip to", "go to", "buy ", "log in", "sign in", "sign up")):
-        return False
-    return bool(IR_HTML_MATERIAL_TITLE_PATTERN.search(normalized))
-
-
 def _load_finnhub_payload(
     run_date: date,
     api_key: str,
@@ -1828,16 +1602,6 @@ def _ensure_index(path: Path, title: str, body: str) -> None:
     if path.exists():
         return
     path.write_text(f"# {title}\n\n{body}\n", encoding="utf-8")
-
-
-def _xml_text(node: ElementTree.Element, tag_name: str) -> str:
-    value = node.findtext(tag_name)
-    if value:
-        return value.strip()
-    for child in node:
-        if child.tag.endswith(tag_name) and child.text:
-            return child.text.strip()
-    return ""
 
 
 def _event_date(row: dict[str, Any], fallback_date: date) -> str:

@@ -14,16 +14,16 @@ Prioritize items relevant to these current holdings/watchlist companies:
 
 ## Selection constraints
 
-- Collect relevant data releases, calendar entries, press statements, policy announcements, and other material investor evidence.
-- Skip items older than 3 days based on the visible source date.
-- For calendar pages, collect only releases dated from 3 days before {{DATE}} through 7 days after {{DATE}}. Never collect later future entries merely because they appear on the schedule.
+- Collect material investor evidence relevant to the source-specific scope.
+- Ingest only items published from the previous calendar date at 04:00 America/New_York inclusive through `{{DATE}}` at 04:00 America/New_York exclusive.
+- When no date is visible on the landing page, retain the item only long enough to inspect its distinct destination; skip it if no publication value can be established.
 - Check deterministic database duplicates before fetching distinct item pages or extracting their full bodies. Never estimate title similarity or calculate article hashes yourself.
 - If no unseen qualifying items exist, ingest nothing and report zero. Do not create placeholders.
-- Use web_fetch only. Never open a browser, invoke Slack/webhooks, spawn another agent, or run a summarizer. Leave `summary` absent for the outer Sol agent.
+- Use web_fetch only. Never open a browser, invoke Slack/webhooks, spawn another agent, or run a summarizer. Leave `summary` absent for Charlie.
 
 ## Deterministic duplicate lookup
 
-Write candidate metadata only as one JSON array to `{{CANDIDATE_FILE}}`, overwriting it on every lookup. Every object must contain `title`, `url`, and `published`. Use the exact distinct item URL when present; use an empty URL instead of the shared landing URL when no distinct destination exists. If a URL exists but no date is visible, use an empty `published` value for URL-first matching. If neither exists, use `{{DATE}}` as `published`.
+Write candidate metadata only as one JSON array to `{{CANDIDATE_FILE}}`, overwriting it on every lookup. Every object must contain `title`, `url`, and `published`. Use the exact distinct item URL when present; use an empty URL instead of the shared landing URL when no distinct destination exists. If a URL exists but no date is visible, use an empty `published` value for URL-first matching. Skip items with neither a destination URL nor a publication value.
 
 Run exactly this lookup and overwrite your isolated result file:
 
@@ -40,7 +40,7 @@ For each collected item, construct exactly one in-memory JSON object with:
 - `title`: exact, non-empty item title
 - `source_id`: exactly `{{SOURCE_ID}}`
 - `url`: the distinct item URL, or `{{URL}}` for an item that genuinely has no distinct destination
-- `published_at`: the most precise visible publication value including timezone; use `{{DATE}}` only if none exists
+- `published_at`: the most precise visible publication value including timezone; skip the item if none exists
 - `content`: normalized non-empty Markdown/plain text containing the complete substantive item, excluding navigation, advertisements, cookie text, and page chrome; never raw HTML
 - optional `section`: source category
 - optional `collected_at`: current ISO-8601 UTC timestamp
