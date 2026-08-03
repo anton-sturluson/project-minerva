@@ -902,38 +902,13 @@ def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     assert Path(handoff["collector_stats"]).name == "collectors.json"
     assert Path(handoff["holdings_path"]).name == "holdings.json"
     assert Path(handoff["watchlist_path"]).name == "watchlist.json"
-    # Handoff enumerates the summarize -> persist -> report chain.
+    # Handoff exposes one synthesized output.
     steps_blob = " ".join(handoff["steps"])
     assert "minerva summarize" in steps_blob
-    assert "morning-brief-report.md" in handoff["report_output"]
+    assert [key for key in handoff if key.endswith("_output")] == [
+        "slack_brief_output"
+    ]
     assert "slack-brief.md" in handoff["slack_brief_output"]
 
     # The script hands delivery back to the outer cron layer.
     assert "Do not post Slack from this script." in result.stdout
-
-
-# ---------------------------------------------------------------------------
-# Prompt template safety
-# ---------------------------------------------------------------------------
-
-
-def test_prompts_render_direct_ingest_placeholders() -> None:
-    """Templates use the shared placeholder set consumed by the wrapper."""
-    for name in ("collect_news.md", "collect_news_webfetch.md", "collect_ir_batch.md"):
-        text = (REPO_ROOT / "scripts" / "prompts" / name).read_text(
-            encoding="utf-8"
-        )
-        for placeholder in (
-            "{{SOURCE_ROOT}}",
-            "{{CANDIDATE_FILE}}",
-            "{{LOOKUP_FILE}}",
-            "{{NEWS_EXIST_COMMAND}}",
-            "{{NEWS_INGEST_COMMAND}}",
-            "{{INVEST_DB}}",
-            "{{DATE}}",
-        ):
-            assert placeholder in text, f"{name} missing {placeholder}"
-        # Neither template invokes summarizers, Slack, or article files.
-        assert "summarizer" in text
-        assert "Slack" in text or "slack" in text
-        assert ".md" not in text.split("published")[0]

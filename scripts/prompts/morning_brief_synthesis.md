@@ -4,7 +4,7 @@ The collection script has already populated prepared evidence, `news`, and `pric
 
 ## 1. Validate the input
 
-Read the `synthesis-handoff.json` path printed by `scripts/run_morning_brief.sh`. Treat this prompt as the versioned synthesis contract. Before accessing the database, require a JSON object with `status` set to `ready`; require `date`, `window_start`, `window_end`, `db`, `prepared_evidence`, `evidence_stats`, `instructions`, `report_output`, and `slack_brief_output` with the expected types; and require `instructions` to identify this prompt. Stop with a concise schema/version error if validation fails. Do not infer missing values.
+Read the `synthesis-handoff.json` path printed by `scripts/run_morning_brief.sh`. Treat this prompt as the versioned synthesis contract. Before accessing the database, require a JSON object with `status` set to `ready`; require `date`, `window_start`, `window_end`, `db`, `prepared_evidence`, `evidence_stats`, `collector_stats`, `holdings_path`, `watchlist_path`, `instructions`, and `slack_brief_output` with the expected types; and require `instructions` to identify this prompt. Stop with a concise schema/version error if validation fails. Do not infer missing values.
 
 Use `window_start` and `window_end` exactly as provided with today's collected data.
 
@@ -23,19 +23,23 @@ uv run minerva summarize --model gemini-3.6-flash --thinking high
 - After all calls succeed, persist summaries with parameter binding in one SQLite transaction. Update by `article_key` only where the summary is still NULL or blank.
 - Re-query the same fixed half-open window and require zero eligible blank summaries before synthesis. Reruns must be idempotent.
 
-## 3. Read and select
+## 3. Select the developments
 
-Read the prepared-evidence JSON, relevant `prices` rows, and the complete summary of every article from the collection period before deciding what to include. Do not select articles from headlines or URLs alone. Before writing, confirm that the number of summaries read matches the total article count in `evidence_stats`. If it does not, stop and report both counts and the diagnostic artifact path.
+Read the prepared-evidence JSON, relevant `prices` rows, and the complete summary of every article from the collection period before deciding what to include. Do not select from headlines or URLs alone. Confirm that the number of summaries read matches the total article count in `evidence_stats`; otherwise stop and report both counts and the diagnostic artifact path.
 
-For Portfolio / Watchlist Events, consider only companies listed in `holdings_path` or `watchlist_path`. Do not use the broader company universe. Combine articles covering the same event.
+Create a ranked list of distinct material developments. Combine duplicate, syndicated, and follow-up articles about the same development, then use this list when writing the Slack brief.
 
-Include only developments that could meaningfully affect an investor's view of a company, its valuation, competitive position, capital allocation, or risk. Prefer company filings and official sources, followed by WSJ, Economist, and Reuters. Clearly identify commentary, rumors, and third-party interpretations.
+- Include every development that offers a concrete investor takeaway. Do not omit a qualifying item merely for brevity or impose an arbitrary bullet limit.
+- Portfolio / Watchlist Events may cover companies listed in `holdings_path` or `watchlist_path`. Do not use the broader company universe or promote an unrelated company because of a ticker-text match.
+- Worth Knowing Today may include material market, macro, policy, industry, technology, or business developments, including slightly adjacent items.
+- Omit duplicates, irrelevant ticker matches, and low-substance commentary. Clearly label rumors and third-party interpretations.
+- Prefer company filings and official sources, followed by WSJ, Economist, and Reuters.
 
-## 4. Write the outputs
+## 4. Write the Slack brief
 
-Write a durable Markdown report to `report_output` with collection counts, a market snapshot, portfolio/watchlist events, significant broader developments, and direct citations. Keep this report separate from the Slack output.
+Write `slack_brief_output` from the ranked list. Do not create a separate report or memo.
 
-Write `slack_brief_output` in Slack mrkdwn with exactly this structure: three sections in the order shown, with no other text or sections.
+Write exactly these three sections in the order shown, with no other text or sections:
 
 ```text
 _Crawler:_ {total articles} — {source} {count} · {source} {count} · ...; {successful}/{total} collectors succeeded, {failed} failed.
@@ -53,8 +57,8 @@ If nothing material occurred for the portfolio or watchlist, use the approved fa
 • No material portfolio or watchlist developments during the collection period.
 ```
 
-Get final article and per-source counts from the verified window query and collector successes and failures from `collectors.json` beside `evidence_stats`. Select for significance; combine related reporting into one bullet. Cite factual claims with direct source URLs from SQLite, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables.
+Get final article and per-source counts from the verified window query and collector successes and failures from `collector_stats`. Cite factual claims with direct source URLs from SQLite, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables.
 
 ## 5. Return the result
 
-Do not call Slack or any messaging tool. Return only the exact contents of `slack_brief_output`, with no preamble, commentary, or code fence, so the cron delivery layer posts it once. If a required phase fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief.
+Do not call Slack or any messaging tool. Return the exact contents of `slack_brief_output`, with no preamble, commentary, or code fence, so the cron delivery layer posts it once. If a required phase fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief.

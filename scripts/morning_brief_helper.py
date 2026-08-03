@@ -188,7 +188,6 @@ def synthesis_handoff(
     run_date: date,
     db: Path,
     prepared_evidence: Path,
-    report_output: Path,
     slack_brief_output: Path,
     evidence_stats: Path,
     collector_stats: Path,
@@ -206,7 +205,6 @@ def synthesis_handoff(
         "holdings_path": str(holdings_path),
         "instructions": str(instructions),
         "prepared_evidence": str(prepared_evidence),
-        "report_output": str(report_output),
         "slack_brief_output": str(slack_brief_output),
         "watchlist_path": str(watchlist_path),
         "steps": [
@@ -216,8 +214,8 @@ def synthesis_handoff(
             "summaries until all calls succeed.",
             "Persist summaries with parameter binding in one safe transaction, "
             "updating only still-blank rows.",
-            "Synthesize notes/morning-brief-report.md and notes/slack-brief.md from "
-            "prepared evidence and news in the fixed handoff window.",
+            "Build one ranked topic shortlist from every complete summary and "
+            "render it directly to notes/slack-brief.md.",
         ],
         "status": "ready",
         "window_end": end.isoformat(),
@@ -355,13 +353,12 @@ def _main(command: str, args: list[str]) -> None:
         _require(command, args, 1)
         check_manifest(Path(args[0]))
     elif command == "write-handoff":
-        _require(command, args, 11)
+        _require(command, args, 10)
         (
             output,
             run_date,
             db,
             prepared,
-            report,
             slack,
             evidence,
             collectors,
@@ -375,7 +372,6 @@ def _main(command: str, args: list[str]) -> None:
                 run_date=parse_run_date(run_date),
                 db=Path(db),
                 prepared_evidence=Path(prepared),
-                report_output=Path(report),
                 slack_brief_output=Path(slack),
                 evidence_stats=Path(evidence),
                 collector_stats=Path(collectors),

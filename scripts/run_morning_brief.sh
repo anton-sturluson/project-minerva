@@ -443,7 +443,6 @@ HANDOFF_PATH="${PHASE_DIR}/synthesis-handoff.json"
 SYNTHESIS_PROMPT="${ROOT_DIR}/scripts/prompts/morning_brief_synthesis.md"
 python3 "${HELPER}" write-handoff \
   "${HANDOFF_PATH}" "${RUN_DATE}" "${INVEST_DB}" "${PREPARED_PATH}" \
-  "${REPORT_DIR}/notes/morning-brief-report.md" \
   "${REPORT_DIR}/notes/slack-brief.md" \
   "${PHASE_DIR}/window-evidence.json" "${PHASE_DIR}/collectors.json" \
   "${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/holdings.json" \
@@ -457,4 +456,4 @@ echo "news_db: ${INVEST_DB}"
 echo "phase_artifacts: ${PHASE_DIR}"
 echo "synthesis_handoff: ${HANDOFF_PATH}"
 echo "synthesis_instructions: ${SYNTHESIS_PROMPT}"
-echo "synthesis_step: Follow the versioned instructions to summarize rows in the fixed 04:00 New York window with NULL/blank summary, persist all summaries safely in one transaction, synthesize both report artifacts, and return the Slack brief for cron delivery. Do not post Slack from this script."
+echo "synthesis_step: Follow the versioned instructions to summarize rows in the fixed 04:00 New York window with NULL/blank summary, persist all summaries safely in one transaction, build one ranked shortlist, write the Slack brief, and return its exact contents for cron delivery. Do not post Slack from this script."
