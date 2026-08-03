@@ -191,6 +191,9 @@ def synthesis_handoff(
     report_output: Path,
     slack_brief_output: Path,
     evidence_stats: Path,
+    collector_stats: Path,
+    holdings_path: Path,
+    watchlist_path: Path,
     instructions: Path,
 ) -> dict[str, Any]:
     """Build the neutral synthesis handoff contract."""
@@ -198,11 +201,14 @@ def synthesis_handoff(
     return {
         "date": run_date.isoformat(),
         "db": str(db),
+        "collector_stats": str(collector_stats),
         "evidence_stats": str(evidence_stats),
+        "holdings_path": str(holdings_path),
         "instructions": str(instructions),
         "prepared_evidence": str(prepared_evidence),
         "report_output": str(report_output),
         "slack_brief_output": str(slack_brief_output),
+        "watchlist_path": str(watchlist_path),
         "steps": [
             "Query news in the fixed [previous-run 04:00, run-date 04:00) "
             "America/New_York window whose summary is NULL or blank.",
@@ -349,8 +355,20 @@ def _main(command: str, args: list[str]) -> None:
         _require(command, args, 1)
         check_manifest(Path(args[0]))
     elif command == "write-handoff":
-        _require(command, args, 8)
-        output, run_date, db, prepared, report, slack, evidence, instructions = args
+        _require(command, args, 11)
+        (
+            output,
+            run_date,
+            db,
+            prepared,
+            report,
+            slack,
+            evidence,
+            collectors,
+            holdings,
+            watchlist,
+            instructions,
+        ) = args
         _write_json(
             Path(output),
             synthesis_handoff(
@@ -360,6 +378,9 @@ def _main(command: str, args: list[str]) -> None:
                 report_output=Path(report),
                 slack_brief_output=Path(slack),
                 evidence_stats=Path(evidence),
+                collector_stats=Path(collectors),
+                holdings_path=Path(holdings),
+                watchlist_path=Path(watchlist),
                 instructions=Path(instructions),
             ),
         )

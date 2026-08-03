@@ -797,12 +797,23 @@ def test_morning_brief_shell_and_prompts_use_direct_ingest_contract() -> None:
         assert prompt.count("Leave `summary` absent") == 1
         assert prompt.lower().count("skip the article") <= 1
 
-    assert "at most four subprocesses" in synthesis_prompt
-    assert "one transaction" in synthesis_prompt
-    assert "Do not call Slack" in synthesis_prompt
-    assert "Return the exact contents" in synthesis_prompt
-    assert "previous run date at 04:00" in synthesis_prompt
-    assert "run date at 04:00" in synthesis_prompt
+    assert "no more than four summarization subprocesses" in synthesis_prompt
+    assert "one SQLite transaction" in synthesis_prompt
+    assert "Do not call Slack or any messaging tool" in synthesis_prompt
+    assert "Return only the exact contents" in synthesis_prompt
+    assert "complete summary of every article" in synthesis_prompt
+    assert "before deciding what to include" in synthesis_prompt
+    assert "number of summaries read matches the total article count" in synthesis_prompt
+    assert "listed in `holdings_path` or `watchlist_path`" in synthesis_prompt
+    assert "Do not use the broader company universe" in synthesis_prompt
+    assert "exactly this structure" in synthesis_prompt
+    for section in (
+        "_Crawler:_",
+        "_Portfolio / Watchlist Events_",
+        "_Worth Knowing Today_",
+    ):
+        assert section in synthesis_prompt
+    assert "original articles rather than `finnhub.io/api/news` proxy pages" in synthesis_prompt
     assert "agent" not in synthesis_prompt.lower()
 
 

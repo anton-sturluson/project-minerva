@@ -899,6 +899,9 @@ def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     ].endswith("T04:00:00-05:00")
     assert Path(handoff["instructions"]).name == "morning_brief_synthesis.md"
     assert Path(handoff["instructions"]).is_file()
+    assert Path(handoff["collector_stats"]).name == "collectors.json"
+    assert Path(handoff["holdings_path"]).name == "holdings.json"
+    assert Path(handoff["watchlist_path"]).name == "watchlist.json"
     # Handoff enumerates the summarize -> persist -> report chain.
     steps_blob = " ".join(handoff["steps"])
     assert "minerva summarize" in steps_blob
