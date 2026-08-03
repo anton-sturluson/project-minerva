@@ -147,12 +147,18 @@ def test_synthesis_handoff_has_neutral_contract_fields(tmp_path: Path) -> None:
         report_output=tmp_path / "report.md",
         slack_brief_output=tmp_path / "slack.md",
         evidence_stats=tmp_path / "window.json",
+        collector_stats=tmp_path / "collectors.json",
+        holdings_path=tmp_path / "holdings.json",
+        watchlist_path=tmp_path / "watchlist.json",
         instructions=tmp_path / "instructions.md",
     )
 
     assert payload["status"] == "ready"
     assert payload["window_start"] == "2026-07-26T04:00:00-04:00"
     assert payload["window_end"] == "2026-07-27T04:00:00-04:00"
+    assert payload["collector_stats"].endswith("collectors.json")
+    assert payload["holdings_path"].endswith("holdings.json")
+    assert payload["watchlist_path"].endswith("watchlist.json")
     assert "agent" not in " ".join(payload).lower()
     assert "minerva summarize" in " ".join(payload["steps"])
 

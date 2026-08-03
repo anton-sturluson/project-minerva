@@ -445,7 +445,10 @@ python3 "${HELPER}" write-handoff \
   "${HANDOFF_PATH}" "${RUN_DATE}" "${INVEST_DB}" "${PREPARED_PATH}" \
   "${REPORT_DIR}/notes/morning-brief-report.md" \
   "${REPORT_DIR}/notes/slack-brief.md" \
-  "${PHASE_DIR}/window-evidence.json" "${SYNTHESIS_PROMPT}"
+  "${PHASE_DIR}/window-evidence.json" "${PHASE_DIR}/collectors.json" \
+  "${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/holdings.json" \
+  "${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/watchlist.json" \
+  "${SYNTHESIS_PROMPT}"
 
 echo ""
 echo "prepared_evidence: ${PREPARED_PATH}"
