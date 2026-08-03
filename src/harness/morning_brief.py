@@ -101,12 +101,11 @@ def ensure_daily_run_layout(workspace_root: Path, run_date: date) -> RunPaths:
     _ensure_index(paths.structured_dir / "INDEX.md", "Structured Evidence", "Prepared and audited evidence artifacts.")
     _ensure_index(paths.rendered_dir / "INDEX.md", "Rendered Evidence", "Deterministic markdown renders for human review.")
 
-    for notes_file, title in (
-        (paths.notes_dir / "morning-brief-report.md", "Morning Brief Report"),
-        (paths.notes_dir / "slack-brief.md", "Slack Brief"),
-    ):
-        if not notes_file.exists():
-            notes_file.write_text(f"# {title}\n\nPending main-agent writeup.\n", encoding="utf-8")
+    slack_brief = paths.notes_dir / "slack-brief.md"
+    if not slack_brief.exists():
+        slack_brief.write_text(
+            "# Slack Brief\n\nPending synthesis.\n", encoding="utf-8"
+        )
 
     if not paths.review_log.exists():
         paths.review_log.write_text("", encoding="utf-8")
@@ -1036,7 +1035,6 @@ def _default_manifest_outputs(run_paths: RunPaths) -> dict[str, Any]:
             "audit": str(run_paths.rendered_dir / "audit.md"),
         },
         "notes": {
-            "morning_brief_report": str(run_paths.notes_dir / "morning-brief-report.md"),
             "slack_brief": str(run_paths.notes_dir / "slack-brief.md"),
         },
         "manifest": str(run_paths.manifest),

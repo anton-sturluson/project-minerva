@@ -802,11 +802,11 @@ def test_morning_brief_shell_and_prompts_use_direct_ingest_contract() -> None:
     assert "Do not call Slack or any messaging tool" in synthesis_prompt
     assert "Return only the exact contents" in synthesis_prompt
     assert "complete summary of every article" in synthesis_prompt
-    assert "before deciding what to include" in synthesis_prompt
+    assert "before making any selection" in synthesis_prompt
     assert "number of summaries read matches the total article count" in synthesis_prompt
     assert "listed in `holdings_path` or `watchlist_path`" in synthesis_prompt
     assert "Do not use the broader company universe" in synthesis_prompt
-    assert "exactly this structure" in synthesis_prompt
+    assert "exactly these three sections" in synthesis_prompt
     for section in (
         "_Crawler:_",
         "_Portfolio / Watchlist Events_",
@@ -815,6 +815,44 @@ def test_morning_brief_shell_and_prompts_use_direct_ingest_contract() -> None:
         assert section in synthesis_prompt
     assert "original articles rather than `finnhub.io/api/news` proxy pages" in synthesis_prompt
     assert "agent" not in synthesis_prompt.lower()
+
+
+def test_morning_brief_synthesis_has_one_broad_observable_shortlist() -> None:
+    prompt = (
+        REPO_ROOT / "scripts" / "prompts" / "morning_brief_synthesis.md"
+    ).read_text(encoding="utf-8")
+
+    assert "one ranked shortlist of distinct material topics" in prompt
+    assert "This is the only selection pass" in prompt
+    assert "do not independently re-select" in prompt
+    assert "Render the already-ranked shortlist directly" in prompt
+    assert "Include every distinct development that offers a concrete investor takeaway" in prompt
+    assert "including slightly adjacent items" in prompt
+    assert "Omit only duplicates, irrelevant ticker matches, and low-substance commentary" in prompt
+    assert "Do not omit a qualifying item merely for brevity" in prompt
+    assert "may cover only companies listed in `holdings_path` or `watchlist_path`" in prompt
+
+    assert "exactly one compact JSON selection diagnostic" in prompt
+    assert "through a non-writing tool call" in prompt
+    assert "session transcript" in prompt
+    assert '"reviewed_count"' in prompt
+    assert '"selected_topics"' in prompt
+    assert '"article_keys"' in prompt
+    assert '"excluded_counts"' in prompt
+    assert "not saved to a file" in prompt
+    assert "Never place the diagnostic in the Slack brief or the final response" in prompt
+
+    template = prompt.split(
+        "Write exactly these three sections in the order shown, with no other text or sections:\n\n```text\n",
+        1,
+    )[1].split("\n```", 1)[0]
+    section_lines = [line for line in template.splitlines() if line.startswith("_")]
+    assert len(section_lines) == 3
+    assert section_lines[0].startswith("_Crawler:_")
+    assert section_lines[1:] == [
+        "_Portfolio / Watchlist Events_",
+        "_Worth Knowing Today_",
+    ]
 
 
 def test_morning_brief_hands_summarization_to_synthesis_step() -> None:
@@ -829,6 +867,5 @@ def test_morning_brief_hands_summarization_to_synthesis_step() -> None:
     assert "minerva summarize" in helper
     assert "run summarize" not in script
     assert '"${MINERVA_RUNNER_ARR[@]}" summarize' not in script
-    assert "morning-brief-report.md" in script
-    assert "slack-brief.md" in script
+    assert script.count("notes/slack-brief.md") == 1
     assert "curl" not in script or "slack" not in script.lower()

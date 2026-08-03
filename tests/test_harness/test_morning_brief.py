@@ -135,7 +135,7 @@ class MorningBriefTests(unittest.TestCase):
         self.assertTrue(
             {"filings", "earnings", "macro", "market", "prep", "audit", "review-log"}.issubset(manifest["sources"])
         )
-        self.assertTrue(manifest["outputs"]["notes"]["morning_brief_report"].endswith("notes/morning-brief-report.md"))
+        self.assertEqual(set(manifest["outputs"]["notes"]), {"slack_brief"})
         self.assertTrue(manifest["outputs"]["raw"]["filings"].endswith("data/raw/filings.json"))
         self.assertTrue(
             manifest["outputs"]["structured"]["prepared_evidence"].endswith("data/structured/prepared-evidence.json")
@@ -144,6 +144,10 @@ class MorningBriefTests(unittest.TestCase):
         self.assertTrue(Path(manifest["outputs"]["structured"]["prepared_evidence"]).exists())
         self.assertTrue(Path(manifest["outputs"]["rendered"]["audit"]).exists())
         self.assertTrue(Path(manifest["outputs"]["notes"]["slack_brief"]).exists())
+        self.assertEqual(
+            {path.name for path in run_paths.notes_dir.iterdir()},
+            {"INDEX.md", "slack-brief.md"},
+        )
         self.assertTrue(
             any(event["headline"] == "TSM reported stronger AI packaging demand" for event in prepared["grouped_events"]["read-through"])
         )

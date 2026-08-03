@@ -144,7 +144,6 @@ def test_synthesis_handoff_has_neutral_contract_fields(tmp_path: Path) -> None:
         run_date=date(2026, 7, 27),
         db=tmp_path / "invest.db",
         prepared_evidence=tmp_path / "prepared.json",
-        report_output=tmp_path / "report.md",
         slack_brief_output=tmp_path / "slack.md",
         evidence_stats=tmp_path / "window.json",
         collector_stats=tmp_path / "collectors.json",
@@ -159,8 +158,13 @@ def test_synthesis_handoff_has_neutral_contract_fields(tmp_path: Path) -> None:
     assert payload["collector_stats"].endswith("collectors.json")
     assert payload["holdings_path"].endswith("holdings.json")
     assert payload["watchlist_path"].endswith("watchlist.json")
+    assert payload["slack_brief_output"].endswith("slack.md")
+    assert [key for key in payload if key.endswith("_output")] == [
+        "slack_brief_output"
+    ]
     assert "agent" not in " ".join(payload).lower()
     assert "minerva summarize" in " ".join(payload["steps"])
+    assert "one ranked topic shortlist" in " ".join(payload["steps"])
 
 
 def test_collector_summary_reports_missing_artifact(tmp_path: Path) -> None:

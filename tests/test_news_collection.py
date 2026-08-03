@@ -902,10 +902,13 @@ def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     assert Path(handoff["collector_stats"]).name == "collectors.json"
     assert Path(handoff["holdings_path"]).name == "holdings.json"
     assert Path(handoff["watchlist_path"]).name == "watchlist.json"
-    # Handoff enumerates the summarize -> persist -> report chain.
+    # Handoff enumerates summarize -> persist -> one-shortlist Slack synthesis.
     steps_blob = " ".join(handoff["steps"])
     assert "minerva summarize" in steps_blob
-    assert "morning-brief-report.md" in handoff["report_output"]
+    assert "one ranked topic shortlist" in steps_blob
+    assert [key for key in handoff if key.endswith("_output")] == [
+        "slack_brief_output"
+    ]
     assert "slack-brief.md" in handoff["slack_brief_output"]
 
     # The script hands delivery back to the outer cron layer.
