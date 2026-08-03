@@ -23,31 +23,21 @@ uv run minerva summarize --model gemini-3.6-flash --thinking high
 - After all calls succeed, persist summaries with parameter binding in one SQLite transaction. Update by `article_key` only where the summary is still NULL or blank.
 - Re-query the same fixed half-open window and require zero eligible blank summaries before synthesis. Reruns must be idempotent.
 
-## 3. Read once and form the only shortlist
+## 3. Select the developments
 
-Read the prepared-evidence JSON, relevant `prices` rows, and the complete summary of every article from the collection period before making any selection. Do not select from headlines or URLs alone. Before selection, confirm that the number of summaries read matches the total article count in `evidence_stats`. If it does not, stop and report both counts and the diagnostic artifact path.
+Read the prepared-evidence JSON, relevant `prices` rows, and the complete summary of every article from the collection period before deciding what to include. Do not select from headlines or URLs alone. Confirm that the number of summaries read matches the total article count in `evidence_stats`; otherwise stop and report both counts and the diagnostic artifact path.
 
-Create one ranked shortlist of distinct material topics after all summaries have been read. Combine duplicate, syndicated, and follow-up articles about the same development into one topic. This is the only selection pass: do not independently re-select, shorten, reprioritize, or rebuild the shortlist while rendering.
+Create a ranked list of distinct material developments. Combine duplicate, syndicated, and follow-up articles about the same development, then use this list when writing the Slack brief.
 
-Balance precision with breadth:
-
-- Include every distinct development that offers a concrete investor takeaway. Do not omit a qualifying item merely for brevity, and do not impose an arbitrary topic or bullet limit.
-- Portfolio / Watchlist Events may cover only companies listed in `holdings_path` or `watchlist_path`. Do not use the broader company universe or promote an unrelated company because of a ticker-text match.
-- Worth Knowing Today may include material market, macro, policy, industry, technology, or business developments, including slightly adjacent items, when the investor takeaway is concrete.
-- Omit only duplicates, irrelevant ticker matches, and low-substance commentary. Clearly label rumors and third-party interpretations when they still provide a concrete takeaway.
+- Include every development that offers a concrete investor takeaway. Do not omit a qualifying item merely for brevity or impose an arbitrary bullet limit.
+- Portfolio / Watchlist Events may cover companies listed in `holdings_path` or `watchlist_path`. Do not use the broader company universe or promote an unrelated company because of a ticker-text match.
+- Worth Knowing Today may include material market, macro, policy, industry, technology, or business developments, including slightly adjacent items.
+- Omit duplicates, irrelevant ticker matches, and low-substance commentary. Clearly label rumors and third-party interpretations.
 - Prefer company filings and official sources, followed by WSJ, Economist, and Reuters.
 
-Before final writing, emit exactly one compact JSON selection diagnostic through a non-writing tool call so it appears in the session transcript but is not saved to a file. Use this schema, with selected topics in ranked order and SQLite article keys in `article_keys`:
+## 4. Write the Slack brief
 
-```json
-{"reviewed_count":0,"selected_topics":[{"rank":1,"section":"portfolio_watchlist|worth_knowing","topic":"...","article_keys":["..."]}],"excluded_counts":{"duplicate":0,"irrelevant_ticker_match":0,"low_substance_commentary":0}}
-```
-
-Use integer counts, include zero counts, and emit no prose with the diagnostic. Finalize the shortlist before this tool call and do not alter it afterward. Never place the diagnostic in the Slack brief or the final response.
-
-## 4. Write the only synthesized output
-
-`slack_brief_output` is the only synthesized artifact. Do not create a separate report, memo, intermediate shortlist, or other durable synthesis file. Render the already-ranked shortlist directly into Slack mrkdwn, placing each selected topic exactly once in the applicable content section and retaining its relative rank within that section.
+Write `slack_brief_output` from the ranked list. Do not create a separate report or memo.
 
 Write exactly these three sections in the order shown, with no other text or sections:
 
@@ -71,4 +61,4 @@ Get final article and per-source counts from the verified window query and colle
 
 ## 5. Return the result
 
-Do not call Slack or any messaging tool. Return only the exact contents of `slack_brief_output`, with no preamble, commentary, diagnostic, or code fence, so the cron delivery layer posts it once. If a required phase fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief.
+Do not call Slack or any messaging tool. Return the exact contents of `slack_brief_output`, with no preamble, commentary, or code fence, so the cron delivery layer posts it once. If a required phase fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief.
