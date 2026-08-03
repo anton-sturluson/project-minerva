@@ -7,7 +7,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -29,7 +29,7 @@ def _fake_minerva(tmp_path: Path) -> Path:
     Aggregate downloads (`news download-finnhub`, `news download-market-data`)
     just log. `news exist` returns an empty-seen response so collectors treat
     every candidate as unseen. `news ingest` writes the piped article into a
-    real SQLite `news` table so the current-evidence gate sees rows.
+    real SQLite `news` table so the fixed-window evidence gate sees rows.
     """
     script = r"""#!/usr/bin/env bash
 set -euo pipefail
@@ -159,6 +159,11 @@ invest_db=$(printf '%s\n' "${message}" | \
 printf '%s|%s\n' "${source_id}" "${timeout}" >> "${TIMEOUT_LOG}"
 printf '%s\n' "${agent}" >> "${AGENT_LOG}"
 printf '%s\n' "${source_id}" >> "${COLLECTOR_START_LOG}"
+batch_json=$(printf '%s\n' "${message}" | \
+  sed -n 's/^Batch companies JSON: `\(.*\)`$/\1/p' | head -n 1)
+if [[ -n "${batch_json}" ]]; then
+  printf '%s|%s\n' "${source_id}" "${batch_json}" >> "${IR_BATCH_LOG}"
+fi
 
 if [[ "${source_id}" == "${BROKEN_SOURCE:-__unset__}" ]]; then
   exit 7
@@ -200,14 +205,26 @@ def _run_wrapper(
     *,
     sources: list[dict[str, object]],
     ir_entries: list[dict[str, object]] | None = None,
+    universe_entries: list[dict[str, object]] | None = None,
     extra_env: dict[str, str] | None = None,
     run_date: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     ir_entries = ir_entries or []
+    if universe_entries is None:
+        universe_entries = [
+            {
+                "security_id": entry["security_id"],
+                "ticker": entry["security_id"],
+                "company_name": entry.get("company_name", entry["security_id"]),
+            }
+            for entry in ir_entries
+        ]
     sources_path = tmp_path / "news-sources.json"
     sources_path.write_text(json.dumps(sources), encoding="utf-8")
     ir_path = tmp_path / "ir-registry.json"
     ir_path.write_text(json.dumps(ir_entries), encoding="utf-8")
+    universe_path = tmp_path / "universe.json"
+    universe_path.write_text(json.dumps(universe_entries), encoding="utf-8")
 
     fake_home = tmp_path / "home"
     fake_home.mkdir(exist_ok=True)
@@ -238,6 +255,7 @@ def _run_wrapper(
             "MINERVA_RUNNER": str(fake_minerva),
             "MINERVA_NEWS_SOURCES": str(sources_path),
             "MINERVA_IR_REGISTRY": str(ir_path),
+            "MINERVA_PORTFOLIO_UNIVERSE": str(universe_path),
             "MINERVA_SKIP_STATUS_CHECK": "1",
             "MINERVA_WORKSPACE_ROOT": str(workspace),
             "INVEST_DB": str(invest_db),
@@ -245,12 +263,15 @@ def _run_wrapper(
             "TIMEOUT_LOG": str(coordinator / "timeouts.log"),
             "AGENT_LOG": str(coordinator / "agents.log"),
             "COLLECTOR_START_LOG": str(coordinator / "collector-starts.log"),
+            "IR_BATCH_LOG": str(coordinator / "ir-batches.log"),
         }
     )
     if extra_env:
         env.update(extra_env)
 
     resolved_run_date = run_date or date.today().isoformat()
+    previous_date = date.fromisoformat(resolved_run_date) - timedelta(days=1)
+    env.setdefault("PUBLISHED_AT", f"{previous_date.isoformat()}T12:00:00-05:00")
     return subprocess.run(
         ["bash", str(PIPELINE_SCRIPT), resolved_run_date],
         cwd=REPO_ROOT,
@@ -321,7 +342,7 @@ def test_collector_timeout_validation_precedes_temp_state(
 
 @pytest.mark.parametrize(
     ("collector_agent", "expected"),
-    [(None, "main"), ("steve", "steve")],
+    [(None, "steve"), ("collector-override", "collector-override")],
 )
 def test_collector_agent_defaults_and_can_be_overridden(
     tmp_path: Path, collector_agent: str | None, expected: str
@@ -336,8 +357,8 @@ def test_collector_agent_defaults_and_can_be_overridden(
         tmp_path,
         sources=[
             {
-                "id": "test-source",
-                "name": "Test Source",
+                "id": "wsj",
+                "name": "Wall Street Journal",
                 "url": "https://example.test/news",
                 "access": "web_fetch",
             }
@@ -366,8 +387,8 @@ def test_aggregate_download_phases_run_before_agent_collectors(
         tmp_path,
         sources=[
             {
-                "id": "source-a",
-                "name": "Source A",
+                "id": "wsj",
+                "name": "Wall Street Journal",
                 "url": "https://example.test/a",
                 "access": "web_fetch",
             }
@@ -381,11 +402,17 @@ def test_aggregate_download_phases_run_before_agent_collectors(
     ).read_text(encoding="utf-8").splitlines()
 
     subcommands = [line for line in calls if line]
-    # Finnhub and market-data downloads share the invest.db and RUN_DATE.
-    finnhub = next(c for c in subcommands if c.startswith("news download-finnhub"))
-    assert f"--date {run_date}" in finnhub
-    assert "--db " in finnhub
-    assert "--symbol" not in finnhub
+    # Finnhub fetches both publication dates intersecting the fixed 04:00
+    # window; market data remains anchored to RUN_DATE.
+    finnhub_calls = [
+        c for c in subcommands if c.startswith("news download-finnhub")
+    ]
+    previous_date = (date.fromisoformat(run_date) - timedelta(days=1)).isoformat()
+    assert len(finnhub_calls) == 2
+    assert any(f"--date {previous_date}" in call for call in finnhub_calls)
+    assert any(f"--date {run_date}" in call for call in finnhub_calls)
+    assert all("--db " in call for call in finnhub_calls)
+    assert all("--symbol" not in call for call in finnhub_calls)
 
     market = next(
         c for c in subcommands if c.startswith("news download-market-data")
@@ -394,13 +421,13 @@ def test_aggregate_download_phases_run_before_agent_collectors(
     assert "--db " in market
     assert "--index" not in market
 
-    # Finnhub download precedes agent-collector ingests.
-    finnhub_idx = subcommands.index(finnhub)
+    # Both Finnhub downloads precede agent-collector ingests.
+    finnhub_indices = [subcommands.index(call) for call in finnhub_calls]
     ingest_indices = [
         i for i, line in enumerate(subcommands) if line.startswith("news ingest")
     ]
     assert ingest_indices, "expected at least one direct-ingest call"
-    assert finnhub_idx < min(ingest_indices)
+    assert max(finnhub_indices) < min(ingest_indices)
 
     # No legacy batch-ingest / extract-files invocations.
     for banned in ("extract-files", "--raw-dir", "--summaries-dir"):
@@ -410,6 +437,148 @@ def test_aggregate_download_phases_run_before_agent_collectors(
 # ---------------------------------------------------------------------------
 # Collector orchestration
 # ---------------------------------------------------------------------------
+
+
+def test_only_agreed_editorial_sources_consume_news_agent_sessions(
+    tmp_path: Path,
+) -> None:
+    run_date = date.today().isoformat()
+    sources = [
+        {
+            "id": source_id,
+            "name": source_id,
+            "url": f"https://example.test/{source_id}",
+            "access": "browser" if source_id != "bea-schedule" else "web_fetch",
+        }
+        for source_id in (
+            "fed-press",
+            "reuters-markets",
+            "bea-schedule",
+            "economist",
+            "bls-calendar",
+            "wsj",
+        )
+    ]
+
+    result = _run_wrapper(tmp_path, sources=sources, run_date=run_date)
+
+    assert result.returncode == 0, result.stderr
+    starts = (tmp_path / "coordinator" / "collector-starts.log").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert set(starts) == {"wsj", "economist", "reuters-markets"}
+    assert len(starts) == 3
+
+
+def test_ir_selection_joins_current_universe_to_registry_feeds(
+    tmp_path: Path,
+) -> None:
+    run_date = date.today().isoformat()
+    registry = [
+        {
+            "security_id": "STALE",
+            "company_name": "Stale Registry Company",
+            "feeds": [{"url": "https://example.test/stale"}],
+        },
+        {
+            "security_id": "NVDA",
+            "company_name": "Registry Name",
+            "feeds": [{"format": "rss", "url": "https://example.test/nvda"}],
+        },
+        {
+            "security_id": "AMD",
+            "company_name": "AMD",
+            "feeds": [],
+        },
+    ]
+    universe = [
+        {"security_id": "NVDA", "ticker": "NVDA", "company_name": "NVIDIA"},
+        {"security_id": "AMD", "ticker": "AMD", "company_name": "AMD"},
+        {"security_id": "NOFEED", "ticker": "NOFEED", "company_name": "No Feed"},
+    ]
+
+    result = _run_wrapper(
+        tmp_path,
+        sources=[],
+        ir_entries=registry,
+        universe_entries=universe,
+        run_date=run_date,
+    )
+
+    assert result.returncode == 0, result.stderr
+    starts = (tmp_path / "coordinator" / "collector-starts.log").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert starts == ["ir-batch-001"]
+    _, payload = (tmp_path / "coordinator" / "ir-batches.log").read_text(
+        encoding="utf-8"
+    ).strip().split("|", 1)
+    companies = json.loads(payload)
+    assert companies == [
+        {
+            "company_name": "NVIDIA",
+            "feeds": [
+                {
+                    "format": "rss",
+                    "name": "",
+                    "url": "https://example.test/nvda",
+                }
+            ],
+            "security_id": "NVDA",
+            "source_id": "ir-NVDA",
+            "ticker": "NVDA",
+        }
+    ]
+
+
+def test_ir_sessions_batch_ten_companies_in_deterministic_order(
+    tmp_path: Path,
+) -> None:
+    run_date = date.today().isoformat()
+    ids = [f"C{index:02d}" for index in range(21)]
+    registry = [
+        {
+            "security_id": security_id,
+            "company_name": security_id,
+            "feeds": [{"url": f"https://example.test/{security_id}"}],
+        }
+        for security_id in reversed(ids)
+    ]
+    universe = [
+        {
+            "security_id": security_id,
+            "ticker": security_id,
+            "company_name": f"Company {security_id}",
+        }
+        for security_id in reversed(ids)
+    ]
+
+    result = _run_wrapper(
+        tmp_path,
+        sources=[],
+        ir_entries=registry,
+        universe_entries=universe,
+        run_date=run_date,
+        # This assertion validates deterministic chunking, not concurrent log writes
+        # in the fake agent harness.
+        extra_env={"MINERVA_MAX_COLLECTORS": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    rows = {}
+    for line in (tmp_path / "coordinator" / "ir-batches.log").read_text(
+        encoding="utf-8"
+    ).splitlines():
+        batch_id, payload = line.split("|", 1)
+        rows[batch_id] = json.loads(payload)
+    assert sorted(rows) == ["ir-batch-001", "ir-batch-002", "ir-batch-003"]
+    assert [len(rows[batch_id]) for batch_id in sorted(rows)] == [10, 10, 1]
+    ordered_ids = [
+        company["security_id"]
+        for batch_id in sorted(rows)
+        for company in rows[batch_id]
+    ]
+    assert ordered_ids == ids
 
 
 def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
@@ -422,10 +591,10 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
             "access": "browser",
         },
         {
-            "id": "web-source",
-            "name": "Web Source",
-            "url": "https://example.test/web",
-            "access": "web_fetch",
+            "id": "wsj",
+            "name": "Wall Street Journal",
+            "url": "https://example.test/wsj",
+            "access": "browser",
         },
     ]
     ir_entries = [
@@ -455,7 +624,7 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
     starts = (
         tmp_path / "coordinator" / "collector-starts.log"
     ).read_text(encoding="utf-8").splitlines()
-    assert set(starts) == {"reuters-markets", "web-source", "ir-AMD", "ir-NVDA"}
+    assert set(starts) == {"wsj", "reuters-markets", "ir-batch-001"}
 
     timeouts = dict(
         line.split("|", 1)
@@ -464,12 +633,12 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
         ).read_text(encoding="utf-8").splitlines()
     )
     assert timeouts["reuters-markets"] == "900"
-    assert timeouts["web-source"] == "300"
-    assert timeouts["ir-AMD"] == "900"
+    assert timeouts["wsj"] == "900"
+    assert timeouts["ir-batch-001"] == "900"
 
     # Every collector's status.json reports ok.
     collector_dir = _phase_dir(tmp_path, run_date) / "collectors"
-    for source_id in ("reuters-markets", "web-source", "ir-AMD", "ir-NVDA"):
+    for source_id in ("wsj", "reuters-markets", "ir-batch-001"):
         status = json.loads(
             (collector_dir / source_id / "status.json").read_text(encoding="utf-8")
         )
@@ -485,7 +654,7 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
     )
     assert aggregate["status"] == "ok"
     assert aggregate["failed"] == 0
-    assert aggregate["succeeded"] == 4
+    assert aggregate["succeeded"] == 3
 
     # Every collector wrote one row directly to SQLite.
     with sqlite3.connect(tmp_path / "invest.db") as conn:
@@ -495,10 +664,10 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
                 "SELECT source FROM news ORDER BY source"
             ).fetchall()
         }
-    assert rows == {"reuters-markets", "web-source", "ir-AMD", "ir-NVDA"}
+    assert rows == {"wsj", "reuters-markets", "ir-batch-001"}
 
     # No .md files or raw-dir aggregation happen for direct-ingest collectors.
-    for source_id in ("reuters-markets", "web-source", "ir-AMD", "ir-NVDA"):
+    for source_id in ("wsj", "reuters-markets", "ir-batch-001"):
         source_files = list((collector_dir / source_id).iterdir())
         assert all(
             path.suffix != ".md" for path in source_files
@@ -513,30 +682,30 @@ def test_failed_collector_reports_status_without_blocking_pipeline(
         tmp_path,
         sources=[
             {
-                "id": "healthy",
-                "name": "Healthy",
-                "url": "https://example.test/healthy",
-                "access": "web_fetch",
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
             },
             {
-                "id": "broken-feed",
-                "name": "Broken",
-                "url": "https://example.test/broken",
-                "access": "web_fetch",
+                "id": "economist",
+                "name": "The Economist",
+                "url": "https://example.test/economist",
+                "access": "browser",
             },
         ],
         run_date=run_date,
-        extra_env={"BROKEN_SOURCE": "broken-feed"},
+        extra_env={"BROKEN_SOURCE": "economist"},
     )
 
     assert result.returncode == 0, result.stderr
 
     collector_dir = _phase_dir(tmp_path, run_date) / "collectors"
     broken_status = json.loads(
-        (collector_dir / "broken-feed" / "status.json").read_text(encoding="utf-8")
+        (collector_dir / "economist" / "status.json").read_text(encoding="utf-8")
     )
     healthy_status = json.loads(
-        (collector_dir / "healthy" / "status.json").read_text(encoding="utf-8")
+        (collector_dir / "wsj" / "status.json").read_text(encoding="utf-8")
     )
     assert broken_status["status"] == "failed"
     assert broken_status["exit_status"] == 7
@@ -551,7 +720,7 @@ def test_failed_collector_reports_status_without_blocking_pipeline(
     assert aggregate["failed"] == 1
     assert aggregate["succeeded"] == 1
     failed_ids = {row["source_id"] for row in aggregate["failures"]}
-    assert failed_ids == {"broken-feed"}
+    assert failed_ids == {"economist"}
 
     # The degraded run is still reported on stdout for the operator.
     assert "collector error" in result.stdout
@@ -562,25 +731,25 @@ def test_failed_collector_reports_status_without_blocking_pipeline(
 # ---------------------------------------------------------------------------
 
 
-def test_thin_brief_refused_when_no_current_evidence(tmp_path: Path) -> None:
+def test_thin_brief_refused_when_no_window_evidence(tmp_path: Path) -> None:
     """With every collector broken and no override, script exits non-zero."""
     run_date = date.today().isoformat()
     result = _run_wrapper(
         tmp_path,
         sources=[
             {
-                "id": "broken-feed",
-                "name": "Broken",
-                "url": "https://example.test/broken",
-                "access": "web_fetch",
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
             }
         ],
         run_date=run_date,
-        extra_env={"BROKEN_SOURCE": "broken-feed"},
+        extra_env={"BROKEN_SOURCE": "wsj"},
     )
 
     assert result.returncode != 0
-    assert "no eligible current-date news evidence" in result.stderr
+    assert "no eligible evidence exists in the fixed 04:00 New York window" in result.stderr
     assert "MINERVA_ALLOW_THIN_BRIEF=1" in result.stderr
 
 
@@ -590,15 +759,15 @@ def test_thin_brief_allowed_when_override_set(tmp_path: Path) -> None:
         tmp_path,
         sources=[
             {
-                "id": "broken-feed",
-                "name": "Broken",
-                "url": "https://example.test/broken",
-                "access": "web_fetch",
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
             }
         ],
         run_date=run_date,
         extra_env={
-            "BROKEN_SOURCE": "broken-feed",
+            "BROKEN_SOURCE": "wsj",
             "MINERVA_ALLOW_THIN_BRIEF": "1",
         },
     )
@@ -614,10 +783,10 @@ def test_rerun_with_existing_rows_does_not_refuse_thin_brief(tmp_path: Path) -> 
         tmp_path,
         sources=[
             {
-                "id": "healthy",
-                "name": "Healthy",
-                "url": "https://example.test/healthy",
-                "access": "web_fetch",
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
             }
         ],
         run_date=run_date,
@@ -629,97 +798,85 @@ def test_rerun_with_existing_rows_does_not_refuse_thin_brief(tmp_path: Path) -> 
         tmp_path,
         sources=[
             {
-                "id": "broken-feed",
-                "name": "Broken",
-                "url": "https://example.test/broken",
-                "access": "web_fetch",
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
             }
         ],
         run_date=run_date,
-        extra_env={"BROKEN_SOURCE": "broken-feed"},
+        extra_env={"BROKEN_SOURCE": "wsj"},
     )
     assert second.returncode == 0, second.stderr
 
     evidence = json.loads(
-        (_phase_dir(tmp_path, run_date) / "current-evidence.json").read_text(
+        (_phase_dir(tmp_path, run_date) / "window-evidence.json").read_text(
             encoding="utf-8"
         )
     )
-    assert evidence["current_rows"] >= 1
+    assert evidence["eligible_rows"] >= 1
 
 
-def test_current_evidence_uses_new_york_day_boundaries(tmp_path: Path) -> None:
-    """02:30 UTC on the following date still belongs to the prior ET run day."""
-    run_date = "2026-07-27"
-    result = _run_wrapper(
-        tmp_path,
-        sources=[
-            {
-                "id": "overnight",
-                "name": "Overnight",
-                "url": "https://example.test/overnight",
-                "access": "web_fetch",
-            }
-        ],
-        run_date=run_date,
-        extra_env={"PUBLISHED_AT": "2026-07-28T02:30:00Z"},
-    )
-
-    assert result.returncode == 0, result.stderr
-    evidence = json.loads(
-        (_phase_dir(tmp_path, run_date) / "current-evidence.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert evidence["current_rows"] == 1
-
-
-def test_current_evidence_does_not_treat_utc_date_as_market_date(
+@pytest.mark.parametrize(
+    ("published_at", "expected_rows"),
+    [
+        ("2026-07-26T03:59:59-04:00", 0),
+        ("2026-07-26T04:00:00-04:00", 1),
+        ("2026-07-27T03:59:59-04:00", 1),
+        ("2026-07-27T04:00:00-04:00", 0),
+        ("2026-07-27T05:00:00-04:00", 0),
+        ("2026-07-28T12:00:00-04:00", 0),
+    ],
+)
+def test_window_evidence_uses_fixed_four_am_new_york_bounds(
     tmp_path: Path,
+    published_at: str,
+    expected_rows: int,
 ) -> None:
-    """02:30 UTC on RUN_DATE belongs to the previous New York market day."""
     run_date = "2026-07-27"
     result = _run_wrapper(
         tmp_path,
         sources=[
             {
-                "id": "prior-market-day",
-                "name": "Prior Market Day",
-                "url": "https://example.test/prior-market-day",
-                "access": "web_fetch",
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
             }
         ],
         run_date=run_date,
         extra_env={
             "MINERVA_ALLOW_THIN_BRIEF": "1",
-            "PUBLISHED_AT": "2026-07-27T02:30:00Z",
+            "PUBLISHED_AT": published_at,
         },
     )
 
     assert result.returncode == 0, result.stderr
     evidence = json.loads(
-        (_phase_dir(tmp_path, run_date) / "current-evidence.json").read_text(
+        (_phase_dir(tmp_path, run_date) / "window-evidence.json").read_text(
             encoding="utf-8"
         )
     )
-    assert evidence["current_rows"] == 0
+    assert evidence["eligible_rows"] == expected_rows
+    assert evidence["window_start"] == "2026-07-26T04:00:00-04:00"
+    assert evidence["window_end"] == "2026-07-27T04:00:00-04:00"
 
 
 # ---------------------------------------------------------------------------
-# Outer-Sol handoff artifact
+# Synthesis handoff artifact
 # ---------------------------------------------------------------------------
 
 
-def test_outer_sol_handoff_is_emitted_with_summary_instructions(tmp_path: Path) -> None:
+def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     run_date = date.today().isoformat()
     result = _run_wrapper(
         tmp_path,
         sources=[
             {
-                "id": "healthy",
-                "name": "Healthy",
-                "url": "https://example.test/healthy",
-                "access": "web_fetch",
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
             }
         ],
         run_date=run_date,
@@ -727,14 +884,20 @@ def test_outer_sol_handoff_is_emitted_with_summary_instructions(tmp_path: Path) 
     assert result.returncode == 0, result.stderr
 
     handoff = json.loads(
-        (_phase_dir(tmp_path, run_date) / "outer-sol-handoff.json").read_text(
+        (_phase_dir(tmp_path, run_date) / "synthesis-handoff.json").read_text(
             encoding="utf-8"
         )
     )
-    assert handoff["final_agent"] == "outer-cron-sol"
+    assert "agent" not in " ".join(handoff).lower()
     assert handoff["date"] == run_date
     assert handoff["status"] == "ready"
-    assert Path(handoff["instructions"]).name == "morning_brief_outer_sol.md"
+    assert handoff["window_start"].endswith("T04:00:00-04:00") or handoff[
+        "window_start"
+    ].endswith("T04:00:00-05:00")
+    assert handoff["window_end"].endswith("T04:00:00-04:00") or handoff[
+        "window_end"
+    ].endswith("T04:00:00-05:00")
+    assert Path(handoff["instructions"]).name == "morning_brief_synthesis.md"
     assert Path(handoff["instructions"]).is_file()
     # Handoff enumerates the summarize -> persist -> report chain.
     steps_blob = " ".join(handoff["steps"])
@@ -753,7 +916,7 @@ def test_outer_sol_handoff_is_emitted_with_summary_instructions(tmp_path: Path) 
 
 def test_prompts_render_direct_ingest_placeholders() -> None:
     """Templates use the shared placeholder set consumed by the wrapper."""
-    for name in ("collect_news.md", "collect_news_webfetch.md"):
+    for name in ("collect_news.md", "collect_news_webfetch.md", "collect_ir_batch.md"):
         text = (REPO_ROOT / "scripts" / "prompts" / name).read_text(
             encoding="utf-8"
         )
@@ -764,8 +927,6 @@ def test_prompts_render_direct_ingest_placeholders() -> None:
             "{{NEWS_EXIST_COMMAND}}",
             "{{NEWS_INGEST_COMMAND}}",
             "{{INVEST_DB}}",
-            "{{SOURCE_ID}}",
-            "{{URL}}",
             "{{DATE}}",
         ):
             assert placeholder in text, f"{name} missing {placeholder}"

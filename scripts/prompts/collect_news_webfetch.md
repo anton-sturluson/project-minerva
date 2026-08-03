@@ -1,6 +1,6 @@
 Collect and directly ingest qualifying items from {{SOURCE_NAME}} ({{URL}}) for {{DATE}} using web_fetch only.
 
-Your isolated metadata root is `{{SOURCE_ROOT}}`. You may write only the candidate and lookup JSON files rendered below. Do not write article, Markdown, text, HTML, summary, or intermediate JSON files. Item bodies must exist only in process memory and in SQLite after a successful direct ingest.
+Your isolated metadata root is `{{SOURCE_ROOT}}`. You may write only `{{CANDIDATE_FILE}}` and `{{LOOKUP_FILE}}`, overwriting them for each lookup. Item bodies must remain in process memory until successful SQLite ingestion; never write article, Markdown, text, HTML, summary, or intermediate JSON files.
 
 ## Portfolio context
 
@@ -12,57 +12,56 @@ Prioritize items relevant to these current holdings/watchlist companies:
 
 {{COLLECT_SCOPE}}
 
-## Selection constraints
+## Eligibility and safety
 
-- Collect relevant data releases, calendar entries, press statements, policy announcements, and other material investor evidence.
-- Skip items older than 3 days based on the visible source date.
-- For calendar pages, collect only releases dated from 3 days before {{DATE}} through 7 days after {{DATE}}. Never collect later future entries merely because they appear on the schedule.
-- Check deterministic database duplicates before fetching distinct item pages or extracting their full bodies. Never estimate title similarity or calculate article hashes yourself.
-- If no unseen qualifying items exist, ingest nothing and report zero. Do not create placeholders.
-- Use web_fetch only. Never open a browser, invoke Slack/webhooks, spawn another agent, or run a summarizer. Leave `summary` absent for the outer Sol agent.
+- Collect material investor evidence relevant to the source-specific scope.
+- The publication window is the previous calendar date at 04:00 America/New_York inclusive through `{{DATE}}` at 04:00 America/New_York exclusive.
+- A publication value is mandatory. Prefer machine-readable metadata over rendered text and preserve its exact timezone/offset. A date alone is acceptable without an invented time or timezone. When the landing page has no date, inspect the distinct destination before body extraction; discard the item if no publication value exists.
+- Use the deterministic database lookup before fetching distinct item pages or extracting full bodies. Never estimate title similarity or calculate article hashes yourself.
+- If no unseen eligible items exist, ingest nothing and report zero; never create placeholders or error articles.
+- Never open a browser, invoke Slack or webhooks, spawn another agent, or run a summarizer. Leave `summary` absent for the synthesis step.
 
 ## Deterministic duplicate lookup
 
-Write candidate metadata only as one JSON array to `{{CANDIDATE_FILE}}`, overwriting it on every lookup. Every object must contain `title`, `url`, and `published`. Use the exact distinct item URL when present; use an empty URL instead of the shared landing URL when no distinct destination exists. If a URL exists but no date is visible, use an empty `published` value for URL-first matching. If neither exists, use `{{DATE}}` as `published`.
+Write candidate metadata as one JSON array to `{{CANDIDATE_FILE}}`. Every object must contain `title`, `url`, and `published`. Use the exact distinct item URL when present, or an empty URL rather than the shared landing URL when none exists. Use an empty `published` string when the landing page shows no date. An item with neither a destination URL nor a publication value is ineligible.
 
-Run exactly this lookup and overwrite your isolated result file:
+Run this command and overwrite the lookup result:
 
 ```bash
 {{NEWS_EXIST_COMMAND}} --db "{{INVEST_DB}}" --source-id "{{SOURCE_ID}}" --input "{{CANDIDATE_FILE}}" > "{{LOOKUP_FILE}}"
 ```
 
-Indexes in `seen` are duplicates. Only `unseen` indexes may be collected. This read-only command uses the same normalized identity as ingestion. Run one batch lookup for all landing-page candidates.
+Indexes in `seen` are duplicates; only `unseen` indexes may proceed. The command is read-only and uses the same normalized identity as ingestion. Submit all landing-page candidates in one lookup. For a candidate whose date is discovered at its destination, repeat the lookup once with a one-item array containing the final URL and discovered publication value before extracting its body.
 
 ## Direct ingest contract
 
-For each collected item, construct exactly one in-memory JSON object with:
+For each eligible unseen item, construct one in-memory JSON object with:
 
 - `title`: exact, non-empty item title
 - `source_id`: exactly `{{SOURCE_ID}}`
-- `url`: the distinct item URL, or `{{URL}}` for an item that genuinely has no distinct destination
-- `published_at`: the most precise visible publication value including timezone; use `{{DATE}}` only if none exists
-- `content`: normalized non-empty Markdown/plain text containing the complete substantive item, excluding navigation, advertisements, cookie text, and page chrome; never raw HTML
+- `url`: the distinct item URL, or `{{URL}}` when the item genuinely has no distinct destination
+- `published_at`: the most precise source publication value available
+- `content`: normalized non-empty Markdown or plain text containing the complete substantive item, excluding navigation, advertisements, cookie text, and page chrome; never raw HTML
 - optional `section`: source category
 - optional `collected_at`: current ISO-8601 UTC timestamp
 
-Pipe that single object directly on stdin to:
+Pipe that object directly on stdin to:
 
 ```bash
 printf '%s\n' "$article_json" | {{NEWS_INGEST_COMMAND}}
 ```
 
-A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place content on a command line. Confirm the result status is `inserted`, `updated`, or `duplicate`; otherwise treat the item as failed and return non-zero.
+A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the item as failed and return a non-zero result after continuing safely.
 
-## Steps
+## Procedure
 
 1. Fetch `{{URL}}` with web_fetch.
 2. Identify qualifying candidates and record exact title, distinct destination URL (if any), and visible publication value without extracting distinct item bodies.
-3. Apply the date rules, overwrite `{{CANDIDATE_FILE}}`, run the batch duplicate lookup, read `{{LOOKUP_FILE}}`, and retain only `unseen` indexes.
-4. For each unseen item:
-   a. If it has a distinct URL, fetch that URL before extracting content. If the fetch fails, skip it. A calendar row without a distinct URL may use substantive content from the landing-page fetch.
-   b. Extract and normalize the full substantive item.
-   c. Build one JSON object in memory and pipe it directly to the ingest command. Never write the object or body to disk.
-5. If the initial fetch fails or the collector cannot complete safely, return non-zero. Do not create an error article.
-6. Reply briefly with counts for inserted/updated/duplicate/skipped/failed. Do not include item bodies in your reply.
-
-Prefer machine-readable publication metadata over rendered text and preserve exact timezone/offset information. If only a date is present, do not invent a time. No additional browser windows or tabs are allowed because this task uses web_fetch only.
+3. Apply the eligibility rules, run the batch duplicate lookup, and retain only `unseen` indexes.
+4. For each remaining item:
+   a. Fetch its distinct URL when one exists; a calendar row without a distinct URL may use substantive content from the landing-page fetch.
+   b. Resolve missing publication metadata as specified above, then extract and normalize the complete substantive item.
+   c. Build and ingest the in-memory object.
+   d. Record fetch or extraction failures as skipped and continue.
+5. If the initial fetch fails or safe completion is impossible, return non-zero.
+6. Reply briefly with counts for inserted/updated/duplicate/skipped/failed. Do not include item bodies.

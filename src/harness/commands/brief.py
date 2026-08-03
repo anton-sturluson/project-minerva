@@ -15,7 +15,6 @@ from harness.morning_brief import (
     audit_evidence,
     collect_earnings,
     collect_filings,
-    collect_ir,
     collect_macro,
     collect_macro_registry_events,
     collect_market,
@@ -76,13 +75,6 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
                 run_date=parse_iso_date(str(parsed.get("date") or "")),
                 registry=str(parsed["registry"]) if "registry" in parsed else None,
                 output=str(parsed["output"]) if "output" in parsed else None,
-                settings=settings,
-            )
-        if subcommand == "ir":
-            parsed = parse_flag_args(args[1:])
-            return ir_command(
-                run_date=parse_iso_date(str(parsed.get("date") or "")),
-                registry=str(parsed["registry"]) if "registry" in parsed else None,
                 settings=settings,
             )
         if subcommand == "market":
@@ -231,30 +223,6 @@ def macro_collect_command(
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
 
-def ir_command(
-    *,
-    run_date,
-    registry: str | None,
-    settings: HarnessSettings,
-) -> CommandResult:
-    """Collect IR releases from configured feeds."""
-    start = time.perf_counter()
-    
-    try:
-        summary = collect_ir(
-            settings.ensure_workspace_root(),
-            run_date=run_date,
-            registry_path=Path(registry) if registry else None,
-        )
-    except Exception as exc:
-        return error_result(
-            f"failed to collect IR releases: {exc}",
-            "update `ir-registry.json` or pass an alternate registry file",
-            ["`brief ir --date 2026-04-08`"],
-            start,
-        )
-    return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
-
 def market_command(
     *,
     run_date,
@@ -375,14 +343,6 @@ def macro_collect_cli(
 ) -> None:
     settings = get_settings()
     _print(macro_collect_command(run_date=parse_iso_date(date_arg), registry=registry, output=output, settings=settings))
-
-@app.command("ir", help="Scan configured IR feeds for overnight releases.")
-def ir_cli(
-    date_arg: str | None = typer.Option(None, "--date", help="Run date."),
-    registry: str | None = typer.Option(None, "--registry", help="Optional IR registry path."),
-) -> None:
-    settings = get_settings()
-    _print(ir_command(run_date=parse_iso_date(date_arg), registry=registry, settings=settings))
 
 @app.command("market", help="Collect narrow market context that materially matters.")
 def market_cli(
