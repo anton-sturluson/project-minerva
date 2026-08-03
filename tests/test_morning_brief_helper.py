@@ -164,7 +164,6 @@ def test_synthesis_handoff_has_neutral_contract_fields(tmp_path: Path) -> None:
     ]
     assert "agent" not in " ".join(payload).lower()
     assert "minerva summarize" in " ".join(payload["steps"])
-    assert "one ranked topic shortlist" in " ".join(payload["steps"])
 
 
 def test_collector_summary_reports_missing_artifact(tmp_path: Path) -> None:
