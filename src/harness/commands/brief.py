@@ -391,3 +391,5 @@ def _split_csv(raw: str) -> list[str]:
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())
+    if result.exit_code:
+        raise typer.Exit(result.exit_code)
