@@ -1,6 +1,6 @@
 # Morning brief synthesis contract
 
-You are GPT-5.6 Sol. The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, delegate synthesis or writing, or post to Slack with a messaging tool. The sole permitted delegation is the one fresh GPT Terra article-selection turn in Section 3: Terra selects; Sol synthesizes and writes.
+The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, delegate synthesis or writing, or post to Slack with a messaging tool. The sole permitted delegation is the one fresh GPT Terra article-selection turn in Section 3: Terra selects; Sol synthesizes and writes.
 
 ## 1. Validate the input
 
@@ -35,9 +35,9 @@ openclaw agent --agent main --model terra --thinking high --session-id "$fresh_s
 
 The single message must contain the portfolio/watchlist identities and the complete summary set, with exactly one object per article containing `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. It must also instruct Terra to return JSON only as `{"selected_developments": [{"section": "portfolio_watchlist|worth_knowing", "takeaway": "...", "article_keys": ["..."], "urls": ["..."], "materiality": "..."}]}` under this selection policy:
 
-- Include only decision-useful items: material portfolio/watchlist fundamental developments; credible new facts affecting long-term economics or competitive position, capital allocation, management or incentives, regulation, financing or solvency; or material macro/industry demand, cost, rate, or tail-risk changes. Include disconfirming evidence and thesis-break signals.
-- Exclude stock-price movement or technicals, price targets, ratings changes without new primary facts, promotional stock picks, listicles, predictions, clickbait, low-substance commentary, and recycled or syndicated items without incremental information.
-- Prefer first-party filings, IR, and regulators; then WSJ, Economist, and Reuters. Use lower-quality aggregators only for unique material facts. Materiality beats source prestige; quality breaks ties.
+- Include news only if it could materially change our estimate of a business's long-term value or risk. This includes portfolio/watchlist fundamental developments; new evidence about demand, economics or moat, management or incentives, capital allocation, regulation, or balance-sheet/solvency risk; macro or industry changes that materially affect demand, costs, rates, or tail risk; and credible evidence against the thesis, including thesis-break signals.
+- Exclude stock-price moves, technicals, price targets, rating changes without new facts, promotional picks, predictions, listicles, clickbait, low-substance commentary, and recycled or syndicated stories without new information.
+- Use filings, IR, and regulators first, followed by WSJ, Economist, and Reuters. Use lower-quality sources only for unique material facts. Materiality comes first; source quality breaks ties.
 - Group duplicate and follow-up coverage into one development grounded in its article keys and URLs. Portfolio/watchlist items may cover only companies in the supplied holdings or watchlist; reject unrelated ticker-text matches.
 
 Do not retry, ask Terra a follow-up, or make another delegated agent call. Treat every article absent from Terra's `selected_developments` as excluded. Sol may group and rank Terra's selections and must write every selected qualifying development without an arbitrary bullet limit, but must not add an excluded article, article key, URL, or development. Clearly label rumors and third-party interpretations.
