@@ -28,20 +28,21 @@ uv run minerva summarize --model gemini-3.6-flash --thinking high
 Do not read all article summaries into your context.
 
 1. Create a temporary directory.
-2. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into up to four balanced JSONL batch files. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. Write the files without printing or reading their contents.
-3. Run the existing extractor once:
+2. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. Write the files without printing or reading their contents.
+3. Count the batch files and run the existing extractor once, setting concurrency equal to that count. If there are no batches, skip Terra selection:
 
 ```bash
+BATCH_COUNT=$(find "$SELECTION_TMP" -name 'batch-*' -type f | wc -l | tr -d ' ')
 uv run minerva extract-files \
   --questions-file scripts/prompts/morning_brief_selection.md \
   --files "$SELECTION_TMP/batch-*" \
   --out "$SELECTION_TMP/results" \
   --model gpt-5.6-terra \
   --thinking high \
-  --concurrency 4
+  --concurrency "$BATCH_COUNT"
 ```
 
-4. Read only Terra's small result files. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not read the batch files or restore excluded articles. Clearly label rumors and third-party interpretations.
+4. Read Terra's JSONL results, ignore null `article_key` values, collect the selected keys, and query those articles from SQLite. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not read the batch files or query articles Terra excluded. Clearly label rumors and third-party interpretations.
 5. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
@@ -66,7 +67,7 @@ If nothing material occurred for the portfolio or watchlist, use the approved fa
 • No material portfolio or watchlist developments during the collection period.
 ```
 
-Get final article and per-source counts from the verified fixed-window query and collector successes and failures from `collector_stats`. Cite factual claims with the direct source URLs in Terra's verified selections, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables. Do not run a deterministic Slack validator or rewriter.
+Get final article and per-source counts from the verified fixed-window query and collector successes and failures from `collector_stats`. Cite factual claims with the direct source URLs from the selected SQLite rows, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables. Do not run a deterministic Slack validator or rewriter.
 
 ## 5. Return the result
 
