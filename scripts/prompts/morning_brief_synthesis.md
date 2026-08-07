@@ -23,28 +23,26 @@ uv run minerva summarize --model gemini-3.6-flash --thinking high
 - After all calls succeed, persist summaries with parameter binding in one SQLite transaction. Update by `article_key` only where the summary is still NULL or blank.
 - Re-query the same fixed half-open window and require zero eligible blank summaries before selection. Reruns must be idempotent.
 
-## 3. Run the Terra selection pass without loading summaries
+## 3. Select the articles with Terra
 
-Do not read article summaries into your context. Use shell subprocesses for all batch export and grounding checks:
+Do not read all article summaries into your context.
 
-1. Create one temporary selection directory and arrange unconditional cleanup on success or failure. Resolve the versioned selection prompt at `scripts/prompts/morning_brief_selection.md`; do not copy, modify, or replace it.
-2. Run one short Python subprocess that reads the handoff, holdings, and watchlist and queries SQLite directly. Bind the exact epoch bounds derived from `window_start` and `window_end`; select every row with non-empty `content` and a complete non-blank `summary`, ordered by `published_at, article_key`. Require this row count to equal `evidence_stats.eligible_rows` and require the Section 2 blank-summary count to be zero.
-3. In that subprocess, partition the ordered rows deterministically into `min(4, article_count)` contiguous batches whose sizes differ by at most one. For a zero-article window, write one empty batch so the fixed command still runs. Write compact `batch-01.json` through at most `batch-04.json` in the temporary directory. Every batch must include the holdings/watchlist identities under `portfolio_watchlist` and an `articles` array; every article must contain exactly `article_key`, `url`, `title`, `source`, `published_at`, and `summary`, with every queried article appearing exactly once. The subprocess must emit nothing to stdout and must never print summaries or batch contents.
-4. Do not use `read`, `cat`, `jq`, or any other context-loading operation on the batch files. Invoke the existing extractor exactly once, letting it parallelize the temporary files:
+1. Create a temporary directory.
+2. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into up to four balanced JSONL batch files. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. Write the files without printing or reading their contents.
+3. Run the existing extractor once:
 
 ```bash
 uv run minerva extract-files \
-  --questions-file "$SELECTION_PROMPT" \
-  --files "$SELECTION_TMP/batch-*.json" \
+  --questions-file scripts/prompts/morning_brief_selection.md \
+  --files "$SELECTION_TMP/batch-*" \
   --out "$SELECTION_TMP/results" \
   --model gpt-5.6-terra \
   --thinking high \
   --concurrency 4
 ```
 
-5. After that single command succeeds, use another short Python subprocess—not your context—to require one successful manifest entry and one strict JSON result per exported batch. For each result, validate the selection-prompt schema and verify every returned article key exists in its paired batch and every returned URL belongs to those selected batch records. Emit no batch data or summaries to stdout. If export, extraction, or grounding fails, stop with one concise selection failure naming the failed phase.
-6. Only after the grounding check succeeds, read the small Terra result files into your context. Do not read the batch inputs, manifest, excluded summaries, or any other article summaries. Across the results, group duplicate or follow-up coverage into one development, deduplicate keys and URLs while preserving their first deterministic occurrence, and rank the developments for the brief. The verified union of selected article keys is an immutable ceiling: do not query, add, or restore any excluded article, key, URL, or development. Clearly label rumors and third-party interpretations.
-7. Remove the entire temporary selection directory after the result files have been consumed. Do not persist selection outputs or alter the handoff.
+4. Read only Terra's small result files. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not read the batch files or restore excluded articles. Clearly label rumors and third-party interpretations.
+5. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
 
