@@ -194,19 +194,21 @@ def synthesis_handoff(
     holdings_path: Path,
     watchlist_path: Path,
     instructions: Path,
+    article_shortlist: Path,
 ) -> dict[str, Any]:
     """Build the neutral synthesis handoff contract."""
     start, end = brief_window(run_date)
     return {
+        "article_shortlist": str(article_shortlist),
+        "collector_stats": str(collector_stats),
         "date": run_date.isoformat(),
         "db": str(db),
-        "collector_stats": str(collector_stats),
         "evidence_stats": str(evidence_stats),
         "holdings_path": str(holdings_path),
         "instructions": str(instructions),
         "prepared_evidence": str(prepared_evidence),
         "slack_brief_output": str(slack_brief_output),
-        "watchlist_path": str(watchlist_path),
+        "status": "ready",
         "steps": [
             "Query news in the fixed [previous-run 04:00, run-date 04:00) "
             "America/New_York window whose summary is NULL or blank.",
@@ -214,10 +216,13 @@ def synthesis_handoff(
             "summaries until all calls succeed.",
             "Persist summaries with parameter binding in one safe transaction, "
             "updating only still-blank rows.",
-            "Build one ranked topic shortlist from every complete summary and "
-            "render it directly to notes/slack-brief.md.",
+            "Invoke `uv run minerva brief select-news --handoff <this handoff>` "
+            "to run one bounded Terra selection pass over the fixed window and "
+            "write the durable shortlist at `article_shortlist`.",
+            "Render `slack_brief_output` from that shortlist without restoring "
+            "excluded articles.",
         ],
-        "status": "ready",
+        "watchlist_path": str(watchlist_path),
         "window_end": end.isoformat(),
         "window_start": start.isoformat(),
     }
@@ -353,7 +358,7 @@ def _main(command: str, args: list[str]) -> None:
         _require(command, args, 1)
         check_manifest(Path(args[0]))
     elif command == "write-handoff":
-        _require(command, args, 10)
+        _require(command, args, 11)
         (
             output,
             run_date,
@@ -365,6 +370,7 @@ def _main(command: str, args: list[str]) -> None:
             holdings,
             watchlist,
             instructions,
+            shortlist,
         ) = args
         _write_json(
             Path(output),
@@ -378,6 +384,7 @@ def _main(command: str, args: list[str]) -> None:
                 holdings_path=Path(holdings),
                 watchlist_path=Path(watchlist),
                 instructions=Path(instructions),
+                article_shortlist=Path(shortlist),
             ),
         )
     else:

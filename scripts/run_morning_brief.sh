@@ -440,6 +440,7 @@ fi
 
 PREPARED_PATH="${REPORT_DIR}/data/structured/prepared-evidence.json"
 HANDOFF_PATH="${PHASE_DIR}/synthesis-handoff.json"
+ARTICLE_SHORTLIST_PATH="${PHASE_DIR}/article-shortlist.json"
 SYNTHESIS_PROMPT="${ROOT_DIR}/scripts/prompts/morning_brief_synthesis.md"
 python3 "${HELPER}" write-handoff \
   "${HANDOFF_PATH}" "${RUN_DATE}" "${INVEST_DB}" "${PREPARED_PATH}" \
@@ -447,7 +448,7 @@ python3 "${HELPER}" write-handoff \
   "${PHASE_DIR}/window-evidence.json" "${PHASE_DIR}/collectors.json" \
   "${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/holdings.json" \
   "${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/watchlist.json" \
-  "${SYNTHESIS_PROMPT}"
+  "${SYNTHESIS_PROMPT}" "${ARTICLE_SHORTLIST_PATH}"
 
 echo ""
 echo "prepared_evidence: ${PREPARED_PATH}"
