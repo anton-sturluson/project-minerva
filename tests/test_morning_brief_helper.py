@@ -150,7 +150,6 @@ def test_synthesis_handoff_has_neutral_contract_fields(tmp_path: Path) -> None:
         holdings_path=tmp_path / "holdings.json",
         watchlist_path=tmp_path / "watchlist.json",
         instructions=tmp_path / "instructions.md",
-        article_shortlist=tmp_path / "article-shortlist.json",
     )
 
     assert payload["status"] == "ready"
@@ -160,14 +159,11 @@ def test_synthesis_handoff_has_neutral_contract_fields(tmp_path: Path) -> None:
     assert payload["holdings_path"].endswith("holdings.json")
     assert payload["watchlist_path"].endswith("watchlist.json")
     assert payload["slack_brief_output"].endswith("slack.md")
-    assert payload["article_shortlist"].endswith("article-shortlist.json")
     assert [key for key in payload if key.endswith("_output")] == [
         "slack_brief_output"
     ]
     assert "agent" not in " ".join(payload).lower()
-    assert "openclaw" not in " ".join(payload["steps"]).lower()
     assert "minerva summarize" in " ".join(payload["steps"])
-    assert "minerva brief select-news" in " ".join(payload["steps"])
 
 
 def test_collector_summary_reports_missing_artifact(tmp_path: Path) -> None:

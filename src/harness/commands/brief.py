@@ -8,7 +8,6 @@ from pathlib import Path
 import typer
 
 from harness.commands.common import elapsed_ms, error_result, parse_flag_args
-from harness.article_selection import select_articles_from_handoff
 from harness.commands.sec import _configure_edgar
 from harness.config import HarnessSettings, get_settings
 from harness.morning_brief import (
@@ -31,7 +30,6 @@ BRIEF_HELP = (
     "  minerva brief macro-collect --date 2026-04-08\n"
     "  minerva brief earnings --date 2026-04-08 --source ./market-data.json\n"
     "  minerva brief prep --date 2026-04-08\n"
-    "  minerva brief select-news --handoff ./synthesis-handoff.json\n"
 )
 
 app = typer.Typer(help=BRIEF_HELP, no_args_is_help=True)
@@ -90,11 +88,6 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
         if subcommand == "prep":
             parsed = parse_flag_args(args[1:])
             return prep_command(run_date=parse_iso_date(str(parsed.get("date") or "")), settings=settings)
-        if subcommand == "select-news":
-            parsed = parse_flag_args(args[1:])
-            return select_news_command(
-                handoff=str(parsed.get("handoff") or ""), settings=settings
-            )
         if subcommand == "audit":
             parsed = parse_flag_args(args[1:])
             return audit_command(run_date=parse_iso_date(str(parsed.get("date") or "")), settings=settings)
@@ -272,30 +265,6 @@ def prep_command(*, run_date, settings: HarnessSettings) -> CommandResult:
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
 
-def select_news_command(*, handoff: str, settings: HarnessSettings) -> CommandResult:
-    """Select material summarized news with direct batched Terra extraction."""
-    start = time.perf_counter()
-    if not handoff:
-        return error_result(
-            "no synthesis handoff was provided",
-            "pass the ready handoff emitted by the morning-brief pipeline",
-            ["`brief select-news --handoff path/to/synthesis-handoff.json`"],
-            start,
-        )
-    try:
-        summary = select_articles_from_handoff(Path(handoff))
-    except Exception as exc:
-        return error_result(
-            f"failed to select morning-brief articles: {exc}",
-            "complete all summaries and verify the handoff, then retry",
-            ["`brief select-news --handoff path/to/synthesis-handoff.json`"],
-            start,
-        )
-    return CommandResult.from_text(
-        _summary_lines(summary["counts"]), duration_ms=elapsed_ms(start)
-    )
-
-
 def audit_command(*, run_date, settings: HarnessSettings) -> CommandResult:
     """Run a bounded audit of the prepared evidence."""
     start = time.perf_counter()
@@ -389,14 +358,6 @@ def prep_cli(date_arg: str | None = typer.Option(None, "--date", help="Run date.
     settings = get_settings()
     _print(prep_command(run_date=parse_iso_date(date_arg), settings=settings))
 
-@app.command("select-news", help="Select material summarized news with Terra.")
-def select_news_cli(
-    handoff: str = typer.Option(..., "--handoff", help="Ready synthesis handoff JSON."),
-) -> None:
-    settings = get_settings()
-    _print(select_news_command(handoff=handoff, settings=settings))
-
-
 @app.command("audit", help="Run a bounded miss-check after prep.")
 def audit_cli(date_arg: str | None = typer.Option(None, "--date", help="Run date.")) -> None:
     settings = get_settings()
@@ -415,7 +376,7 @@ def _usage_error(message: str) -> str:
         [
             f"What went wrong: {message}",
             "What to do instead: use one of the supported brief commands",
-            "Available alternatives: `brief filings`, `brief macro-collect`, `brief prep`, `brief select-news`, `brief review-log --notes ...`",
+            "Available alternatives: `brief filings`, `brief macro-collect`, `brief prep`, `brief review-log --notes ...`",
             "",
             BRIEF_HELP.rstrip(),
         ]
