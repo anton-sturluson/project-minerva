@@ -15,7 +15,7 @@ Use `window_start` and `window_end` exactly as provided with today's collected d
 - For each row, pipe `content` on stdin to:
 
 ```bash
-uv run minerva summarize --model gemini-3.6-flash --thinking high
+uv run minerva summarize --model gpt-5.6-luna --thinking medium
 ```
 
 - Run no more than four summarization subprocesses at once. During this phase, keep article content and generated summaries in memory.
