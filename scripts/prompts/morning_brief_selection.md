@@ -4,7 +4,7 @@ Read every summary and select each article that meets the criteria below. Do not
 
 Include only news that could materially change our estimate of a business's long-term value or risk: portfolio/watchlist fundamentals; demand, economics, or moat; management or incentives; capital allocation; regulation; balance-sheet or solvency risk; material macro or industry demand, cost, rate, or tail-risk changes; and credible evidence against the thesis.
 
-Exclude price moves or technicals, targets, ratings without new facts, promotional picks, predictions, listicles, clickbait, low-substance commentary, and recycled or syndicated stories without new information.
+Exclude price-movement stories, technical analysis, price targets, ratings without new evidence, generic promotional picks, predictions, listicles, clickbait, low-substance commentary, and recycled or syndicated stories without new information. A stock-pick article may qualify when it offers a specific, evidence-backed variant perception that could change our view.
 
 Prefer filings, investor relations, and regulators, then WSJ, Economist, and Reuters. Use lower-quality sources only for unique material facts. Materiality comes first; source quality breaks ties.
 

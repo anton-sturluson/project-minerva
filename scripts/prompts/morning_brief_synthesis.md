@@ -42,7 +42,7 @@ uv run minerva extract-files \
   --concurrency "$BATCH_COUNT"
 ```
 
-4. Read Terra's JSONL results, ignore null `article_key` values, and query the selected articles from SQLite. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query excluded articles. Clearly label rumors and third-party interpretations.
+4. Extract only the non-null `article_key` values from Terra's JSONL results; do not use Terra's rationales in synthesis. Query titles and sources for the selected keys first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. When several articles cover the same event, prefer the highest-quality source. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query excluded articles. Clearly label rumors and third-party interpretations.
 5. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
@@ -58,8 +58,10 @@ _Portfolio / Watchlist Events_
 • _{Company/ticker — takeaway}:_ Explain what happened, the important facts, and why it matters. Cite the original sources.
 
 _Worth Knowing Today_
-• _{Investor takeaway}:_ Explain the development, why it matters to investors, and any important uncertainty. Cite the original sources.
+• _{Investor takeaway}:_ {Concise helpful explanation with original-source links.}
 ```
+
+For `_Worth Knowing Today_`, select exactly 10 distinct non-portfolio events that are most useful for becoming a better investor. They may be company-specific or broader. Prefer developments with transferable lessons about economics, competition, incentives, capital allocation, regulation, technology, macro conditions, or risk.
 
 If nothing material occurred for the portfolio or watchlist, use the approved fallback:
 
