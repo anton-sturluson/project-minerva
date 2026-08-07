@@ -1,6 +1,6 @@
 # Morning brief synthesis contract
 
-The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, delegate synthesis, or post to Slack with a messaging tool.
+You are GPT-5.6 Sol. The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, delegate synthesis or writing, or post to Slack with a messaging tool. The sole permitted delegation is the one fresh GPT Terra article-selection turn in Section 3: Terra selects; Sol synthesizes and writes.
 
 ## 1. Validate the input
 
@@ -23,21 +23,28 @@ uv run minerva summarize --model gemini-3.6-flash --thinking high
 - After all calls succeed, persist summaries with parameter binding in one SQLite transaction. Update by `article_key` only where the summary is still NULL or blank.
 - Re-query the same fixed half-open window and require zero eligible blank summaries before synthesis. Reruns must be idempotent.
 
-## 3. Select the developments
+## 3. Have Terra select the developments
 
-Read the prepared-evidence JSON, relevant `prices` rows, and the complete summary of every article from the collection period before deciding what to include. Do not select from headlines or URLs alone. Confirm that the number of summaries read matches the total article count in `evidence_stats`; otherwise stop and report both counts and the diagnostic artifact path.
+Read the prepared-evidence JSON, relevant `prices` rows, and the complete summary of every article in the collection period. Do not select from headlines or URLs alone. Confirm that the number of summaries read matches the total article count in `evidence_stats`; otherwise stop and report both counts and the diagnostic artifact path.
 
-Create a ranked list of distinct material developments. Combine duplicate, syndicated, and follow-up articles about the same development, then use this list when writing the Slack brief.
+Before writing, make exactly one fresh Terra agent turn. Give it a unique new session ID and invoke it without `--deliver` or any other delivery option:
 
-- Include every development that offers a concrete investor takeaway. Do not omit a qualifying item merely for brevity or impose an arbitrary bullet limit.
-- Portfolio / Watchlist Events may cover companies listed in `holdings_path` or `watchlist_path`. Do not use the broader company universe or promote an unrelated company because of a ticker-text match.
-- Worth Knowing Today may include material market, macro, policy, industry, technology, or business developments, including slightly adjacent items.
-- Omit duplicates, irrelevant ticker matches, and low-substance commentary. Clearly label rumors and third-party interpretations.
-- Prefer company filings and official sources, followed by WSJ, Economist, and Reuters.
+```bash
+openclaw agent --agent main --model terra --thinking high --session-id "$fresh_session_id" --message "$selection_prompt"
+```
+
+The single message must contain the portfolio/watchlist identities and the complete summary set, with exactly one object per article containing `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. It must also instruct Terra to return JSON only as `{"selected_developments": [{"section": "portfolio_watchlist|worth_knowing", "takeaway": "...", "article_keys": ["..."], "urls": ["..."], "materiality": "..."}]}` under this selection policy:
+
+- Include only decision-useful items: material portfolio/watchlist fundamental developments; credible new facts affecting long-term economics or competitive position, capital allocation, management or incentives, regulation, financing or solvency; or material macro/industry demand, cost, rate, or tail-risk changes. Include disconfirming evidence and thesis-break signals.
+- Exclude stock-price movement or technicals, price targets, ratings changes without new primary facts, promotional stock picks, listicles, predictions, clickbait, low-substance commentary, and recycled or syndicated items without incremental information.
+- Prefer first-party filings, IR, and regulators; then WSJ, Economist, and Reuters. Use lower-quality aggregators only for unique material facts. Materiality beats source prestige; quality breaks ties.
+- Group duplicate and follow-up coverage into one development grounded in its article keys and URLs. Portfolio/watchlist items may cover only companies in the supplied holdings or watchlist; reject unrelated ticker-text matches.
+
+Do not retry, ask Terra a follow-up, or make another delegated agent call. Treat every article absent from Terra's `selected_developments` as excluded. Sol may group and rank Terra's selections and must write every selected qualifying development without an arbitrary bullet limit, but must not add an excluded article, article key, URL, or development. Clearly label rumors and third-party interpretations.
 
 ## 4. Write the Slack brief
 
-Write `slack_brief_output` from the ranked list. Do not create a separate report or memo.
+Write the canonical `slack_brief_output` from Terra's shortlist. Do not create a separate report or memo.
 
 Write exactly these three sections in the order shown, with no other text or sections:
 
