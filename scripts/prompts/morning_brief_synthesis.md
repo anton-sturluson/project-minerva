@@ -1,6 +1,6 @@
 # Morning brief synthesis contract
 
-The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, delegate synthesis, or post to Slack with a messaging tool.
+The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, or start another agent or session. After summary completion, the only additional model work permitted is the Terra selection pass in Section 3; perform the orchestration, synthesis, and writing in this run.
 
 ## 1. Validate the input
 
@@ -15,29 +15,39 @@ Use `window_start` and `window_end` exactly as provided with today's collected d
 - For each row, pipe `content` on stdin to:
 
 ```bash
-uv run minerva summarize --model gemini-3.6-flash --thinking high
+uv run minerva summarize --model gpt-5.6-luna --thinking medium
 ```
 
-- Run no more than four summarization subprocesses at once. Keep article content and generated summaries in memory; do not write article or summary files.
+- Run no more than four summarization subprocesses at once. During this phase, keep article content and generated summaries in memory.
 - If any summarization fails, do not write a partial batch. Report the failure count and artifact paths concisely.
 - After all calls succeed, persist summaries with parameter binding in one SQLite transaction. Update by `article_key` only where the summary is still NULL or blank.
-- Re-query the same fixed half-open window and require zero eligible blank summaries before synthesis. Reruns must be idempotent.
+- Re-query the same fixed half-open window and require zero eligible blank summaries before selection. Reruns must be idempotent.
 
-## 3. Select the developments
+## 3. Select the articles with Terra
 
-Read the prepared-evidence JSON, relevant `prices` rows, and the complete summary of every article from the collection period before deciding what to include. Do not select from headlines or URLs alone. Confirm that the number of summaries read matches the total article count in `evidence_stats`; otherwise stop and report both counts and the diagnostic artifact path.
+Do not read the batch inputs into your context.
 
-Create a ranked list of distinct material developments. Combine duplicate, syndicated, and follow-up articles about the same development, then use this list when writing the Slack brief.
+1. Create a temporary directory.
+2. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`.
+3. If batches exist, count them and run the extractor once with concurrency equal to the batch count; otherwise skip Terra selection:
 
-- Include every development that offers a concrete investor takeaway. Do not omit a qualifying item merely for brevity or impose an arbitrary bullet limit.
-- Portfolio / Watchlist Events may cover companies listed in `holdings_path` or `watchlist_path`. Do not use the broader company universe or promote an unrelated company because of a ticker-text match.
-- Worth Knowing Today may include material market, macro, policy, industry, technology, or business developments, including slightly adjacent items.
-- Omit duplicates, irrelevant ticker matches, and low-substance commentary. Clearly label rumors and third-party interpretations.
-- Prefer company filings and official sources, followed by WSJ, Economist, and Reuters.
+```bash
+BATCH_COUNT=$(find "$SELECTION_TMP" -name 'batch-*' -type f | wc -l | tr -d ' ')
+uv run minerva extract-files \
+  --questions-file scripts/prompts/morning_brief_selection.md \
+  --files "$SELECTION_TMP/batch-*" \
+  --out "$SELECTION_TMP/results" \
+  --model gpt-5.6-terra \
+  --thinking high \
+  --concurrency "$BATCH_COUNT"
+```
+
+4. Extract only the non-null `article_key` values from Terra's JSONL results; do not use Terra's rationales in synthesis. Query titles and sources for the selected keys first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. When several articles cover the same event, prefer the highest-quality source. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query excluded articles. Clearly label rumors and third-party interpretations.
+5. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
 
-Write `slack_brief_output` from the ranked list. Do not create a separate report or memo.
+Write the canonical `slack_brief_output` from the verified Terra selections. Do not create a separate report or memo.
 
 Write exactly these three sections in the order shown, with no other text or sections:
 
@@ -48,8 +58,10 @@ _Portfolio / Watchlist Events_
 • _{Company/ticker — takeaway}:_ Explain what happened, the important facts, and why it matters. Cite the original sources.
 
 _Worth Knowing Today_
-• _{Investor takeaway}:_ Explain the development, why it matters to investors, and any important uncertainty. Cite the original sources.
+• _{Investor takeaway}:_ {Concise helpful explanation with original-source links.}
 ```
+
+For `_Worth Knowing Today_`, select exactly 10 distinct non-portfolio events that are most useful for becoming a better investor. They may be company-specific or broader. Prefer developments with transferable lessons about economics, competition, incentives, capital allocation, regulation, technology, macro conditions, or risk.
 
 If nothing material occurred for the portfolio or watchlist, use the approved fallback:
 
@@ -57,8 +69,8 @@ If nothing material occurred for the portfolio or watchlist, use the approved fa
 • No material portfolio or watchlist developments during the collection period.
 ```
 
-Get final article and per-source counts from the verified window query and collector successes and failures from `collector_stats`. Cite factual claims with direct source URLs from SQLite, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables.
+Get final article and per-source counts from the verified fixed-window query and collector successes and failures from `collector_stats`. Cite factual claims with the direct source URLs from the selected SQLite rows, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables.
 
 ## 5. Return the result
 
-Do not call Slack or any messaging tool. Return the exact contents of `slack_brief_output`, with no preamble, commentary, or code fence, so the cron delivery layer posts it once. If a required step explicitly listed in Sections 1-4 fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief. Only those failures are fatal. Do not invent or invoke validation commands not listed in this contract; if an unlisted command fails, correct or skip it rather than aborting when `slack_brief_output` can still be produced and read.
+Do not call Slack or any messaging tool. Return the exact contents of `slack_brief_output`, with no preamble, commentary, or code fence, so the cron delivery layer posts it once. If a required step in Sections 1-4 fails, return one concise failure message naming the phase and diagnostic artifact path instead of a partial brief. Do not run a Slack validator, rewriter, or other unlisted validation command; correct or skip failures outside the required steps when `slack_brief_output` can still be produced.
