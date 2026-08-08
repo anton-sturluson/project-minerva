@@ -43,7 +43,8 @@ uv run minerva extract-files \
 ```
 
 4. Extract only the non-null `article_key` values from Terra's JSONL results; do not use Terra's rationales in synthesis. Query titles and sources for the selected keys first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. When several articles cover the same event, prefer the highest-quality source. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query excluded articles. Clearly label rumors and third-party interpretations.
-5. Delete the temporary directory after selection.
+5. Before writing, read up to five of the most recent previous `slack-brief.md` outputs in the dated sibling run directories. Exclude developments already covered unless today's evidence adds a material new fact; if retained, write only the update.
+6. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
 
