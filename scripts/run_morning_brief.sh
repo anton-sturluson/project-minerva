@@ -13,11 +13,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 HELPER="${ROOT_DIR}/scripts/morning_brief_helper.py"
 RUN_DATE="${1:-$(date +%F)}"
+MINERVA_EDITORIAL_TIMEOUT="${MINERVA_EDITORIAL_TIMEOUT:-1800}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
 MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"
 MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-steve}"
 for integer_name in \
+  MINERVA_EDITORIAL_TIMEOUT \
   MINERVA_BROWSER_TIMEOUT \
   MINERVA_WEBFETCH_TIMEOUT \
   MINERVA_MAX_COLLECTORS; do
@@ -233,21 +235,20 @@ else
   write_collector_status() {
     local destination="$1" source_id="$2" source_name="$3" url="$4"
     local session_id="$5" status="$6" exit_status="$7" log_file="$8"
-    local output_bytes="$9"
+    local attempts="$9" error="${10}"
     python3 "${HELPER}" collector-status \
       "${destination}" "${source_id}" "${source_name}" "${url}" \
       "${session_id}" "${status}" "${exit_status}" "${log_file}" \
-      "${output_bytes}"
+      "${attempts}" "${error}"
   }
 
   collect_source() {
     local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
-    local url="$5" collection_scope="$6" source_root="$7"
+    local url="$5" collection_scope="$6" source_root="$7" max_attempts="$8"
     local artifact_root="${COLLECTOR_ARTIFACT_DIR}/${source_id}"
-    local session_id="news-${source_id}-${RUN_DATE}-$$-${RANDOM}"
     local lifecycle_log="${artifact_root}/collector.log"
     local status_file="${artifact_root}/status.json"
-    local prompt exit_status output_bytes result_status
+    local prompt session_id failure_reason="" attempts=0 exit_status=1 result_status=failed
     mkdir -p "${artifact_root}"
     prompt=$(render_collection_prompt "${prompt_template}" "${source_name}" \
       "${source_id}" "${url}" "${collection_scope}" "${source_root}")
@@ -256,36 +257,41 @@ else
       echo "source_id: ${source_id}"
       echo "source_name: ${source_name}"
       echo "url: ${url}"
-      echo "session_id: ${session_id}"
       echo "started_at: $(date -u +%FT%TZ)"
     } >"${lifecycle_log}"
 
-    # Count and discard agent output as a stream. Even if an agent violates the
-    # reply contract, an article body is never materialized in a temp file.
-    if output_bytes=$(openclaw agent \
-      --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
-      --timeout "${timeout}" \
-      --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
-      --thinking high \
-      --session-id "${session_id}" \
-      --message "${prompt}" 2>&1 | wc -c); then
-      exit_status=0
-      result_status=ok
-    else
-      exit_status=$?
-      result_status=failed
-    fi
-    output_bytes=$(echo "${output_bytes}" | tr -d ' ')
+    while [[ "${attempts}" -lt "${max_attempts}" ]]; do
+      attempts=$((attempts + 1))
+      session_id="news-${source_id}-${RUN_DATE}-$$-${attempts}-${RANDOM}"
+      echo "attempt_${attempts}_session_id: ${session_id}" >>"${lifecycle_log}"
+      if failure_reason=$(openclaw agent --json \
+        --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
+        --timeout "${timeout}" \
+        --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
+        --thinking high \
+        --session-id "${session_id}" \
+        --message "${prompt}" 2>/dev/null | \
+        python3 "${HELPER}" validate-openclaw 2>&1); then
+        exit_status=0
+        result_status=ok
+        failure_reason=""
+        break
+      else
+        exit_status=$?
+      fi
+      failure_reason="${failure_reason:-process_error}"
+    done
     {
       echo "finished_at: $(date -u +%FT%TZ)"
       echo "status: ${result_status}"
       echo "exit_status: ${exit_status}"
-      echo "openclaw_output_bytes: ${output_bytes}"
+      echo "attempts: ${attempts}"
+      [[ -z "${failure_reason}" ]] || echo "error: ${failure_reason}"
       echo "note: OpenClaw output discarded to prevent article-body persistence"
     } >>"${lifecycle_log}"
     write_collector_status "${status_file}" "${source_id}" "${source_name}" \
       "${url}" "${session_id}" "${result_status}" "${exit_status}" \
-      "${lifecycle_log}" "${output_bytes}"
+      "${lifecycle_log}" "${attempts}" "${failure_reason}"
 
     if [[ "${exit_status}" -eq 0 ]]; then
       echo "news: ${source_id} ok (status: ${status_file})"
@@ -308,7 +314,7 @@ else
 
   launch_source() {
     local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
-    local url="$5" collection_scope="$6"
+    local url="$5" collection_scope="$6" max_attempts="${7:-1}"
     if ! [[ "${source_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
       echo "error[collectors]: unsafe source id: ${source_id}" >&2
       return 1
@@ -321,7 +327,8 @@ else
     mkdir -p "${source_root}"
     printf '%s\n' "${source_id}" >>"${NEWS_RUN_DIR}/launched.txt"
     collect_source "${prompt_template}" "${timeout}" "${source_id}" \
-      "${source_name}" "${url}" "${collection_scope}" "${source_root}" &
+      "${source_name}" "${url}" "${collection_scope}" "${source_root}" \
+      "${max_attempts}" &
     PIDS+=("$!")
     if [[ "${#PIDS[@]}" -ge "${MINERVA_MAX_COLLECTORS}" ]]; then
       wait_for_collectors
@@ -342,12 +349,12 @@ else
       collection_scope=$(echo "${entry}" | jq -r '.collect // "Items relevant to a long-only investor."')
       if [[ "${access}" == "browser" ]]; then
         echo "  spawning browser agent: ${source_id}"
-        launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}" \
-          "${source_id}" "${source_name}" "${url}" "${collection_scope}"
+        launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_EDITORIAL_TIMEOUT}" \
+          "${source_id}" "${source_name}" "${url}" "${collection_scope}" 2
       else
         echo "  spawning web_fetch agent: ${source_id}"
-        launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_WEBFETCH_TIMEOUT}" \
-          "${source_id}" "${source_name}" "${url}" "${collection_scope}"
+        launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_EDITORIAL_TIMEOUT}" \
+          "${source_id}" "${source_name}" "${url}" "${collection_scope}" 2
       fi
     done
   fi

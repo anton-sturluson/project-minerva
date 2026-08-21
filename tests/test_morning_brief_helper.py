@@ -47,6 +47,40 @@ def test_render_prompt_does_not_expand_placeholders_inside_metadata() -> None:
     )
 
 
+@pytest.mark.parametrize("stop_reason", ["completed", "end_turn", "stop"])
+def test_validate_openclaw_result_accepts_completed_turns(stop_reason: str) -> None:
+    payload = {
+        "status": "ok",
+        "result": {
+            "payloads": [{"text": "must not be returned"}],
+            "meta": {"aborted": False, "stopReason": stop_reason},
+        },
+    }
+
+    assert helper.validate_openclaw_result(json.dumps(payload)) == "ok"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", "invalid_json"),
+        ("{}{}", "invalid_json"),
+        ("[]", "status_error"),
+        ('{"status":"error"}', "status_error"),
+        ('{"status":"ok","result":{}}', "invalid_result"),
+        ('{"status":"ok","result":{"payloads":[],"meta":{"aborted":true,"stopReason":"end_turn"}}}', "aborted"),
+        ('{"status":"ok","result":{"payloads":[],"meta":{"error":"boom","stopReason":"end_turn"}}}', "agent_error"),
+        ('{"status":"ok","result":{"payloads":[],"meta":{"timeoutPhase":"model","stopReason":"end_turn"}}}', "timeout"),
+        ('{"status":"ok","result":{"payloads":[{"isError":true}],"meta":{"stopReason":"end_turn"}}}', "error_payload"),
+        ('{"status":"ok","result":{"payloads":[],"meta":{"stopReason":"length"}}}', "incomplete"),
+    ],
+)
+def test_validate_openclaw_result_rejects_incomplete_or_invalid_results(
+    text: str, expected: str
+) -> None:
+    assert helper.validate_openclaw_result(text) == expected
+
+
 def test_build_ir_batches_uses_universe_for_inclusion_and_registry_for_feeds() -> None:
     security_ids = [f"C{index:02d}" for index in range(11)]
     universe = [
