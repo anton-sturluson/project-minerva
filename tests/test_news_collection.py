@@ -139,14 +139,21 @@ set -euo pipefail
 message=""
 timeout=""
 agent=""
+session_id=""
+json_mode=0
+failure_json='{"status":"ok","result":{"payloads":[{"isError":true,"text":"SENSITIVE_PAYLOAD_SENTINEL"}],"meta":{"aborted":true,"stopReason":"aborted"}}}'
+success_json='{"status":"ok","result":{"payloads":[{"text":"SENSITIVE_PAYLOAD_SENTINEL"}],"meta":{"aborted":false,"stopReason":"end_turn"}}}'
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    --json) json_mode=1; shift ;;
     --message) message="$2"; shift 2 ;;
     --timeout) timeout="$2"; shift 2 ;;
     --agent) agent="$2"; shift 2 ;;
+    --session-id) session_id="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+[[ "${json_mode}" -eq 1 ]] || exit 9
 
 # Extract the isolated metadata root and the news-ingest command rendered in
 # the prompt. Both are stable, verbatim substrings emitted by the script.
@@ -159,6 +166,10 @@ invest_db=$(printf '%s\n' "${message}" | \
 printf '%s|%s\n' "${source_id}" "${timeout}" >> "${TIMEOUT_LOG}"
 printf '%s\n' "${agent}" >> "${AGENT_LOG}"
 printf '%s\n' "${source_id}" >> "${COLLECTOR_START_LOG}"
+printf '%s|%s\n' "${source_id}" "${session_id}" >> "${SESSION_LOG}"
+attempt_file="${ATTEMPT_DIR}/${source_id}"
+attempt=$(( $(cat "${attempt_file}" 2>/dev/null || echo 0) + 1 ))
+printf '%s\n' "${attempt}" > "${attempt_file}"
 batch_json=$(printf '%s\n' "${message}" | \
   sed -n 's/^Batch companies JSON: `\(.*\)`$/\1/p' | head -n 1)
 if [[ -n "${batch_json}" ]]; then
@@ -167,6 +178,17 @@ fi
 
 if [[ "${source_id}" == "${BROKEN_SOURCE:-__unset__}" ]]; then
   exit 7
+fi
+
+logical_failure=0
+if [[ "${source_id}" == "${LOGICAL_FAILURE_SOURCE:-__unset__}" ]] || \
+   [[ "${source_id}" == "${RECOVER_SOURCE:-__unset__}" && "${attempt}" -eq 1 ]]; then
+  logical_failure=1
+fi
+if [[ "${logical_failure}" -eq 1 && \
+      "${source_id}" != "${INGEST_BEFORE_FAILURE_SOURCE:-__unset__}" ]]; then
+  printf '%s\n' "${failure_json}"
+  exit 0
 fi
 
 # The prompt must include the direct-ingest command surface. Assert it here so
@@ -196,6 +218,11 @@ PY
 )
 printf '%s\n' "${article_json}" | "${MINERVA_RUNNER}" news ingest \
   --input - --db "${invest_db}" >/dev/null
+if [[ "${logical_failure}" -eq 1 ]]; then
+  printf '%s\n' "${failure_json}"
+else
+  printf '%s\n' "${success_json}"
+fi
 """,
     )
 
@@ -232,6 +259,8 @@ def _run_wrapper(
     temp_state.mkdir(exist_ok=True)
     coordinator = tmp_path / "coordinator"
     coordinator.mkdir(exist_ok=True)
+    attempt_dir = coordinator / "attempts"
+    attempt_dir.mkdir(exist_ok=True)
     bin_dir = tmp_path / "bin"
     fake_openclaw = (
         bin_dir / "openclaw" if bin_dir.is_dir() else _fake_openclaw(tmp_path)
@@ -264,6 +293,8 @@ def _run_wrapper(
             "AGENT_LOG": str(coordinator / "agents.log"),
             "COLLECTOR_START_LOG": str(coordinator / "collector-starts.log"),
             "IR_BATCH_LOG": str(coordinator / "ir-batches.log"),
+            "SESSION_LOG": str(coordinator / "sessions.log"),
+            "ATTEMPT_DIR": str(attempt_dir),
         }
     )
     if extra_env:
@@ -304,6 +335,7 @@ def _phase_dir(tmp_path: Path, run_date: str) -> Path:
 @pytest.mark.parametrize(
     ("variable", "value"),
     [
+        ("MINERVA_EDITORIAL_TIMEOUT", "0"),
         ("MINERVA_BROWSER_TIMEOUT", "0"),
         ("MINERVA_BROWSER_TIMEOUT", "not-a-number"),
         ("MINERVA_WEBFETCH_TIMEOUT", "-1"),
@@ -632,8 +664,8 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
             tmp_path / "coordinator" / "timeouts.log"
         ).read_text(encoding="utf-8").splitlines()
     )
-    assert timeouts["reuters-markets"] == "900"
-    assert timeouts["wsj"] == "900"
+    assert timeouts["reuters-markets"] == "1800"
+    assert timeouts["wsj"] == "1800"
     assert timeouts["ir-batch-001"] == "900"
 
     # Every collector's status.json reports ok.
@@ -644,6 +676,8 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
         )
         assert status["status"] == "ok"
         assert status["exit_status"] == 0
+        assert status["attempts"] == 1
+        assert status["error"] is None
         assert status["source_id"] == source_id
 
     # collectors.json aggregates success totals.
@@ -672,6 +706,13 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
         assert all(
             path.suffix != ".md" for path in source_files
         ), f"unexpected markdown file under {source_id}: {source_files}"
+    assert "SENSITIVE_PAYLOAD_SENTINEL" not in str(
+        [
+            path.read_text(encoding="utf-8")
+            for path in collector_dir.rglob("*")
+            if path.is_file()
+        ]
+    )
 
 
 def test_failed_collector_reports_status_without_blocking_pipeline(
@@ -708,8 +749,11 @@ def test_failed_collector_reports_status_without_blocking_pipeline(
         (collector_dir / "wsj" / "status.json").read_text(encoding="utf-8")
     )
     assert broken_status["status"] == "failed"
-    assert broken_status["exit_status"] == 7
+    assert broken_status["exit_status"] != 0
+    assert broken_status["attempts"] == 2
+    assert broken_status["error"] == "invalid_json"
     assert healthy_status["status"] == "ok"
+    assert healthy_status["attempts"] == 1
 
     aggregate = json.loads(
         (_phase_dir(tmp_path, run_date) / "collectors.json").read_text(
@@ -724,6 +768,111 @@ def test_failed_collector_reports_status_without_blocking_pipeline(
 
     # The degraded run is still reported on stdout for the operator.
     assert "collector error" in result.stdout
+
+
+def test_editorial_collector_retries_once_with_a_fresh_session(tmp_path: Path) -> None:
+    run_date = date.today().isoformat()
+    result = _run_wrapper(
+        tmp_path,
+        sources=[
+            {
+                "id": "economist",
+                "name": "The Economist",
+                "url": "https://example.test/economist",
+                "access": "browser",
+            }
+        ],
+        run_date=run_date,
+        extra_env={"RECOVER_SOURCE": "economist"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    status = json.loads(
+        (_phase_dir(tmp_path, run_date) / "collectors/economist/status.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    sessions = [
+        line.split("|", 1)[1]
+        for line in (tmp_path / "coordinator/sessions.log").read_text().splitlines()
+        if line.startswith("economist|")
+    ]
+    assert status["status"] == "ok"
+    assert status["attempts"] == 2
+    assert len(sessions) == len(set(sessions)) == 2
+
+
+def test_partial_ingestion_survives_final_logical_failure(tmp_path: Path) -> None:
+    run_date = date.today().isoformat()
+    result = _run_wrapper(
+        tmp_path,
+        sources=[
+            {
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
+            }
+        ],
+        run_date=run_date,
+        extra_env={
+            "LOGICAL_FAILURE_SOURCE": "wsj",
+            "INGEST_BEFORE_FAILURE_SOURCE": "wsj",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    phase_dir = _phase_dir(tmp_path, run_date)
+    status = json.loads((phase_dir / "collectors/wsj/status.json").read_text())
+    with sqlite3.connect(tmp_path / "invest.db") as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM news WHERE source='wsj'"
+        ).fetchone()[0]
+    assert count == 1
+    assert status["status"] == "failed"
+    assert status["attempts"] == 2
+    assert status["error"] == "aborted"
+    assert "SENSITIVE_PAYLOAD_SENTINEL" not in str(
+        [
+            path.read_text(encoding="utf-8")
+            for path in phase_dir.rglob("*")
+            if path.is_file()
+        ]
+    )
+
+
+def test_ir_failure_is_not_retried(tmp_path: Path) -> None:
+    run_date = date.today().isoformat()
+    result = _run_wrapper(
+        tmp_path,
+        sources=[
+            {
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
+            }
+        ],
+        ir_entries=[
+            {
+                "security_id": "AMD",
+                "company_name": "AMD",
+                "feeds": [{"url": "https://example.test/AMD"}],
+            }
+        ],
+        run_date=run_date,
+        extra_env={"BROKEN_SOURCE": "ir-batch-001"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    status = json.loads(
+        (
+            _phase_dir(tmp_path, run_date)
+            / "collectors/ir-batch-001/status.json"
+        ).read_text()
+    )
+    assert status["status"] == "failed"
+    assert status["attempts"] == 1
 
 
 # ---------------------------------------------------------------------------

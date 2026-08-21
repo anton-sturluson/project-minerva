@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 IR_BATCH_SIZE = 10
 _PLACEHOLDER = re.compile(r"{{([A-Z_]+)}}")
+_SUCCESS_STOP_REASONS = {"completed", "end_turn", "stop"}
 
 
 def parse_run_date(value: str) -> date:
@@ -43,6 +44,37 @@ def render_prompt(template: str, replacements: dict[str, str]) -> str:
     return _PLACEHOLDER.sub(
         lambda match: replacements.get(match.group(1), match.group(0)), template
     )
+
+
+def validate_openclaw_result(text: str) -> str:
+    """Return a safe outcome code without exposing agent payload text."""
+    try:
+        envelope = json.loads(text)
+    except json.JSONDecodeError:
+        return "invalid_json"
+    if not isinstance(envelope, dict) or envelope.get("status") != "ok":
+        return "status_error"
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        return "invalid_result"
+    meta = result.get("meta")
+    payloads = result.get("payloads")
+    if not isinstance(meta, dict) or not isinstance(payloads, list):
+        return "invalid_result"
+    if meta.get("aborted") is True:
+        return "aborted"
+    if meta.get("error") is not None:
+        return "agent_error"
+    if meta.get("timeoutPhase") is not None:
+        return "timeout"
+    if any(
+        isinstance(payload, dict) and payload.get("isError") is True
+        for payload in payloads
+    ):
+        return "error_payload"
+    if meta.get("stopReason") not in _SUCCESS_STOP_REASONS:
+        return "incomplete"
+    return "ok"
 
 
 def build_ir_batches(
@@ -324,15 +356,32 @@ def _main(command: str, args: list[str]) -> None:
         )
     elif command == "render-prompt":
         _render_prompt_command(args)
+    elif command == "validate-openclaw":
+        _require(command, args, 0)
+        outcome = validate_openclaw_result(sys.stdin.read())
+        if outcome != "ok":
+            raise ValueError(outcome)
     elif command == "collector-status":
-        _require(command, args, 9)
-        output, source_id, source_name, url, session_id, status, exit_status, log, size = args
+        _require(command, args, 10)
+        (
+            output,
+            source_id,
+            source_name,
+            url,
+            session_id,
+            status,
+            exit_status,
+            log,
+            attempts,
+            error,
+        ) = args
         _write_json(
             Path(output),
             {
+                "attempts": int(attempts),
+                "error": error or None,
                 "exit_status": int(exit_status),
                 "log": log,
-                "openclaw_output_bytes": int(size),
                 "session_id": session_id,
                 "source_id": source_id,
                 "source_name": source_name,
