@@ -1020,6 +1020,12 @@ def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     assert Path(handoff["collector_stats"]).name == "collectors.json"
     assert Path(handoff["holdings_path"]).name == "holdings.json"
     assert Path(handoff["watchlist_path"]).name == "watchlist.json"
+    synthesis_contract = Path(handoff["instructions"]).read_text(encoding="utf-8")
+    assert "exact `holdings_path` and `watchlist_path`" in synthesis_contract
+    assert 'arrays named `holdings` and `watchlist`' in synthesis_contract
+    assert "`security_id`, `ticker`, and `company_name`" in synthesis_contract
+    assert '--questions-file "$SELECTION_TMP/relevance-prompt.md"' in synthesis_contract
+    assert "--model gpt-5.6-terra" in synthesis_contract
     # Handoff exposes one synthesized output.
     steps_blob = " ".join(handoff["steps"])
     assert "minerva summarize" in steps_blob
