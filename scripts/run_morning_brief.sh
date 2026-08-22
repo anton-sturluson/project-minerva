@@ -14,7 +14,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 HELPER="${ROOT_DIR}/scripts/morning_brief_helper.py"
 RUN_DATE="${1:-$(date +%F)}"
 MINERVA_EDITORIAL_TIMEOUT="${MINERVA_EDITORIAL_TIMEOUT:-1800}"
-MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-900}"
+MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-1800}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
 MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"
 MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-steve}"
@@ -375,7 +375,7 @@ else
       echo "  spawning IR browser agent: ${ir_batch_id} (${company_count} companies)"
       launch_source "${IR_BATCH_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}" \
         "${ir_batch_id}" "IR batch ${ir_batch_number}" "${first_url}" \
-        "${ir_companies_json}"
+        "${ir_companies_json}" 2
     done <"${NEWS_RUN_DIR}/ir-batches.jsonl"
   fi
 

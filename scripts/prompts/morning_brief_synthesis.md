@@ -70,6 +70,12 @@ If nothing material occurred for the portfolio or watchlist, use the approved fa
 • No material portfolio or watchlist developments during the collection period.
 ```
 
+If no non-portfolio event qualifies for `_Worth Knowing Today_`, use this fallback:
+
+```text
+• No qualifying non-portfolio developments during the collection period.
+```
+
 Get final article and per-source counts from the verified fixed-window query and collector successes and failures from `collector_stats`. Cite factual claims with the direct source URLs from the selected SQLite rows, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables.
 
 ## 5. Return the result

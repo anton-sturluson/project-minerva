@@ -17,6 +17,14 @@ MARKET_TIMEZONE = ZoneInfo("America/New_York")
 IR_BATCH_SIZE = 10
 _PLACEHOLDER = re.compile(r"{{([A-Z_]+)}}")
 _SUCCESS_STOP_REASONS = {"completed", "end_turn", "stop"}
+_COLLECTOR_REPORT_KEYS = {
+    "status",
+    "inserted",
+    "updated",
+    "duplicate",
+    "skipped",
+    "failed",
+}
 
 
 def parse_run_date(value: str) -> date:
@@ -74,6 +82,24 @@ def validate_openclaw_result(text: str) -> str:
         return "error_payload"
     if meta.get("stopReason") not in _SUCCESS_STOP_REASONS:
         return "incomplete"
+    if len(payloads) != 1 or not isinstance(payloads[0], dict):
+        return "invalid_report"
+    report_text = payloads[0].get("text")
+    if not isinstance(report_text, str):
+        return "invalid_report"
+    try:
+        report = json.loads(report_text)
+    except json.JSONDecodeError:
+        return "invalid_report"
+    if not isinstance(report, dict) or set(report) != _COLLECTOR_REPORT_KEYS:
+        return "invalid_report"
+    if report.get("status") not in {"ok", "failed"}:
+        return "invalid_report"
+    counts = [report[key] for key in _COLLECTOR_REPORT_KEYS - {"status"}]
+    if any(type(count) is not int or count < 0 for count in counts):
+        return "invalid_counts"
+    if report["status"] != "ok" or report["failed"] != 0:
+        return "collector_failed"
     return "ok"
 
 

@@ -46,15 +46,19 @@ Pipe that object directly on stdin to:
 printf '%s\n' "$article_json" | {{NEWS_INGEST_COMMAND}}
 ```
 
-A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never put release JSON or content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the release as failed and return a non-zero result after continuing safely.
+A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never put release JSON or content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the release as failed and report collector status `failed` after continuing safely.
 
 ## Browser procedure
 
 1. Open the first configured feed exactly once with `browser open ... --new --window`. Record the returned tab alias; it is the only window and tab for the whole batch. Close any accidentally created extra tab or window immediately.
 2. For each company and feed, navigate that tab to the feed URL, scan the complete listing, and record candidate headline, destination URL, and visible publication value before opening release bodies.
 3. Run the per-company batch duplicate lookup. For each remaining candidate, use the same tab to resolve publication metadata, extract the full release, and ingest the in-memory object.
-4. Continue through all feeds and companies when an individual page returns a 404, CAPTCHA, paywall, or extraction failure, recording the affected item as skipped.
+4. Continue through all feeds and companies when an individual page is unavailable or paywalled, recording the affected item as skipped. Count a browser, fetch, or extraction failure as failed and continue safely.
 5. Close the tab with `browser close {tab_alias}`.
-6. Reply briefly with per-company and total counts for inserted/updated/duplicate/skipped/failed. Do not include release bodies.
+6. Return the final report described below.
 
-If no company has an accessible configured feed, or the browser bridge prevents safe completion, return non-zero.
+If no company has an accessible configured feed, or the browser bridge prevents safe completion, report status `failed`.
+
+## Final report
+
+Your final reply must be exactly one compact JSON object with no Markdown, preamble, or trailing text: `{"status":"ok","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":0}`. Use only the keys shown, with `status` set to `ok` or `failed` and every total count set to a nonnegative integer. `status` may be `ok` only when `failed` is zero; any browser, fetch, or safe-completion failure must use `failed`. Do not include release bodies.
