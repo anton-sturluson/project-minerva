@@ -62,7 +62,7 @@ _Worth Knowing Today_
 • _{Investor takeaway}:_ {Concise helpful explanation with original-source links.}
 ```
 
-For `_Worth Knowing Today_`, select exactly 10 distinct non-portfolio events that are most useful for becoming a better investor. They may be company-specific or broader. Prefer developments with transferable lessons about economics, competition, incentives, capital allocation, regulation, technology, macro conditions, or risk.
+For `_Worth Knowing Today_`, select up to 10 distinct non-portfolio events that are most useful for becoming a better investor. When fewer than 10 events qualify, include every qualifying event. Never add filler, and never query or read rejected articles merely to reach the maximum. Events may be company-specific or broader. Prefer developments with transferable lessons about economics, competition, incentives, capital allocation, regulation, technology, macro conditions, or risk.
 
 If nothing material occurred for the portfolio or watchlist, use the approved fallback:
 

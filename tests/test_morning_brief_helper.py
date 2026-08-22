@@ -19,6 +19,17 @@ helper = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helper)
 
 
+def test_morning_brief_prompts_do_not_require_a_worth_knowing_quota() -> None:
+    selection = (REPO_ROOT / "scripts/prompts/morning_brief_selection.md").read_text()
+    synthesis = (REPO_ROOT / "scripts/prompts/morning_brief_synthesis.md").read_text()
+
+    assert "Do not select from titles or URLs alone or impose a quota." in selection
+    assert "select up to 10 distinct non-portfolio events" in synthesis
+    assert "When fewer than 10 events qualify, include every qualifying event." in synthesis
+    assert "Never add filler, and never query or read rejected articles" in synthesis
+    assert "select exactly 10" not in synthesis
+
+
 def test_parse_run_date_is_strict_and_previous_date_cli_logic_is_exact() -> None:
     assert helper.parse_run_date("2026-03-01") == date(2026, 3, 1)
     with pytest.raises(ValueError, match="ISO date"):
