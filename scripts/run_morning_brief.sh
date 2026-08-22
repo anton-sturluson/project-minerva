@@ -12,6 +12,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 HELPER="${ROOT_DIR}/scripts/morning_brief_helper.py"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
+run_helper() {
+  uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"
+}
 RUN_DATE="${1:-$(date +%F)}"
 MINERVA_EDITORIAL_TIMEOUT="${MINERVA_EDITORIAL_TIMEOUT:-1800}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-1800}"
@@ -29,11 +33,9 @@ for integer_name in \
     exit 1
   fi
 done
-if ! PREVIOUS_DATE="$(python3 "${HELPER}" previous-date "${RUN_DATE}")"; then
+if ! PREVIOUS_DATE="$(run_helper previous-date "${RUN_DATE}")"; then
   exit 1
 fi
-
-export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
 export MINERVA_WORKSPACE_ROOT="${MINERVA_WORKSPACE_ROOT:-${ROOT_DIR}/hard-disk}"
 
 REPORT_DIR="${MINERVA_REPORT_DIR:-${MINERVA_WORKSPACE_ROOT}/reports/03-daily-news/${RUN_DATE}}"
@@ -76,7 +78,7 @@ mkdir -p "${REPORT_DIR}" "${PHASE_DIR}" "${COLLECTOR_ARTIFACT_DIR}" \
 write_status() {
   local destination="$1" phase="$2" status="$3" exit_status="$4"
   local stdout_path="${5:-}" stderr_path="${6:-}"
-  python3 "${HELPER}" write-status \
+  run_helper write-status \
     "${destination}" "${phase}" "${status}" "${exit_status}" \
     "${stdout_path}" "${stderr_path}"
 }
@@ -138,7 +140,7 @@ echo ""
 if [[ "${MINERVA_SKIP_NEWS}" == "1" ]]; then
   echo "── Phase 2: News collection (skipped) ──"
   write_status "${PHASE_DIR}/news.status.json" news skipped 0
-  python3 "${HELPER}" window-evidence \
+  run_helper window-evidence \
     "${INVEST_DB}" "${RUN_DATE}" "${PHASE_DIR}/window-evidence.json" \
     --skipped
 else
@@ -224,7 +226,7 @@ else
   render_collection_prompt() {
     local template="$1" source_name="$2" source_id="$3" url="$4"
     local collection_scope="$5" source_root="$6"
-    python3 "${HELPER}" render-prompt \
+    run_helper render-prompt \
       "${template}" "${RUN_DATE}" "${source_name}" "${source_id}" \
       "${url}" "${source_root}" "${INVEST_DB}" \
       "${NEWS_EXIST_COMMAND}" "${NEWS_INGEST_COMMAND}" \
@@ -236,7 +238,7 @@ else
     local destination="$1" source_id="$2" source_name="$3" url="$4"
     local session_id="$5" status="$6" exit_status="$7" log_file="$8"
     local attempts="$9" error="${10}"
-    python3 "${HELPER}" collector-status \
+    run_helper collector-status \
       "${destination}" "${source_id}" "${source_name}" "${url}" \
       "${session_id}" "${status}" "${exit_status}" "${log_file}" \
       "${attempts}" "${error}"
@@ -271,7 +273,7 @@ else
         --thinking high \
         --session-id "${session_id}" \
         --message "${prompt}" 2>/dev/null | \
-        python3 "${HELPER}" validate-openclaw 2>&1); then
+        run_helper validate-openclaw 2>&1); then
         exit_status=0
         result_status=ok
         failure_reason=""
@@ -362,7 +364,7 @@ else
   # IR registry rows are metadata only. Select current-universe companies with
   # configured feeds, sort by security_id, then chunk into sessions of ten.
   if [[ -f "${PORTFOLIO_UNIVERSE}" && -f "${IR_REGISTRY}" ]]; then
-    python3 "${HELPER}" ir-batches \
+    run_helper ir-batches \
       "${PORTFOLIO_UNIVERSE}" "${IR_REGISTRY}" \
       >"${NEWS_RUN_DIR}/ir-batches.jsonl"
     ir_batch_number=0
@@ -382,7 +384,7 @@ else
   echo "  waiting for news agents..."
   wait_for_collectors
 
-  python3 "${HELPER}" collector-summary \
+  run_helper collector-summary \
     "${NEWS_RUN_DIR}/launched.txt" "${COLLECTOR_ARTIFACT_DIR}" \
     "${PHASE_DIR}/collectors.json"
   COLLECTION_ERROR_COUNT=$(jq -r '.failed' "${PHASE_DIR}/collectors.json")
@@ -396,7 +398,7 @@ else
   # ── PHASE 3: Fixed 04:00 America/New_York evidence gate ──
   echo ""
   echo "── Phase 3: Fixed 04:00 evidence gate ──"
-  if python3 "${HELPER}" window-evidence \
+  if run_helper window-evidence \
       "${INVEST_DB}" "${RUN_DATE}" "${PHASE_DIR}/window-evidence.json" \
       2>"${PHASE_DIR}/window-evidence.stderr.log"
   then
@@ -429,7 +431,7 @@ run_minerva_phase prep brief prep --date "${RUN_DATE}"
 
 MANIFEST_PATH="${REPORT_DIR}/data/raw/manifest.json"
 if [[ "${MINERVA_SKIP_STATUS_CHECK}" != "1" ]]; then
-  if python3 "${HELPER}" manifest-check "${MANIFEST_PATH}" \
+  if run_helper manifest-check "${MANIFEST_PATH}" \
       2>"${PHASE_DIR}/manifest-check.stderr.log"
   then
     write_status "${PHASE_DIR}/manifest-check.status.json" manifest-check ok 0
@@ -448,7 +450,7 @@ fi
 PREPARED_PATH="${REPORT_DIR}/data/structured/prepared-evidence.json"
 HANDOFF_PATH="${PHASE_DIR}/synthesis-handoff.json"
 SYNTHESIS_PROMPT="${ROOT_DIR}/scripts/prompts/morning_brief_synthesis.md"
-python3 "${HELPER}" write-handoff \
+run_helper write-handoff \
   "${HANDOFF_PATH}" "${RUN_DATE}" "${INVEST_DB}" "${PREPARED_PATH}" \
   "${REPORT_DIR}/notes/slack-brief.md" \
   "${PHASE_DIR}/window-evidence.json" "${PHASE_DIR}/collectors.json" \
