@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import time as time_module
 from datetime import date, datetime, time, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -25,6 +26,11 @@ _COLLECTOR_REPORT_KEYS = {
     "skipped",
     "failed",
 }
+
+
+class CollectorStatus(StrEnum):
+    OK = "ok"
+    FAILED = "failed"
 
 
 def parse_run_date(value: str) -> date:
@@ -93,12 +99,14 @@ def validate_openclaw_result(text: str) -> str:
         return "invalid_report"
     if not isinstance(report, dict) or set(report) != _COLLECTOR_REPORT_KEYS:
         return "invalid_report"
-    if report.get("status") not in {"ok", "failed"}:
+    try:
+        status = CollectorStatus(report["status"])
+    except (TypeError, ValueError):
         return "invalid_report"
     counts = [report[key] for key in _COLLECTOR_REPORT_KEYS - {"status"}]
     if any(type(count) is not int or count < 0 for count in counts):
         return "invalid_counts"
-    if report["status"] != "ok" or report["failed"] != 0:
+    if status is not CollectorStatus.OK or report["failed"] != 0:
         return "collector_failed"
     return "ok"
 
