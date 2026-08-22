@@ -7,13 +7,19 @@ import json
 import os
 import tempfile
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from harness.workflows.evidence.paths import CompanyPaths
 
 LEDGER_VERSION = 2
-EVIDENCE_STATUSES: frozenset[str] = frozenset({"downloaded", "discovered", "blocked"})
+
+
+class EvidenceStatus(StrEnum):
+    DOWNLOADED = "downloaded"
+    DISCOVERED = "discovered"
+    BLOCKED = "blocked"
 
 
 def make_evidence_id(
@@ -61,9 +67,11 @@ def upsert_evidence(
     collector: str | None,
 ) -> dict[str, Any]:
     """Insert-or-update an evidence record. Writes JSONL atomically + evidence.md."""
-    if status not in EVIDENCE_STATUSES:
-        raise ValueError(f"unsupported evidence status: {status}")
-    if status == "downloaded" and not local_path:
+    try:
+        evidence_status = EvidenceStatus(status)
+    except ValueError:
+        raise ValueError(f"unsupported evidence status: {status}") from None
+    if evidence_status is EvidenceStatus.DOWNLOADED and not local_path:
         raise ValueError("status=downloaded requires local_path")
 
     paths.data_dir.mkdir(parents=True, exist_ok=True)
@@ -84,7 +92,7 @@ def upsert_evidence(
             "title": title,
             "ticker": ticker.upper(),
             "category": category,
-            "status": status,
+            "status": evidence_status,
             "local_path": local_path,
             "url": url,
             "date": date,
@@ -100,7 +108,7 @@ def upsert_evidence(
                 "title": title,
                 "ticker": ticker.upper(),
                 "category": category,
-                "status": status,
+                "status": evidence_status,
                 "local_path": local_path,
                 "url": url,
                 "date": date,

@@ -17,20 +17,41 @@ from zoneinfo import ZoneInfo
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 IR_BATCH_SIZE = 10
 _PLACEHOLDER = re.compile(r"{{([A-Z_]+)}}")
-_SUCCESS_STOP_REASONS = {"completed", "end_turn", "stop"}
-_COLLECTOR_REPORT_KEYS = {
-    "status",
-    "inserted",
-    "updated",
-    "duplicate",
-    "skipped",
-    "failed",
-}
+
+
+class OpenClawSuccessStopReason(StrEnum):
+    COMPLETED = "completed"
+    END_TURN = "end_turn"
+    STOP = "stop"
+
+
+class CollectorReportField(StrEnum):
+    STATUS = "status"
+    INSERTED = "inserted"
+    UPDATED = "updated"
+    DUPLICATE = "duplicate"
+    SKIPPED = "skipped"
+    FAILED = "failed"
 
 
 class CollectorStatus(StrEnum):
     OK = "ok"
     FAILED = "failed"
+
+
+class ValidationOutcome(StrEnum):
+    INVALID_JSON = "invalid_json"
+    STATUS_ERROR = "status_error"
+    INVALID_RESULT = "invalid_result"
+    ABORTED = "aborted"
+    AGENT_ERROR = "agent_error"
+    TIMEOUT = "timeout"
+    ERROR_PAYLOAD = "error_payload"
+    INCOMPLETE = "incomplete"
+    INVALID_REPORT = "invalid_report"
+    INVALID_COUNTS = "invalid_counts"
+    COLLECTOR_FAILED = "collector_failed"
+    OK = "ok"
 
 
 def parse_run_date(value: str) -> date:
@@ -60,55 +81,64 @@ def render_prompt(template: str, replacements: dict[str, str]) -> str:
     )
 
 
-def validate_openclaw_result(text: str) -> str:
+def validate_openclaw_result(text: str) -> ValidationOutcome:
     """Return a safe outcome code without exposing agent payload text."""
     try:
         envelope = json.loads(text)
     except json.JSONDecodeError:
-        return "invalid_json"
-    if not isinstance(envelope, dict) or envelope.get("status") != "ok":
-        return "status_error"
+        return ValidationOutcome.INVALID_JSON
+    if not isinstance(envelope, dict) or envelope.get("status") != CollectorStatus.OK:
+        return ValidationOutcome.STATUS_ERROR
     result = envelope.get("result")
     if not isinstance(result, dict):
-        return "invalid_result"
+        return ValidationOutcome.INVALID_RESULT
     meta = result.get("meta")
     payloads = result.get("payloads")
     if not isinstance(meta, dict) or not isinstance(payloads, list):
-        return "invalid_result"
+        return ValidationOutcome.INVALID_RESULT
     if meta.get("aborted") is True:
-        return "aborted"
+        return ValidationOutcome.ABORTED
     if meta.get("error") is not None:
-        return "agent_error"
+        return ValidationOutcome.AGENT_ERROR
     if meta.get("timeoutPhase") is not None:
-        return "timeout"
+        return ValidationOutcome.TIMEOUT
     if any(
         isinstance(payload, dict) and payload.get("isError") is True
         for payload in payloads
     ):
-        return "error_payload"
-    if meta.get("stopReason") not in _SUCCESS_STOP_REASONS:
-        return "incomplete"
+        return ValidationOutcome.ERROR_PAYLOAD
+    try:
+        OpenClawSuccessStopReason(meta.get("stopReason"))
+    except (TypeError, ValueError):
+        return ValidationOutcome.INCOMPLETE
     if len(payloads) != 1 or not isinstance(payloads[0], dict):
-        return "invalid_report"
+        return ValidationOutcome.INVALID_REPORT
     report_text = payloads[0].get("text")
     if not isinstance(report_text, str):
-        return "invalid_report"
+        return ValidationOutcome.INVALID_REPORT
     try:
         report = json.loads(report_text)
     except json.JSONDecodeError:
-        return "invalid_report"
-    if not isinstance(report, dict) or set(report) != _COLLECTOR_REPORT_KEYS:
-        return "invalid_report"
+        return ValidationOutcome.INVALID_REPORT
+    if not isinstance(report, dict) or set(report) != set(CollectorReportField):
+        return ValidationOutcome.INVALID_REPORT
     try:
-        status = CollectorStatus(report["status"])
+        status = CollectorStatus(report[CollectorReportField.STATUS])
     except (TypeError, ValueError):
-        return "invalid_report"
-    counts = [report[key] for key in _COLLECTOR_REPORT_KEYS - {"status"}]
+        return ValidationOutcome.INVALID_REPORT
+    counts = [
+        report[field]
+        for field in CollectorReportField
+        if field is not CollectorReportField.STATUS
+    ]
     if any(type(count) is not int or count < 0 for count in counts):
-        return "invalid_counts"
-    if status is not CollectorStatus.OK or report["failed"] != 0:
-        return "collector_failed"
-    return "ok"
+        return ValidationOutcome.INVALID_COUNTS
+    if (
+        status is not CollectorStatus.OK
+        or report[CollectorReportField.FAILED] != 0
+    ):
+        return ValidationOutcome.COLLECTOR_FAILED
+    return ValidationOutcome.OK
 
 
 def build_ir_batches(
@@ -235,10 +265,12 @@ def collector_summary(launched_path: Path, artifact_root: Path) -> dict[str, Any
                 "error": "collector exited without a status artifact",
                 "exit_status": -1,
                 "source_id": source_id,
-                "status": "failed",
+                "status": CollectorStatus.FAILED,
             }
         rows.append(row)
-    failures = [row for row in rows if row.get("status") != "ok"]
+    failures = [
+        row for row in rows if row.get("status") != CollectorStatus.OK
+    ]
     return {
         "failed": len(failures),
         "failures": failures,
@@ -393,7 +425,7 @@ def _main(command: str, args: list[str]) -> None:
     elif command == "validate-openclaw":
         _require(command, args, 0)
         outcome = validate_openclaw_result(sys.stdin.read())
-        if outcome != "ok":
+        if outcome is not ValidationOutcome.OK:
             raise ValueError(outcome)
     elif command == "collector-status":
         _require(command, args, 10)

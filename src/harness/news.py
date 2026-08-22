@@ -14,16 +14,53 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
+from enum import StrEnum
 from pathlib import Path
 from time import monotonic, sleep
-from typing import Iterable, Literal, Mapping, Sequence, TypedDict
+from typing import Iterable, Mapping, Sequence, TypedDict
 from zoneinfo import ZoneInfo
 
 from harness.finnhub import fetch_finnhub_news
 from harness.portfolio_state import NON_SECURITY_TICKERS
 
-# Header keys we care about (case-insensitive on the label).
-META_KEYS = {"source", "url", "published", "collected", "section", "status"}
+class MetaKey(StrEnum):
+    """Recognized raw-markdown header fields."""
+
+    SOURCE = "source"
+    URL = "url"
+    PUBLISHED = "published"
+    COLLECTED = "collected"
+    SECTION = "section"
+    STATUS = "status"
+
+
+class ArticleField(StrEnum):
+    """Accepted fields in the normalized single-article input schema."""
+
+    TITLE = "title"
+    SOURCE_ID = "source_id"
+    URL = "url"
+    PUBLISHED_AT = "published_at"
+    CONTENT = "content"
+    SUMMARY = "summary"
+    SECTION = "section"
+    COLLECTED_AT = "collected_at"
+
+
+class NewsColumn(StrEnum):
+    """Canonical news table columns in SQL serialization order."""
+
+    ARTICLE_KEY = "article_key"
+    PUBLISHED_AT = "published_at"
+    PUBLISHED_AT_RAW = "published_at_raw"
+    TITLE = "title"
+    CONTENT = "content"
+    SUMMARY = "summary"
+    SOURCE = "source"
+    URL = "url"
+    SECTION = "section"
+    COLLECTED_AT = "collected_at"
+
 
 DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -166,9 +203,12 @@ def parse_raw_markdown(text: str) -> ParsedRaw:
             break
         if ":" in line and not line.startswith("#"):
             key, _, val = line.partition(":")
-            k = key.strip().lower()
-            if k in META_KEYS:
-                meta[k] = val.strip()
+            try:
+                meta_key = MetaKey(key.strip().lower())
+            except ValueError:
+                pass
+            else:
+                meta[meta_key.value] = val.strip()
                 idx += 1
                 continue
         break
@@ -518,10 +558,10 @@ def is_excluded_filename(name: str) -> str | None:
 
 def is_excluded_meta(meta: dict[str, str], title: str) -> str | None:
     """Content-level exclusions (belt-and-suspenders vs filename)."""
-    section = meta.get("section", "").lower()
+    section = meta.get(MetaKey.SECTION, "").lower()
     if "collection-error" in section or "collection error" in section:
         return "error"
-    status = meta.get("status", "").strip().lower()
+    status = meta.get(MetaKey.STATUS, "").strip().lower()
     if status and status != "ok":
         return "status"
     if re.match(
@@ -563,7 +603,10 @@ class ArticleInput:
     collected_at: str | None = None
 
 
-ArticleIngestStatus = Literal["inserted", "duplicate", "updated"]
+class ArticleIngestStatus(StrEnum):
+    INSERTED = "inserted"
+    DUPLICATE = "duplicate"
+    UPDATED = "updated"
 
 
 class ArticleIngestResult(TypedDict):
@@ -572,23 +615,33 @@ class ArticleIngestResult(TypedDict):
 
 
 _ARTICLE_REQUIRED_FIELDS = (
-    "title",
-    "source_id",
-    "url",
-    "published_at",
-    "content",
+    ArticleField.TITLE,
+    ArticleField.SOURCE_ID,
+    ArticleField.URL,
+    ArticleField.PUBLISHED_AT,
+    ArticleField.CONTENT,
 )
-_ARTICLE_OPTIONAL_FIELDS = {"summary", "section", "collected_at"}
+_ARTICLE_OPTIONAL_FIELDS = frozenset(
+    {
+        ArticleField.SUMMARY,
+        ArticleField.SECTION,
+        ArticleField.COLLECTED_AT,
+    }
+)
 
 
-def _required_article_text(payload: Mapping[str, object], field: str) -> str:
+def _required_article_text(
+    payload: Mapping[str, object], field: ArticleField
+) -> str:
     value = payload.get(field)
     if not isinstance(value, str) or not value.strip():
         raise ArticleInputError(f"article must have a non-empty string {field}")
     return value.strip()
 
 
-def _optional_article_text(payload: Mapping[str, object], field: str) -> str | None:
+def _optional_article_text(
+    payload: Mapping[str, object], field: ArticleField
+) -> str | None:
     value = payload.get(field)
     if value is None:
         return None
@@ -618,27 +671,31 @@ def parse_article_input(text: str) -> ArticleInput:
         field: _required_article_text(payload, field)
         for field in _ARTICLE_REQUIRED_FIELDS
     }
-    published = normalize_published(values["published_at"])
+    published = normalize_published(values[ArticleField.PUBLISHED_AT])
     if published is None:
         raise ArticleInputError("article must have a parseable published_at")
-    if re.match(r"^(?:<!doctype\s+html\b|<html\b)", values["content"], re.IGNORECASE):
+    if re.match(
+        r"^(?:<!doctype\s+html\b|<html\b)",
+        values[ArticleField.CONTENT],
+        re.IGNORECASE,
+    ):
         raise ArticleInputError(
             "article content must be normalized Markdown/text, not raw HTML"
         )
 
-    collected_at = _optional_article_text(payload, "collected_at")
+    collected_at = _optional_article_text(payload, ArticleField.COLLECTED_AT)
     if collected_at is not None:
         collected_at = normalize_collected(collected_at)
 
     return ArticleInput(
-        title=values["title"],
-        source_id=values["source_id"],
-        url=values["url"],
-        published_at_raw=values["published_at"],
+        title=values[ArticleField.TITLE],
+        source_id=values[ArticleField.SOURCE_ID],
+        url=values[ArticleField.URL],
+        published_at_raw=values[ArticleField.PUBLISHED_AT],
         published=published,
-        content=values["content"],
-        summary=_optional_article_text(payload, "summary"),
-        section=_optional_article_text(payload, "section"),
+        content=values[ArticleField.CONTENT],
+        summary=_optional_article_text(payload, ArticleField.SUMMARY),
+        section=_optional_article_text(payload, ArticleField.SECTION),
         collected_at=collected_at,
     )
 
@@ -655,8 +712,17 @@ class Candidate:
     published: str = ""
 
 
-MatchKind = Literal["url", "article_key", "batch_url", "batch_article_key"]
-ExistenceStatus = Literal["ok", "database_missing", "news_table_missing"]
+class MatchKind(StrEnum):
+    URL = "url"
+    ARTICLE_KEY = "article_key"
+    BATCH_URL = "batch_url"
+    BATCH_ARTICLE_KEY = "batch_article_key"
+
+
+class ExistenceStatus(StrEnum):
+    OK = "ok"
+    DATABASE_MISSING = "database_missing"
+    NEWS_TABLE_MISSING = "news_table_missing"
 
 
 class SeenMatch(TypedDict):
@@ -744,7 +810,7 @@ def _batch_matches(
     for index, candidate in enumerate(candidates):
         if candidate.url:
             if candidate.url in urls:
-                matches[index] = "batch_url"
+                matches[index] = MatchKind.BATCH_URL
             urls.add(candidate.url)
 
         published = normalize_published(candidate.published)
@@ -752,7 +818,7 @@ def _batch_matches(
             continue
         key = article_key(source_id, published.date_only, candidate.title)
         if matches[index] is None and key in keys:
-            matches[index] = "batch_article_key"
+            matches[index] = MatchKind.BATCH_ARTICLE_KEY
         keys.add(key)
     return matches
 
@@ -787,7 +853,7 @@ def check_candidates(
     validated = _validated_candidates(candidates)
     matches = _batch_matches(normalized_source_id, validated)
     if not db_path.is_file():
-        return _existence_result("database_missing", matches)
+        return _existence_result(ExistenceStatus.DATABASE_MISSING, matches)
 
     uri = f"{db_path.resolve().as_uri()}?mode=ro"
     with sqlite3.connect(uri, uri=True) as conn:
@@ -800,7 +866,7 @@ def check_candidates(
             ("table", "news"),
         ).fetchone()
         if table_exists is None:
-            return _existence_result("news_table_missing", matches)
+            return _existence_result(ExistenceStatus.NEWS_TABLE_MISSING, matches)
 
         for index, candidate in enumerate(validated):
             if matches[index] is not None:
@@ -811,7 +877,7 @@ def check_candidates(
                     (candidate.url,),
                 ).fetchone()
                 if url_match is not None:
-                    matches[index] = "url"
+                    matches[index] = MatchKind.URL
                     continue
 
             published = normalize_published(candidate.published)
@@ -824,9 +890,9 @@ def check_candidates(
                     (key,),
                 ).fetchone()
                 if key_match is not None:
-                    matches[index] = "article_key"
+                    matches[index] = MatchKind.ARTICLE_KEY
 
-    return _existence_result("ok", matches)
+    return _existence_result(ExistenceStatus.OK, matches)
 
 
 # ---------------------------------------------------------------------------
@@ -853,20 +919,6 @@ NEWS_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_news_url ON news(url)",
 )
 
-_NEWS_COLUMNS = (
-    "article_key",
-    "published_at",
-    "published_at_raw",
-    "title",
-    "content",
-    "summary",
-    "source",
-    "url",
-    "section",
-    "collected_at",
-)
-
-
 def _create_news_schema(conn: sqlite3.Connection) -> None:
     conn.execute(NEWS_TABLE_SQL)
     for statement in NEWS_INDEX_SQL:
@@ -889,7 +941,7 @@ def _legacy_publication_epoch(raw: str, collected_at: str) -> int:
 def _migrate_legacy_news(
     conn: sqlite3.Connection, legacy_columns: set[str]
 ) -> None:
-    required = set(_NEWS_COLUMNS) - {"published_at_raw"}
+    required = set(NewsColumn) - {NewsColumn.PUBLISHED_AT_RAW}
     missing = required - legacy_columns
     if missing:
         names = ", ".join(sorted(missing))
@@ -897,7 +949,11 @@ def _migrate_legacy_news(
             f"cannot migrate legacy news table; missing columns: {names}"
         )
 
-    select_columns = tuple(column for column in _NEWS_COLUMNS if column != "published_at_raw")
+    select_columns = tuple(
+        column
+        for column in NewsColumn
+        if column is not NewsColumn.PUBLISHED_AT_RAW
+    )
     cursor = conn.execute(f"SELECT {', '.join(select_columns)} FROM news")
     legacy_rows = [dict(zip(select_columns, row, strict=True)) for row in cursor]
 
@@ -911,29 +967,29 @@ def _migrate_legacy_news(
 
         migrated_rows = []
         for row in legacy_rows:
-            raw_value = row["published_at"]
+            raw_value = row[NewsColumn.PUBLISHED_AT]
             published_at_raw = "" if raw_value is None else str(raw_value)
-            collected_at = row["collected_at"]
+            collected_at = row[NewsColumn.COLLECTED_AT]
             migrated_rows.append(
                 (
-                    row["article_key"],
+                    row[NewsColumn.ARTICLE_KEY],
                     _legacy_publication_epoch(
                         published_at_raw,
                         "" if collected_at is None else str(collected_at),
                     ),
                     published_at_raw,
-                    row["title"],
-                    row["content"],
-                    row["summary"],
-                    row["source"],
-                    row["url"],
-                    row["section"],
+                    row[NewsColumn.TITLE],
+                    row[NewsColumn.CONTENT],
+                    row[NewsColumn.SUMMARY],
+                    row[NewsColumn.SOURCE],
+                    row[NewsColumn.URL],
+                    row[NewsColumn.SECTION],
                     collected_at,
                 )
             )
         conn.executemany(
             "INSERT INTO news "
-            f"({', '.join(_NEWS_COLUMNS)}) VALUES ({', '.join('?' for _ in _NEWS_COLUMNS)})",
+            f"({', '.join(NewsColumn)}) VALUES ({', '.join('?' for _ in NewsColumn)})",
             migrated_rows,
         )
         conn.execute("DROP TABLE news_legacy_migration")
@@ -963,8 +1019,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
     column_rows = conn.execute("PRAGMA table_info(news)").fetchall()
     columns = {row[1]: row for row in column_rows}
-    published_type = str(columns.get("published_at", (None, None, ""))[2]).upper()
-    if "published_at_raw" not in columns or published_type != "INTEGER":
+    published_type = str(
+        columns.get(NewsColumn.PUBLISHED_AT, (None, None, ""))[2]
+    ).upper()
+    if NewsColumn.PUBLISHED_AT_RAW not in columns or published_type != "INTEGER":
         _migrate_legacy_news(conn, set(columns))
     else:
         _create_news_schema(conn)
@@ -994,7 +1052,7 @@ def ingest_article(db_path: Path, article: ArticleInput) -> ArticleIngestResult:
         conn.execute("BEGIN IMMEDIATE")
         ensure_schema(conn)
         existing = conn.execute(
-            f"SELECT {', '.join(_NEWS_COLUMNS)} FROM news "
+            f"SELECT {', '.join(NewsColumn)} FROM news "
             "WHERE url = ? COLLATE BINARY "
             "ORDER BY CASE WHEN article_key = ? THEN 0 ELSE 1 END, article_key "
             "LIMIT 1",
@@ -1002,7 +1060,7 @@ def ingest_article(db_path: Path, article: ArticleInput) -> ArticleIngestResult:
         ).fetchone()
         if existing is None:
             existing = conn.execute(
-                f"SELECT {', '.join(_NEWS_COLUMNS)} FROM news WHERE article_key = ?",
+                f"SELECT {', '.join(NewsColumn)} FROM news WHERE article_key = ?",
                 (key,),
             ).fetchone()
         collected_at = article.collected_at
@@ -1028,28 +1086,28 @@ def ingest_article(db_path: Path, article: ArticleInput) -> ArticleIngestResult:
         )
 
         if existing is None:
-            placeholders = ", ".join("?" for _ in _NEWS_COLUMNS)
+            placeholders = ", ".join("?" for _ in NewsColumn)
             conn.execute(
-                f"INSERT INTO news ({', '.join(_NEWS_COLUMNS)}) "
+                f"INSERT INTO news ({', '.join(NewsColumn)}) "
                 f"VALUES ({placeholders})",
                 values,
             )
-            status: ArticleIngestStatus = "inserted"
+            status = ArticleIngestStatus.INSERTED
         elif tuple(existing) == values:
-            status = "duplicate"
+            status = ArticleIngestStatus.DUPLICATE
         elif existing[0] != key and conn.execute(
             "SELECT 1 FROM news WHERE article_key = ?", (key,)
         ).fetchone() is not None:
             # The database already contains separate URL and article-key
             # matches. Preserve both rather than guessing which row to merge.
-            status = "duplicate"
+            status = ArticleIngestStatus.DUPLICATE
         else:
-            assignments = ", ".join(f"{column} = ?" for column in _NEWS_COLUMNS)
+            assignments = ", ".join(f"{column} = ?" for column in NewsColumn)
             conn.execute(
                 f"UPDATE news SET {assignments} WHERE article_key = ?",
                 (*values, existing[0]),
             )
-            status = "updated"
+            status = ArticleIngestStatus.UPDATED
         conn.commit()
     except Exception:
         conn.rollback()
@@ -1057,7 +1115,7 @@ def ingest_article(db_path: Path, article: ArticleInput) -> ArticleIngestResult:
     finally:
         conn.close()
 
-    return {"status": status, "article_key": key}
+    return {"status": status, NewsColumn.ARTICLE_KEY.value: key}
 
 
 # ---------------------------------------------------------------------------
@@ -1466,7 +1524,7 @@ def _ingest_one(
         report.append(f"skip:no-body\t{raw_path}")
         return
 
-    collected = parsed.meta.get("collected", "").strip()
+    collected = parsed.meta.get(MetaKey.COLLECTED, "").strip()
     if not collected:
         collected = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
             "+00:00", "Z"
@@ -1490,7 +1548,7 @@ def _ingest_one(
     published_at_raw = (
         enrichment_value
         if enrichment_value is not None
-        else parsed.meta.get("published", "")
+        else parsed.meta.get(MetaKey.PUBLISHED, "")
     )
     published = normalize_published(published_at_raw)
     if published is None:
@@ -1508,8 +1566,8 @@ def _ingest_one(
         stats.publication_fallbacks += 1
         report.append(f"fallback:publication-date\t{raw_path}")
 
-    url = parsed.meta.get("url", "").strip()
-    section = parsed.meta.get("section", "").strip() or None
+    url = parsed.meta.get(MetaKey.URL, "").strip()
+    section = parsed.meta.get(MetaKey.SECTION, "").strip() or None
 
     stats.eligible += 1
 

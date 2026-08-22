@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from harness.workflows.evidence.audit_prompt import AUDIT_PROMPT_TEMPLATE
 from harness.workflows.evidence.constants import SEC_CATEGORIES
-from harness.workflows.evidence.ledger import load_ledger
+from harness.workflows.evidence.ledger import EvidenceStatus, load_ledger
 from harness.workflows.evidence.paths import CompanyPaths
 
 DEFAULT_AUDIT_MODEL = "gpt-5.5"
@@ -176,7 +176,7 @@ def _render_external_contents(paths: CompanyPaths, entries: list[dict[str, Any]]
         status = e.get("status", "")
         local_path = e.get("local_path")
 
-        if status == "downloaded" and local_path:
+        if status == EvidenceStatus.DOWNLOADED and local_path:
             abs_path = paths.root / local_path
             text = _read_source_text(abs_path)
             sections.append(f"### {title}\n\ncategory: {category}\n\n{text}")

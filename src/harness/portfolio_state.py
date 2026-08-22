@@ -9,6 +9,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from enum import StrEnum
 from io import StringIO
 from pathlib import Path
 from typing import Any, Mapping, NotRequired, Sequence, TypedDict
@@ -35,6 +36,13 @@ FISCAL_PERIOD_PATTERN = re.compile(r"^(FY\d{4}|H[12] FY\d{4}|Q[1-4] FY\d{4})$")
 FISCAL_PERIOD_EXAMPLES = "FY2026, H1 FY2026, H2 FY2026, Q1 FY2026, Q2 FY2026, Q3 FY2026, Q4 FY2026"
 MAX_THESIS_LIST_ITEMS = 5
 MAX_THESIS_METRICS = 5
+
+
+class EnrichmentField(StrEnum):
+    EXCHANGE = "exchange"
+    COUNTRY = "country"
+    SEC_REGISTERED = "sec_registered"
+    FINNHUB_SYMBOL = "finnhub_symbol"
 
 
 class ThesisMetricObservation(TypedDict):
@@ -1152,9 +1160,6 @@ def parse_iso_date(raw: str | None) -> date:
     return date.fromisoformat(raw)
 
 
-_ENRICHMENT_FIELDS = ("exchange", "country", "sec_registered", "finnhub_symbol")
-
-
 def _carry_forward_enrichment(
     current: list[dict[str, Any]],
     previous: list[dict[str, Any]],
@@ -1172,17 +1177,17 @@ def _carry_forward_enrichment(
         prev = prev_by_id.get(sid)
         if not prev:
             continue
-        for field in _ENRICHMENT_FIELDS:
+        for field in EnrichmentField:
             prev_val = prev.get(field)
             new_val = record.get(field)
-            if field == "exchange":
+            if field is EnrichmentField.EXCHANGE:
                 # Prefer the new (sheet) value if present, else keep previous.
                 if not (new_val and str(new_val).strip()):
                     if prev_val is not None:
-                        record[field] = prev_val
+                        record[field.value] = prev_val
             else:
                 if new_val is None and prev_val is not None:
-                    record[field] = prev_val
+                    record[field.value] = prev_val
 
 
 def _normalize_security_row(row: dict[str, Any], *, source_kind: str) -> dict[str, Any]:

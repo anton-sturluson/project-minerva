@@ -11,7 +11,7 @@ from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
 from harness.workflows.evidence.audit import DEFAULT_AUDIT_MODEL, default_audit_llm, run_audit
 from harness.workflows.evidence.constants import RECOGNIZED_CATEGORIES
-from harness.workflows.evidence.ledger import load_ledger, upsert_evidence
+from harness.workflows.evidence.ledger import EvidenceStatus, load_ledger, upsert_evidence
 from harness.workflows.evidence.paths import resolve_company_root
 from harness.workflows.evidence.registry import initialize_registry
 
@@ -114,7 +114,7 @@ def add_source_command(
     start = time.perf_counter()
 
     # Validate: downloaded requires a path.
-    if status == "downloaded" and not path:
+    if status == EvidenceStatus.DOWNLOADED and not path:
         return CommandResult.from_text(
             "",
             stderr="status=downloaded requires --path; pass a local file path for downloaded sources",
