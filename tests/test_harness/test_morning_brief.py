@@ -345,8 +345,23 @@ class MorningBriefTests(unittest.TestCase):
         self.assertEqual(macro_summary["event_count"], 1)
         self.assertTrue(any("Broken source" in reason for reason in macro_payload["degraded_reasons"]))
 
+    def test_wrapper_routes_all_helper_calls_through_uv_python(self) -> None:
+        script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
+            encoding="utf-8"
+        )
+        direct_helper_lines = [
+            line.strip()
+            for line in script.splitlines()
+            if '"${HELPER}"' in line and not line.startswith("HELPER=")
+        ]
+
+        self.assertEqual(
+            direct_helper_lines,
+            ['uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"'],
+        )
+
     def test_wrapper_orchestrates_command_sequence_with_optional_sources(self) -> None:
-        """V2 script runs structured data + prep (news collection skipped via env)."""
+        """The wrapper uses uv Python while preserving its configured CLI runner."""
         call_log = self.workspace / "calls.log"
         fake_minerva = self.workspace / "fake-minerva.sh"
         fake_minerva.write_text(
@@ -355,6 +370,21 @@ class MorningBriefTests(unittest.TestCase):
             encoding="utf-8",
         )
         fake_minerva.chmod(0o755)
+
+        # A bare python3 helper invocation would select this incompatible
+        # system-Python stand-in. The helper must instead run inside `uv run`.
+        system_python_marker = self.workspace / "system-python-used"
+        fake_bin = self.workspace / "fake-bin"
+        fake_bin.mkdir()
+        fake_python = fake_bin / "python3"
+        fake_python.write_text(
+            "#!/usr/bin/env bash\n"
+            "touch \"$SYSTEM_PYTHON_MARKER\"\n"
+            "echo 'incompatible system python used' >&2\n"
+            "exit 86\n",
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o755)
 
         # A sourced zshrc may provide missing secrets, but explicit caller
         # configuration must win. Poison every important path/runner here to
@@ -374,6 +404,8 @@ class MorningBriefTests(unittest.TestCase):
         env.update(
             {
                 "HOME": str(fake_home),
+                "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+                "SYSTEM_PYTHON_MARKER": str(system_python_marker),
                 "MINERVA_CALL_LOG": str(call_log),
                 "MINERVA_RUNNER": str(fake_minerva),
                 "MINERVA_SKIP_STATUS_CHECK": "1",
@@ -397,6 +429,7 @@ class MorningBriefTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(system_python_marker.exists())
         self.assertIn("prepared_evidence:", result.stdout)
         self.assertIn("manifest:", result.stdout)
         # Report layout is anchored to MINERVA_WORKSPACE_ROOT so tests never
