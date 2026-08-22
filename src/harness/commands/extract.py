@@ -8,6 +8,7 @@ import hashlib
 import json
 import time
 from datetime import datetime, timezone
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -98,7 +99,18 @@ SUMMARY_PROMPT = (
     "figures, qualifications, and conclusions. Return only the summary without a preamble."
 )
 
-VALID_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "adaptive"})
+class ThinkingLevel(StrEnum):
+    OFF = "off"
+    MINIMAL = "minimal"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    ADAPTIVE = "adaptive"
+
+
+class ExtractionStatus(StrEnum):
+    OK = "ok"
+    ERROR = "error"
 
 app = typer.Typer(help=EXTRACT_HELP, no_args_is_help=False, invoke_without_command=True)
 summarize_app = typer.Typer(
@@ -408,8 +420,8 @@ def extract_files_command(
     except _UsageError as exc:
         return error_result(exc.what, exc.what_to_do, exc.alternatives, start)
 
-    resolved_thinking = _resolve_default_thinking(model, thinking)
     try:
+        resolved_thinking = _resolve_default_thinking(model, thinking)
         _build_thinking_config(model, resolved_thinking)
     except ValueError as exc:
         return error_result(
@@ -470,7 +482,9 @@ def extract_files_command(
     }
     (out_root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
-    failures = [entry for entry in entries if entry["status"] != "ok"]
+    failures = [
+        entry for entry in entries if entry["status"] is not ExtractionStatus.OK
+    ]
     summary_lines = [
         f"wrote {len(entries) - len(failures)} extraction(s) under {out_root}",
         f"manifest: {out_root / 'manifest.json'}",
@@ -789,24 +803,34 @@ def _compose_prompt(*, prompt_pack: str, document_text: str) -> str:
 # ---------------------------------------------------------------------------
 # Thinking config helpers
 # ---------------------------------------------------------------------------
-def _resolve_default_thinking(model: str, explicit: str | None) -> str | None:
+def _resolve_default_thinking(
+    model: str, explicit: str | ThinkingLevel | None
+) -> ThinkingLevel | None:
     if explicit is not None:
-        return explicit
+        return _coerce_thinking_level(explicit)
     if _is_gemini_3_flash(model):
-        return "minimal"
+        return ThinkingLevel.MINIMAL
     return None
 
-def _build_thinking_config(model: str, thinking: str | None):
+
+def _coerce_thinking_level(value: str | ThinkingLevel) -> ThinkingLevel:
+    try:
+        return ThinkingLevel(value)
+    except ValueError:
+        expected = sorted(level.value for level in ThinkingLevel)
+        raise ValueError(
+            f"unknown thinking level `{value}` (expected one of {expected})"
+        ) from None
+
+
+def _build_thinking_config(model: str, thinking: str | ThinkingLevel | None):
     """Return a ThinkingConfig (or None) for the given model.
 
     Raises ValueError on unsupported (model, level) combinations.
     """
     if thinking is None:
         return None
-    if thinking not in VALID_THINKING_LEVELS:
-        raise ValueError(
-            f"unknown thinking level `{thinking}` (expected one of {sorted(VALID_THINKING_LEVELS)})"
-        )
+    level = _coerce_thinking_level(thinking)
 
     try:
         from google.genai import types as genai_types
@@ -814,20 +838,20 @@ def _build_thinking_config(model: str, thinking: str | None):
         raise RuntimeError("google-genai is not installed") from exc
 
     if _is_gemini_3(model):
-        if thinking in {"off", "adaptive"}:
+        if level in {ThinkingLevel.OFF, ThinkingLevel.ADAPTIVE}:
             raise ValueError(
-                f"`--thinking {thinking}` is not supported for Gemini 3 models; "
+                f"`--thinking {level.value}` is not supported for Gemini 3 models; "
                 "use minimal|low|medium|high"
             )
-        return genai_types.ThinkingConfig(thinking_level=thinking.upper())
+        return genai_types.ThinkingConfig(thinking_level=level.value.upper())
 
     if _is_gemini_25(model):
-        if thinking == "off":
+        if level is ThinkingLevel.OFF:
             return genai_types.ThinkingConfig(thinking_budget=0)
-        if thinking == "adaptive":
+        if level is ThinkingLevel.ADAPTIVE:
             return genai_types.ThinkingConfig(thinking_budget=-1)
         raise ValueError(
-            f"`--thinking {thinking}` is not supported for Gemini 2.5 models; use off|adaptive"
+            f"`--thinking {level.value}` is not supported for Gemini 2.5 models; use off|adaptive"
         )
 
     if _is_openai_model(model):
@@ -837,7 +861,9 @@ def _build_thinking_config(model: str, thinking: str | None):
         f"`--thinking` is not configured for model `{model}`; omit `--thinking` to skip thinking config"
     )
 
-def _build_generate_config(model: str, max_tokens: int, thinking: str | None):
+def _build_generate_config(
+    model: str, max_tokens: int, thinking: str | ThinkingLevel | None
+):
     try:
         from google.genai import types as genai_types
     except ModuleNotFoundError as exc:  # pragma: no cover
@@ -892,7 +918,7 @@ def _generate_answer(
     document_text: str,  # kept for tests/observability
     model: str,
     max_tokens: int,
-    thinking: str | None,
+    thinking: str | ThinkingLevel | None,
     api_key: str,
 ) -> str:
     if _is_openai_model(model):
@@ -916,7 +942,7 @@ def _generate_gemini_answer(
     prompt: str,
     model: str,
     max_tokens: int,
-    thinking: str | None,
+    thinking: str | ThinkingLevel | None,
     api_key: str,
 ) -> str:
     try:
@@ -933,7 +959,12 @@ def _generate_gemini_answer(
 
 
 def _generate_openai_answer(
-    *, prompt: str, model: str, max_tokens: int, thinking: str | None = None, api_key: str
+    *,
+    prompt: str,
+    model: str,
+    max_tokens: int,
+    thinking: str | ThinkingLevel | None = None,
+    api_key: str,
 ) -> str:
     try:
         import openai
@@ -946,8 +977,10 @@ def _generate_openai_answer(
         "input": prompt,
         "max_output_tokens": max_tokens,
     }
-    if thinking in {"low", "medium", "high"}:
-        kwargs["reasoning"] = {"effort": thinking}
+    if thinking is not None:
+        level = _coerce_thinking_level(thinking)
+        if level in {ThinkingLevel.LOW, ThinkingLevel.MEDIUM, ThinkingLevel.HIGH}:
+            kwargs["reasoning"] = {"effort": level.value}
     response = client.responses.create(**kwargs)
     text = _openai_response_text(response)
     if not text:
@@ -1091,7 +1124,7 @@ async def _run_extractions(
     prompt_pack: str,
     model: str,
     max_tokens: int,
-    thinking: str | None,
+    thinking: str | ThinkingLevel | None,
     api_key: str,
     concurrency: int,
 ) -> list[dict[str, Any]]:
@@ -1102,7 +1135,7 @@ async def _run_extractions(
             entry: dict[str, Any] = {
                 "source": str(src),
                 "output": str(target),
-                "status": "ok",
+                "status": ExtractionStatus.OK,
                 "error": None,
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -1121,7 +1154,7 @@ async def _run_extractions(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(answer.strip() + "\n", encoding="utf-8")
             except Exception as exc:  # noqa: BLE001
-                entry["status"] = "error"
+                entry["status"] = ExtractionStatus.ERROR
                 entry["error"] = f"{type(exc).__name__}: {exc}"
             entry["finished_at"] = datetime.now(timezone.utc).isoformat()
             return entry

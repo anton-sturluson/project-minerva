@@ -8,6 +8,7 @@ import re
 import time as time_mod
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -42,6 +43,13 @@ DEFAULT_QUOTE_SYMBOLS = [
     "XLK", "XLF", "XLE", "XLV",
 ]
 FINNHUB_CALL_DELAY_SECONDS = 0.1
+
+
+class CollectionStatus(StrEnum):
+    SUCCESS = "success"
+    DEGRADED = "degraded"
+    ERROR = "error"
+
 
 @dataclass(slots=True)
 class RunPaths:
@@ -186,7 +194,13 @@ def collect_filings(
     rendered_path = run_paths.rendered_dir / "filings.md"
     write_json(raw_path, payload)
     rendered_path.write_text(render_event_markdown("Filings", sorted_events), encoding="utf-8")
-    status = "success" if not errors else ("degraded" if events else "error")
+    status = (
+        CollectionStatus.SUCCESS
+        if not errors
+        else CollectionStatus.DEGRADED
+        if events
+        else CollectionStatus.ERROR
+    )
     update_manifest_source(
         run_paths,
         "filings",
@@ -250,7 +264,11 @@ def collect_earnings(
         },
     )
     rendered_path.write_text(render_event_markdown("Earnings", sorted_events), encoding="utf-8")
-    status = "degraded" if degraded_reasons else "success"
+    status = (
+        CollectionStatus.DEGRADED
+        if degraded_reasons
+        else CollectionStatus.SUCCESS
+    )
     update_manifest_source(
         run_paths,
         "earnings",
@@ -318,7 +336,11 @@ def collect_macro(
         },
     )
     rendered_path.write_text(render_event_markdown("Macro", sorted_events), encoding="utf-8")
-    status = "degraded" if degraded_reasons else "success"
+    status = (
+        CollectionStatus.DEGRADED
+        if degraded_reasons
+        else CollectionStatus.SUCCESS
+    )
     update_manifest_source(
         run_paths,
         "macro",
@@ -372,7 +394,11 @@ def collect_macro_registry_events(
     }
     write_json(destination, payload)
 
-    status = "degraded" if payload["degraded_reasons"] else "success"
+    status = (
+        CollectionStatus.DEGRADED
+        if payload["degraded_reasons"]
+        else CollectionStatus.SUCCESS
+    )
     update_manifest_source(
         run_paths,
         "macro-collect",
@@ -429,7 +455,11 @@ def collect_market(
         },
     )
     rendered_path.write_text(render_event_markdown("Market", sorted_events), encoding="utf-8")
-    status = "degraded" if degraded_reasons else "success"
+    status = (
+        CollectionStatus.DEGRADED
+        if degraded_reasons
+        else CollectionStatus.SUCCESS
+    )
     update_manifest_source(
         run_paths,
         "market",
@@ -531,7 +561,7 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
         run_paths,
         "prep",
         {
-            "status": "success",
+            "status": CollectionStatus.SUCCESS,
             "event_count": len(sorted_events),
             "suppressed_count": len(suppressed),
             "prepared_path": str(prepared_path),
@@ -541,7 +571,11 @@ def prepare_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
             "universe_path": str(universe_path),
         },
     )
-    return {"status": "success", "event_count": len(sorted_events), "prepared_path": prepared_path}
+    return {
+        "status": CollectionStatus.SUCCESS,
+        "event_count": len(sorted_events),
+        "prepared_path": prepared_path,
+    }
 
 
 def audit_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
@@ -574,7 +608,9 @@ def audit_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
             missed_events.append({"source": name, "event": event})
 
     source_failures = {
-        name: details for name, details in manifest.get("sources", {}).items() if details.get("status") not in {"success", ""}
+        name: details
+        for name, details in manifest.get("sources", {}).items()
+        if details.get("status") not in {CollectionStatus.SUCCESS, ""}
     }
     covered_security_ids = {str(event.get("security_id", "")) for event in prepared_events if event.get("relationship") == "monitored"}
     universe = load_json(portfolio_paths(workspace_root).universe, default=[])
@@ -599,13 +635,17 @@ def audit_evidence(workspace_root: Path, *, run_date: date) -> dict[str, Any]:
         run_paths,
         "audit",
         {
-            "status": "success",
+            "status": CollectionStatus.SUCCESS,
             "missed_event_count": len(missed_events),
             "audit_path": str(audit_path),
             "rendered_path": str(rendered_path),
         },
     )
-    return {"status": "success", "missed_event_count": len(missed_events), "audit_path": audit_path}
+    return {
+        "status": CollectionStatus.SUCCESS,
+        "missed_event_count": len(missed_events),
+        "audit_path": audit_path,
+    }
 
 
 def append_review_log(workspace_root: Path, *, run_date: date, notes: str | None = None) -> dict[str, Any]:
@@ -620,7 +660,7 @@ def append_review_log(workspace_root: Path, *, run_date: date, notes: str | None
         "source_failures": {
             name: details
             for name, details in manifest.get("sources", {}).items()
-            if details.get("status") not in {"success", ""}
+            if details.get("status") not in {CollectionStatus.SUCCESS, ""}
         },
         "degraded_modes_used": sorted(
             {
@@ -638,13 +678,16 @@ def append_review_log(workspace_root: Path, *, run_date: date, notes: str | None
         run_paths,
         "review-log",
         {
-            "status": "success",
+            "status": CollectionStatus.SUCCESS,
             "review_log_path": str(run_paths.review_log),
             "logged_at": entry["logged_at"],
             "entry_count": len(_read_review_log(run_paths.review_log)),
         },
     )
-    return {"status": "success", "review_log_path": run_paths.review_log}
+    return {
+        "status": CollectionStatus.SUCCESS,
+        "review_log_path": run_paths.review_log,
+    }
 
 
 def _load_filings_source_payload(
@@ -1149,7 +1192,7 @@ def _collect_macro_registry_source(source_entry: dict[str, Any], run_date: date)
             "name": source_name,
             "url": source_url,
             "parser": parser,
-            "status": "degraded",
+            "status": CollectionStatus.DEGRADED,
             "event_count": 0,
             "degraded_reasons": degraded_reasons,
         }, []
@@ -1167,7 +1210,7 @@ def _collect_macro_registry_source(source_entry: dict[str, Any], run_date: date)
             "name": source_name,
             "url": source_url,
             "parser": parser,
-            "status": "degraded",
+            "status": CollectionStatus.DEGRADED,
             "event_count": 0,
             "degraded_reasons": degraded_reasons,
         }, []
@@ -1176,7 +1219,11 @@ def _collect_macro_registry_source(source_entry: dict[str, Any], run_date: date)
         "name": source_name,
         "url": source_url,
         "parser": parser,
-        "status": "degraded" if degraded_reasons else "success",
+        "status": (
+            CollectionStatus.DEGRADED
+            if degraded_reasons
+            else CollectionStatus.SUCCESS
+        ),
         "event_count": len(events),
         "degraded_reasons": degraded_reasons,
     }, events
