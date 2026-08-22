@@ -28,13 +28,15 @@ uv run minerva summarize --model gpt-5.6-luna --thinking medium
 Do not read the batch inputs into your context.
 
 1. Create a temporary directory.
-2. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`.
-3. If batches exist, count them and run the extractor once with concurrency equal to the batch count; otherwise skip Terra selection:
+2. Use the exact `prepared_evidence` path from the validated handoff to create `$SELECTION_TMP/relevance-prompt.md`. Copy `scripts/prompts/morning_brief_selection.md`, then append only the top-level `universe` array as `PORTFOLIO_UNIVERSE_JSON`. Do this with a short inline Python or `jq` command without reading the source file into your context.
+
+3. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`.
+4. If batches exist, count them and run the extractor once with concurrency equal to the batch count; otherwise skip Terra selection:
 
 ```bash
 BATCH_COUNT=$(find "$SELECTION_TMP" -name 'batch-*' -type f | wc -l | tr -d ' ')
 uv run minerva extract-files \
-  --questions-file scripts/prompts/morning_brief_selection.md \
+  --questions-file "$SELECTION_TMP/relevance-prompt.md" \
   --files "$SELECTION_TMP/batch-*" \
   --out "$SELECTION_TMP/results" \
   --model gpt-5.6-terra \
@@ -42,9 +44,9 @@ uv run minerva extract-files \
   --concurrency "$BATCH_COUNT"
 ```
 
-4. Extract only the non-null `article_key` values from Terra's JSONL results; do not use Terra's rationales in synthesis. Query titles and sources for the selected keys first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. When several articles cover the same event, prefer the highest-quality source. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query excluded articles. Clearly label rumors and third-party interpretations.
-5. Before writing, read up to five of the most recent previous `slack-brief.md` outputs in the dated sibling run directories. Exclude developments already covered unless today's evidence adds a material new fact; if retained, write only the update.
-6. Delete the temporary directory after selection.
+5. Extract only the non-null `article_key` values from Terra's JSONL results; do not use Terra's rationales in synthesis. Query titles and sources for the selected keys first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. When several articles cover the same event, prefer the highest-quality source. Combine duplicate developments, classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query excluded articles. Clearly label rumors and third-party interpretations.
+6. Before writing, read up to five of the most recent previous `slack-brief.md` outputs in the dated sibling run directories. Exclude developments already covered unless today's evidence adds a material new fact; if retained, write only the update.
+7. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
 
