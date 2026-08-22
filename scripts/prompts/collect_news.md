@@ -51,7 +51,7 @@ Pipe that object directly on stdin to:
 printf '%s\n' "$article_json" | {{NEWS_INGEST_COMMAND}}
 ```
 
-A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place article JSON or content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the article as failed and return a non-zero result after continuing safely.
+A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place article JSON or content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the article as failed and report collector status `failed` after continuing safely.
 
 ## Browser procedure
 
@@ -63,8 +63,12 @@ A different safe in-memory JSON-producing construct is allowed, but it must end 
    a. Navigate to the article and resolve missing publication metadata as specified above.
    b. Extract and normalize the full substantive body with `browser extract` or `browser ask`.
    c. Build and ingest the in-memory object.
-   d. On 404, CAPTCHA, video-only content, paywall, or extraction failure, record a skipped item and continue.
+   d. Record an unavailable, paywalled, or video-only item as skipped and continue. Count a browser or extraction failure as failed and continue safely.
 6. Close the tab with `browser close {tab_alias}`.
-7. Reply briefly with counts for inserted/updated/duplicate/skipped/failed. Do not include article bodies.
+7. Return the final report described below.
 
-If the browser bridge is unavailable or safe completion is impossible, return non-zero. Same-tab navigation is allowed; additional tabs and windows are not.
+If the browser bridge is unavailable or safe completion is impossible, report status `failed`. Same-tab navigation is allowed; additional tabs and windows are not.
+
+## Final report
+
+Your final reply must be exactly one compact JSON object with no Markdown, preamble, or trailing text: `{"status":"ok","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":0}`. Use only the keys shown, with `status` set to `ok` or `failed` and every count set to a nonnegative integer. `status` may be `ok` only when `failed` is zero; any browser, fetch, or safe-completion failure must use `failed`. Do not include article bodies.

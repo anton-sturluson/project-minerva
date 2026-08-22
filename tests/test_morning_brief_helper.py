@@ -48,11 +48,23 @@ def test_render_prompt_does_not_expand_placeholders_inside_metadata() -> None:
 
 
 @pytest.mark.parametrize("stop_reason", ["completed", "end_turn", "stop"])
-def test_validate_openclaw_result_accepts_completed_turns(stop_reason: str) -> None:
+def test_validate_openclaw_result_accepts_exact_collector_report(
+    stop_reason: str,
+) -> None:
+    report = {
+        "status": "ok",
+        "inserted": 2,
+        "updated": 1,
+        "duplicate": 3,
+        "skipped": 4,
+        "failed": 0,
+    }
     payload = {
         "status": "ok",
         "result": {
-            "payloads": [{"text": "must not be returned"}],
+            "payloads": [
+                {"text": json.dumps(report, separators=(",", ":"))}
+            ],
             "meta": {"aborted": False, "stopReason": stop_reason},
         },
     }
@@ -79,6 +91,56 @@ def test_validate_openclaw_result_rejects_incomplete_or_invalid_results(
     text: str, expected: str
 ) -> None:
     assert helper.validate_openclaw_result(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [
+        ("", "invalid_report"),
+        ("not json", "invalid_report"),
+        ('{"status":"ok"}', "invalid_report"),
+        ('{"status":"ok","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":0,"note":"extra"}', "invalid_report"),
+        ('{"status":"unknown","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":0}', "invalid_report"),
+        ('{"status":"failed","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":0}', "collector_failed"),
+        ('{"status":"ok","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":1}', "collector_failed"),
+        ('{"status":"ok","inserted":-1,"updated":0,"duplicate":0,"skipped":0,"failed":0}', "invalid_counts"),
+        ('{"status":"ok","inserted":true,"updated":0,"duplicate":0,"skipped":0,"failed":0}', "invalid_counts"),
+    ],
+)
+def test_validate_openclaw_result_rejects_failed_or_malformed_collector_reports(
+    report: str, expected: str
+) -> None:
+    payload = {
+        "status": "ok",
+        "result": {
+            "payloads": [{"text": report}],
+            "meta": {"stopReason": "end_turn"},
+        },
+    }
+
+    assert helper.validate_openclaw_result(json.dumps(payload)) == expected
+
+
+def test_validate_openclaw_result_rejects_missing_or_ambiguous_reports() -> None:
+    def envelope(payloads: list[dict[str, str]]) -> str:
+        return json.dumps(
+            {
+                "status": "ok",
+                "result": {
+                    "payloads": payloads,
+                    "meta": {"stopReason": "end_turn"},
+                },
+            }
+        )
+
+    valid_report = '{"status":"ok","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":0}'
+    assert helper.validate_openclaw_result(envelope([])) == "invalid_report"
+    assert (
+        helper.validate_openclaw_result(
+            envelope([{"text": valid_report}, {"text": valid_report}])
+        )
+        == "invalid_report"
+    )
 
 
 def test_build_ir_batches_uses_universe_for_inclusion_and_registry_for_feeds() -> None:

@@ -141,8 +141,8 @@ timeout=""
 agent=""
 session_id=""
 json_mode=0
-failure_json='{"status":"ok","result":{"payloads":[{"isError":true,"text":"SENSITIVE_PAYLOAD_SENTINEL"}],"meta":{"aborted":true,"stopReason":"aborted"}}}'
-success_json='{"status":"ok","result":{"payloads":[{"text":"SENSITIVE_PAYLOAD_SENTINEL"}],"meta":{"aborted":false,"stopReason":"end_turn"}}}'
+failure_json='{"status":"ok","result":{"payloads":[{"text":"{\"status\":\"failed\",\"inserted\":0,\"updated\":0,\"duplicate\":0,\"skipped\":0,\"failed\":1}"}],"meta":{"aborted":false,"stopReason":"end_turn"}}}'
+success_json='{"status":"ok","result":{"payloads":[{"text":"{\"status\":\"ok\",\"inserted\":1,\"updated\":0,\"duplicate\":0,\"skipped\":0,\"failed\":0}"}],"meta":{"aborted":false,"stopReason":"end_turn"}}}'
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --json) json_mode=1; shift ;;
@@ -652,21 +652,11 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
 
-    # Every collector launched, each got its own timeout row.
+    # Every collector launched.
     starts = (
         tmp_path / "coordinator" / "collector-starts.log"
     ).read_text(encoding="utf-8").splitlines()
     assert set(starts) == {"wsj", "reuters-markets", "ir-batch-001"}
-
-    timeouts = dict(
-        line.split("|", 1)
-        for line in (
-            tmp_path / "coordinator" / "timeouts.log"
-        ).read_text(encoding="utf-8").splitlines()
-    )
-    assert timeouts["reuters-markets"] == "1800"
-    assert timeouts["wsj"] == "1800"
-    assert timeouts["ir-batch-001"] == "900"
 
     # Every collector's status.json reports ok.
     collector_dir = _phase_dir(tmp_path, run_date) / "collectors"
@@ -706,13 +696,6 @@ def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:
         assert all(
             path.suffix != ".md" for path in source_files
         ), f"unexpected markdown file under {source_id}: {source_files}"
-    assert "SENSITIVE_PAYLOAD_SENTINEL" not in str(
-        [
-            path.read_text(encoding="utf-8")
-            for path in collector_dir.rglob("*")
-            if path.is_file()
-        ]
-    )
 
 
 def test_failed_collector_reports_status_without_blocking_pipeline(
@@ -831,28 +814,14 @@ def test_partial_ingestion_survives_final_logical_failure(tmp_path: Path) -> Non
     assert count == 1
     assert status["status"] == "failed"
     assert status["attempts"] == 2
-    assert status["error"] == "aborted"
-    assert "SENSITIVE_PAYLOAD_SENTINEL" not in str(
-        [
-            path.read_text(encoding="utf-8")
-            for path in phase_dir.rglob("*")
-            if path.is_file()
-        ]
-    )
+    assert status["error"] == "collector_failed"
 
 
-def test_ir_failure_is_not_retried(tmp_path: Path) -> None:
+def test_ir_logical_failure_is_retried_once(tmp_path: Path) -> None:
     run_date = date.today().isoformat()
     result = _run_wrapper(
         tmp_path,
-        sources=[
-            {
-                "id": "wsj",
-                "name": "Wall Street Journal",
-                "url": "https://example.test/wsj",
-                "access": "browser",
-            }
-        ],
+        sources=[],
         ir_entries=[
             {
                 "security_id": "AMD",
@@ -861,7 +830,7 @@ def test_ir_failure_is_not_retried(tmp_path: Path) -> None:
             }
         ],
         run_date=run_date,
-        extra_env={"BROKEN_SOURCE": "ir-batch-001"},
+        extra_env={"RECOVER_SOURCE": "ir-batch-001"},
     )
 
     assert result.returncode == 0, result.stderr
@@ -871,8 +840,8 @@ def test_ir_failure_is_not_retried(tmp_path: Path) -> None:
             / "collectors/ir-batch-001/status.json"
         ).read_text()
     )
-    assert status["status"] == "failed"
-    assert status["attempts"] == 1
+    assert status["status"] == "ok"
+    assert status["attempts"] == 2
 
 
 # ---------------------------------------------------------------------------

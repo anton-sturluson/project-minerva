@@ -62,12 +62,18 @@ _Worth Knowing Today_
 • _{Investor takeaway}:_ {Concise helpful explanation with original-source links.}
 ```
 
-For `_Worth Knowing Today_`, select exactly 10 distinct non-portfolio events that are most useful for becoming a better investor. They may be company-specific or broader. Prefer developments with transferable lessons about economics, competition, incentives, capital allocation, regulation, technology, macro conditions, or risk.
+For `_Worth Knowing Today_`, select up to 10 distinct non-portfolio events that are most useful for becoming a better investor. When fewer than 10 events qualify, include every qualifying event. Never add filler, and never query or read rejected articles merely to reach the maximum. Events may be company-specific or broader. Prefer developments with transferable lessons about economics, competition, incentives, capital allocation, regulation, technology, macro conditions, or risk.
 
 If nothing material occurred for the portfolio or watchlist, use the approved fallback:
 
 ```text
 • No material portfolio or watchlist developments during the collection period.
+```
+
+If no non-portfolio event qualifies for `_Worth Knowing Today_`, use this fallback:
+
+```text
+• No qualifying non-portfolio developments during the collection period.
 ```
 
 Get final article and per-source counts from the verified fixed-window query and collector successes and failures from `collector_stats`. Cite factual claims with the direct source URLs from the selected SQLite rows, linking to original articles rather than `finnhub.io/api/news` proxy pages when possible. Do not use Markdown headings or tables.

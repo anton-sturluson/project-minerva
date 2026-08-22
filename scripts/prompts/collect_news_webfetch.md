@@ -51,7 +51,7 @@ Pipe that object directly on stdin to:
 printf '%s\n' "$article_json" | {{NEWS_INGEST_COMMAND}}
 ```
 
-A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the item as failed and return a non-zero result after continuing safely.
+A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never place content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the item as failed and report collector status `failed` after continuing safely.
 
 ## Procedure
 
@@ -62,6 +62,10 @@ A different safe in-memory JSON-producing construct is allowed, but it must end 
    a. Fetch its distinct URL when one exists; a calendar row without a distinct URL may use substantive content from the landing-page fetch.
    b. Resolve missing publication metadata as specified above, then extract and normalize the complete substantive item.
    c. Build and ingest the in-memory object.
-   d. Record fetch or extraction failures as skipped and continue.
-5. If the initial fetch fails or safe completion is impossible, return non-zero.
-6. Reply briefly with counts for inserted/updated/duplicate/skipped/failed. Do not include item bodies.
+   d. Record an unavailable or non-substantive item as skipped and continue. Count a fetch or extraction failure as failed and continue safely.
+5. If the initial fetch fails or safe completion is impossible, report status `failed`.
+6. Return the final report described below.
+
+## Final report
+
+Your final reply must be exactly one compact JSON object with no Markdown, preamble, or trailing text: `{"status":"ok","inserted":0,"updated":0,"duplicate":0,"skipped":0,"failed":0}`. Use only the keys shown, with `status` set to `ok` or `failed` and every count set to a nonnegative integer. `status` may be `ok` only when `failed` is zero; any browser, fetch, or safe-completion failure must use `failed`. Do not include article bodies.
