@@ -177,6 +177,11 @@ def load_prepared_event_titles(
     prepared_path: Path, run_date: date
 ) -> list[CandidateTitle]:
     """Load compact prepared-evidence headlines and assign deterministic IDs."""
+    payload = _load_prepared_evidence(prepared_path)
+    return _prepared_event_titles(payload, run_date)
+
+
+def _load_prepared_evidence(prepared_path: Path) -> dict[str, Any]:
     if not prepared_path.is_file():
         raise SynthesisError(f"prepared evidence does not exist: {prepared_path}")
     try:
@@ -185,8 +190,20 @@ def load_prepared_event_titles(
         raise SynthesisError(f"could not read prepared evidence: {exc}") from exc
     if not isinstance(payload, dict):
         raise SynthesisError("prepared evidence must be a JSON object")
+    return payload
 
-    universe_roles = _universe_role_map(payload.get("universe"))
+
+def _prepared_universe(payload: dict[str, Any]) -> list[Any]:
+    raw_universe = payload.get("universe", [])
+    if not isinstance(raw_universe, list):
+        raise SynthesisError("prepared evidence `universe` must be a list")
+    return raw_universe
+
+
+def _prepared_event_titles(
+    payload: dict[str, Any], run_date: date
+) -> list[CandidateTitle]:
+    universe_roles = _universe_role_map(_prepared_universe(payload))
     events = payload.get("events", [])
     if not isinstance(events, list):
         raise SynthesisError("prepared evidence `events` must be a list")
@@ -368,10 +385,18 @@ def build_source_collection_line(candidates: Sequence[CandidateTitle]) -> str:
     )
 
 
-def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date) -> str:
-    """Render pass 1 with only article-choice titles and no evidence bodies."""
+def build_shortlist_prompt(
+    candidates: Sequence[CandidateTitle],
+    run_date: date,
+    *,
+    portfolio_context: dict[str, list[dict[str, Any]]] | None = None,
+) -> str:
+    """Render pass 1 with only article-choice titles and compact portfolio context."""
     payload = {
         "run_date": run_date.isoformat(),
+        "portfolio_context": portfolio_context
+        if portfolio_context is not None
+        else {"holdings": [], "watchlist": []},
         "candidate_count": len(candidates),
         "candidates": [candidate.title_record() for candidate in candidates],
     }
@@ -380,12 +405,18 @@ def build_shortlist_prompt(candidates: Sequence[CandidateTitle], run_date: date)
         "For this turn, DO NOT use or call any tools. DO NOT browse, search, or fetch anything. "
         "DO NOT read, create, edit, or write any files. Work only from this message and reply "
         "directly. The JSON below is the complete ARTICLE-CHOICE title/headline universe for this "
-        "run. Portfolio/watchlist events, market moves, and other non-article events have already "
-        "been routed automatically and must not compete in this pass.\n\n"
+        "run. It contains title/headline metadata only—no article bodies or summaries. The compact "
+        "portfolio_context comes from this run's prepared evidence and contains only security "
+        "identity fields grouped as holdings and watchlist. Portfolio/watchlist events, market "
+        "moves, and other non-article events have already been routed automatically and must not "
+        "compete in this pass.\n\n"
         "Select a focused but broad shortlist for a long-only investor, targeting 15-25 choices "
-        "when the candidate quality supports it. HARD MAXIMUM: select no more than 30 IDs. Retain "
-        "stories that are plausibly market-moving, company-specific, useful as an investor "
-        "read-through, or materially economic, political, or geopolitical. Reject lifestyle, "
+        "when the candidate quality supports it. HARD MAXIMUM: select no more than 30 IDs. Treat "
+        "holding/watchlist membership as an important relevance signal, but not as an automatic-"
+        "selection mandate; include coverage with material direct or read-through relevance to "
+        "those securities. Retain stories that are plausibly market-moving, company-specific, "
+        "useful as an investor read-through, or materially economic, political, or geopolitical. "
+        "Reject lifestyle, "
         "sports, celebrity, and other non-investor fluff. Semantically deduplicate overlapping "
         "headlines: select one representative of the same development, preferring a "
         "collected_sqlite_article over a secondary_prepared_market_news record because the former "
@@ -664,13 +695,22 @@ def synthesize_morning_brief(
     retry_count: int = 1,
 ) -> str:
     """Run both OpenClaw turns in one session and persist the final artifact."""
-    all_candidates = build_title_universe(db_path, prepared_path, run_date)
+    prepared_payload = _load_prepared_evidence(prepared_path)
+    prepared_candidates = _prepared_event_titles(prepared_payload, run_date)
+    portfolio_context = _compact_portfolio_context(
+        _prepared_universe(prepared_payload)
+    )
+    all_candidates = query_fresh_article_titles(
+        db_path, run_date
+    ) + prepared_candidates
     source_collection_line = build_source_collection_line(all_candidates)
     routing_plan = partition_candidates(all_candidates)
     candidates = routing_plan.article_candidates
     call_model = model_call or _default_model_call
     active_session_key = _resolve_session_key(session_key, run_date)
-    pass_1_prompt = build_shortlist_prompt(candidates, run_date)
+    pass_1_prompt = build_shortlist_prompt(
+        candidates, run_date, portfolio_context=portfolio_context
+    )
 
     shortlist_ids = _with_retries(
         lambda: validate_shortlist_ids(
@@ -947,9 +987,60 @@ def _event_evidence(candidate: CandidateTitle, *, routing_class: str) -> dict[st
     return evidence_record
 
 
-def _universe_role_map(raw_universe: Any) -> dict[str, str]:
-    if not isinstance(raw_universe, list):
-        return {}
+def _universe_membership(item: dict[str, Any]) -> str:
+    sources = item.get("sources")
+    if isinstance(sources, list):
+        source_roles = {
+            str(source).strip().casefold()
+            for source in sources
+            if str(source).strip()
+        }
+        for role in ("holding", "watchlist"):
+            if role in source_roles:
+                return role
+
+    for field in ("source_kind", "relationship"):
+        role = str(item.get(field) or "").strip().casefold()
+        if role in PORTFOLIO_ROLES:
+            return role
+    return ""
+
+
+def _compact_portfolio_context(
+    raw_universe: list[Any],
+) -> dict[str, list[dict[str, Any]]]:
+    context: dict[str, list[dict[str, Any]]] = {
+        "holdings": [],
+        "watchlist": [],
+    }
+    identity_fields = ("security_id", "ticker", "company_name")
+    for item in raw_universe:
+        if not isinstance(item, dict):
+            continue
+        role = _universe_membership(item)
+        if not role:
+            continue
+        compact = {key: item[key] for key in identity_fields if key in item}
+        context["holdings" if role == "holding" else "watchlist"].append(compact)
+
+    for records in context.values():
+        records.sort(
+            key=lambda record: (
+                str(record.get("security_id") or "").casefold(),
+                str(record.get("ticker") or "").casefold(),
+                str(record.get("company_name") or "").casefold(),
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        )
+    return context
+
+
+def _universe_role_map(raw_universe: list[Any]) -> dict[str, str]:
     roles: dict[str, str] = {}
     for item in raw_universe:
         if not isinstance(item, dict):
@@ -957,8 +1048,10 @@ def _universe_role_map(raw_universe: Any) -> dict[str, str]:
         security_id = (
             str(item.get("security_id") or item.get("ticker") or "").strip().upper()
         )
-        role = str(item.get("source_kind") or item.get("relationship") or "").strip()
-        if security_id and role:
+        role = _universe_membership(item)
+        if security_id and role and (
+            security_id not in roles or role == "holding"
+        ):
             roles[security_id] = role
     return roles
 

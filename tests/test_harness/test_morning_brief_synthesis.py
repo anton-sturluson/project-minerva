@@ -141,12 +141,25 @@ def _make_inputs(tmp_path: Path) -> tuple[Path, Path]:
                     {
                         "security_id": "PORT",
                         "ticker": "PORT",
-                        "source_kind": "holding",
+                        "company_name": "Portfolio Corp",
+                        "source_kind": "watchlist",
+                        "sources": ["watchlist", "holding"],
+                        "shares": 125,
+                        "weight": 0.15,
                     },
                     {
                         "security_id": "WATCH",
                         "ticker": "WATCH",
+                        "company_name": "Watchlist Ltd",
+                        "source_kind": "holding",
+                        "sources": ["watchlist"],
+                        "notes": "Do not send this to pass 1.",
+                    },
+                    {
+                        "security_id": "ODD.L/A",
+                        "ticker": "Odd.L/A",
                         "source_kind": "watchlist",
+                        "notes": "Name intentionally absent.",
                     },
                 ],
                 "events": [
@@ -445,6 +458,35 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     )
 
     title_universe = _payload_from_prompt(prompts[0], "TITLE_UNIVERSE_JSON:")
+    assert title_universe["portfolio_context"] == {
+        "holdings": [
+            {
+                "security_id": "PORT",
+                "ticker": "PORT",
+                "company_name": "Portfolio Corp",
+            }
+        ],
+        "watchlist": [
+            {
+                "security_id": "ODD.L/A",
+                "ticker": "Odd.L/A",
+            },
+            {
+                "security_id": "WATCH",
+                "ticker": "WATCH",
+                "company_name": "Watchlist Ltd",
+            },
+        ],
+    }
+    assert all(
+        set(record) <= {"security_id", "ticker", "company_name"}
+        for records in title_universe["portfolio_context"].values()
+        for record in records
+    )
+    assert "shares" not in prompts[0]
+    assert "weight" not in prompts[0]
+    assert "Name intentionally absent" not in prompts[0]
+    assert "Do not send this to pass 1" not in prompts[0]
     article_records = [
         item for item in title_universe["candidates"] if item["kind"] == "article"
     ]
@@ -479,6 +521,9 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     assert "HARD MAXIMUM: select no more than 30 IDs" in prompts[0]
     assert "Semantically deduplicate" in prompts[0]
     assert "Reject lifestyle" in prompts[0]
+    assert "important relevance signal, but not as an automatic-selection mandate" in prompts[0]
+    assert "material direct or read-through relevance" in prompts[0]
+    assert "title/headline metadata only—no article bodies or summaries" in prompts[0]
 
     shortlisted = _payload_from_prompt(prompts[1], "SHORTLISTED_EVIDENCE_JSON:")
     assert shortlisted["shortlisted_count"] == 2
@@ -502,6 +547,12 @@ def test_weighted_routing_partitions_pass_1_and_labels_all_pass_2_evidence(
     assert auto_by_title["WATCH schedules an investor day"]["routing_class"] == (
         "auto_portfolio_watchlist"
     )
+    assert auto_by_title["PORT reports before the open"]["details"][
+        "portfolio_role"
+    ] == "holding"
+    assert auto_by_title["WATCH schedules an investor day"]["details"][
+        "portfolio_role"
+    ] == "watchlist"
     assert auto_by_title["SPY moved 1.25%"]["routing_class"] == "auto_market_move"
     assert auto_by_title["Employment report due at 08:30 ET"]["routing_class"] == (
         "other_auto_event"
@@ -740,6 +791,73 @@ def test_empty_shortlist_for_nonempty_universe_fails_after_retry(
         )
 
     assert calls == 2
+
+
+def test_missing_prepared_universe_supplies_empty_pass_1_context(
+    tmp_path: Path,
+) -> None:
+    db_path, prepared_path = _make_inputs(tmp_path)
+    prepared = json.loads(prepared_path.read_text(encoding="utf-8"))
+    del prepared["universe"]
+    prepared_path.write_text(json.dumps(prepared), encoding="utf-8")
+    prompts: list[str] = []
+    no_portfolio_brief = (
+        "*Market Snapshot*\n"
+        "• SPY moved 1.25% <https://example.com/spy|Market>\n\n"
+        "*Worth Knowing Today*\n"
+        "• Material development <https://example.com/story|Reuters>"
+    )
+
+    def model_call(**kwargs) -> str:
+        prompts.append(kwargs["prompt"])
+        if "PASS 1" in kwargs["prompt"]:
+            universe = _payload_from_prompt(
+                kwargs["prompt"], "TITLE_UNIVERSE_JSON:"
+            )
+            return json.dumps({"ids": [universe["candidates"][0]["id"]]})
+        return no_portfolio_brief
+
+    result = synthesize_morning_brief(
+        db_path=db_path,
+        prepared_path=prepared_path,
+        run_date=RUN_DATE,
+        model_call=model_call,
+    )
+
+    title_universe = _payload_from_prompt(prompts[0], "TITLE_UNIVERSE_JSON:")
+    assert title_universe["portfolio_context"] == {
+        "holdings": [],
+        "watchlist": [],
+    }
+    assert result == f"{SOURCE_COLLECTION_LINE}\n{no_portfolio_brief}"
+
+
+def test_non_list_prepared_universe_is_rejected_before_synthesis(
+    tmp_path: Path,
+) -> None:
+    db_path, prepared_path = _make_inputs(tmp_path)
+    prepared = json.loads(prepared_path.read_text(encoding="utf-8"))
+    prepared["universe"] = {"security_id": "PORT"}
+    prepared_path.write_text(json.dumps(prepared), encoding="utf-8")
+    model_calls = 0
+
+    def model_call(**kwargs) -> str:
+        nonlocal model_calls
+        model_calls += 1
+        return "unused"
+
+    with pytest.raises(
+        SynthesisError,
+        match=r"prepared evidence `universe` must be a list",
+    ):
+        synthesize_morning_brief(
+            db_path=db_path,
+            prepared_path=prepared_path,
+            run_date=RUN_DATE,
+            model_call=model_call,
+        )
+
+    assert model_calls == 0
 
 
 def test_empty_universe_preserves_explicit_evidence_thin_brief(tmp_path: Path) -> None:
