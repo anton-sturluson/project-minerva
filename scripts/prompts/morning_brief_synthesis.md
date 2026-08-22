@@ -28,9 +28,9 @@ uv run minerva summarize --model gpt-5.6-luna --thinking medium
 Do not read the batch inputs into your context.
 
 1. Create a temporary directory.
-2. Use the exact `holdings_path` and `watchlist_path` from the validated handoff to create `$SELECTION_TMP/relevance-prompt.md`. Copy `scripts/prompts/morning_brief_selection.md`, then append compact JSON arrays named `holdings` and `watchlist` from those files. Include only `security_id`, `ticker`, and `company_name`; sort each array by `security_id`; omit shares, weights, notes, and every other field. Do this with a short inline Python or `jq` command without reading the source files into your context. Tell Terra to treat portfolio/watchlist membership as an important positive relevance signal, not automatic selection, and to include articles with material direct or read-through relevance to those securities.
+2. Use the exact `prepared_evidence` path from the validated handoff to create `$SELECTION_TMP/relevance-prompt.md`. Copy `scripts/prompts/morning_brief_selection.md`, then append only the top-level `universe` array as `PORTFOLIO_UNIVERSE_JSON`. Do this with a short inline Python or `jq` command without reading the source file into your context.
 
-3. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into JSONL batches of 30 articles each. Each line must contain exactly `article_key`, `url`, `title`, `source`, `published_at`, and `summary`; do not add article bodies or other fields.
+3. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`.
 4. If batches exist, count them and run the extractor once with concurrency equal to the batch count; otherwise skip Terra selection:
 
 ```bash
