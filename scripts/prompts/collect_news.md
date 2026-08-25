@@ -14,7 +14,7 @@ Prioritize articles relevant to these current holdings/watchlist companies:
 
 ## Eligibility and safety
 
-- Collect every qualifying article found during the browser procedure. Rank direct portfolio relevance first, then material macro/market news, industry developments, market-relevant geopolitics/politics, and genuinely important business, technology, science, or world news. Exclude lifestyle, sports, entertainment, and celebrity stories.
+- Collect every qualifying article found during the browser procedure. Rank direct portfolio relevance first, then material macro/market news, industry developments, market-relevant geopolitics/politics, and genuinely important business, technology, science, or world news. Collect evidence-backed durable business, technological, social, demographic, labor, institutional, or resource shifts when they can materially reshape demand, productivity, costs, incentives, or risk, including indirectly or over the long term. Exclude lifestyle, sports, entertainment, and celebrity stories.
 - The publication window is the previous calendar date at 04:00 America/New_York inclusive through `{{DATE}}` at 04:00 America/New_York exclusive.
 - A publication value is mandatory. Prefer machine-readable source metadata such as `article:published_time` or `<time datetime>` over rendered text, and preserve its exact timezone/offset. A date alone is acceptable without an invented time or timezone. When the landing page has no date, inspect article metadata before body extraction; discard the article if no publication value exists.
 - Use the deterministic database lookup before expensive body extraction. Never estimate title similarity or calculate article hashes yourself.

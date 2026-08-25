@@ -269,8 +269,8 @@ else
       if failure_reason=$(openclaw agent --json \
         --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
         --timeout "${timeout}" \
-        --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
-        --thinking high \
+        --model openai/gpt-5.6-luna \
+        --thinking xhigh \
         --session-id "${session_id}" \
         --message "${prompt}" 2>/dev/null | \
         run_helper validate-openclaw 2>&1); then
