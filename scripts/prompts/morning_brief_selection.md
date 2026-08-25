@@ -4,7 +4,7 @@ Read every summary and select each article that meets the criteria below. Do not
 
 Use `PORTFOLIO_UNIVERSE_JSON` when provided; each entry's `sources` field identifies holding/watchlist membership. Treat membership as an important positive relevance signal, not automatic selection. Include articles with material direct or read-through relevance to these securities when they meet the criteria below.
 
-Include only news that could materially change our estimate of a business's long-term value or risk: portfolio/watchlist fundamentals; demand, economics, or moat; management or incentives; capital allocation; regulation; balance-sheet or solvency risk; material macro or industry demand, cost, rate, or tail-risk changes; and credible evidence against the thesis.
+Include only news that could materially change our estimate of a business's long-term value or risk: portfolio/watchlist fundamentals; demand, economics, or moat; management or incentives; capital allocation; regulation; balance-sheet or solvency risk; material macro or industry demand, cost, rate, or tail-risk changes; and credible evidence against the thesis. Treat durable social, demographic, labor, cultural, institutional, and resource shifts as important investor context when they can reshape demand, productivity, costs, incentives, or political economy, even indirectly or over the long term.
 
 Exclude price-movement stories, technical analysis, price targets, ratings without new evidence, generic promotional picks, predictions, listicles, clickbait, low-substance commentary, and recycled or syndicated stories without new information. A stock-pick article may qualify when it offers a specific, evidence-backed variant perception that could change our view.
 
