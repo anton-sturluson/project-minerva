@@ -123,107 +123,132 @@ exit 0
 
 
 def _fake_openclaw(tmp_path: Path) -> Path:
-    """Fake OpenClaw that mimics a collector agent.
-
-    Parses `SOURCE_ROOT`, `INVEST_DB`, and `news ingest` command out of the
-    prompt, then either fails (for the broken source id) or invokes
-    `minerva news ingest --input -` via MINERVA_RUNNER so the wrapper's
-    contract with the news CLI is exercised end-to-end.
-    """
+    """Fake the one parent coordinator and its native crawler children."""
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     return _write_executable(
         fake_bin / "openclaw",
-        r"""#!/usr/bin/env bash
-set -euo pipefail
-message=""
-timeout=""
-agent=""
-session_id=""
-json_mode=0
-failure_json='{"status":"ok","result":{"payloads":[{"text":"{\"status\":\"failed\",\"inserted\":0,\"updated\":0,\"duplicate\":0,\"skipped\":0,\"failed\":1}"}],"meta":{"aborted":false,"stopReason":"end_turn"}}}'
-success_json='{"status":"ok","result":{"payloads":[{"text":"{\"status\":\"ok\",\"inserted\":1,\"updated\":0,\"duplicate\":0,\"skipped\":0,\"failed\":0}"}],"meta":{"aborted":false,"stopReason":"end_turn"}}}'
-while [[ "$#" -gt 0 ]]; do
-  case "$1" in
-    --json) json_mode=1; shift ;;
-    --message) message="$2"; shift 2 ;;
-    --timeout) timeout="$2"; shift 2 ;;
-    --agent) agent="$2"; shift 2 ;;
-    --session-id) session_id="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-[[ "${json_mode}" -eq 1 ]] || exit 9
-
-# Extract the isolated metadata root and the news-ingest command rendered in
-# the prompt. Both are stable, verbatim substrings emitted by the script.
-source_root=$(printf '%s\n' "${message}" | \
-  sed -n 's/^Your isolated metadata root is `\([^`]*\)`.*/\1/p' | head -n 1)
-source_id="${source_root##*/}"
-invest_db=$(printf '%s\n' "${message}" | \
-  sed -n 's|.*--db "\([^"]*\)".*|\1|p' | head -n 1)
-
-printf '%s|%s\n' "${source_id}" "${timeout}" >> "${TIMEOUT_LOG}"
-printf '%s\n' "${agent}" >> "${AGENT_LOG}"
-printf '%s\n' "${source_id}" >> "${COLLECTOR_START_LOG}"
-printf '%s|%s\n' "${source_id}" "${session_id}" >> "${SESSION_LOG}"
-attempt_file="${ATTEMPT_DIR}/${source_id}"
-attempt=$(( $(cat "${attempt_file}" 2>/dev/null || echo 0) + 1 ))
-printf '%s\n' "${attempt}" > "${attempt_file}"
-batch_json=$(printf '%s\n' "${message}" | \
-  sed -n 's/^Batch companies JSON: `\(.*\)`$/\1/p' | head -n 1)
-if [[ -n "${batch_json}" ]]; then
-  printf '%s|%s\n' "${source_id}" "${batch_json}" >> "${IR_BATCH_LOG}"
-fi
-
-if [[ "${source_id}" == "${BROKEN_SOURCE:-__unset__}" ]]; then
-  exit 7
-fi
-
-logical_failure=0
-if [[ "${source_id}" == "${LOGICAL_FAILURE_SOURCE:-__unset__}" ]] || \
-   [[ "${source_id}" == "${RECOVER_SOURCE:-__unset__}" && "${attempt}" -eq 1 ]]; then
-  logical_failure=1
-fi
-if [[ "${logical_failure}" -eq 1 && \
-      "${source_id}" != "${INGEST_BEFORE_FAILURE_SOURCE:-__unset__}" ]]; then
-  printf '%s\n' "${failure_json}"
-  exit 0
-fi
-
-# The prompt must include the direct-ingest command surface. Assert it here so
-# any regression surfaces as a collector failure with a clear diagnostic.
-if ! printf '%s\n' "${message}" | grep -q "news ingest --input -"; then
-  echo "prompt missing direct-ingest command" >&2
-  exit 8
-fi
-
-# Perform the direct-ingest that a real collector would perform.
-article_json=$(SOURCE_ID="${source_id}" python3 - <<'PY'
+        r'''#!/usr/bin/env python3
 import json
 import os
+import re
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-source_id = os.environ["SOURCE_ID"]
-now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+args = sys.argv[1:]
+def option(name):
+    index = args.index(name)
+    return args[index + 1]
+
+if "--json" not in args or option("--agent") != "main":
+    raise SystemExit(9)
+message = option("--message")
+agent = option("--agent")
+jobs_match = re.search(r"^- Ordered jobs manifest: `([^`]+)`$", message, re.MULTILINE)
+artifacts_match = re.search(r"^- Collector result root: `([^`]+)`$", message, re.MULTILINE)
+if not jobs_match or not artifacts_match:
+    raise SystemExit(8)
+jobs = json.loads(Path(jobs_match.group(1)).read_text())["jobs"]
+artifact_root = Path(artifacts_match.group(1))
+Path(os.environ["AGENT_LOG"]).open("a").write(agent + "\n")
+
+for job in jobs:
+    source_id = job["source_id"]
+    Path(os.environ["COLLECTOR_START_LOG"]).open("a").write(source_id + "\n")
+    Path(os.environ["TIMEOUT_LOG"]).open("a").write(
+        f"{source_id}|{job['timeout']}\n"
+    )
+    prompt = Path(job["prompt_file"]).read_text()
+    batch = re.search(r"^Batch companies JSON: `(.*)`$", prompt, re.MULTILINE)
+    if batch:
+        Path(os.environ["IR_BATCH_LOG"]).open("a").write(
+            f"{source_id}|{batch.group(1)}\n"
+        )
+    db_match = re.search(r'--db "([^"]+)"', prompt)
+    if not db_match or "news ingest --input -" not in prompt:
+        raise SystemExit(7)
+    invest_db = db_match.group(1)
+    final_status = "failed"
+    error = "invalid_json"
+    attempts = 0
+    for attempt in range(1, job["max_attempts"] + 1):
+        attempts = attempt
+        Path(os.environ["SESSION_LOG"]).open("a").write(
+            f"{source_id}|news-{source_id}-attempt-{attempt}\n"
+        )
+        broken = source_id == os.environ.get("BROKEN_SOURCE", "__unset__")
+        logical = (
+            source_id == os.environ.get("LOGICAL_FAILURE_SOURCE", "__unset__")
+            or (
+                source_id == os.environ.get("RECOVER_SOURCE", "__unset__")
+                and attempt == 1
+            )
+        )
+        ingest = not broken and (
+            not logical
+            or source_id == os.environ.get("INGEST_BEFORE_FAILURE_SOURCE", "__unset__")
+        )
+        if ingest:
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+                "+00:00", "Z"
+            )
+            article = {
+                "title": f"Article from {source_id}",
+                "source_id": source_id,
+                "url": f"https://example.test/{source_id}/story",
+                "published_at": os.environ.get("PUBLISHED_AT", now),
+                "content": f"Body from {source_id}",
+                "collected_at": now,
+            }
+            subprocess.run(
+                [os.environ["MINERVA_RUNNER"], "news", "ingest", "--input", "-", "--db", invest_db],
+                input=json.dumps(article) + "\n",
+                text=True,
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+        if not broken and not logical:
+            final_status = "ok"
+            error = None
+            break
+        error = "collector_failed" if logical else "invalid_json"
+
+    status_path = artifact_root / source_id / "status.json"
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path = Path(job["log_file"])
+    with log_path.open("a") as lifecycle:
+        lifecycle.write(f"status: {final_status}\nattempts: {attempts}\n")
+    status_path.write_text(
+        json.dumps(
+            {
+                "attempts": attempts,
+                "error": error,
+                "exit_status": 0 if final_status == "ok" else 1,
+                "log": str(log_path),
+                "session_id": f"coordinator:{source_id}:{attempts}",
+                "source_id": source_id,
+                "source_name": job["source_name"],
+                "status": final_status,
+                "url": job["url"],
+            }
+        )
+    )
+
+report = json.dumps({"status": "ok", "completed": len(jobs)}, separators=(",", ":"))
 print(json.dumps({
-    "title": f"Article from {source_id}",
-    "source_id": source_id,
-    "url": f"https://example.test/{source_id}/story",
-    "published_at": os.environ.get("PUBLISHED_AT", now),
-    "content": f"Body from {source_id}",
-    "collected_at": now,
+    "status": "ok",
+    "result": {
+        "payloads": [{"text": report}],
+        "meta": {
+            "aborted": False,
+            "livenessState": "working",
+            "stopReason": "end_turn",
+        },
+    },
 }))
-PY
-)
-printf '%s\n' "${article_json}" | "${MINERVA_RUNNER}" news ingest \
-  --input - --db "${invest_db}" >/dev/null
-if [[ "${logical_failure}" -eq 1 ]]; then
-  printf '%s\n' "${failure_json}"
-else
-  printf '%s\n' "${success_json}"
-fi
-""",
+''',
     )
 
 
@@ -372,12 +397,9 @@ def test_collector_timeout_validation_precedes_temp_state(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("collector_agent", "expected"),
-    [(None, "steve"), ("collector-override", "collector-override")],
-)
-def test_collector_agent_defaults_and_can_be_overridden(
-    tmp_path: Path, collector_agent: str | None, expected: str
+@pytest.mark.parametrize("collector_agent", [None, "collector-override"])
+def test_parent_coordinator_is_always_main(
+    tmp_path: Path, collector_agent: str | None
 ) -> None:
     extra_env = (
         {"MINERVA_NEWS_COLLECTOR_AGENT": collector_agent}
@@ -403,7 +425,7 @@ def test_collector_agent_defaults_and_can_be_overridden(
     agents = (tmp_path / "coordinator" / "agents.log").read_text(
         encoding="utf-8"
     ).splitlines()
-    assert agents == [expected]
+    assert agents == ["main"]
 
 
 # ---------------------------------------------------------------------------

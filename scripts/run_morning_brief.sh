@@ -21,7 +21,6 @@ MINERVA_EDITORIAL_TIMEOUT="${MINERVA_EDITORIAL_TIMEOUT:-1800}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-1800}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
 MINERVA_MAX_COLLECTORS="${MINERVA_MAX_COLLECTORS:-8}"
-MINERVA_NEWS_COLLECTOR_AGENT="${MINERVA_NEWS_COLLECTOR_AGENT:-steve}"
 for integer_name in \
   MINERVA_EDITORIAL_TIMEOUT \
   MINERVA_BROWSER_TIMEOUT \
@@ -33,6 +32,17 @@ for integer_name in \
     exit 1
   fi
 done
+longest_collector_timeout="${MINERVA_EDITORIAL_TIMEOUT}"
+[[ "${MINERVA_BROWSER_TIMEOUT}" -le "${longest_collector_timeout}" ]] || \
+  longest_collector_timeout="${MINERVA_BROWSER_TIMEOUT}"
+[[ "${MINERVA_WEBFETCH_TIMEOUT}" -le "${longest_collector_timeout}" ]] || \
+  longest_collector_timeout="${MINERVA_WEBFETCH_TIMEOUT}"
+MINERVA_COORDINATOR_TIMEOUT="${MINERVA_COORDINATOR_TIMEOUT:-}"
+if [[ -n "${MINERVA_COORDINATOR_TIMEOUT}" ]] && \
+    ! [[ "${MINERVA_COORDINATOR_TIMEOUT}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "MINERVA_COORDINATOR_TIMEOUT must be a positive integer" >&2
+  exit 1
+fi
 if ! PREVIOUS_DATE="$(run_helper previous-date "${RUN_DATE}")"; then
   exit 1
 fi
@@ -44,12 +54,36 @@ PHASE_DIR="${MINERVA_NEWS_ARTIFACT_DIR:-${REPORT_DIR}/data/structured/news-pipel
 COLLECTOR_ARTIFACT_DIR="${PHASE_DIR}/collectors"
 NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 NEWS_SOURCE_ROOTS_DIR="${NEWS_RUN_DIR}/sources"
+LEASE_MANIFEST_DIR="${MINERVA_BROWSER_LEASE_DIR:-${TMPDIR:-/tmp}/minerva-browser-leases}"
+LEASE_MANIFEST="${LEASE_MANIFEST_DIR}/lease-${RUN_DATE}-$$-${RANDOM}.json"
+COORDINATOR_WRAPPER_PID=""
 cleanup_run_dir() {
+  # The coordinator wrapper normally removes this manifest. This fallback
+  # covers validation failures before it starts and closes recorded aliases only.
+  if [[ -f "${LEASE_MANIFEST}" ]]; then
+    run_helper lease-cleanup "${LEASE_MANIFEST}" >/dev/null 2>&1 || true
+  fi
   # Candidate and lookup metadata is ephemeral. Collector responses are never
   # retained because they could accidentally contain article body text.
   rm -rf "${NEWS_RUN_DIR}"
 }
+terminate_pipeline() {
+  local signal_name="$1" exit_status="$2"
+  trap - TERM INT
+  if [[ -n "${COORDINATOR_WRAPPER_PID}" ]] && \
+      kill -0 "${COORDINATOR_WRAPPER_PID}" 2>/dev/null; then
+    kill -s "${signal_name}" "${COORDINATOR_WRAPPER_PID}" 2>/dev/null || true
+    wait "${COORDINATOR_WRAPPER_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${COORDINATOR_JOBS:-}" && -f "${COORDINATOR_JOBS}" ]]; then
+    run_helper coordinator-finalize \
+      "${COORDINATOR_JOBS}" "${COLLECTOR_ARTIFACT_DIR}" >/dev/null 2>&1 || true
+  fi
+  exit "${exit_status}"
+}
 trap cleanup_run_dir EXIT
+trap 'terminate_pipeline TERM 143' TERM
+trap 'terminate_pipeline INT 130' INT
 
 MINERVA_RUNNER="${MINERVA_RUNNER:-uv run minerva}"
 MINERVA_BRIEF_EARNINGS_PROVIDER="${MINERVA_BRIEF_EARNINGS_PROVIDER:-finnhub}"
@@ -164,10 +198,12 @@ else
   BROWSER_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news.md"
   WEBFETCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_news_webfetch.md"
   IR_BATCH_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/collect_ir_batch.md"
+  COORDINATOR_PROMPT_TEMPLATE="${ROOT_DIR}/scripts/prompts/morning_brief_coordinator.md"
+  COORDINATOR_JOBS="${NEWS_RUN_DIR}/coordinator-jobs.json"
+  COORDINATOR_PROMPT="${NEWS_RUN_DIR}/coordinator-prompt.md"
   NEWS_SOURCES="${MINERVA_NEWS_SOURCES:-${MINERVA_WORKSPACE_ROOT}/data/02-news/news-sources.json}"
   PORTFOLIO_UNIVERSE="${MINERVA_PORTFOLIO_UNIVERSE:-${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/universe.json}"
   IR_REGISTRY="${MINERVA_IR_REGISTRY:-${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/ir-registry.json}"
-  PIDS=()
 
   if [[ -f "${NEWS_SOURCES}" ]] && ! jq -e '
     type == "array" and all(.[];
@@ -234,107 +270,38 @@ else
       "${source_root}/candidates.json" "${source_root}/lookup.json"
   }
 
-  write_collector_status() {
-    local destination="$1" source_id="$2" source_name="$3" url="$4"
-    local session_id="$5" status="$6" exit_status="$7" log_file="$8"
-    local attempts="$9" error="${10}"
-    run_helper collector-status \
-      "${destination}" "${source_id}" "${source_name}" "${url}" \
-      "${session_id}" "${status}" "${exit_status}" "${log_file}" \
-      "${attempts}" "${error}"
-  }
+  run_helper coordinator-init "${COORDINATOR_JOBS}" "${MINERVA_MAX_COLLECTORS}"
 
-  collect_source() {
-    local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
-    local url="$5" collection_scope="$6" source_root="$7" max_attempts="$8"
+  launch_source() {
+    local access="$1" prompt_template="$2" timeout="$3" source_id="$4"
+    local source_name="$5" url="$6" collection_scope="$7" max_attempts="${8:-1}"
+    if ! [[ "${source_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+      echo "error[collectors]: unsafe source id: ${source_id}" >&2
+      return 1
+    fi
+    local source_root="${NEWS_SOURCE_ROOTS_DIR}/${source_id}"
     local artifact_root="${COLLECTOR_ARTIFACT_DIR}/${source_id}"
     local lifecycle_log="${artifact_root}/collector.log"
-    local status_file="${artifact_root}/status.json"
-    local prompt session_id failure_reason="" attempts=0 exit_status=1 result_status=failed
-    mkdir -p "${artifact_root}"
-    prompt=$(render_collection_prompt "${prompt_template}" "${source_name}" \
-      "${source_id}" "${url}" "${collection_scope}" "${source_root}")
-
+    local prompt_file="${source_root}/collector-prompt.md"
+    if [[ -e "${source_root}" ]]; then
+      echo "error[collectors]: duplicate source id: ${source_id}" >&2
+      return 1
+    fi
+    mkdir -p "${source_root}" "${artifact_root}"
+    render_collection_prompt "${prompt_template}" "${source_name}" \
+      "${source_id}" "${url}" "${collection_scope}" "${source_root}" \
+      >"${prompt_file}"
     {
       echo "source_id: ${source_id}"
       echo "source_name: ${source_name}"
       echo "url: ${url}"
       echo "started_at: $(date -u +%FT%TZ)"
     } >"${lifecycle_log}"
-
-    while [[ "${attempts}" -lt "${max_attempts}" ]]; do
-      attempts=$((attempts + 1))
-      session_id="news-${source_id}-${RUN_DATE}-$$-${attempts}-${RANDOM}"
-      echo "attempt_${attempts}_session_id: ${session_id}" >>"${lifecycle_log}"
-      if failure_reason=$(openclaw agent --json \
-        --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
-        --timeout "${timeout}" \
-        --model fireworks/accounts/fireworks/routers/glm-5p2-fast \
-        --thinking high \
-        --session-id "${session_id}" \
-        --message "${prompt}" 2>/dev/null | \
-        run_helper validate-openclaw 2>&1); then
-        exit_status=0
-        result_status=ok
-        failure_reason=""
-        break
-      else
-        exit_status=$?
-      fi
-      failure_reason="${failure_reason:-process_error}"
-    done
-    {
-      echo "finished_at: $(date -u +%FT%TZ)"
-      echo "status: ${result_status}"
-      echo "exit_status: ${exit_status}"
-      echo "attempts: ${attempts}"
-      [[ -z "${failure_reason}" ]] || echo "error: ${failure_reason}"
-      echo "note: OpenClaw output discarded to prevent article-body persistence"
-    } >>"${lifecycle_log}"
-    write_collector_status "${status_file}" "${source_id}" "${source_name}" \
-      "${url}" "${session_id}" "${result_status}" "${exit_status}" \
-      "${lifecycle_log}" "${attempts}" "${failure_reason}"
-
-    if [[ "${exit_status}" -eq 0 ]]; then
-      echo "news: ${source_id} ok (status: ${status_file})"
-    else
-      echo "news: ${source_id} failed (status ${exit_status}; status: ${status_file})"
-    fi
-    return "${exit_status}"
-  }
-
-  wait_for_collectors() {
-    if [[ "${#PIDS[@]}" -eq 0 ]]; then
-      return 0
-    fi
-    echo "  waiting for collector batch (${#PIDS[@]} agents)..."
-    for pid in "${PIDS[@]}"; do
-      wait "${pid}" 2>/dev/null || true
-    done
-    PIDS=()
-  }
-
-  launch_source() {
-    local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
-    local url="$5" collection_scope="$6" max_attempts="${7:-1}"
-    if ! [[ "${source_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-      echo "error[collectors]: unsafe source id: ${source_id}" >&2
-      return 1
-    fi
-    local source_root="${NEWS_SOURCE_ROOTS_DIR}/${source_id}"
-    if [[ -e "${source_root}" ]]; then
-      echo "error[collectors]: duplicate source id: ${source_id}" >&2
-      return 1
-    fi
-    mkdir -p "${source_root}"
     printf '%s\n' "${source_id}" >>"${NEWS_RUN_DIR}/launched.txt"
-    collect_source "${prompt_template}" "${timeout}" "${source_id}" \
-      "${source_name}" "${url}" "${collection_scope}" "${source_root}" \
-      "${max_attempts}" &
-    PIDS+=("$!")
-    if [[ "${#PIDS[@]}" -ge "${MINERVA_MAX_COLLECTORS}" ]]; then
-      wait_for_collectors
-    fi
+    run_helper coordinator-job \
+      "${COORDINATOR_JOBS}" "${source_id}" "${source_name}" "${url}" \
+      "${access}" "${prompt_file}" "${source_root}" "${max_attempts}" \
+      "${timeout}" "${lifecycle_log}"
   }
 
   # The daily workflow has exactly three editorial collector slots. Official
@@ -351,12 +318,14 @@ else
       collection_scope=$(echo "${entry}" | jq -r '.collect // "Items relevant to a long-only investor."')
       if [[ "${access}" == "browser" ]]; then
         echo "  spawning browser agent: ${source_id}"
-        launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_EDITORIAL_TIMEOUT}" \
-          "${source_id}" "${source_name}" "${url}" "${collection_scope}" 2
+        launch_source browser "${BROWSER_PROMPT_TEMPLATE}" \
+          "${MINERVA_EDITORIAL_TIMEOUT}" "${source_id}" "${source_name}" \
+          "${url}" "${collection_scope}" 2
       else
         echo "  spawning web_fetch agent: ${source_id}"
-        launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_EDITORIAL_TIMEOUT}" \
-          "${source_id}" "${source_name}" "${url}" "${collection_scope}" 2
+        launch_source web_fetch "${WEBFETCH_PROMPT_TEMPLATE}" \
+          "${MINERVA_EDITORIAL_TIMEOUT}" "${source_id}" "${source_name}" \
+          "${url}" "${collection_scope}" 2
       fi
     done
   fi
@@ -375,14 +344,53 @@ else
       company_count=$(echo "${ir_companies_json}" | jq 'length')
       first_url=$(echo "${ir_companies_json}" | jq -r '.[0].feeds[0].url')
       echo "  spawning IR browser agent: ${ir_batch_id} (${company_count} companies)"
-      launch_source "${IR_BATCH_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}" \
-        "${ir_batch_id}" "IR batch ${ir_batch_number}" "${first_url}" \
-        "${ir_companies_json}" 2
+      launch_source browser "${IR_BATCH_PROMPT_TEMPLATE}" \
+        "${MINERVA_BROWSER_TIMEOUT}" "${ir_batch_id}" \
+        "IR batch ${ir_batch_number}" "${first_url}" "${ir_companies_json}" 2
     done <"${NEWS_RUN_DIR}/ir-batches.jsonl"
   fi
 
-  echo "  waiting for news agents..."
-  wait_for_collectors
+  job_count=$(jq '.jobs | length' "${COORDINATOR_JOBS}")
+  if [[ "${job_count}" -gt 0 ]]; then
+    coordinator_waves=$(((job_count + MINERVA_MAX_COLLECTORS - 1) / MINERVA_MAX_COLLECTORS))
+    coordinator_timeout="${MINERVA_COORDINATOR_TIMEOUT:-$((2 * longest_collector_timeout * coordinator_waves + 120))}"
+    mkdir -p "${LEASE_MANIFEST_DIR}"
+    # Recover only dead owners from this helper's narrowly scoped manifest dir.
+    run_helper lease-recover "${LEASE_MANIFEST_DIR}" >/dev/null
+    run_helper lease-init "${LEASE_MANIFEST}" "$$"
+    HELPER_COMMAND="$(run_helper self-command)"
+    run_helper render-coordinator \
+      "${COORDINATOR_PROMPT_TEMPLATE}" "${COORDINATOR_PROMPT}" \
+      "${COORDINATOR_JOBS}" "${LEASE_MANIFEST}" \
+      "${COLLECTOR_ARTIFACT_DIR}" "${HELPER_COMMAND}"
+    coordinator_session_id="news-coordinator-${RUN_DATE}-$$-${RANDOM}"
+    echo "  running one main-agent coordinator for ${job_count} crawler(s)..."
+    (
+      trap - TERM INT
+      run_helper run-coordinator \
+        "${LEASE_MANIFEST}" "${COORDINATOR_JOBS}" \
+        "${COLLECTOR_ARTIFACT_DIR}" \
+        "$((coordinator_timeout + 30))" -- \
+        openclaw agent --json --agent main \
+        --timeout "${coordinator_timeout}" \
+        --thinking high --session-id "${coordinator_session_id}" \
+        --message "$(<"${COORDINATOR_PROMPT}")"
+    ) &
+    COORDINATOR_WRAPPER_PID=$!
+    if wait "${COORDINATOR_WRAPPER_PID}"; then
+      coordinator_status=0
+    else
+      coordinator_status=$?
+    fi
+    COORDINATOR_WRAPPER_PID=""
+    if [[ "${coordinator_status}" -eq 130 ]]; then
+      exit "${coordinator_status}"
+    fi
+    if [[ "${coordinator_status}" -ne 0 ]]; then
+      echo "error[collectors]: parent coordinator failed; missing jobs will be marked failed" >&2
+    fi
+  fi
+  run_helper coordinator-finalize "${COORDINATOR_JOBS}" "${COLLECTOR_ARTIFACT_DIR}"
 
   run_helper collector-summary \
     "${NEWS_RUN_DIR}/launched.txt" "${COLLECTOR_ARTIFACT_DIR}" \

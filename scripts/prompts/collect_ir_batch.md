@@ -48,14 +48,21 @@ printf '%s\n' "$article_json" | {{NEWS_INGEST_COMMAND}}
 
 A different safe in-memory JSON-producing construct is allowed, but it must end in the same `news ingest --input - --db ...` command. Never put release JSON or content on a command line. Require the compact command result to have status `inserted`, `updated`, or `duplicate`; otherwise count the release as failed and report collector status `failed` after continuing safely.
 
-## Browser procedure
+## Browser lease procedure
 
-1. Open the first configured feed exactly once with `browser open ... --new --window`. Record the returned tab alias; it is the only window and tab for the whole batch. Close any accidentally created extra tab or window immediately.
-2. For each company and feed, navigate that tab to the feed URL, scan the complete listing, and record candidate headline, destination URL, and visible publication value before opening release bodies.
-3. Run the per-company batch duplicate lookup. For each remaining candidate, use the same tab to resolve publication metadata, extract the full release, and ingest the in-memory object.
+Your assigned browser alias is exactly `{{BROWSER_ALIAS}}`. Use only this lease-checked command prefix for browser work:
+
+```bash
+{{LEASED_BROWSER_COMMAND}}
+```
+
+Every browser operation must use that prefix, which deterministically targets only the assigned alias. Never invoke the raw browser CLI/tool, enumerate or focus tabs, create a tab or window, supply a tab-selection or new-window option, or close the lease. The deterministic runner owns cleanup.
+
+1. Navigate the existing leased tab to the first configured feed with `{{LEASED_BROWSER_COMMAND}} open "$first_feed_url"`.
+2. For each company and feed, navigate only that leased tab to the feed URL, scan the complete listing, and record candidate headline, destination URL, and visible publication value before opening release bodies.
+3. Run the per-company batch duplicate lookup. For each remaining candidate, use only the same leased alias to resolve publication metadata, extract the full release, and ingest the in-memory object.
 4. Continue through all feeds and companies when an individual page is unavailable or paywalled, recording the affected item as skipped. Count a browser, fetch, or extraction failure as failed and continue safely.
-5. Close the tab with `browser close {tab_alias}`.
-6. Return the final report described below.
+5. Leave the assigned lease open and return the final report described below.
 
 If no company has an accessible configured feed, or the browser bridge prevents safe completion, report status `failed`.
 
