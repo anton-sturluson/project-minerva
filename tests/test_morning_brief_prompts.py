@@ -11,13 +11,13 @@ def _read_prompt(name: str) -> str:
     return (PROMPT_DIR / name).read_text(encoding="utf-8")
 
 
-def test_collector_uses_luna_with_xhigh_reasoning() -> None:
+def test_collector_uses_luna_with_high_reasoning() -> None:
     runner = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
         encoding="utf-8"
     )
 
     assert "--model openai/gpt-5.6-luna" in runner
-    assert "--thinking xhigh" in runner
+    assert "--thinking high" in runner
     assert "fireworks/accounts/fireworks/routers/glm-5p2-fast" not in runner
 
 
