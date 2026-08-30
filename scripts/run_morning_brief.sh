@@ -270,7 +270,7 @@ else
         --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
         --timeout "${timeout}" \
         --model openai/gpt-5.6-luna \
-        --thinking xhigh \
+        --thinking high \
         --session-id "${session_id}" \
         --message "${prompt}" 2>/dev/null | \
         run_helper validate-openclaw 2>&1); then
