@@ -358,7 +358,7 @@ def _require(command: str, args: list[str], count: int) -> None:
 
 
 def _render_prompt_command(args: list[str]) -> None:
-    _require("render-prompt", args, 13)
+    _require("render-prompt", args, 14)
     (
         template,
         run_date,
@@ -373,8 +373,10 @@ def _render_prompt_command(args: list[str]) -> None:
         collection_scope,
         candidate_file,
         lookup_file,
+        browser_tab_alias,
     ) = args
     replacements = {
+        "BROWSER_TAB_ALIAS": browser_tab_alias,
         "CANDIDATE_FILE": candidate_file,
         "COLLECT_SCOPE": collection_scope,
         "DATE": run_date,

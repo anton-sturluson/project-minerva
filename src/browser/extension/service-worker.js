@@ -1434,8 +1434,9 @@ async function runOpen(params, context = {}) {
   }
 
   const preview = await readPreview(updatedTab.id);
+  const alias = getManagedTabEntry(updatedTab.id)?.alias || null;
   await maybePostActionDelay(params);
-  return preview;
+  return { ...preview, alias };
 }
 
 async function runClick(params, context = {}) {

@@ -63,6 +63,17 @@ test("close-idle dry-run formatting explicitly says nothing was closed", () => {
   assert.doesNotMatch(output, /Closed tabs:/);
 });
 
+test("open reports the managed tab alias", () => {
+  const output = formatSuccess(
+    "open",
+    { alias: "t7", title: "Example", preview: "Ready" },
+    "https://example.com",
+    1,
+  );
+
+  assert.match(output, /^Tab alias: t7$/m);
+});
+
 test("tabs and errors render concise human-readable output", () => {
   const tabs = formatSuccess(
     "tabs",
