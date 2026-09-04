@@ -132,7 +132,7 @@ def _fake_openclaw(tmp_path: Path) -> Path:
     """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    return _write_executable(
+    openclaw = _write_executable(
         fake_bin / "openclaw",
         r"""#!/usr/bin/env bash
 set -euo pipefail
@@ -170,6 +170,7 @@ printf '%s|%s\n' "${source_id}" "${session_id}" >> "${SESSION_LOG}"
 attempt_file="${ATTEMPT_DIR}/${source_id}"
 attempt=$(( $(cat "${attempt_file}" 2>/dev/null || echo 0) + 1 ))
 printf '%s\n' "${attempt}" > "${attempt_file}"
+printf '%s\n' "${message}" > "${PROMPT_LOG_DIR}/${source_id}-${attempt}.md"
 batch_json=$(printf '%s\n' "${message}" | \
   sed -n 's/^Batch companies JSON: `\(.*\)`$/\1/p' | head -n 1)
 if [[ -n "${batch_json}" ]]; then
@@ -225,6 +226,32 @@ else
 fi
 """,
     )
+    _write_executable(
+        fake_bin / "browser",
+        r"""#!/usr/bin/env bash
+set -euo pipefail
+command="${1:-}"
+shift || true
+case "${command}" in
+  open)
+    alias="t$(cat "${BROWSER_STATE}" 2>/dev/null || echo 0)"
+    next=$(( ${alias#t} + 1 ))
+    printf '%s\n' "${next}" > "${BROWSER_STATE}"
+    printf 'open|%s|%s\n' "${alias}" "$*" >> "${BROWSER_LOG}"
+    printf 'Tab alias: %s\nTitle: (untitled)\nPreview: [blank]\n[ok | url: about:blank | 0ms]\n' "${alias}"
+    ;;
+  close)
+    printf 'close|%s\n' "${1:?missing alias}" >> "${BROWSER_LOG}"
+    printf 'Closed: %s\n[ok | url: about:blank | 0ms]\n' "$1"
+    ;;
+  *)
+    printf 'unexpected browser command: %s\n' "${command}" >&2
+    exit 2
+    ;;
+esac
+""",
+    )
+    return openclaw
 
 
 def _run_wrapper(
@@ -261,6 +288,8 @@ def _run_wrapper(
     coordinator.mkdir(exist_ok=True)
     attempt_dir = coordinator / "attempts"
     attempt_dir.mkdir(exist_ok=True)
+    prompt_log_dir = coordinator / "prompts"
+    prompt_log_dir.mkdir(exist_ok=True)
     bin_dir = tmp_path / "bin"
     fake_openclaw = (
         bin_dir / "openclaw" if bin_dir.is_dir() else _fake_openclaw(tmp_path)
@@ -295,6 +324,9 @@ def _run_wrapper(
             "IR_BATCH_LOG": str(coordinator / "ir-batches.log"),
             "SESSION_LOG": str(coordinator / "sessions.log"),
             "ATTEMPT_DIR": str(attempt_dir),
+            "PROMPT_LOG_DIR": str(prompt_log_dir),
+            "BROWSER_LOG": str(coordinator / "browser.log"),
+            "BROWSER_STATE": str(coordinator / "browser-state"),
         }
     )
     if extra_env:
@@ -611,6 +643,115 @@ def test_ir_sessions_batch_ten_companies_in_deterministic_order(
         for company in rows[batch_id]
     ]
     assert ordered_ids == ids
+
+
+def _extract_alias(prompt: str) -> str:
+    return prompt.split("assigned tab alias is exactly `", 1)[1].split("`", 1)[0]
+
+
+def test_each_browser_collector_gets_its_own_dedicated_window_and_web_fetch_gets_none(
+    tmp_path: Path,
+) -> None:
+    run_date = date.today().isoformat()
+    result = _run_wrapper(
+        tmp_path,
+        sources=[
+            {
+                "id": "wsj",
+                "name": "Wall Street Journal",
+                "url": "https://example.test/wsj",
+                "access": "browser",
+            },
+            {
+                "id": "economist",
+                "name": "The Economist",
+                "url": "https://example.test/economist",
+                "access": "browser",
+            },
+            {
+                "id": "reuters-markets",
+                "name": "Reuters Markets",
+                "url": "https://example.test/reuters",
+                "access": "web_fetch",
+            },
+        ],
+        run_date=run_date,
+        extra_env={"MINERVA_MAX_COLLECTORS": "3"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    prompts = tmp_path / "coordinator" / "prompts"
+
+    browser_aliases: dict[str, str] = {}
+    for source_id in ("wsj", "economist"):
+        prompt = (prompts / f"{source_id}-1.md").read_text(encoding="utf-8")
+        alias = _extract_alias(prompt)
+        browser_aliases[source_id] = alias
+        assert f"Use `--tab {alias}` on every browser command" in prompt
+        assert f"browser open URL --tab {alias}" in prompt
+        assert "Never enumerate, focus, or close tabs" in prompt
+        assert "never create a tab or window" in prompt
+
+    assert len(set(browser_aliases.values())) == len(browser_aliases)
+
+    web_fetch_prompt = (prompts / "reuters-markets-1.md").read_text(
+        encoding="utf-8"
+    )
+    assert "assigned tab alias" not in web_fetch_prompt
+    assert "{{BROWSER_TAB_ALIAS}}" not in web_fetch_prompt
+
+    browser_events = (tmp_path / "coordinator" / "browser.log").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    open_events = [line for line in browser_events if line.startswith("open|")]
+    close_events = [line for line in browser_events if line.startswith("close|")]
+    opened = {line.split("|", 2)[1] for line in open_events}
+    closed = {line.split("|", 1)[1] for line in close_events}
+
+    # Every coordinator-issued lease uses its own dedicated Chrome window.
+    assert len(open_events) == len(browser_aliases)
+    for line in open_events:
+        args = line.split("|", 2)[2]
+        assert "--new" in args
+        assert "--window" in args
+        assert "--tab" not in args
+
+    assert opened == set(browser_aliases.values())
+    assert closed == opened
+
+
+def test_failed_browser_collector_reuses_its_leased_tab_across_retries(
+    tmp_path: Path,
+) -> None:
+    run_date = date.today().isoformat()
+    result = _run_wrapper(
+        tmp_path,
+        sources=[
+            {
+                "id": "economist",
+                "name": "The Economist",
+                "url": "https://example.test/economist",
+                "access": "browser",
+            }
+        ],
+        run_date=run_date,
+        extra_env={"BROKEN_SOURCE": "economist", "MINERVA_ALLOW_THIN_BRIEF": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    prompts = tmp_path / "coordinator" / "prompts"
+    aliases = [
+        _extract_alias((prompts / f"economist-{attempt}.md").read_text(encoding="utf-8"))
+        for attempt in (1, 2)
+    ]
+    assert aliases[0] == aliases[1]
+
+    browser_events = (tmp_path / "coordinator" / "browser.log").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert [line for line in browser_events if line.startswith("close|")] == [
+        f"close|{aliases[0]}"
+    ]
 
 
 def test_collectors_are_isolated_and_ingest_directly(tmp_path: Path) -> None:

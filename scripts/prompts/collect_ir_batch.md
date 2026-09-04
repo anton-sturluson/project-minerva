@@ -50,12 +50,13 @@ A different safe in-memory JSON-producing construct is allowed, but it must end 
 
 ## Browser procedure
 
-1. Open the first configured feed exactly once with `browser open ... --new --window`. Record the returned tab alias; it is the only window and tab for the whole batch. Close any accidentally created extra tab or window immediately.
-2. For each company and feed, navigate that tab to the feed URL, scan the complete listing, and record candidate headline, destination URL, and visible publication value before opening release bodies.
-3. Run the per-company batch duplicate lookup. For each remaining candidate, use the same tab to resolve publication metadata, extract the full release, and ingest the in-memory object.
+Your assigned tab alias is exactly `{{BROWSER_TAB_ALIAS}}`. Use `--tab {{BROWSER_TAB_ALIAS}}` on every browser command. Navigate with `browser open URL --tab {{BROWSER_TAB_ALIAS}}`. Never enumerate, focus, or close tabs, and never create a tab or window; in particular, do not use `browser tabs`, `browser focus`, `browser close`, `--new`, or `--window`. The shell coordinator owns the tab and its cleanup.
+
+1. Navigate the assigned tab to the first configured feed with `browser open "$first_feed_url" --tab {{BROWSER_TAB_ALIAS}}`.
+2. For each company and feed, navigate only that tab with `browser open "$feed_url" --tab {{BROWSER_TAB_ALIAS}}`, scan the complete listing, and record candidate headline, destination URL, and visible publication value before opening release bodies.
+3. Run the per-company batch duplicate lookup. For each remaining candidate, use only the same assigned tab, including `--tab {{BROWSER_TAB_ALIAS}}` on extraction commands, to resolve publication metadata, extract the full release, and ingest the in-memory object.
 4. Continue through all feeds and companies when an individual page is unavailable or paywalled, recording the affected item as skipped. Count a browser, fetch, or extraction failure as failed and continue safely.
-5. Close the tab with `browser close {tab_alias}`.
-6. Return the final report described below.
+5. Leave the tab open and return the final report described below.
 
 If no company has an accessible configured feed, or the browser bridge prevents safe completion, report status `failed`.
 

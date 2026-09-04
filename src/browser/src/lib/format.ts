@@ -57,8 +57,8 @@ function renderTabsTable(data: unknown): string {
 
 function renderCommandData(command: CommandName, data: unknown): string {
   if (command === "open" && typeof data === "object" && data !== null) {
-    const record = data as { title?: unknown; preview?: unknown };
-    return `Title: ${String(record.title ?? "(untitled)")}\nPreview: ${String(record.preview ?? "[blank]")}`;
+    const record = data as { alias?: unknown; title?: unknown; preview?: unknown };
+    return `Tab alias: ${String(record.alias ?? "")}\nTitle: ${String(record.title ?? "(untitled)")}\nPreview: ${String(record.preview ?? "[blank]")}`;
   }
 
   if (command === "tabs") {

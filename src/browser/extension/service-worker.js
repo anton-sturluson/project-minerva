@@ -4,7 +4,7 @@ import {
   captureTargetViaCdp,
   resolveManagedTabIdentifier,
 } from "./browser-boundaries.js";
-import { SerializedStateStore, SerialTaskQueue } from "./runtime-state.js";
+import { bindCommandTarget, commandQueueKey, KeyedSerialTaskQueue, SerializedStateStore } from "./runtime-state.js";
 
 const BRIDGE_URL = "ws://127.0.0.1:19224";
 const BRIDGE_PROTOCOL_VERSION = 1;
@@ -17,7 +17,7 @@ let socket = null;
 let reconnectTimer = null;
 let keepaliveTimer = null;
 let reconnectDelayMs = 1000;
-const requestQueue = new SerialTaskQueue();
+const requestQueue = new KeyedSerialTaskQueue();
 const cancelledRequestsBySocket = new WeakMap();
 
 let managedTabs = new Map();
@@ -106,13 +106,6 @@ async function cancellableSleep(ms, context) {
     await sleep(Math.min(100, Math.max(0, deadline - Date.now())));
   }
   throwIfCancelled(context, "wait completed");
-}
-
-function postActionDelay(minMs = 300, maxMs = 800) {
-  const minimum = Number.isFinite(minMs) ? Math.max(0, Math.floor(minMs)) : 300;
-  const maximum = Number.isFinite(maxMs) ? Math.max(minimum, Math.floor(maxMs)) : 800;
-  const delay = minimum === maximum ? minimum : Math.floor(Math.random() * (maximum - minimum + 1)) + minimum;
-  return sleep(delay);
 }
 
 function log(...parts) {
@@ -406,7 +399,6 @@ async function createManagedWindow(context = {}) {
     focused: true,
     type: "normal",
   });
-
   let tab = createdWindow.tabs?.find((candidate) => candidate?.id != null) ?? null;
   if (!tab && Number.isInteger(createdWindow.id)) {
     const tabs = await chrome.tabs.query({ windowId: createdWindow.id });
@@ -418,6 +410,7 @@ async function createManagedWindow(context = {}) {
   }
 
   await addManagedTab(tab);
+  throwIfCancelled(context, "window registration");
   return tab;
 }
 
@@ -820,7 +813,7 @@ function computeStateChanges(beforeSnapshot, afterSnapshot, limit = 20) {
   return changes.length > 0 ? changes : ["No state changes detected."];
 }
 
-async function captureWriteStateChanges(tabId, action) {
+async function captureWriteStateChanges(tabId, action, context = {}) {
   let beforeSnapshot = null;
   try {
     beforeSnapshot = await captureAxTree(tabId, { depth: 3 });
@@ -828,7 +821,9 @@ async function captureWriteStateChanges(tabId, action) {
     log("Pre-action AX snapshot failed:", error instanceof Error ? error.message : String(error));
   }
 
+  throwIfCancelled(context, "page mutation");
   const result = await action();
+  throwIfCancelled(context, "post-action state capture");
 
   if (!beforeSnapshot) {
     return {
@@ -851,11 +846,12 @@ async function captureWriteStateChanges(tabId, action) {
   }
 }
 
-async function maybePostActionDelay(params) {
+async function maybePostActionDelay(params, context = {}) {
   if (params?.noDelay) {
     return;
   }
-  await postActionDelay();
+  const delay = Math.floor(Math.random() * 501) + 300;
+  await cancellableSleep(delay, context);
 }
 
 async function captureAxTree(tabId, options = {}) {
@@ -1413,6 +1409,7 @@ async function runOpen(params, context = {}) {
         ...(Number.isInteger(sourceTab.windowId) ? { windowId: sourceTab.windowId } : {}),
       });
       await addManagedTab(tab);
+      throwIfCancelled(context, "tab registration");
     }
   } else {
     tab = await getManagedTab({ tabId: requestedTabId, allowFallback: true, requireScriptable: false, context });
@@ -1421,8 +1418,11 @@ async function runOpen(params, context = {}) {
   }
 
   await waitForTabComplete(tab.id, 10000, context);
+  throwIfCancelled(context, "navigation result registration");
   const updatedTab = await chrome.tabs.get(tab.id);
+  throwIfCancelled(context, "navigation result registration");
   await addManagedTab(updatedTab);
+  throwIfCancelled(context, "navigation session reset");
   clearSessionState(updatedTab.id);
 
   const waitSelector = typeof params.wait === "string" ? params.wait.trim() : "";
@@ -1434,8 +1434,9 @@ async function runOpen(params, context = {}) {
   }
 
   const preview = await readPreview(updatedTab.id);
-  await maybePostActionDelay(params);
-  return preview;
+  const alias = getManagedTabEntry(updatedTab.id)?.alias || null;
+  await maybePostActionDelay(params, context);
+  return { ...preview, alias };
 }
 
 async function runClick(params, context = {}) {
@@ -1607,14 +1608,14 @@ async function runClick(params, context = {}) {
 
     await waitForTabComplete(tab.id, 2000, context).catch(() => undefined);
     return clickResult;
-  });
+  }, context);
 
   if (!result?.ok) {
     throw new Error(result?.error || `No element matching "${target}".`);
   }
 
   const preview = await readPreview(tab.id);
-  await maybePostActionDelay(params);
+  await maybePostActionDelay(params, context);
   return {
     clicked: rawTarget,
     target,
@@ -1733,13 +1734,13 @@ async function runType(params, context = {}) {
 
       return { ok: false, error: `Element "${rawTarget}" is not a writable input.` };
     }, [target, text, index, isProbablySelector(target)]);
-  });
+  }, context);
 
   if (!result?.ok) {
     throw new Error(result?.error || `No writable element matching "${target}".`);
   }
 
-  await maybePostActionDelay(params);
+  await maybePostActionDelay(params, context);
   return {
     typedInto: rawTarget,
     target,
@@ -1801,10 +1802,10 @@ async function runFill(params, context = {}) {
         }
       }
     });
-  });
+  }, context);
 
   const actual = await readElementValue(tab.id, resolved.selector);
-  await maybePostActionDelay(params);
+  await maybePostActionDelay(params, context);
   return {
     filledInto: rawTarget,
     target: resolved.selector || target,
@@ -1854,10 +1855,10 @@ async function runUpload(params, context = {}) {
         nodeId,
       });
     });
-  });
+  }, context);
 
   const preview = await readPreview(tab.id);
-  await maybePostActionDelay(params);
+  await maybePostActionDelay(params, context);
   return {
     uploaded: filepath,
     target: rawTarget,
@@ -2037,12 +2038,13 @@ async function runWait(params, context = {}) {
   throw new Error(`Timed out waiting for ${waitedFor}. Current page state: ${waitContext}`);
 }
 
-async function runSnapshot(params) {
+async function runSnapshot(params, context = {}) {
   const depth = Number.isFinite(params.depth) ? Number(params.depth) : -1;
   const tabId = await resolveTabParam(params);
   const tab = await getManagedTab({ tabId, allowFallback: false, requireScriptable: true });
   const scope = typeof params.scope === "string" && params.scope ? resolveTargetRef(tab.id, params.scope) : null;
   const snapshot = await captureAxTree(tab.id, { scope, depth });
+  throwIfCancelled(context, "snapshot baseline update");
   getTabState(tab.id).snapshotBaseline = snapshot;
   const preview = await readPreview(tab.id);
   return {
@@ -2051,13 +2053,14 @@ async function runSnapshot(params) {
   };
 }
 
-async function runDiff(params) {
+async function runDiff(params, context = {}) {
   const depth = Number.isFinite(params.depth) ? Number(params.depth) : -1;
   const tabId = await resolveTabParam(params);
   const tab = await getManagedTab({ tabId, allowFallback: false, requireScriptable: true });
   const scope = typeof params.scope === "string" && params.scope ? resolveTargetRef(tab.id, params.scope) : null;
   const tabState = getTabState(tab.id);
   const current = await captureAxTree(tab.id, { scope, depth });
+  throwIfCancelled(context, "diff baseline update");
   const previous = tabState.snapshotBaseline;
   tabState.snapshotBaseline = current;
   const preview = await readPreview(tab.id);
@@ -2098,7 +2101,7 @@ async function runDiff(params) {
   };
 }
 
-async function runInspect(params) {
+async function runInspect(params, context = {}) {
   const tabId = await resolveTabParam(params);
   const tab = await getManagedTab({ tabId, allowFallback: false, requireScriptable: true });
   const scope = typeof params.scope === "string" && params.scope ? resolveTargetRef(tab.id, params.scope) : null;
@@ -2217,6 +2220,7 @@ async function runInspect(params) {
     throw new Error(inspected.error);
   }
 
+  throwIfCancelled(context, "inspection reference update");
   clearRefMap(tab.id);
   const elements = Array.isArray(inspected?.elements) ? inspected.elements : [];
   const preview = await readPreview(tab.id);
@@ -2481,25 +2485,24 @@ async function runDialog(params, context = {}) {
   };
 }
 
-async function runTabs() {
+async function runTabs(context = {}) {
   await loadState();
   const entries = await Promise.all(
-    Array.from(managedTabs.keys()).map(async (tabId) => {
+    Array.from(managedTabs.values()).map(async (entry) => {
       try {
-        const tab = await chrome.tabs.get(tabId);
-        await updateManagedTab(tab);
-        const entry = getManagedTabEntry(tabId);
-        return entry
-          ? {
-              alias: entry.alias,
-              tabId: entry.tabId,
-              url: tab.url || entry.url,
-              title: tab.title || entry.title,
-              active: tab.id === activeTabId,
-            }
-          : null;
+        // Listing is observational. Lifecycle listeners own registry cleanup,
+        // so a transient tabs.get failure cannot race an in-flight tab command.
+        const tab = await chrome.tabs.get(entry.tabId);
+        throwIfCancelled(context, "managed tab lookup");
+        return {
+          alias: entry.alias,
+          tabId: entry.tabId,
+          url: tab.url || entry.url,
+          title: tab.title || entry.title,
+          active: tab.id === activeTabId,
+        };
       } catch {
-        await removeManagedTab(tabId);
+        throwIfCancelled(context, "managed tab lookup");
         return null;
       }
     }),
@@ -2567,27 +2570,39 @@ async function runCloseIdle(params, context = {}) {
   }
 }
 
-async function runStatus(params = {}) {
+async function runStatus(params = {}, context = {}) {
   await loadState();
 
   const hasExplicitTab =
     params.tabId != null && !(typeof params.tabId === "string" && !params.tabId.trim()) ||
     params.alias != null && !(typeof params.alias === "string" && !params.alias.trim());
   const requestedTabId = hasExplicitTab ? await resolveTabParam(params) : activeTabId;
-  let managedTab = null;
-  let activeManagedTab = null;
   const resolvedActiveTabId = activeTabId;
+  const readTab = async (tabId) => {
+    if (!Number.isInteger(tabId)) {
+      return null;
+    }
+    try {
+      return await chrome.tabs.get(tabId);
+    } catch {
+      return null;
+    }
+  };
 
-  if (requestedTabId != null) {
-    const lookup = getManagedTab({ tabId: requestedTabId, allowFallback: false, requireScriptable: false });
-    managedTab = hasExplicitTab ? await lookup : await lookup.catch(() => null);
+  // Status is intentionally observational: unlike normal commands it does not
+  // refresh/remove registry entries, so it can safely use its own diagnostic
+  // lane even while a tab command is stuck.
+  const managedTab = await readTab(requestedTabId);
+  throwIfCancelled(context, "status lookup");
+  if (hasExplicitTab && !managedTab) {
+    throw new Error(`Managed tab ${requestedTabId} is no longer available.`);
   }
-
-  if (resolvedActiveTabId != null) {
-    activeManagedTab = await getManagedTab({ tabId: resolvedActiveTabId, allowFallback: false, requireScriptable: false }).catch(() => null);
-  }
-
+  const activeManagedTab = requestedTabId === resolvedActiveTabId
+    ? managedTab
+    : await readTab(resolvedActiveTabId);
+  throwIfCancelled(context, "status lookup");
   const activeTab = await getActiveTab().catch(() => null);
+  throwIfCancelled(context, "status lookup");
   const tab = hasExplicitTab ? managedTab : managedTab || activeManagedTab || activeTab;
   const managedEntry = tab?.id != null ? getManagedTabEntry(tab.id) : null;
   const activeEntry = activeManagedTab?.id != null ? getManagedTabEntry(activeManagedTab.id) : null;
@@ -2778,7 +2793,7 @@ async function dispatchAction(action, params, context = {}) {
     case "open":
       return runOpen(params, context);
     case "tabs":
-      return runTabs();
+      return runTabs(context);
     case "focus":
       return runFocus(params, context);
     case "close":
@@ -2796,11 +2811,11 @@ async function dispatchAction(action, params, context = {}) {
     case "wait":
       return runWait(params, context);
     case "snapshot":
-      return runSnapshot(params);
+      return runSnapshot(params, context);
     case "diff":
-      return runDiff(params);
+      return runDiff(params, context);
     case "inspect":
-      return runInspect(params);
+      return runInspect(params, context);
     case "extract":
       return runExtract(params);
     case "screenshot":
@@ -2812,7 +2827,7 @@ async function dispatchAction(action, params, context = {}) {
     case "dialog":
       return runDialog(params, context);
     case "status":
-      return runStatus(params);
+      return runStatus(params, context);
     default:
       throw new Error(`Unknown action "${action}".`);
   }
@@ -2840,7 +2855,42 @@ function handleBridgeMessage(sourceSocket, rawData) {
     return;
   }
 
-  void requestQueue.enqueue(() => handleRequest(payload, sourceSocket));
+  void enqueueBridgeRequest(payload, sourceSocket, cancelledRequests);
+}
+
+async function enqueueBridgeRequest(payload, sourceSocket, cancelledRequests) {
+  const id = typeof payload?.id === "string" ? payload.id : "";
+  const action = typeof payload?.action === "string" ? payload.action : "";
+  const deadline = Number.isFinite(payload?.deadline) ? payload.deadline : Number.POSITIVE_INFINITY;
+  const shouldStart = () =>
+    !cancelledRequests.has(id) && sourceSocket.readyState === WebSocket.OPEN && Date.now() <= deadline;
+
+  try {
+    // Alias-to-tab canonicalization must use restored session state. Otherwise
+    // a cold-start burst can put the same tab in both tab-alias:tN and tab:N.
+    await loadState();
+    if (!shouldStart()) {
+      return;
+    }
+
+    const rawParams = payload?.params && typeof payload.params === "object" ? payload.params : {};
+    const params = bindCommandTarget(action, rawParams, activeTabId);
+    const queuedPayload = params === rawParams ? payload : { ...payload, params };
+    const baseQueueKey = commandQueueKey(action, params, managedTabs.values(), activeTabId);
+    const queueKey = action === "status" ? `${baseQueueKey}:${id}` : baseQueueKey;
+
+    // Keep an unabortable operation's lane quarantined until it really settles;
+    // unrelated tabs (and observational status) use independent lanes. A queued
+    // request that expired or belonged to a disconnected socket never starts.
+    await requestQueue.enqueue(queueKey, () => handleRequest(queuedPayload, sourceSocket), { shouldStart });
+  } catch (error) {
+    log("Request failed outside response handling:", error instanceof Error ? error.message : String(error));
+    if (shouldStart()) {
+      sendTo(sourceSocket, { id, ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  } finally {
+    cancelledRequests.delete(id);
+  }
 }
 
 async function handleRequest(payload, responseSocket) {

@@ -18,7 +18,7 @@ class FakeBridge implements CommandBridge {
     this.calls.push({ action, params, timeoutMs });
     switch (action) {
       case "open":
-        return { url: "https://example.test", title: "Example", preview: "ready" };
+        return { alias: "t0", url: "https://example.test", title: "Example", preview: "ready" };
       case "tabs":
         return [];
       case "focus":

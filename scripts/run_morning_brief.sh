@@ -44,12 +44,42 @@ PHASE_DIR="${MINERVA_NEWS_ARTIFACT_DIR:-${REPORT_DIR}/data/structured/news-pipel
 COLLECTOR_ARTIFACT_DIR="${PHASE_DIR}/collectors"
 NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 NEWS_SOURCE_ROOTS_DIR="${NEWS_RUN_DIR}/sources"
+PIDS=()
+BROWSER_TAB_ALIASES=()
+
+close_browser_leases() {
+  local alias close_failed=0
+  local -a remaining=()
+  for alias in ${BROWSER_TAB_ALIASES[@]+"${BROWSER_TAB_ALIASES[@]}"}; do
+    if ! browser close "${alias}" >/dev/null 2>&1; then
+      remaining+=("${alias}")
+      close_failed=1
+    fi
+  done
+  if [[ "${close_failed}" -eq 0 ]]; then
+    BROWSER_TAB_ALIASES=()
+  else
+    BROWSER_TAB_ALIASES=("${remaining[@]}")
+  fi
+  return "${close_failed}"
+}
+
 cleanup_run_dir() {
+  local pid
+  trap - EXIT INT TERM
+  # On interruption or an early exit, reap collector shells before closing
+  # only the tabs allocated by this coordinator.
+  for pid in ${PIDS[@]+"${PIDS[@]}"}; do
+    wait "${pid}" 2>/dev/null || true
+  done
+  close_browser_leases || true
   # Candidate and lookup metadata is ephemeral. Collector responses are never
   # retained because they could accidentally contain article body text.
   rm -rf "${NEWS_RUN_DIR}"
 }
 trap cleanup_run_dir EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 MINERVA_RUNNER="${MINERVA_RUNNER:-uv run minerva}"
 MINERVA_BRIEF_EARNINGS_PROVIDER="${MINERVA_BRIEF_EARNINGS_PROVIDER:-finnhub}"
@@ -167,7 +197,6 @@ else
   NEWS_SOURCES="${MINERVA_NEWS_SOURCES:-${MINERVA_WORKSPACE_ROOT}/data/02-news/news-sources.json}"
   PORTFOLIO_UNIVERSE="${MINERVA_PORTFOLIO_UNIVERSE:-${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/universe.json}"
   IR_REGISTRY="${MINERVA_IR_REGISTRY:-${MINERVA_WORKSPACE_ROOT}/data/01-portfolio/current/ir-registry.json}"
-  PIDS=()
 
   if [[ -f "${NEWS_SOURCES}" ]] && ! jq -e '
     type == "array" and all(.[];
@@ -225,13 +254,14 @@ else
 
   render_collection_prompt() {
     local template="$1" source_name="$2" source_id="$3" url="$4"
-    local collection_scope="$5" source_root="$6"
+    local collection_scope="$5" source_root="$6" browser_tab_alias="$7"
     run_helper render-prompt \
       "${template}" "${RUN_DATE}" "${source_name}" "${source_id}" \
       "${url}" "${source_root}" "${INVEST_DB}" \
       "${NEWS_EXIST_COMMAND}" "${NEWS_INGEST_COMMAND}" \
       "${PORTFOLIO_TICKERS}" "${collection_scope}" \
-      "${source_root}/candidates.json" "${source_root}/lookup.json"
+      "${source_root}/candidates.json" "${source_root}/lookup.json" \
+      "${browser_tab_alias}"
   }
 
   write_collector_status() {
@@ -247,13 +277,15 @@ else
   collect_source() {
     local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
     local url="$5" collection_scope="$6" source_root="$7" max_attempts="$8"
+    local browser_tab_alias="$9"
     local artifact_root="${COLLECTOR_ARTIFACT_DIR}/${source_id}"
     local lifecycle_log="${artifact_root}/collector.log"
     local status_file="${artifact_root}/status.json"
     local prompt session_id failure_reason="" attempts=0 exit_status=1 result_status=failed
     mkdir -p "${artifact_root}"
     prompt=$(render_collection_prompt "${prompt_template}" "${source_name}" \
-      "${source_id}" "${url}" "${collection_scope}" "${source_root}")
+      "${source_id}" "${url}" "${collection_scope}" "${source_root}" \
+      "${browser_tab_alias}")
 
     {
       echo "source_id: ${source_id}"
@@ -304,7 +336,7 @@ else
   }
 
   wait_for_collectors() {
-    if [[ "${#PIDS[@]}" -eq 0 ]]; then
+    if [[ -z "${PIDS[*]-}" ]]; then
       return 0
     fi
     echo "  waiting for collector batch (${#PIDS[@]} agents)..."
@@ -314,9 +346,34 @@ else
     PIDS=()
   }
 
+  # Each browser collector gets its own dedicated Chrome window with a single
+  # leased tab. The agent never opens or closes tabs or windows; the coordinator
+  # owns the lifecycle.
+  allocate_browser_tab() {
+    local browser_output alias existing
+    if ! browser_output=$(browser open "about:blank" --new --window --no-delay); then
+      echo "error[collectors]: unable to create browser lease window" >&2
+      return 1
+    fi
+    alias=$(printf '%s\n' "${browser_output}" | \
+      sed -n 's/^Tab alias: \(t[0-9][0-9]*\)$/\1/p')
+    if ! [[ "${alias}" =~ ^t[0-9]+$ ]]; then
+      echo "error[collectors]: browser did not report one created tab alias" >&2
+      return 1
+    fi
+    for existing in ${BROWSER_TAB_ALIASES[@]+"${BROWSER_TAB_ALIASES[@]}"}; do
+      if [[ "${existing}" == "${alias}" ]]; then
+        echo "error[collectors]: browser reused allocated tab alias ${alias}" >&2
+        return 1
+      fi
+    done
+    BROWSER_TAB_ALIASES+=("${alias}")
+  }
+
   launch_source() {
     local prompt_template="$1" timeout="$2" source_id="$3" source_name="$4"
     local url="$5" collection_scope="$6" max_attempts="${7:-1}"
+    local browser_tab_alias="${8:-}"
     if ! [[ "${source_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
       echo "error[collectors]: unsafe source id: ${source_id}" >&2
       return 1
@@ -330,12 +387,35 @@ else
     printf '%s\n' "${source_id}" >>"${NEWS_RUN_DIR}/launched.txt"
     collect_source "${prompt_template}" "${timeout}" "${source_id}" \
       "${source_name}" "${url}" "${collection_scope}" "${source_root}" \
-      "${max_attempts}" &
+      "${max_attempts}" "${browser_tab_alias}" &
     PIDS+=("$!")
     if [[ "${#PIDS[@]}" -ge "${MINERVA_MAX_COLLECTORS}" ]]; then
       wait_for_collectors
     fi
   }
+
+  # Resolve the complete browser-collector set before launching agents so all
+  # dedicated Chrome windows can be allocated up front.
+  : >"${NEWS_RUN_DIR}/ir-batches.jsonl"
+  if [[ -f "${PORTFOLIO_UNIVERSE}" && -f "${IR_REGISTRY}" ]]; then
+    run_helper ir-batches \
+      "${PORTFOLIO_UNIVERSE}" "${IR_REGISTRY}" \
+      >"${NEWS_RUN_DIR}/ir-batches.jsonl"
+  fi
+  browser_collector_count=0
+  if [[ -f "${NEWS_SOURCES}" ]]; then
+    browser_collector_count=$(jq '[. as $sources |
+      ["wsj", "economist", "reuters-markets"][] as $id |
+      ($sources | map(select(.id == $id)) | first // empty) |
+      select(.access == "browser")
+    ] | length' "${NEWS_SOURCES}")
+  fi
+  ir_batch_count=$(grep -cve '^$' "${NEWS_RUN_DIR}/ir-batches.jsonl" || true)
+  browser_collector_count=$((browser_collector_count + ir_batch_count))
+  for ((lease_number = 0; lease_number < browser_collector_count; lease_number++)); do
+    allocate_browser_tab
+  done
+  next_browser_lease=0
 
   # The daily workflow has exactly three editorial collector slots. Official
   # macro sources are handled by structured phases, not news-agent sessions.
@@ -350,9 +430,12 @@ else
       access=$(echo "${entry}" | jq -r '.access')
       collection_scope=$(echo "${entry}" | jq -r '.collect // "Items relevant to a long-only investor."')
       if [[ "${access}" == "browser" ]]; then
-        echo "  spawning browser agent: ${source_id}"
+        browser_tab_alias="${BROWSER_TAB_ALIASES[${next_browser_lease}]}"
+        next_browser_lease=$((next_browser_lease + 1))
+        echo "  spawning browser agent: ${source_id} (tab ${browser_tab_alias})"
         launch_source "${BROWSER_PROMPT_TEMPLATE}" "${MINERVA_EDITORIAL_TIMEOUT}" \
-          "${source_id}" "${source_name}" "${url}" "${collection_scope}" 2
+          "${source_id}" "${source_name}" "${url}" "${collection_scope}" 2 \
+          "${browser_tab_alias}"
       else
         echo "  spawning web_fetch agent: ${source_id}"
         launch_source "${WEBFETCH_PROMPT_TEMPLATE}" "${MINERVA_EDITORIAL_TIMEOUT}" \
@@ -363,10 +446,7 @@ else
 
   # IR registry rows are metadata only. Select current-universe companies with
   # configured feeds, sort by security_id, then chunk into sessions of ten.
-  if [[ -f "${PORTFOLIO_UNIVERSE}" && -f "${IR_REGISTRY}" ]]; then
-    run_helper ir-batches \
-      "${PORTFOLIO_UNIVERSE}" "${IR_REGISTRY}" \
-      >"${NEWS_RUN_DIR}/ir-batches.jsonl"
+  if [[ -s "${NEWS_RUN_DIR}/ir-batches.jsonl" ]]; then
     ir_batch_number=0
     while IFS= read -r ir_companies_json; do
       [[ -n "${ir_companies_json}" ]] || continue
@@ -374,15 +454,20 @@ else
       printf -v ir_batch_id 'ir-batch-%03d' "${ir_batch_number}"
       company_count=$(echo "${ir_companies_json}" | jq 'length')
       first_url=$(echo "${ir_companies_json}" | jq -r '.[0].feeds[0].url')
-      echo "  spawning IR browser agent: ${ir_batch_id} (${company_count} companies)"
+      browser_tab_alias="${BROWSER_TAB_ALIASES[${next_browser_lease}]}"
+      next_browser_lease=$((next_browser_lease + 1))
+      echo "  spawning IR browser agent: ${ir_batch_id} (${company_count} companies; tab ${browser_tab_alias})"
       launch_source "${IR_BATCH_PROMPT_TEMPLATE}" "${MINERVA_BROWSER_TIMEOUT}" \
         "${ir_batch_id}" "IR batch ${ir_batch_number}" "${first_url}" \
-        "${ir_companies_json}" 2
+        "${ir_companies_json}" 2 "${browser_tab_alias}"
     done <"${NEWS_RUN_DIR}/ir-batches.jsonl"
   fi
 
   echo "  waiting for news agents..."
   wait_for_collectors
+  if ! close_browser_leases; then
+    echo "error[collectors]: unable to close one or more allocated browser tabs" >&2
+  fi
 
   run_helper collector-summary \
     "${NEWS_RUN_DIR}/launched.txt" "${COLLECTOR_ARTIFACT_DIR}" \
