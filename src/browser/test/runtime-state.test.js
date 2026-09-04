@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SerialTaskQueue, SerializedStateStore } from "../extension/runtime-state.js";
+import {
+  bindCommandTarget,
+  commandQueueKey,
+  KeyedSerialTaskQueue,
+  SerialTaskQueue,
+  SerializedStateStore,
+} from "../extension/runtime-state.js";
 
 function deferred() {
   let resolve;
@@ -143,4 +149,101 @@ test("request queue serializes tasks and recovers after a rejection", async () =
   await assert.rejects(first, /expected/);
   assert.equal(await second, 42);
   assert.deepEqual(events, ["first:start", "first:end", "second:start", "second:end"]);
+});
+
+test("implicit tab targets are pinned before queued execution", () => {
+  const implicit = { selector: "main" };
+  const pinned = bindCommandTarget("extract", implicit, 41);
+  assert.deepEqual(pinned, { selector: "main", tabId: 41 });
+  assert.notEqual(pinned, implicit);
+
+  const explicit = { tabId: "t1" };
+  assert.equal(bindCommandTarget("extract", explicit, 41), explicit);
+  assert.equal(bindCommandTarget("status", implicit, 41), implicit);
+  assert.equal(bindCommandTarget("tabs", implicit, 41), implicit);
+  assert.equal(bindCommandTarget("close-idle", implicit, 41), implicit);
+  assert.equal(bindCommandTarget("extract", implicit, null), implicit);
+});
+
+test("command lanes canonicalize aliases while isolating tabs and diagnostics", () => {
+  const managed = [
+    { tabId: 41, alias: "t0" },
+    { tabId: 99, alias: "t1" },
+  ];
+
+  assert.equal(commandQueueKey("open", { tabId: "t0" }, managed, 99), "tab:41");
+  assert.equal(commandQueueKey("extract", { alias: "t1" }, managed, 41), "tab:99");
+  assert.equal(commandQueueKey("click", {}, managed, 41), "tab:41");
+  assert.equal(commandQueueKey("status", {}, managed, 41), "diagnostic:status");
+  assert.equal(commandQueueKey("close-idle", {}, managed, 41), "managed-tabs");
+  assert.equal(commandQueueKey("open", { newTab: true }, managed, 41), "managed-tabs");
+  assert.equal(commandQueueKey("open", { newTab: true, newWindow: true }, managed, 41), "managed-tabs");
+});
+
+test("a hung tab lane does not head-of-line block an isolated tab", async () => {
+  const queue = new KeyedSerialTaskQueue();
+  const hung = deferred();
+  const events = [];
+
+  const firstTabTask = queue.enqueue("tab:41", async () => {
+    events.push("t0:start");
+    await hung.promise;
+    events.push("t0:end");
+  });
+  const blockedSameTabTask = queue.enqueue("tab:41", async () => {
+    events.push("t0:next");
+  });
+  const isolatedTask = queue.enqueue("tab:99", async () => {
+    events.push("t1:start");
+    return "completed";
+  });
+
+  assert.equal(await isolatedTask, "completed");
+  assert.deepEqual(events, ["t0:start", "t1:start"]);
+
+  hung.resolve();
+  await Promise.all([firstTabTask, blockedSameTabTask]);
+  assert.deepEqual(events, ["t0:start", "t1:start", "t0:end", "t0:next"]);
+});
+
+test("expired work queued behind a hung request is skipped after reconnect", async () => {
+  const queue = new KeyedSerialTaskQueue();
+  const hung = deferred();
+  const events = [];
+  let oldSocketOpen = true;
+  let now = 100;
+  const deadline = 100;
+
+  const hungOldRequest = queue.enqueue("tab:41", async () => {
+    events.push("old:start");
+    await hung.promise;
+    events.push("old:settled");
+  });
+  const abandonedOldRequest = queue.enqueue(
+    "tab:41",
+    async () => {
+      events.push("old:mutated");
+    },
+    { shouldStart: () => oldSocketOpen && now <= deadline },
+  );
+
+  now = 101;
+  oldSocketOpen = false;
+  const reconnectedOtherTab = queue.enqueue("tab:99", async () => {
+    events.push("new:t1");
+    return 99;
+  });
+  assert.equal(await reconnectedOtherTab, 99);
+  assert.deepEqual(events, ["old:start", "new:t1"]);
+
+  const reconnectedSameTab = queue.enqueue("tab:41", async () => {
+    events.push("new:t0");
+    return 41;
+  });
+  hung.resolve();
+
+  await hungOldRequest;
+  assert.equal(await abandonedOldRequest, undefined);
+  assert.equal(await reconnectedSameTab, 41);
+  assert.deepEqual(events, ["old:start", "new:t1", "old:settled", "new:t0"]);
 });
