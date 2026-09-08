@@ -4,7 +4,13 @@ import {
   captureTargetViaCdp,
   resolveManagedTabIdentifier,
 } from "./browser-boundaries.js";
-import { bindCommandTarget, commandQueueKey, KeyedSerialTaskQueue, SerializedStateStore } from "./runtime-state.js";
+import {
+  bindCommandTarget,
+  commandQueueKey,
+  isUsableTimedOutDocument,
+  KeyedSerialTaskQueue,
+  SerializedStateStore,
+} from "./runtime-state.js";
 
 const BRIDGE_URL = "ws://127.0.0.1:19224";
 const BRIDGE_PROTOCOL_VERSION = 1;
@@ -510,7 +516,15 @@ function waitForTabComplete(tabId, timeoutMs = 10000, context = {}) {
           return;
         }
         if (Date.now() > deadline) {
-          fail("Timed out waiting for tab to finish loading.");
+          const documentState = await runInTab(tabId, () => ({
+            readyState: document.readyState,
+            hasBodyText: Boolean(document.body?.innerText.trim()),
+          }));
+          if (isUsableTimedOutDocument(documentState?.readyState, documentState?.hasBodyText)) {
+            finish(current);
+          } else {
+            fail("Timed out waiting for tab to finish loading.");
+          }
         }
       } catch {
         fail("Tab is no longer available.");
