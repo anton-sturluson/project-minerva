@@ -92,6 +92,11 @@ export class KeyedSerialTaskQueue {
   }
 }
 
+/** Accept a timed-out navigation when its parsed document is already usable. */
+export function isUsableTimedOutDocument(readyState, hasBodyText) {
+  return (readyState === "interactive" || readyState === "complete") && hasBodyText === true;
+}
+
 /** Pin an implicit tab command before it waits in a queue. */
 export function bindCommandTarget(action, params = {}, activeTabId = null) {
   if (!Number.isInteger(activeTabId) || action === "status" || action === "tabs" || action === "close-idle") {

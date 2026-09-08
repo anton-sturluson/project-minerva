@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   bindCommandTarget,
   commandQueueKey,
+  isUsableTimedOutDocument,
   KeyedSerialTaskQueue,
   SerialTaskQueue,
   SerializedStateStore,
@@ -149,6 +150,13 @@ test("request queue serializes tasks and recovers after a rejection", async () =
   await assert.rejects(first, /expected/);
   assert.equal(await second, 42);
   assert.deepEqual(events, ["first:start", "first:end", "second:start", "second:end"]);
+});
+
+test("timed-out navigation accepts only parsed documents with body text", () => {
+  assert.equal(isUsableTimedOutDocument("loading", true), false);
+  assert.equal(isUsableTimedOutDocument("interactive", false), false);
+  assert.equal(isUsableTimedOutDocument("interactive", true), true);
+  assert.equal(isUsableTimedOutDocument("complete", true), true);
 });
 
 test("implicit tab targets are pinned before queued execution", () => {

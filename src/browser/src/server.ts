@@ -131,9 +131,12 @@ function requireBridge(): ExtensionBridge {
   return bridge;
 }
 
-async function getCurrentLocation(commandBridge: CommandBridge): Promise<{ url: string; title: string }> {
+async function getCurrentLocation(
+  commandBridge: CommandBridge,
+  tabParams: Record<string, unknown> = {},
+): Promise<{ url: string; title: string }> {
   try {
-    const status = await commandBridge.call("status", {}, LOCATION_TIMEOUT_MS);
+    const status = await commandBridge.call("status", tabParams, LOCATION_TIMEOUT_MS);
     const location = extractLocation(status);
     if (location) {
       return location;
@@ -639,9 +642,13 @@ export async function runCommand(
 
 export type CommandExecutor = (body: CommandRequest, signal?: AbortSignal) => Promise<CommandResponse>;
 
-async function executeCommand(body: CommandRequest, signal?: AbortSignal): Promise<CommandResponse> {
+export async function executeCommand(
+  body: CommandRequest,
+  signal?: AbortSignal,
+  commandBridge: CommandBridge = requireBridge(),
+): Promise<CommandResponse> {
   const started = Date.now();
-  const commandBridge = requireBridge();
+  const tabParams = buildTabParams(body.options);
   const scopedBridge: CommandBridge = {
     getStatus: () => commandBridge.getStatus(),
     call: (action, params, timeoutMs) => commandBridge.call(action, params, timeoutMs, signal),
@@ -653,7 +660,8 @@ async function executeCommand(body: CommandRequest, signal?: AbortSignal): Promi
     const responseData =
       shouldStop && isObject(data) ? Object.fromEntries(Object.entries(data).filter(([key]) => key !== "shouldStop")) : data;
 
-    const location = extractLocation(responseData) ?? (signal?.aborted ? { url: "about:blank", title: "" } : await getCurrentLocation(commandBridge));
+    const location = extractLocation(responseData) ??
+      (signal?.aborted ? { url: "about:blank", title: "" } : await getCurrentLocation(commandBridge, tabParams));
     const response: CommandResponse = {
       ok: true,
       data: responseData,
@@ -670,7 +678,9 @@ async function executeCommand(body: CommandRequest, signal?: AbortSignal): Promi
 
     return response;
   } catch (error) {
-    const location = signal?.aborted ? { url: "about:blank", title: "" } : await getCurrentLocation(commandBridge);
+    const location = signal?.aborted
+      ? { url: "about:blank", title: "" }
+      : await getCurrentLocation(commandBridge, tabParams);
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
