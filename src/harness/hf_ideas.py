@@ -113,6 +113,30 @@ def slug(value: str) -> str:
     return result or "unnamed"
 
 
+EXCHANGE_CODE = re.compile(r"[A-Z]{2,3}")
+
+
+def split_symbol(symbol: str) -> tuple[str, str]:
+    """Split a published symbol into ticker and exchange.
+
+    The roster publishes Bloomberg-style ``"AAPL US"``. When the publisher is
+    unsure it writes its own marker instead of a code (observed: ``"INOXCVA
+    IN? N/A"``). Treat anything that is not a 2-3 letter code as unknown rather
+    than letting it leak into the exchange field and the derived company_id.
+    ``symbol_as_published`` retains the original text either way.
+    """
+    parts = symbol.split()
+    if not parts:
+        return "", ""
+    ticker = parts[0].upper()
+    if len(parts) == 1:
+        return ticker, ""
+    candidate = " ".join(parts[1:]).upper()
+    if not EXCHANGE_CODE.fullmatch(candidate):
+        return ticker, ""
+    return ticker, candidate
+
+
 def entity_kind(company: str, ticker: str) -> str:
     if not ticker and normalized(company) in NON_STOCK_NAMES:
         return "non-stock"
@@ -146,9 +170,7 @@ def parse_pitches(text: str) -> list[dict[str, Any]]:
                 raise ValueError(f"could not parse roster row: {roster_line}")
             company, fund = (part.strip() for part in parsed_no_symbol.groups())
             symbol = ""
-        symbol_parts = symbol.split()
-        ticker = symbol_parts[0].upper() if symbol_parts else ""
-        exchange = " ".join(symbol_parts[1:]).upper() if len(symbol_parts) > 1 else ""
+        ticker, exchange = split_symbol(symbol)
         kind = entity_kind(company, ticker)
         company_id = company_id_for(company, ticker, exchange, kind)
         occurrence_key = (company_id, normalized(fund))

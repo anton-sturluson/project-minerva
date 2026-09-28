@@ -364,6 +364,30 @@ def test_fabricated_source_url_remains_a_hard_error(tmp_path: Path) -> None:
         hf_ideas.build_report(folder)
 
 
+def test_split_symbol_handles_real_roster_shapes() -> None:
+    """Shapes observed across all 9 roster issues in the live feed (401 rows)."""
+    assert hf_ideas.split_symbol("AAPL US") == ("AAPL", "US")
+    assert hf_ideas.split_symbol("6146 JP") == ("6146", "JP")
+    assert hf_ideas.split_symbol("") == ("", "")
+    # punctuation inside tickers is legitimate and must survive
+    assert hf_ideas.split_symbol("BA/ LN") == ("BA/", "LN")
+    assert hf_ideas.split_symbol("UHAL/B US") == ("UHAL/B", "US")
+    assert hf_ideas.split_symbol("WALMEX* MM") == ("WALMEX*", "MM")
+    # publisher uncertainty markers must not leak into exchange
+    assert hf_ideas.split_symbol("INOXCVA IN? N/A") == ("INOXCVA", "")
+    assert hf_ideas.split_symbol("DATAPATTNS IN? N/A") == ("DATAPATTNS", "")
+    # single token: no exchange claimed
+    assert hf_ideas.split_symbol("NURS.V") == ("NURS.V", "")
+
+
+def test_unknown_exchange_does_not_leak_into_company_id() -> None:
+    rows = hf_ideas.parse_pitches("\U0001f539 Inox India (INOXCVA IN? N/A) by Some Fund\n")
+    assert len(rows) == 1
+    assert rows[0]["exchange"] == ""
+    assert rows[0]["symbol_as_published"] == "INOXCVA IN? N/A"
+    assert rows[0]["company_id"] == "inox-india--inoxcva-no-exchange"
+
+
 def test_supporting_quote_mismatch_remains_a_hard_error(tmp_path: Path) -> None:
     folder, data = make_duplicate_report(tmp_path)
     data["fund_views"][0]["supporting_quote"] = "Invented source quote."
