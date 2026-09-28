@@ -958,3 +958,97 @@ def test_extract_module_no_longer_exposes_extract_many() -> None:
     assert not hasattr(extract, "extract_many_command")
     assert not hasattr(extract, "extract_many_app")
     assert not hasattr(extract, "dispatch_many")
+
+
+def test_extract_files_retries_transient_provider_errors(tmp_path: Path, monkeypatch) -> None:
+    """A 503 on one file must not discard the whole batch."""
+    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key")
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    (sources / "flaky.md").write_text("flaky body", encoding="utf-8")
+    out = tmp_path / "out"
+    calls = {"n": 0}
+
+    def fake_generate(**kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("503 UNAVAILABLE. The service is currently unavailable.")
+        return "answer"
+
+    monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
+    monkeypatch.setattr("harness.commands.extract.TRANSIENT_BACKOFF_SECONDS", 0.0)
+
+    result = extract.extract_files_command(
+        question="Q",
+        files=[str(sources / "*.md")],
+        out=str(out),
+        concurrency=1,
+        settings=settings,
+    )
+
+    assert result.exit_code == 0
+    assert (out / "flaky.md").read_text(encoding="utf-8").strip() == "answer"
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["entries"][0]
+    assert entry["status"] == "ok"
+    assert entry["attempts"] == 3
+
+
+def test_extract_files_does_not_retry_deterministic_errors(tmp_path: Path, monkeypatch) -> None:
+    """A bad prompt or bad input fails immediately; retrying only wastes calls."""
+    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key")
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    (sources / "bad.md").write_text("bad body", encoding="utf-8")
+    out = tmp_path / "out"
+    calls = {"n": 0}
+
+    def fake_generate(**kwargs):
+        calls["n"] += 1
+        raise ValueError("invalid prompt pack")
+
+    monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
+    monkeypatch.setattr("harness.commands.extract.TRANSIENT_BACKOFF_SECONDS", 0.0)
+
+    result = extract.extract_files_command(
+        question="Q",
+        files=[str(sources / "*.md")],
+        out=str(out),
+        concurrency=1,
+        settings=settings,
+    )
+
+    assert result.exit_code != 0
+    assert calls["n"] == 1
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["entries"][0]["attempts"] == 1
+
+
+def test_extract_files_gives_up_after_bounded_transient_retries(tmp_path: Path, monkeypatch) -> None:
+    """Retries are bounded; a persistently failing provider still reports error."""
+    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key")
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    (sources / "dead.md").write_text("dead body", encoding="utf-8")
+    out = tmp_path / "out"
+    calls = {"n": 0}
+
+    def fake_generate(**kwargs):
+        calls["n"] += 1
+        raise RuntimeError("503 UNAVAILABLE")
+
+    monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
+    monkeypatch.setattr("harness.commands.extract.TRANSIENT_BACKOFF_SECONDS", 0.0)
+
+    result = extract.extract_files_command(
+        question="Q",
+        files=[str(sources / "*.md")],
+        out=str(out),
+        concurrency=1,
+        settings=settings,
+    )
+
+    assert result.exit_code != 0
+    assert calls["n"] == extract.TRANSIENT_ATTEMPTS
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["entries"][0]["status"] == "error"

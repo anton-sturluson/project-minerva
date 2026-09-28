@@ -61,6 +61,29 @@ EXTRACT_FILES_HELP = (
 DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_MAX_TOKENS = 16384
 DEFAULT_CONCURRENCY = 4
+
+# A provider hiccup on one file should not discard a whole batch. Retries are
+# bounded and only apply to errors that are plausibly transient; a bad prompt,
+# a missing key, or an unreadable file fails immediately as before.
+TRANSIENT_ATTEMPTS = 3
+TRANSIENT_BACKOFF_SECONDS = 2.0
+TRANSIENT_ERROR_MARKERS = (
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "unavailable",
+    "overloaded",
+    "rate limit",
+    "resource_exhausted",
+    "deadline exceeded",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "connection aborted",
+    "temporarily",
+)
 MODEL_ALIASES: dict[str, str] = {
     # Gemini 3.6 Flash already uses Google's stable provider model code; no alias needed.
     # OpenClaw/user-facing shorthand; Google GenAI expects the preview model id today.
@@ -1118,6 +1141,12 @@ def _common_parent(files: list[Path]) -> Path:
     if not common:
         return Path(files[0].anchor or ".")
     return Path(*common)
+def _is_transient_error(exc: BaseException) -> bool:
+    """True when an extraction failure is worth one more attempt."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in text for marker in TRANSIENT_ERROR_MARKERS)
+
+
 async def _run_extractions(
     *,
     plan: list[tuple[Path, Path]],
@@ -1139,23 +1168,33 @@ async def _run_extractions(
                 "error": None,
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
-            try:
-                document_text = _read_extraction_text(src)
-                prompt = _compose_prompt(prompt_pack=prompt_pack, document_text=document_text)
-                answer = await asyncio.to_thread(
-                    _generate_answer,
-                    prompt=prompt,
-                    document_text=document_text,
-                    model=model,
-                    max_tokens=max_tokens,
-                    thinking=thinking,
-                    api_key=api_key,
-                )
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(answer.strip() + "\n", encoding="utf-8")
-            except Exception as exc:  # noqa: BLE001
-                entry["status"] = ExtractionStatus.ERROR
-                entry["error"] = f"{type(exc).__name__}: {exc}"
+            attempts_used = 0
+            for attempt in range(1, TRANSIENT_ATTEMPTS + 1):
+                attempts_used = attempt
+                try:
+                    document_text = _read_extraction_text(src)
+                    prompt = _compose_prompt(prompt_pack=prompt_pack, document_text=document_text)
+                    answer = await asyncio.to_thread(
+                        _generate_answer,
+                        prompt=prompt,
+                        document_text=document_text,
+                        model=model,
+                        max_tokens=max_tokens,
+                        thinking=thinking,
+                        api_key=api_key,
+                    )
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(answer.strip() + "\n", encoding="utf-8")
+                    entry["status"] = ExtractionStatus.OK
+                    entry["error"] = None
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    entry["status"] = ExtractionStatus.ERROR
+                    entry["error"] = f"{type(exc).__name__}: {exc}"
+                    if attempt >= TRANSIENT_ATTEMPTS or not _is_transient_error(exc):
+                        break
+                    await asyncio.sleep(TRANSIENT_BACKOFF_SECONDS * attempt)
+            entry["attempts"] = attempts_used
             entry["finished_at"] = datetime.now(timezone.utc).isoformat()
             return entry
 
