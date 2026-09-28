@@ -9,6 +9,7 @@ from harness.commands import (
     brief,
     evidence,
     extract,
+    ideas,
     fileinfo,
     news,
     plot,
@@ -25,6 +26,7 @@ def register_commands(app: typer.Typer) -> None:
     app.add_typer(evidence.app, name="evidence")
     app.add_typer(portfolio.app, name="portfolio")
     app.add_typer(brief.app, name="brief")
+    app.add_typer(ideas.app, name="ideas")
     app.add_typer(news.app, name="news")
     app.add_typer(valuation.app, name="valuation")
     app.add_typer(analyze.app, name="analyze")
