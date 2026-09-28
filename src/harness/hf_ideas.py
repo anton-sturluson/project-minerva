@@ -227,9 +227,7 @@ def parse_issue_analyses(
             maxsplit=1,
             flags=re.M,
         )[0].strip()
-        symbol_parts = (match.group("symbol") or "").split()
-        ticker = symbol_parts[0].upper() if symbol_parts else ""
-        exchange = " ".join(symbol_parts[1:]).upper() if len(symbol_parts) > 1 else ""
+        ticker, exchange = split_symbol(match.group("symbol") or "")
         key = analysis_key(match.group("company"), ticker, exchange, match.group("fund"))
         analyses[key].append(
             {
@@ -784,25 +782,50 @@ def sentence_count(value: str) -> int:
     return len(re.findall(r"[.!?](?=\s|$)", protected))
 
 
-def archived_source_urls(manifest: dict[str, Any]) -> set[str]:
-    """Every URL this run actually fetched and archived on disk.
+def archived_source_urls(manifest: dict[str, Any], group: dict[str, Any]) -> set[str]:
+    """URLs archived for *this company* only.
 
-    Used only to tell a misrouted-but-real citation apart from an invented one.
+    Scoped per company on purpose: a global set would let one company's view
+    cite another company's archived page and be silently "repaired" into place.
     A URL absent from this set is never accepted.
     """
     urls: set[str] = set()
     issue_url = manifest.get("issue_url")
     if isinstance(issue_url, str) and issue_url:
         urls.add(issue_url)
-    for public in manifest.get("public_sources", {}).values():
-        if not isinstance(public, dict):
-            continue
-        if public.get("status") != "fetched":
-            continue
+    public = manifest.get("public_sources", {}).get(group["company_id"])
+    if isinstance(public, dict) and public.get("status") == "fetched":
         url = public.get("url")
         if isinstance(url, str) and url:
             urls.add(url)
     return urls
+
+
+def entry_evidence_segment(source_text: str, entry: dict[str, Any]) -> str:
+    """Return only the rendered evidence block belonging to one roster entry.
+
+    A company source document concatenates a `### {fund}` section per featured
+    fund. Validating a quote against the whole document lets one fund's view
+    quote another fund's text and still pass. Each section is located by its
+    unique roster ID marker, so quotes are checked against the evidence that
+    was actually offered for that entry.
+    """
+    marker = f"- Roster ID: `{entry['roster_id']}`"
+    position = source_text.find(marker)
+    if position < 0:
+        return ""
+    start = source_text.rfind("\n### ", 0, position)
+    start = 0 if start < 0 else start + 1
+    candidates = [
+        offset
+        for offset in (
+            source_text.find("\n### ", position),
+            source_text.find("\n## Public source resolution", position),
+        )
+        if offset >= 0
+    ]
+    end = min(candidates) if candidates else len(source_text)
+    return source_text[start:end]
 
 
 def source_rules(
@@ -820,7 +843,9 @@ def source_rules(
         return {"public synopsis", "informational"}, {public.get("url")}
     if public.get("status") == "fetched":
         return {"informational", "unavailable"}, {public.get("url"), manifest["issue_url"], None}
-    return {"unavailable"}, {manifest["issue_url"], public.get("url"), None}
+    # Fetch failed: the requested URL is resolution metadata, not evidence.
+    # Citing it would present an unretrieved page as a supporting source.
+    return {"unavailable"}, {manifest["issue_url"], None}
 
 
 def normalize_ticker_exchange(
@@ -849,7 +874,11 @@ def normalize_ticker_exchange(
     if actual_ticker == expected_ticker:
         return
     actual_exchange = data.get("exchange")
-    if isinstance(actual_exchange, str) and actual_exchange.strip():
+    # Only repair when exchange was genuinely left empty. A populated or
+    # wrong-typed value is a real mismatch and must reach the hard check.
+    if actual_exchange is not None and not (
+        isinstance(actual_exchange, str) and not actual_exchange.strip()
+    ):
         return
     if normalized_space(actual_ticker) != normalized_space(f"{expected_ticker} {expected_exchange}"):
         return
@@ -931,7 +960,7 @@ def validate_extraction(
                 f"{path}: {entry['fund']} source_basis {view['source_basis']!r} conflicts with available named-fund sources; allowed: {sorted(allowed_basis)}"
             )
         if view["source_url"] not in allowed_urls:
-            archived_urls = archived_source_urls(manifest)
+            archived_urls = archived_source_urls(manifest, group)
             concrete_allowed = sorted(url for url in allowed_urls if url)
             if view["source_url"] in archived_urls and len(concrete_allowed) == 1:
                 # The cited link is a real artifact this run archived, just not the
@@ -972,8 +1001,18 @@ def validate_extraction(
             warning_list.append(
                 f"{path}: {entry['fund']} supporting_quote is over 500 characters"
             )
-        if quote.strip() and normalized_space(quote.strip().strip('"“”')) not in normalized_space(source_text):
-            raise PipelineError(f"{path}: {entry['fund']} supporting_quote is not an exact excerpt from its input")
+        if quote.strip():
+            segment = entry_evidence_segment(source_text, entry)
+            if not segment:
+                raise PipelineError(
+                    f"{path}: {entry['fund']} has no evidence section for roster ID "
+                    f"{entry['roster_id']!r} in its source document"
+                )
+            if normalized_space(quote.strip().strip('"“”')) not in normalized_space(segment):
+                raise PipelineError(
+                    f"{path}: {entry['fund']} supporting_quote is not an exact excerpt "
+                    f"from the evidence offered for that fund"
+                )
         reason = view["unresolved_reason"]
         if not isinstance(reason, str):
             raise PipelineError(f"{path}: unresolved_reason must be a string")
@@ -999,8 +1038,18 @@ def validate_manifest(
     grouped_ids = [entry.get("roster_id") for group in groups for entry in group.get("roster_entries", [])]
     if len(roster_ids) != len(set(roster_ids)):
         raise PipelineError("fetch manifest contains duplicate roster IDs")
-    if roster_ids != grouped_ids:
-        raise PipelineError("grouped companies do not preserve every roster entry in source order")
+    # Grouping is order-preserving *within* a company, but a company repeated at
+    # non-adjacent roster positions legitimately reorders the flattened list.
+    # Completeness is a set property; order only has to hold inside each group.
+    if sorted(roster_ids) != sorted(grouped_ids):
+        raise PipelineError("grouped companies do not preserve every roster entry")
+    roster_order = {roster_id: index for index, roster_id in enumerate(roster_ids)}
+    for group in groups:
+        positions = [roster_order[entry["roster_id"]] for entry in group.get("roster_entries", [])]
+        if positions != sorted(positions):
+            raise PipelineError(
+                f"company {group.get('company_id')!r} does not preserve roster order within its entries"
+            )
     expected_files = [f"content/{group['company_id']}.md" for group in groups]
     if manifest.get("extraction_files") != expected_files:
         raise PipelineError("manifest extraction_files do not cover every company group in source order")
@@ -1086,7 +1135,7 @@ def build_report(folder: Path) -> dict[str, Any]:
         all_roster_ids.extend(view["roster_id"] for view in views)
 
     expected_roster_ids = [pitch["roster_id"] for pitch in manifest["pitches"]]
-    if all_roster_ids != expected_roster_ids:
+    if sorted(all_roster_ids) != sorted(expected_roster_ids):
         raise PipelineError("validated extraction views do not reconcile to the complete source roster")
 
     basis_counts = {basis: 0 for basis in BASIS_VALUES}

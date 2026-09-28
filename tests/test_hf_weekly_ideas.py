@@ -181,9 +181,7 @@ def make_duplicate_report(
     (folder / "extraction-files.txt").write_text(
         f"content/{company_id}.md\n", encoding="utf-8"
     )
-    (folder / "content" / f"{company_id}.md").write_text(
-        "Named evidence 1. Named evidence 2.\n", encoding="utf-8"
-    )
+    write_source_document(folder, manifest)
     extraction_manifest = {
         "entries": [
             {
@@ -231,6 +229,37 @@ def make_duplicate_report(
         ],
     }
     return folder, data
+
+
+def write_source_document(
+    folder: Path,
+    manifest: dict,
+    contexts: dict[str, list[str]] | None = None,
+) -> Path:
+    """Render the real per-fund source document the validator reads.
+
+    Quote validation is scoped to one roster entry's evidence section, so the
+    fixture must carry that structure instead of a flat blob of text.
+    """
+    group = manifest["companies"][0]
+    public = dict(manifest["public_sources"][group["company_id"]])
+    if contexts is not None:
+        public["named_context"] = contexts
+    document = hf_ideas.render_source_document(
+        group,
+        {},
+        public,
+        issue_title=manifest["issue_title"],
+        issue_url=manifest["issue_url"],
+        issue_date=manifest["issue_date"],
+    )
+    path = folder / "content" / f"{group['company_id']}.md"
+    path.write_text(document, encoding="utf-8")
+    return path
+
+
+def load_manifest(folder: Path) -> dict:
+    return json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
 
 
 def write_extraction(folder: Path, data: dict) -> Path:
@@ -296,9 +325,13 @@ def test_soft_validation_warnings_do_not_abort_and_year_month_is_accepted(
 ) -> None:
     folder, data = make_duplicate_report(tmp_path)
     long_quote = "Named evidence 1. " + ("supporting detail " * 31)
-    source_path = folder / "content" / "example-co--ex-us.md"
-    source_path.write_text(
-        long_quote + "\nNamed evidence 2.\n", encoding="utf-8"
+    write_source_document(
+        folder,
+        load_manifest(folder),
+        contexts={
+            "example-co--ex-us--named-fund-1": [long_quote],
+            "example-co--ex-us--named-fund-2": ["Named evidence 2."],
+        },
     )
     data["company_summary"] = "First line.\nSecond line."
     data["fund_views"][0]["commentary_date"] = "2026-06"
@@ -391,6 +424,17 @@ def test_unknown_exchange_does_not_leak_into_company_id() -> None:
 def test_supporting_quote_mismatch_remains_a_hard_error(tmp_path: Path) -> None:
     folder, data = make_duplicate_report(tmp_path)
     data["fund_views"][0]["supporting_quote"] = "Invented source quote."
+    write_extraction(folder, data)
+
+    with pytest.raises(hf_ideas.PipelineError, match="not an exact excerpt"):
+        hf_ideas.build_report(folder)
+
+
+def test_real_quote_from_another_fund_is_a_hard_error(tmp_path: Path) -> None:
+    """A verbatim quote is only valid inside the quoting fund's own evidence."""
+    folder, data = make_duplicate_report(tmp_path)
+    # Fund A cites text that exists in the document, but belongs to Fund B.
+    data["fund_views"][0]["supporting_quote"] = "Named Fund B June 2026 Named evidence 2."
     write_extraction(folder, data)
 
     with pytest.raises(hf_ideas.PipelineError, match="not an exact excerpt"):

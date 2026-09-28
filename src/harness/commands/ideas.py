@@ -9,7 +9,7 @@ from typing import Any
 
 import typer
 
-from harness.commands.common import elapsed_ms, error_result, resolve_path
+from harness.commands.common import elapsed_ms, error_result, parse_flag_args, resolve_path
 from harness.config import HarnessSettings, get_settings
 from harness.hf_ideas import (
     FetchResult,
@@ -80,7 +80,7 @@ def fetch_command(
     progress: list[str] = []
     try:
         result = fetch_latest_issue(
-            _output_root(out),
+            resolve_path(out),
             dry_run=dry_run,
             sleep_seconds=sleep_seconds,
             progress=progress.append,
@@ -138,7 +138,7 @@ def weekly_command(
     folder: Path | None = None
     try:
         fetched = fetch_latest_issue(
-            _output_root(out),
+            resolve_path(out),
             dry_run=dry_run,
             sleep_seconds=sleep_seconds,
             progress=progress.append,
@@ -281,10 +281,6 @@ def _dispatch_extraction(folder: Path, settings: HarnessSettings) -> CommandResu
         )
 
 
-def _output_root(out: str) -> Path:
-    return resolve_path(out)
-
-
 def _fetch_summary(result: FetchResult, *, dry_run: bool) -> list[str]:
     lines: list[str] = []
     if dry_run:
@@ -330,32 +326,19 @@ def _coverage_summary(coverage: dict[str, Any], folder: Path) -> str:
 
 
 def _parse_fetch_args(args: list[str]) -> dict[str, Any]:
-    parsed: dict[str, Any] = {
-        "dry_run": False,
-        "sleep_seconds": 1.0,
-        "out": DEFAULT_OUTPUT_ROOT,
+    """Parse `fetch`/`weekly` flags via the shared harness flag parser."""
+    raw = parse_flag_args(args, allow_flags_without_values={"dry-run"})
+    unknown = set(raw) - {"dry-run", "sleep", "out"}
+    if unknown:
+        raise ValueError(f"unknown argument for `ideas`: `--{sorted(unknown)[0]}`")
+    sleep_seconds = float(raw["sleep"]) if "sleep" in raw else 1.0
+    if sleep_seconds < 0:
+        raise ValueError("`--sleep` must be non-negative")
+    return {
+        "dry_run": bool(raw.get("dry-run", False)),
+        "sleep_seconds": sleep_seconds,
+        "out": str(raw.get("out", DEFAULT_OUTPUT_ROOT)),
     }
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--dry-run":
-            parsed["dry_run"] = True
-            index += 1
-            continue
-        if token in {"--sleep", "--out"}:
-            if index + 1 >= len(args):
-                raise ValueError(f"missing value for `{token}`")
-            value = args[index + 1]
-            if token == "--sleep":
-                parsed["sleep_seconds"] = float(value)
-                if parsed["sleep_seconds"] < 0:
-                    raise ValueError("`--sleep` must be non-negative")
-            else:
-                parsed["out"] = value
-            index += 2
-            continue
-        raise ValueError(f"unknown argument for `ideas`: `{token}`")
-    return parsed
 
 
 def _usage_error(message: str) -> str:
