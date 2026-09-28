@@ -762,6 +762,27 @@ def sentence_count(value: str) -> int:
     return len(re.findall(r"[.!?](?=\s|$)", protected))
 
 
+def archived_source_urls(manifest: dict[str, Any]) -> set[str]:
+    """Every URL this run actually fetched and archived on disk.
+
+    Used only to tell a misrouted-but-real citation apart from an invented one.
+    A URL absent from this set is never accepted.
+    """
+    urls: set[str] = set()
+    issue_url = manifest.get("issue_url")
+    if isinstance(issue_url, str) and issue_url:
+        urls.add(issue_url)
+    for public in manifest.get("public_sources", {}).values():
+        if not isinstance(public, dict):
+            continue
+        if public.get("status") != "fetched":
+            continue
+        url = public.get("url")
+        if isinstance(url, str) and url:
+            urls.add(url)
+    return urls
+
+
 def source_rules(
     entry: dict[str, Any],
     group: dict[str, Any],
@@ -780,6 +801,44 @@ def source_rules(
     return {"unavailable"}, {manifest["issue_url"], public.get("url"), None}
 
 
+def normalize_ticker_exchange(
+    data: dict[str, Any],
+    group: dict[str, Any],
+    path: Path,
+    warning_list: list[str],
+) -> None:
+    """Repair extractions that merge ticker and exchange into the ticker field.
+
+    Models commonly return the roster's display form (``"APH US"``) for ticker
+    and leave exchange blank, instead of the split form (``"APH"`` / ``"US"``).
+    Only rewrite when the merged value reconstructs the expected pair exactly;
+    any other mismatch still raises downstream so real attribution errors are
+    never silently accepted.
+    """
+    expected_ticker = group.get("ticker")
+    expected_exchange = group.get("exchange")
+    if not isinstance(expected_ticker, str) or not isinstance(expected_exchange, str):
+        return
+    if not expected_ticker or not expected_exchange:
+        return
+    actual_ticker = data.get("ticker")
+    if not isinstance(actual_ticker, str):
+        return
+    if actual_ticker == expected_ticker:
+        return
+    actual_exchange = data.get("exchange")
+    if isinstance(actual_exchange, str) and actual_exchange.strip():
+        return
+    if normalized_space(actual_ticker) != normalized_space(f"{expected_ticker} {expected_exchange}"):
+        return
+    data["ticker"] = expected_ticker
+    data["exchange"] = expected_exchange
+    warning_list.append(
+        f"{path}: normalized merged ticker {actual_ticker!r} into "
+        f"ticker {expected_ticker!r} + exchange {expected_exchange!r}"
+    )
+
+
 def validate_extraction(
     data: dict[str, Any],
     group: dict[str, Any],
@@ -793,6 +852,7 @@ def validate_extraction(
     missing = REQUIRED_TOP - set(data)
     if missing:
         raise PipelineError(f"{path}: missing top-level fields: {', '.join(sorted(missing))}")
+    normalize_ticker_exchange(data, group, path, warning_list)
     expected_metadata = {
         "schema_version": 1,
         "company_id": group["company_id"],
@@ -849,9 +909,20 @@ def validate_extraction(
                 f"{path}: {entry['fund']} source_basis {view['source_basis']!r} conflicts with available named-fund sources; allowed: {sorted(allowed_basis)}"
             )
         if view["source_url"] not in allowed_urls:
-            raise PipelineError(
-                f"{path}: {entry['fund']} source_url {view['source_url']!r} is not an archived supporting source"
-            )
+            archived_urls = archived_source_urls(manifest)
+            concrete_allowed = sorted(url for url in allowed_urls if url)
+            if view["source_url"] in archived_urls and len(concrete_allowed) == 1:
+                # The cited link is a real artifact this run archived, just not the
+                # one matching this basis. Repoint it; never invent a URL.
+                warning_list.append(
+                    f"{path}: {entry['fund']} cited archived source {view['source_url']!r} "
+                    f"but basis {view['source_basis']!r} expects {concrete_allowed[0]!r}; repointed"
+                )
+                view["source_url"] = concrete_allowed[0]
+            else:
+                raise PipelineError(
+                    f"{path}: {entry['fund']} source_url {view['source_url']!r} is not an archived supporting source"
+                )
         date = view["commentary_date"]
         if date is not None and (
             not isinstance(date, str)

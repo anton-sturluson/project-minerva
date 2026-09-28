@@ -320,6 +320,50 @@ def test_soft_validation_warnings_do_not_abort_and_year_month_is_accepted(
     assert persisted["warnings"] == warnings
 
 
+def test_merged_ticker_exchange_is_normalized_with_a_warning(tmp_path: Path) -> None:
+    """Models often emit the roster display form 'EX US' and leave exchange blank."""
+    folder, data = make_duplicate_report(tmp_path)
+    data["ticker"] = "EX US"
+    data["exchange"] = ""
+    write_extraction(folder, data)
+
+    coverage = hf_ideas.build_report(folder)
+
+    assert coverage["roster_validated"] == 2
+    assert any("normalized merged ticker 'EX US'" in w for w in coverage["warnings"])
+
+
+def test_wrong_ticker_is_still_a_hard_error(tmp_path: Path) -> None:
+    """Normalization must not become a blanket ticker-mismatch bypass."""
+    folder, data = make_duplicate_report(tmp_path)
+    data["ticker"] = "WRONG"
+    data["exchange"] = ""
+    write_extraction(folder, data)
+
+    with pytest.raises(hf_ideas.PipelineError, match="ticker must be"):
+        hf_ideas.build_report(folder)
+
+
+def test_merged_ticker_not_repointed_when_exchange_already_set(tmp_path: Path) -> None:
+    folder, data = make_duplicate_report(tmp_path)
+    data["ticker"] = "EX US"
+    data["exchange"] = "US"
+    write_extraction(folder, data)
+
+    with pytest.raises(hf_ideas.PipelineError, match="ticker must be"):
+        hf_ideas.build_report(folder)
+
+
+def test_fabricated_source_url_remains_a_hard_error(tmp_path: Path) -> None:
+    """A URL this run never archived must never be accepted."""
+    folder, data = make_duplicate_report(tmp_path)
+    data["fund_views"][0]["source_url"] = "https://evil.example.com/fabricated"
+    write_extraction(folder, data)
+
+    with pytest.raises(hf_ideas.PipelineError, match="not an archived supporting source"):
+        hf_ideas.build_report(folder)
+
+
 def test_supporting_quote_mismatch_remains_a_hard_error(tmp_path: Path) -> None:
     folder, data = make_duplicate_report(tmp_path)
     data["fund_views"][0]["supporting_quote"] = "Invented source quote."
