@@ -200,12 +200,6 @@ def make_duplicate_report(
         json.dumps(extraction_manifest), encoding="utf-8"
     )
     data = {
-        "schema_version": 1,
-        "company_id": company_id,
-        "company": "Example Co.",
-        "ticker": "EX",
-        "exchange": "US",
-        "entity_type": "equity",
         "company_summary": (
             "Named Fund A and Named Fund B both cite the published evidence, and "
             "both views remain separately attributed."
@@ -353,39 +347,35 @@ def test_soft_validation_warnings_do_not_abort_and_year_month_is_accepted(
     assert persisted["warnings"] == warnings
 
 
-def test_merged_ticker_exchange_is_normalized_with_a_warning(tmp_path: Path) -> None:
-    """Models often emit the roster display form 'EX US' and leave exchange blank."""
+def test_model_supplied_identity_is_ignored_in_favour_of_the_roster(tmp_path: Path) -> None:
+    """Identity is injected from the manifest, so model drift cannot fail a run.
+
+    This is the ARM 'exchange: NASDAQ' failure of 2026-09-28: the model wrote a
+    real-world exchange instead of the published code and aborted 47 extractions.
+    """
     folder, data = make_duplicate_report(tmp_path)
     data["ticker"] = "EX US"
-    data["exchange"] = ""
+    data["exchange"] = "NASDAQ"
+    data["company"] = "Example Corporation"
+    data["company_id"] = "wrong--id"
     write_extraction(folder, data)
 
     coverage = hf_ideas.build_report(folder)
 
     assert coverage["roster_validated"] == 2
-    assert any("normalized merged ticker 'EX US'" in w for w in coverage["warnings"])
+    report = (folder / "summary.md").read_text(encoding="utf-8")
+    assert "Example Co. (EX US)" in report
+    assert "NASDAQ" not in report
 
 
-def test_wrong_ticker_is_still_a_hard_error(tmp_path: Path) -> None:
-    """Normalization must not become a blanket ticker-mismatch bypass."""
+def test_wrong_fund_attribution_is_still_a_hard_error(tmp_path: Path) -> None:
+    """Injecting identity must not weaken the per-view attribution check."""
     folder, data = make_duplicate_report(tmp_path)
-    data["ticker"] = "WRONG"
-    data["exchange"] = ""
+    data["fund_views"][0]["featured_fund"] = "Unrelated Fund"
     write_extraction(folder, data)
 
-    with pytest.raises(hf_ideas.PipelineError, match="ticker must be"):
+    with pytest.raises(hf_ideas.PipelineError, match="fund attribution mismatch"):
         hf_ideas.build_report(folder)
-
-
-def test_merged_ticker_not_repointed_when_exchange_already_set(tmp_path: Path) -> None:
-    folder, data = make_duplicate_report(tmp_path)
-    data["ticker"] = "EX US"
-    data["exchange"] = "US"
-    write_extraction(folder, data)
-
-    with pytest.raises(hf_ideas.PipelineError, match="ticker must be"):
-        hf_ideas.build_report(folder)
-
 
 def test_fabricated_source_url_remains_a_hard_error(tmp_path: Path) -> None:
     """A URL this run never archived must never be accepted."""

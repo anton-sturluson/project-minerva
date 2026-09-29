@@ -699,12 +699,6 @@ BASIS_VALUES = {
     "non-stock",
 }
 REQUIRED_TOP = {
-    "schema_version",
-    "company_id",
-    "company",
-    "ticker",
-    "exchange",
-    "entity_type",
     "company_summary",
     "fund_views",
 }
@@ -760,7 +754,7 @@ def parse_extraction_json(
             value, _ = decoder.raw_decode(text[match.start() :])
         except json.JSONDecodeError:
             continue
-        if isinstance(value, dict) and {"schema_version", "company_id"} <= set(value):
+        if isinstance(value, dict) and {"company_summary", "fund_views"} <= set(value):
             candidates.append(value)
     if len(candidates) != 1:
         if not candidates:
@@ -848,48 +842,6 @@ def source_rules(
     return {"unavailable"}, {manifest["issue_url"], None}
 
 
-def normalize_ticker_exchange(
-    data: dict[str, Any],
-    group: dict[str, Any],
-    path: Path,
-    warning_list: list[str],
-) -> None:
-    """Repair extractions that merge ticker and exchange into the ticker field.
-
-    Models commonly return the roster's display form (``"APH US"``) for ticker
-    and leave exchange blank, instead of the split form (``"APH"`` / ``"US"``).
-    Only rewrite when the merged value reconstructs the expected pair exactly;
-    any other mismatch still raises downstream so real attribution errors are
-    never silently accepted.
-    """
-    expected_ticker = group.get("ticker")
-    expected_exchange = group.get("exchange")
-    if not isinstance(expected_ticker, str) or not isinstance(expected_exchange, str):
-        return
-    if not expected_ticker or not expected_exchange:
-        return
-    actual_ticker = data.get("ticker")
-    if not isinstance(actual_ticker, str):
-        return
-    if actual_ticker == expected_ticker:
-        return
-    actual_exchange = data.get("exchange")
-    # Only repair when exchange was genuinely left empty. A populated or
-    # wrong-typed value is a real mismatch and must reach the hard check.
-    if actual_exchange is not None and not (
-        isinstance(actual_exchange, str) and not actual_exchange.strip()
-    ):
-        return
-    if normalized_space(actual_ticker) != normalized_space(f"{expected_ticker} {expected_exchange}"):
-        return
-    data["ticker"] = expected_ticker
-    data["exchange"] = expected_exchange
-    warning_list.append(
-        f"{path}: normalized merged ticker {actual_ticker!r} into "
-        f"ticker {expected_ticker!r} + exchange {expected_exchange!r}"
-    )
-
-
 def validate_extraction(
     data: dict[str, Any],
     group: dict[str, Any],
@@ -903,18 +855,20 @@ def validate_extraction(
     missing = REQUIRED_TOP - set(data)
     if missing:
         raise PipelineError(f"{path}: missing top-level fields: {', '.join(sorted(missing))}")
-    normalize_ticker_exchange(data, group, path, warning_list)
-    expected_metadata = {
-        "schema_version": 1,
-        "company_id": group["company_id"],
-        "company": group["company"],
-        "ticker": group["ticker"],
-        "exchange": group["exchange"],
-        "entity_type": group["entity_type"],
-    }
-    for field, expected in expected_metadata.items():
-        if data[field] != expected:
-            raise PipelineError(f"{path}: {field} must be {expected!r}, got {data[field]!r}")
+    # Identity comes from the manifest, never from the model. Asking an LLM to
+    # echo values we already hold adds no information and five drift modes.
+    # Per-view roster_id/featured_fund stay model-supplied: those are the real
+    # "did it read the right file for the right fund" check.
+    data.update(
+        {
+            "schema_version": 1,
+            "company_id": group["company_id"],
+            "company": group["company"],
+            "ticker": group["ticker"],
+            "exchange": group["exchange"],
+            "entity_type": group["entity_type"],
+        }
+    )
     summary = data["company_summary"]
     if not isinstance(summary, str) or not summary.strip():
         raise PipelineError(f"{path}: company_summary is blank")
