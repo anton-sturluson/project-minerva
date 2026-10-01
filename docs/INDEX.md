@@ -20,6 +20,7 @@
 | [18-minerva-extract-cli-tdd-plan.md](./18-minerva-extract-cli-tdd-plan.md) | file | TDD plan for `minerva extract`, legacy multi-question command removal, and new `extract-files`. |
 | [19-bare-invocation-help-plan.md](./19-bare-invocation-help-plan.md) | file | TDD plan: bare `minerva <command>` shows clean help (no error), exit 0. |
 | [21-news-cli-plan.md](./21-news-cli-plan.md) | file | Implementation plan for `minerva news ingest`, deterministic read-only `news exist`, and morning-brief integration. |
+| [Investor Platform: Homepage Club](../investor-platform/design/README.md) | design | Approved visual direction, interactive reference, and project design skill. |
 | [analysis/](./analysis/INDEX.md) | folder | Trace analyses and deeper implementation reviews. |
 | [plans/](./plans/) | folder | Additional planning documents. |
 
