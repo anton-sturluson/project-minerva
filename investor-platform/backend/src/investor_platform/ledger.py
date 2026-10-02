@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload
 
 from .accounting import replay
 from .accounts import DB, Currency, Identity, owned_account
-from .models import LedgerEntry
+from .models import LedgerCorrection, LedgerEntry
 
 router = APIRouter(prefix="/api/accounts")
 Money = Annotated[Decimal, Field(ge=0, max_digits=24, decimal_places=8, allow_inf_nan=False)]
@@ -80,21 +80,51 @@ class EntryView(BaseModel):
     realized_pnl: WireDecimal | None = None
 
 
+class CorrectionView(BaseModel):
+    id: int
+    original: EntryView
+    replacement: EntryView | None
+    reason: str
+    created_by: UUID
+    created_at: datetime
+
+
 class LedgerView(BaseModel):
     currency: str
     balance: WireDecimal
     entries: list[EntryView]
     holdings: list[HoldingView] = []
+    corrections: list[CorrectionView] = []
 
 
-def entries_for(session, account_id):
+def corrections_for(session, account_id):
     return list(
+        session.scalars(
+            select(LedgerCorrection)
+            .where(LedgerCorrection.account_id == account_id)
+            .order_by(LedgerCorrection.id)
+        )
+    )
+
+
+def entries_for(session, account_id, *, include_superseded=False):
+    entries = list(
         session.scalars(
             select(LedgerEntry)
             .options(joinedload(LedgerEntry.security))
             .where(LedgerEntry.account_id == account_id)
-            .order_by(LedgerEntry.effective_date, LedgerEntry.id)
         )
+    )
+    corrections = corrections_for(session, account_id)
+    superseded = {c.original_id for c in corrections}
+    roots = {}
+    for c in corrections:
+        if c.replacement_id is not None:
+            roots[c.replacement_id] = roots.get(c.original_id, c.original_id)
+    # A replacement retains the original same-day position, including through repeated corrections.
+    return sorted(
+        (e for e in entries if include_superseded or e.id not in superseded),
+        key=lambda e: (e.effective_date, roots.get(e.id, e.id)),
     )
 
 
@@ -139,7 +169,22 @@ def read_ledger(account_id: UUID, session: DB, actor: Identity):
         EntryView.model_validate(e).model_copy(update={"realized_pnl": realized.get(e.id)})
         for e in entries
     ]
+    all_entries = {e.id: e for e in entries_for(session, account_id, include_superseded=True)}
+    corrections = [
+        CorrectionView(
+            id=c.id,
+            original=EntryView.model_validate(all_entries[c.original_id]),
+            replacement=EntryView.model_validate(all_entries[c.replacement_id])
+            if c.replacement_id
+            else None,
+            reason=c.reason,
+            created_by=c.created_by,
+            created_at=c.created_at,
+        )
+        for c in corrections_for(session, account_id)
+    ]
     return LedgerView(
+        corrections=corrections,
         currency=account.base_currency,
         balance=balance,
         entries=views,

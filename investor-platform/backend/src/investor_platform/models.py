@@ -15,7 +15,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
-    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -79,20 +78,7 @@ class LedgerEntry(Base):
     """,
             name="entry_shape",
         ),
-        Index(
-            "one_opening_position",
-            "account_id",
-            "security_id",
-            unique=True,
-            postgresql_where=text("kind = 'opening_position'"),
-        ),
         Index("ledger_order", "account_id", "effective_date", "id"),
-        Index(
-            "one_opening_cash",
-            "account_id",
-            unique=True,
-            postgresql_where=text("kind = 'opening_cash'"),
-        ),
     )
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.id"))
@@ -126,3 +112,17 @@ class Security(Base):
     ticker: Mapped[str] = mapped_column(String(20))
     exchange: Mapped[str] = mapped_column(String(12))
     currency: Mapped[str] = mapped_column(String(3))
+
+
+class LedgerCorrection(Base):
+    __tablename__ = "ledger_corrections"
+    __table_args__ = (UniqueConstraint("account_id", "request_key"),)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.id"))
+    original_id: Mapped[int] = mapped_column(ForeignKey("ledger_entries.id"), unique=True)
+    replacement_id: Mapped[int | None] = mapped_column(ForeignKey("ledger_entries.id"), unique=True)
+    reason: Mapped[str] = mapped_column(String(240))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("owners.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    request_key: Mapped[UUID]
+    request_body: Mapped[str] = mapped_column(Text)
