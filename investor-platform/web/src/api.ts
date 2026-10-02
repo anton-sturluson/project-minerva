@@ -13,7 +13,11 @@ export async function api<T>(
     const body = await response.json().catch(() => ({}));
     const detail = body.detail;
     throw new Error(
-      typeof detail === "string" ? detail : "Check your entries and try again.",
+      typeof detail === "string"
+        ? detail
+        : response.status >= 500
+          ? "Could not reach your records. Check the local service and try again."
+          : "Check your entries and try again.",
     );
   }
   return response.json() as Promise<T>;

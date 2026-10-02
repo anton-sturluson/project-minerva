@@ -39,7 +39,7 @@ Open **http://127.0.0.1:5173/**. Both services bind to loopback. The frontend pr
 
 Account and ledger failures display an error with a manual retry; there is no background health polling.
 
-The backend reads `DATABASE_URL` from the shell; see `backend/.env.example` (not loaded automatically). Run migrations after pulling changes. A seeded local owner is resolved at a single API boundary; all account access checks workspace ownership. `INVESTOR_MODE` values other than `local` refuse startup until hosted authentication exists. Account currency is immutable through this API, including before ledger entries exist. Supported currencies are explicitly listed in the form.
+The backend reads `DATABASE_URL` from the shell; see `backend/.env.example` (not loaded automatically). Run migrations after pulling changes. A seeded local owner is resolved at a single API boundary; all account access checks workspace ownership. `INVESTOR_MODE=tailscale` enables identity-checked private access; other non-local modes refuse startup. See [Tailscale setup and usage](docs/tailscale.md). Account currency is immutable through this API, including before ledger entries exist. Supported currencies are explicitly listed in the form.
 
 ## Verify
 
@@ -73,7 +73,7 @@ Browser tests start both servers if needed, or reuse local servers on the docume
 - [Architecture](docs/architecture.md): stack rationale and future boundaries, not a list of dependencies to install now.
 - Verification: [IP-001 shell](docs/ip-001-verification.md), [IP-002 account](docs/ip-002-verification.md), [IP-003 cash](docs/ip-003-verification.md), and [IP-004 trades](docs/ip-004-verification.md).
 
-No imports from the legacy harness, sheet adapters, or seeded portfolio values are included. The optional comparison fetches public daily history from Yahoo Finance. Hosted authentication and deployment are separate later work; the current launch command is local-only.
+No imports from the legacy harness, sheet adapters, or seeded portfolio values are included. The optional comparison fetches public daily history from Yahoo Finance. Public hosting and multi-user authentication are separate later work. The default launch command is local-only; [Tailscale mode](docs/tailscale.md) provides private access for the same owner.
 
 ## Cash ledger rules
 

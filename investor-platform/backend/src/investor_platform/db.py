@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -34,8 +34,9 @@ def require_local_mode():
         raise RuntimeError("Hosted mode requires authentication; local identity is disabled")
 
 
-def get_actor() -> Actor:
-    require_local_mode()
+def get_actor(request: Request) -> Actor:
+    if not getattr(request.state, "authenticated", False):
+        raise HTTPException(status_code=403, detail="Access denied")
     return Actor(LOCAL_OWNER, LOCAL_WORKSPACE)
 
 
