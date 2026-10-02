@@ -19,15 +19,11 @@ class TradeInput(EntryInput):
     kind: Literal["opening_position", "buy", "sell"]
     ticker: Annotated[
         str,
-        StringConstraints(
-            strip_whitespace=True, to_upper=True, pattern=r"^[A-Z0-9][A-Z0-9.\-]{0,19}$"
-        ),
+        StringConstraints(pattern=r"^[A-Z0-9][A-Z0-9.\-]{0,19}$"),
     ]
     exchange: Annotated[
         str,
-        StringConstraints(
-            strip_whitespace=True, to_upper=True, pattern=r"^[A-Z0-9][A-Z0-9_\-]{1,11}$"
-        ),
+        StringConstraints(pattern=r"^[A-Z0-9][A-Z0-9_\-]{1,11}$"),
     ]
     quantity: Quantity
     price: Quantity | None = None
@@ -104,7 +100,7 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
         created_by=actor.owner_id,
         request_body=body,
         amount=amount,
-        **data.model_dump(exclude={"amount", "ticker", "exchange"}),
+        **data.model_dump(exclude={"ticker", "exchange"}),
     )
     session.add(entry)
     session.flush()

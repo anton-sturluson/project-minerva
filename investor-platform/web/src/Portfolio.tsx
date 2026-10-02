@@ -49,9 +49,9 @@ export function Portfolio() {
       className="portfolio"
       aria-labelledby="portfolio-heading"
     >
-      <h2 id="portfolio-heading">
+      <h1 id="portfolio-heading">
         <span aria-hidden="true">✳ </span>My portfolio
-      </h2>
+      </h1>
       {error && (
         <div className="error" role="alert">
           <p>{error}</p>

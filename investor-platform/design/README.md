@@ -1,6 +1,6 @@
 # Homepage Club
 
-**Selected direction, 1 October 2026.** The user chose Homepage Club after reviewing three rounds of concepts: “Yes homepage club!!!” This is the investor platform's visual baseline. It has not yet been applied to the application shell.
+**Selected direction, 1 October 2026.** The user chose Homepage Club after reviewing three rounds of concepts: “Yes homepage club!!!” This is the investor platform's visual baseline. The application shell follows this direction.
 
 ## Open the reference
 

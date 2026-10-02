@@ -37,7 +37,7 @@ pnpm dev
 
 Open **http://127.0.0.1:5173/**. Both services bind to loopback. The frontend proxies `/api` to `http://127.0.0.1:8010`; optional `web/.env` configuration is documented in `web/.env.example`. Port collisions fail instead of silently changing the URL. Stop either process with Ctrl+C.
 
-The page checks the service every five seconds, times out requests after three seconds, and allows manual retry. To verify recovery, stop the API, check for “Disconnected,” restart it, and check for “Connected.” This indicator verifies API connectivity only, not database readiness.
+Account and ledger failures display an error with a manual retry; there is no background health polling.
 
 The backend reads `DATABASE_URL` from the shell; see `backend/.env.example` (not loaded automatically). Run migrations after pulling changes. A seeded local owner is resolved at a single API boundary; all account access checks workspace ownership. `INVESTOR_MODE` values other than `local` refuse startup until hosted authentication exists. Account currency is immutable through this API, including before ledger entries exist. Supported currencies are explicitly listed in the form.
 
