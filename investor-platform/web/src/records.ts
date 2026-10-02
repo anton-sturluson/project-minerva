@@ -43,6 +43,7 @@ export const today = () => new Date().toISOString().slice(0, 10);
 export const labels: Record<string, string> = {
   opening_cash: "Opening cash",
   deposit: "Deposit",
+  income: "Investment income",
   withdrawal: "Withdrawal",
   opening_position: "Opening position",
   buy: "Buy",

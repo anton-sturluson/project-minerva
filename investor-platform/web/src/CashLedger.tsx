@@ -111,6 +111,7 @@ export function CashLedger({ account }: { account: Account }) {
                 )}
                 <option value="deposit">Deposit</option>
                 <option value="withdrawal">Withdrawal</option>
+                <option value="income">Investment income</option>
               </select>
             </label>
             <label>
@@ -153,8 +154,9 @@ export function CashLedger({ account }: { account: Account }) {
               {kind === "opening_cash"
                 ? "Your balance when tracking starts, not a past deposit."
                 : "Entries are checked against the full dated history. Cash cannot go below zero."}{" "}
-              Same-day entries follow the order saved. Corrections come in a
-              later update.
+              Income is investment return, not a deposit; record gross dividends
+              on their ex-date for comparisons. Same-day entries follow the
+              order saved. Corrections come in a later update.
             </p>
             <button disabled={saving || loading} type="submit">
               {saving ? "Saving…" : "Save cash entry"}

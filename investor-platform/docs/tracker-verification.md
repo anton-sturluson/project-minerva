@@ -10,3 +10,7 @@ The separate `minerva_tracker_demo` portfolio was also inspected in the live bro
 
 - [Scorecard accounting fixture](../backend/tests/test_statistics.py) — fees, partial exits, unknown basis and breakevens.
 - [Scorecard browser workflow](../web/tests/scorecard.spec.ts) — synthetic closed trade and load recovery.
+
+## Investment income
+
+Income was tested before adding the market comparison: 53 backend tests, migration upgrade/metadata checks, formatting/build, and all 12 desktop/mobile browser workflows pass. The existing synthetic cash workflow now records income, verifies the exact cash increase and persistence, and still exercises failure/recovery. A focused database test covers positive amounts, unchanged-payload retry, changed-payload rejection and rollback. No real portfolio was used.
