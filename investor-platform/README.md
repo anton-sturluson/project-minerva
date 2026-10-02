@@ -2,7 +2,9 @@
 
 A local investor workspace inside Minerva. The app will own its PostgreSQL data; any migration from existing portfolio records is a one-time operation, not an application dependency.
 
-IP-001 provides the React/TypeScript shell, Python API health check, live connection/recovery UI, and CI. Portfolio persistence and management begin in IP-002. The Portfolio and Research cards are explicitly marked as planned.
+IP-001 provides the React/TypeScript shell, Python API health check, live connection/recovery UI, and CI. Portfolio persistence and management begin in IP-002. The Portfolio and Research sections are explicitly marked as planned.
+
+The interface uses the approved Homepage Club direction: warm paper, a serif masthead, bracket links, double rules, and small early-web badges. The [design reference and project skill](https://github.com/anton-sturluson/project-minerva/pull/103) are maintained separately from this app foundation.
 
 ## Run locally
 

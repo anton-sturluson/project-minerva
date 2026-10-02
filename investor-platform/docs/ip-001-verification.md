@@ -7,7 +7,9 @@ Verified locally on 2026-10-01. Scope is the app shell and service connectivity;
 - Opened the running app in the Codex in-app browser and verified “Connected” against the real FastAPI service.
 - Stopped the API process, clicked “Check connection,” and verified the disconnected message.
 - Restarted the API, retried, and verified recovery to “Connected.”
-- Inspected desktop and 390-pixel mobile rendering. Mobile content width equaled viewport width; cards stacked without horizontal overflow.
+- Repeated the live checks after applying the Homepage Club design: serif masthead, bracket navigation, double rules, and early-web badges.
+- Inspected desktop and 390- and 320-pixel mobile rendering. Mobile content width equaled viewport width; the notebook margin and planned sections stacked without horizontal overflow.
+- Verified the Portfolio anchor and Back to top link. Corrected mobile heading spacing and badge wrapping during visual inspection.
 
 ## Automated checks
 
