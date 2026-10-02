@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("shows market hit rate, exclusions, outage recovery, and invalidates after a save", async ({
   page,

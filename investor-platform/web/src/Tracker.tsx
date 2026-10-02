@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { api, errorMessage, type Account } from "./api";
 import { TradeScorecard } from "./TradeScorecard";
 import { number, percent } from "./format";
@@ -63,47 +69,65 @@ export function Tracker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const compare = useCallback(
+    async (from: string, through: string) => {
+      const version = ++generation.current;
+      setBusy(true);
+      setError("");
+      setReport(null);
+      try {
+        const r = await api<Report>(
+          `/accounts/${account.id}/performance`,
+          {
+            method: "POST",
+            body: JSON.stringify({ start: from, end: through }),
+          },
+          60000,
+        );
+        if (version === generation.current) setReport(r);
+      } catch (e) {
+        if (version === generation.current) setError(errorMessage(e));
+      } finally {
+        if (version === generation.current) setBusy(false);
+      }
+    },
+    [account.id],
+  );
   useEffect(() => {
-    generation.current += 1;
+    // New records reset the comparison to the full recorded history.
+    const from = ledger.entries[0]?.effective_date ?? yesterday();
+    const through = yesterday();
+    setStart(from);
+    setEnd(through);
     setReport(null);
     setError("");
     setBusy(false);
+    if (
+      ledger.entries.length &&
+      from < through &&
+      account.base_currency === "USD"
+    )
+      void compare(from, through);
     return () => {
       generation.current += 1;
     };
-  }, [account.id, ledger]);
-  async function compare(e: FormEvent) {
+  }, [account.base_currency, ledger, compare]);
+  function submit(e: FormEvent) {
     e.preventDefault();
-    const version = ++generation.current;
-    setBusy(true);
-    setError("");
-    setReport(null);
-    try {
-      const r = await api<Report>(
-        `/accounts/${account.id}/performance`,
-        { method: "POST", body: JSON.stringify({ start, end }) },
-        60000,
-      );
-      if (version === generation.current) setReport(r);
-    } catch (e) {
-      if (version === generation.current) setError(errorMessage(e));
-    } finally {
-      if (version === generation.current) setBusy(false);
-    }
+    void compare(start, end);
   }
   return (
-    <section className="tracker" aria-labelledby="performance-heading">
-      <h2 id="performance-heading">The performance page</h2>
+    <section
+      id="performance"
+      className="tracker"
+      aria-labelledby="performance-heading"
+    >
+      <h2 id="performance-heading">Portfolio vs. the market</h2>
       <p className="form-note">
-        Closing values &amp; the record of your decisions.
+        Your portfolio alongside the S&amp;P 500 (SPY) and Nasdaq-100 (QQQ),
+        with distributions reinvested in the benchmarks.
       </p>
-      <TradeScorecard account={account} ledger={ledger} />
-      <HitRate
-        key={`${account.id}:${ledger.entries.length}`}
-        accountId={account.id}
-      />
-      <h3 className="activity-heading">Against the market</h3>
-      <form className="entry-form" onSubmit={(e) => void compare(e)}>
+      <form className="entry-form" onSubmit={submit}>
         <label>
           From
           <input
@@ -116,6 +140,7 @@ export function Tracker({
             onChange={(e) => {
               setStart(e.target.value);
               setReport(null);
+              setError("");
             }}
             disabled={busy}
           />
@@ -132,27 +157,44 @@ export function Tracker({
             onChange={(e) => {
               setEnd(e.target.value);
               setReport(null);
+              setError("");
             }}
             disabled={busy}
           />
         </label>
         <button
-          disabled={busy || !ledger.entries.length || start >= end}
+          disabled={
+            busy ||
+            !ledger.entries.length ||
+            start >= end ||
+            account.base_currency !== "USD"
+          }
           type="submit"
         >
-          {busy ? "Fetching closes…" : "Compare performance"}
+          {busy
+            ? "Fetching closes…"
+            : error
+              ? "Retry comparison"
+              : "Compare performance"}
         </button>
       </form>
+      {account.base_currency !== "USD" && (
+        <p className="form-note">
+          Index comparisons currently support USD accounts only.
+        </p>
+      )}
       {(!ledger.entries.length || start >= end) && (
         <p className="form-note">
           A comparison needs at least two completed market sessions after
           tracking begins. Choose an earlier start once you have dated records.
         </p>
       )}
+      {busy && <p role="status">Loading portfolio and index returns…</p>}
       <p className="form-note">
         SPY: S&amp;P 500 · QQQ: Nasdaq-100. Benchmarks reinvest distributions.
         USD equities/ETFs on supported US exchanges; completed daily closes
-        only. Data is fetched when you compare.
+        only. The full recorded period loads automatically; choose dates to
+        compare a shorter period.
       </p>
       {error && (
         <p role="alert" className="error">
@@ -180,20 +222,20 @@ export function Tracker({
               <dd>{percent(report.return)}</dd>
             </div>
             <div>
-              <dt>SPY total return</dt>
+              <dt>S&amp;P 500 · SPY</dt>
               <dd>{percent(report.SPY)}</dd>
             </div>
             <div>
-              <dt>QQQ total return</dt>
+              <dt>Nasdaq-100 · QQQ</dt>
               <dd>{percent(report.QQQ)}</dd>
             </div>
           </dl>
           <p>
-            Excess return: SPY{" "}
+            Excess return vs. S&amp;P 500 (SPY):{" "}
             {report.excess_spy === null
               ? "—"
               : `${number(String(Number(report.excess_spy) * 100))} pp`}{" "}
-            · QQQ{" "}
+            · Nasdaq-100 (QQQ):{" "}
             {report.excess_qqq === null
               ? "—"
               : `${number(String(Number(report.excess_qqq) * 100))} pp`}
@@ -295,6 +337,13 @@ export function Tracker({
           rounded; the ledger retains exact decimals.
         </p>
       </details>
+      <div id="decisions" className="decisions">
+        <TradeScorecard account={account} ledger={ledger} />
+        <HitRate
+          key={`${account.id}:${ledger.entries.length}`}
+          accountId={account.id}
+        />
+      </div>
     </section>
   );
 }
@@ -310,8 +359,8 @@ function ReturnChart({ series }: { series: Point[] }) {
     <figure className="return-chart">
       <figcaption>
         Cumulative return · <span className="portfolio-key">Portfolio</span> /{" "}
-        <span className="spy-key">SPY</span> /{" "}
-        <span className="qqq-key">QQQ</span>
+        <span className="spy-key">S&amp;P 500 (SPY)</span> /{" "}
+        <span className="qqq-key">Nasdaq-100 (QQQ)</span>
       </figcaption>
       <svg
         viewBox="0 0 800 220"

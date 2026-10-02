@@ -1,0 +1,57 @@
+import { test as base, expect } from "@playwright/test";
+
+// Public market data is synthetic in CI. Live-provider verification uses the demo database.
+export const performance = {
+  start: "2026-01-02",
+  end: "2026-01-06",
+  value: "1200",
+  cash: "200",
+  return: "0.10",
+  SPY: "0.02",
+  QQQ: "0.04",
+  excess_spy: "0.08",
+  excess_qqq: "0.06",
+  fetched_at: "2026-01-07T12:00:00Z",
+  source: "Synthetic browser fixture",
+  warnings: [],
+  holdings: [
+    {
+      ticker: "AAA",
+      exchange: "NYSE",
+      quantity: "10",
+      close: "100",
+      value: "1000",
+      weight: "0.8333333",
+      basis: null,
+      unrealized_pnl: null,
+    },
+  ],
+  series: [
+    {
+      date: "2026-01-02",
+      value: "1000",
+      cash: "0",
+      portfolio: "0",
+      SPY: "0",
+      QQQ: "0",
+    },
+    {
+      date: "2026-01-06",
+      value: "1200",
+      cash: "200",
+      portfolio: "0.10",
+      SPY: "0.02",
+      QQQ: "0.04",
+    },
+  ],
+};
+
+export const test = base.extend({
+  page: async ({ page }, use) => {
+    await page.route("**/api/accounts/*/performance", (route) =>
+      route.fulfill({ json: performance }),
+    );
+    await use(page);
+  },
+});
+export { expect };

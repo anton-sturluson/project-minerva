@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("shows a closed synthetic trade and recovers a scorecard load failure", async ({
   page,

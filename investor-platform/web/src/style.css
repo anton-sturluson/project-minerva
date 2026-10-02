@@ -138,11 +138,6 @@ button:disabled {
   padding: 11px 0;
   font-size: 15px;
 }
-.main-nav a[aria-current] {
-  color: var(--ink);
-  text-decoration: none;
-  font-weight: bold;
-}
 .welcome-strip {
   background: var(--lilac);
   border-top: 1px solid var(--rule);
@@ -556,4 +551,10 @@ summary:focus-visible {
   .scorecard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.decisions {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 3px double var(--rule);
 }
