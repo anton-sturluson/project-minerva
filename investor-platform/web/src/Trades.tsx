@@ -65,7 +65,7 @@ export function Trades({
       <h3 id="holdings-heading">Holdings</h3>
       <p className="form-note">
         Long-only equities in {account.base_currency}. Cost basis is not market
-        value. No live prices.
+        value. Closing market values are available in Performance.
       </p>
       {holdings.length ? (
         <div className="table-scroll" tabIndex={0} aria-label="Holdings">
