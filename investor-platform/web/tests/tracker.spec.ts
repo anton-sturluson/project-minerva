@@ -79,8 +79,16 @@ test("compares dated returns, explains outage, and invalidates old results", asy
           },
         }),
   );
+  await page.route("**/statistics", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { detail: "Scorecard temporarily unavailable." },
+    }),
+  );
   await page.goto("/");
-  await expect(page.getByTestId("win-rate")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry scorecard" }),
+  ).toBeVisible();
   await page.getByLabel("Performance start").fill("2026-01-02");
   await page.getByLabel("Performance end").fill("2026-01-06");
   await page.getByRole("button", { name: "Compare performance" }).click();
@@ -89,6 +97,13 @@ test("compares dated returns, explains outage, and invalidates old results", asy
   ).toBeVisible();
   await expect(
     page.getByRole("img", { name: /Cumulative portfolio/ }),
+  ).toBeVisible();
+  // Retrying the independent scorecard must preserve a successful comparison.
+  await page.unroute("**/statistics");
+  await page.getByRole("button", { name: "Retry scorecard" }).click();
+  await expect(page.getByTestId("win-rate")).toBeVisible();
+  await expect(
+    page.getByText("Closing value (USD)", { exact: true }),
   ).toBeVisible();
   await page.getByText("Daily values", { exact: true }).click();
   await expect(

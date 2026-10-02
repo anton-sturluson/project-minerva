@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, errorMessage } from "./api";
+import { number, percent } from "./format";
 
 type Benchmark = "SPY" | "QQQ";
 type Result = {
@@ -21,12 +22,6 @@ type Result = {
     benchmarks?: Record<Benchmark, { pnl: string; excess: string }>;
   }[];
 };
-const money = (value: string) =>
-  Number(value).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
 export function HitRate({ accountId }: { accountId: string }) {
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,9 +53,7 @@ export function HitRate({ accountId }: { accountId: string }) {
             <div key={benchmark}>
               <dt>Hit rate · {benchmark}</dt>
               <dd data-testid={`hit-rate-${benchmark}`}>
-                {metric?.hit_rate == null
-                  ? "—"
-                  : `${(Number(metric.hit_rate) * 100).toFixed(2)}%`}
+                {percent(metric?.hit_rate ?? null)}
               </dd>
               {metric && (
                 <span className="form-note">
@@ -149,12 +142,12 @@ export function HitRate({ accountId }: { accountId: string }) {
                     <td>
                       {row.opened_on} — {row.closed_on}
                     </td>
-                    <td>{row.pnl === undefined ? "—" : money(row.pnl)}</td>
+                    <td>{row.pnl === undefined ? "—" : number(row.pnl)}</td>
                     <td>
-                      {row.benchmarks ? money(row.benchmarks.SPY.excess) : "—"}
+                      {row.benchmarks ? number(row.benchmarks.SPY.excess) : "—"}
                     </td>
                     <td>
-                      {row.benchmarks ? money(row.benchmarks.QQQ.excess) : "—"}
+                      {row.benchmarks ? number(row.benchmarks.QQQ.excess) : "—"}
                     </td>
                     <td>{row.excluded ?? "—"}</td>
                   </tr>

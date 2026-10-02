@@ -70,7 +70,7 @@ Browser tests start both servers if needed, or reuse local servers on the docume
 - `backend/`: independent uv/hatchling project and API tests.
 - `.github/workflows/investor-platform-ci.yml` at the repository root: checks on pull requests and pushes to main.
 - [Implementation plan](docs/implementation-plan.md): one ticket per PR; SQL ownership and incremental portfolio features.
-- [Architecture](docs/architecture.md): stack rationale and future boundaries, not a list of dependencies to install now.
+- [Architecture](docs/architecture.md): implemented runtime and feature boundaries.
 - Verification: [IP-001 shell](docs/ip-001-verification.md), [IP-002 account](docs/ip-002-verification.md), [IP-003 cash](docs/ip-003-verification.md), and [IP-004 trades](docs/ip-004-verification.md).
 
 No imports from the legacy harness, sheet adapters, or seeded portfolio values are included. The optional comparison fetches public daily history from Yahoo Finance. Public hosting and multi-user authentication are separate later work. The default launch command is local-only; [Tailscale mode](docs/tailscale.md) provides private access for the same owner.

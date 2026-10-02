@@ -56,11 +56,6 @@ def current_account(session: DB, actor: Identity):
     )
 
 
-@router.get("/accounts/{account_id}", response_model=AccountView)
-def read_account(account_id: UUID, session: DB, actor: Identity):
-    return owned_account(session, actor, account_id)
-
-
 @router.post("/account", response_model=AccountView, status_code=201)
 def create_account(data: AccountInput, session: DB, actor: Identity):
     workspace = session.scalar(

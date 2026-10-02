@@ -1,6 +1,7 @@
 """Small replaceable Yahoo adapter. Only public symbols/dates leave the app."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -110,3 +111,9 @@ def symbol_for(security):
 def verify_exchange(security, history):
     if history.exchange not in EXCHANGES[security.exchange]:
         raise ValueError(f"{security.ticker}: provider listing does not match {security.exchange}")
+
+
+def histories(symbols, start, end):
+    """Fetch each public symbol once, with bounded network concurrency."""
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return dict(pool.map(lambda symbol: (symbol, history(symbol, start, end)), sorted(symbols)))
