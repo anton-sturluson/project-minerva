@@ -558,3 +558,13 @@ summary:focus-visible {
   padding-top: 1rem;
   border-top: 3px double var(--rule);
 }
+
+.reconstruction {
+  border-block: 3px double var(--rule);
+  background: var(--lilac);
+  padding: 12px;
+  margin-bottom: 20px;
+}
+.reconstruction p {
+  margin-block: 8px;
+}

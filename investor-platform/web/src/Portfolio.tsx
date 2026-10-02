@@ -72,6 +72,50 @@ export function Portfolio() {
             <h3>{account.name}</h3>
             <span>{account.base_currency} · Base currency</span>
           </div>
+          {account.reconstruction && (
+            <aside
+              className="reconstruction"
+              aria-label="Reconstruction assumptions"
+            >
+              <strong>Testing copy · incomplete transaction history</strong>
+              <p>{account.reconstruction.warning}</p>
+              <p>
+                {account.reconstruction.imported_trades} transactions imported ·{" "}
+                {account.reconstruction.skipped.length} rows excluded ·{" "}
+                {Object.keys(account.reconstruction.opening_positions).length}{" "}
+                inferred opening positions.
+              </p>
+              <details>
+                <summary>Import assumptions &amp; excluded rows</summary>
+                <p>
+                  Minimum inferred opening cash: USD{" "}
+                  {account.reconstruction.opening_cash}. This is balancing cash,
+                  not a historical balance.
+                </p>
+                <p>
+                  Trade amounts use underlying shares and prices where
+                  available, rounded to eight decimal places. CSV imports use
+                  totals divided by recorded shares. No separate fees were
+                  supplied. {account.reconstruction.price_discrepancies.length}{" "}
+                  rows have a total that differs from displayed shares × price.
+                  Original rows are preserved in PostgreSQL.
+                </p>
+                {Object.entries(account.reconstruction.opening_positions).map(
+                  ([ticker, quantity]) => (
+                    <p key={ticker}>
+                      {ticker}: {quantity} inferred shares, unknown acquisition
+                      date and cost basis.
+                    </p>
+                  ),
+                )}
+                {account.reconstruction.skipped.map((row) => (
+                  <p key={row.row}>
+                    Row {row.row}: {row.reason}
+                  </p>
+                ))}
+              </details>
+            </aside>
+          )}
           <CashLedger account={account} />
         </>
       ) : (

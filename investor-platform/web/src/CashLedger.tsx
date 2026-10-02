@@ -7,6 +7,7 @@ import {
 } from "react";
 import { api, errorMessage, type Account } from "./api";
 import { Tracker } from "./Tracker";
+import { number } from "./format";
 import { Trades } from "./Trades";
 import { exact, today, labels, type Entry, type Ledger } from "./records";
 
@@ -88,14 +89,34 @@ export function CashLedger({ account }: { account: Account }) {
       )}
       {ledger ? (
         <>
+          {account.reconstruction && (
+            <Trades
+              account={account}
+              holdings={ledger.holdings}
+              onSaved={load}
+            />
+          )}
           <Tracker account={account} ledger={ledger} />
           <div className="balance-line">
-            <span>Cash balance</span>
+            <span>
+              {account.reconstruction
+                ? "Reconstructed balancing cash"
+                : "Cash balance"}
+            </span>
             <strong data-testid="cash-balance">
-              {account.base_currency} {exact(ledger.balance)}
+              {account.base_currency}{" "}
+              {account.reconstruction
+                ? number(ledger.balance)
+                : exact(ledger.balance)}
             </strong>
           </div>
-          <Trades account={account} holdings={ledger.holdings} onSaved={load} />
+          {!account.reconstruction && (
+            <Trades
+              account={account}
+              holdings={ledger.holdings}
+              onSaved={load}
+            />
+          )}
           <h3>Record cash</h3>
           <form className="entry-form" onSubmit={(e) => void save(e)}>
             <label>

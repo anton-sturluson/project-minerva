@@ -240,6 +240,12 @@ def calculate(entries, histories, start, end):
 @router.post("/{account_id}/performance")
 def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
+    if account.reconstruction:
+        raise HTTPException(
+            422,
+            "Portfolio returns are unavailable for an incomplete reconstruction: "
+            "opening cash and external flows are not verified.",
+        )
     entries = entries_for(session, account_id)
     if account.base_currency != "USD":
         raise HTTPException(

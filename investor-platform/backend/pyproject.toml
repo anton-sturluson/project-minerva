@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 investor-api = "investor_platform.app:main"
+investor-import = "investor_platform.import_transactions:main"
 
 [build-system]
 requires = ["hatchling"]
