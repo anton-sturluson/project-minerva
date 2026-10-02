@@ -97,35 +97,31 @@ class LedgerView(BaseModel):
     corrections: list[CorrectionView] = []
 
 
-def corrections_for(session, account_id):
-    return list(
-        session.scalars(
-            select(LedgerCorrection)
-            .where(LedgerCorrection.account_id == account_id)
-            .order_by(LedgerCorrection.id)
-        )
-    )
-
-
-def entries_for(session, account_id, *, include_superseded=False):
-    entries = list(
-        session.scalars(
-            select(LedgerEntry)
-            .options(joinedload(LedgerEntry.security))
-            .where(LedgerEntry.account_id == account_id)
-        )
-    )
-    corrections = corrections_for(session, account_id)
+def ledger_snapshot(session, account_id):
+    # One SQL snapshot prevents a concurrent correction from exposing both old and new entries.
+    rows = session.execute(
+        select(LedgerEntry, LedgerCorrection)
+        .outerjoin(LedgerCorrection, LedgerCorrection.original_id == LedgerEntry.id)
+        .options(joinedload(LedgerEntry.security))
+        .where(LedgerEntry.account_id == account_id)
+    ).all()
+    entries = [entry for entry, _ in rows]
+    corrections = sorted((c for _, c in rows if c is not None), key=lambda c: c.id)
     superseded = {c.original_id for c in corrections}
     roots = {}
     for c in corrections:
         if c.replacement_id is not None:
             roots[c.replacement_id] = roots.get(c.original_id, c.original_id)
     # A replacement retains the original same-day position, including through repeated corrections.
-    return sorted(
-        (e for e in entries if include_superseded or e.id not in superseded),
+    active = sorted(
+        (e for e in entries if e.id not in superseded),
         key=lambda e: (e.effective_date, roots.get(e.id, e.id)),
     )
+    return active, {e.id: e for e in entries}, corrections
+
+
+def entries_for(session, account_id):
+    return ledger_snapshot(session, account_id)[0]
 
 
 def fingerprint(data):
@@ -142,7 +138,7 @@ def fingerprint(data):
 @router.get("/{account_id}/ledger", response_model=LedgerView)
 def read_ledger(account_id: UUID, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
-    entries = entries_for(session, account_id)
+    entries, all_entries, audit = ledger_snapshot(session, account_id)
     balance, lots, realized = replay(entries)
     securities = {e.security_id: e.security for e in entries if e.security_id}
     holdings = []
@@ -169,7 +165,6 @@ def read_ledger(account_id: UUID, session: DB, actor: Identity):
         EntryView.model_validate(e).model_copy(update={"realized_pnl": realized.get(e.id)})
         for e in entries
     ]
-    all_entries = {e.id: e for e in entries_for(session, account_id, include_superseded=True)}
     corrections = [
         CorrectionView(
             id=c.id,
@@ -181,7 +176,7 @@ def read_ledger(account_id: UUID, session: DB, actor: Identity):
             created_by=c.created_by,
             created_at=c.created_at,
         )
-        for c in corrections_for(session, account_id)
+        for c in audit
     ]
     return LedgerView(
         corrections=corrections,
