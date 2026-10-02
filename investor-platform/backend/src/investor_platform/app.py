@@ -12,6 +12,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .accounts import router
 from .db import make_engine, require_local_mode
 from .ledger import router as ledger_router
+from .trades import router as trades_router
 
 LOCAL_ORIGINS = frozenset({"http://127.0.0.1:5173", "http://localhost:5173"})
 
@@ -28,6 +29,7 @@ async def lifespan(app):
 app = FastAPI(title="Minerva Investor Platform", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
 app.include_router(ledger_router)
+app.include_router(trades_router)
 
 
 @app.exception_handler(SQLAlchemyError)

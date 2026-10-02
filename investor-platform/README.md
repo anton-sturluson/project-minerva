@@ -2,7 +2,7 @@
 
 A local investor workspace inside Minerva. The app will own its PostgreSQL data; any migration from existing portfolio records is a one-time operation, not an application dependency.
 
-IP-003 adds an auditable cash ledger to the persistent account. Record opening cash, deposits, and withdrawals; the balance is derived from dated entries. Positions and trades arrive next.
+IP-004 adds opening positions, buys, sells, FIFO cost tracking, and a derived holdings table. Cash and positions commit together; account records survive restarts.
 
 The interface uses the approved Homepage Club direction: warm paper, a serif masthead, bracket links, double rules, and small early-web badges. The [design reference and project skill](https://github.com/anton-sturluson/project-minerva/pull/103) are maintained separately from this app foundation.
 
@@ -71,15 +71,28 @@ Browser tests start both servers if needed, or reuse local servers on the docume
 - `.github/workflows/investor-platform-ci.yml` at the repository root: checks on pull requests and pushes to main.
 - [Implementation plan](docs/implementation-plan.md): one ticket per PR; SQL ownership and incremental portfolio features.
 - [Architecture](docs/architecture.md): stack rationale and future boundaries, not a list of dependencies to install now.
-- [IP-001 verification](docs/ip-001-verification.md): manual browser checks and automated coverage.
+- Verification: [IP-001 shell](docs/ip-001-verification.md), [IP-002 account](docs/ip-002-verification.md), [IP-003 cash](docs/ip-003-verification.md), and [IP-004 trades](docs/ip-004-verification.md).
 
-No imports from the legacy harness, sheet adapters, financial data, or mock portfolio values are included. Hosted authentication and deployment are separate later work; the current launch command is local-only.
+No imports from the legacy harness, sheet adapters, live financial feeds, or seeded portfolio values are included. Hosted authentication and deployment are separate later work; the current launch command is local-only.
 
 ## Cash ledger rules
 
-- Amounts are decimal strings, with at most 16 integer and 8 fractional digits. Browser displays retain exact stored values; no floating-point arithmetic is used for balances.
+- Entered cash amounts are decimal strings, with at most 16 integer and 8 fractional digits. Browser displays retain exact stored values; no floating-point arithmetic is used for balances.
 - Opening cash is the first entry and defines the start of tracking. Later entries cannot precede it. Starting with a deposit is also supported; an opening balance cannot be added afterwards.
 - Dates are posting dates in UTC, not settlement accounting. No future-dated entries. Same-day order is the immutable database sequence, shown in activity order.
 - Every write locks the account, checks its complete dated history, and commits atomically. Cash cannot become negative at any point. Concurrent withdrawals obey the same rule.
-- A client-generated request key identifies a write. Retries with the same payload return the original entry; changed content with that key is rejected. The form retains its key after an uncertain response and its draft after validation errors.
+- A client-generated request key identifies a write. Retries with the same payload return the original entry; changed content with that key is rejected. Each form retains its key after an uncertain response and its draft after validation errors. Before reloading a page after an uncertain write, retry the unchanged form or inspect activity; request keys are held in the current form, not a persistent offline queue.
 - Records include creation time and owner identity. Entries cannot yet be edited or deleted; corrections are IP-005. Use synthetic records until that increment and backup/restore are ready.
+
+## Positions and trades
+
+Open **Record a position or trade** below Holdings. Enter an exchange-qualified ticker and select opening position, buy, or sell. Securities must be equities denominated in the account currency; there is no symbol lookup or currency conversion. The same ticker on another exchange is a different security. Names are normalized to uppercase.
+
+- An opening position records shares already owned without a cash trade. Its optional **total** cost basis includes any historical acquisition fees. Blank means unknown; zero is an explicit known zero. Record opening cash first if you need it, then opening positions before trades in each security.
+- Buys debit quantity × price + fees. Sells credit quantity × price − fees; fees exceeding proceeds are unsupported. Quantity and price allow up to 12 integer and 8 fractional digits. Products and cash effects retain up to 16 decimal places without currency-cent rounding; figures represent entered records, not broker settlement calculations.
+- Sales consume the oldest shares first (FIFO), ordered by effective date then saved sequence. Buy fees are included in lot basis and sell fees reduce proceeds. A partial lot's allocated basis rounds half-even at 16 decimal places; its final sale consumes the exact remaining basis so residuals reconcile.
+- Unknown opening basis stays unknown. A sale that consumes any unknown-basis shares has no reported realized gain. Remaining holdings show unknown basis until those shares are exhausted. Sale details include FIFO realized P&L only when all consumed basis is known.
+- Cash and shares must stay nonnegative throughout the full history, including after backdated writes. All cash and trade writers use the same account lock. A rejected write also rolls back any newly created security.
+- Holdings and cash are derived from immutable entries. No editable balances, market valuations, returns, dividends, splits, shorts, margin, options, or foreign-currency trades in this increment. Corrections remain IP-005; backup/restore remains IP-007.
+
+The forms record activity only; they never place orders. The development demo uses a separate synthetic database. Portfolio migration and real-data onboarding remain separate tasks.
