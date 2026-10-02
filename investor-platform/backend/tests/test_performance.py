@@ -149,3 +149,37 @@ def test_zero_balance_breaks_a_continuous_return_period(db_client, portfolio):
     result = report(db_client, aid)
     assert result.status_code == 422
     assert "zero-value balance" in result.json()["detail"]
+
+
+def test_provisional_comparison_models_only_missing_income_without_writing(
+    db_client, portfolio, database
+):
+    from uuid import UUID
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from investor_platform.models import Account, Security
+
+    aid, data = portfolio
+    with Session(database) as session:
+        session.get(Account, UUID(aid)).reconstruction = {"testing": True}
+        session.scalar(select(Security).where(Security.ticker == "AAA")).exchange = "UNVERIFIED"
+        session.commit()
+    data["AAA"].dividends[DAYS[1]] = D("1")
+    assert cash(db_client, aid, "income", "4", day="2026-01-05").status_code == 201
+    before = ledger(db_client, aid)
+    result = report(db_client, aid).json()
+    assert result["provisional"] is True
+    assert result["assumptions"]
+    assert D(result["modeled_income"]) == 6
+    assert D(result["value"]) == 1220
+    assert D(result["return"]) == D(".22")
+    assert D(result["excess_spy"]) == D(".20")
+    assert ledger(db_client, aid) == before
+    # Modeling never relaxes missing-price or corporate-action safeguards.
+    data["AAA"].splits.add(DAYS[1])
+    assert report(db_client, aid).status_code == 422
+    data["AAA"].splits.clear()
+    del data["AAA"].close[DAYS[1]]
+    assert report(db_client, aid).status_code == 422

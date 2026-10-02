@@ -20,6 +20,9 @@ type Point = {
   QQQ: string;
 };
 type Report = {
+  provisional?: boolean;
+  assumptions?: string[];
+  modeled_income?: string;
   start: string;
   end: string;
   value: string;
@@ -103,7 +106,6 @@ export function Tracker({
     setError("");
     setBusy(false);
     if (
-      !account.reconstruction &&
       ledger.entries.length &&
       from < through &&
       account.base_currency === "USD"
@@ -117,32 +119,24 @@ export function Tracker({
     e.preventDefault();
     void compare(start, end);
   }
-  if (account.reconstruction)
-    return (
-      <section
-        id="performance"
-        className="tracker"
-        aria-labelledby="performance-heading"
-      >
-        <h2 id="performance-heading">Provisional trade statistics</h2>
-        <p>
-          Portfolio vs. index returns are unavailable until opening balances and
-          cash flows are verified. These trade statistics describe only the
-          imported decisions; missing trades and rounded source amounts can
-          change them.
-        </p>
-        <div id="decisions">
-          <TradeScorecard account={account} ledger={ledger} />
-        </div>
-      </section>
-    );
   return (
     <section
       id="performance"
       className="tracker"
       aria-labelledby="performance-heading"
     >
-      <h2 id="performance-heading">Portfolio vs. the market</h2>
+      <h2 id="performance-heading">
+        {account.reconstruction
+          ? "Provisional portfolio vs. the market"
+          : "Portfolio vs. the market"}
+      </h2>
+      {account.reconstruction && (
+        <p className="reconstruction">
+          Testing estimate · inferred opening balances and incomplete
+          transactions. This is not verified account performance. Excluded
+          import rows are not included.
+        </p>
+      )}
       <p className="form-note">
         Your portfolio alongside the S&amp;P 500 (SPY) and Nasdaq-100 (QQQ),
         with distributions reinvested in the benchmarks.
@@ -232,13 +226,31 @@ export function Tracker({
               {w} Portfolio return is withheld.
             </p>
           ))}
+          {report.provisional && (
+            <aside className="reconstruction" aria-label="Estimate assumptions">
+              <strong>Provisional estimate · not verified performance</strong>
+              <ul>
+                {report.assumptions?.map((a) => (
+                  <li key={a}>{a}</li>
+                ))}
+              </ul>
+              <p>
+                Modeled gross income included in cash: USD{" "}
+                {number(report.modeled_income ?? "0")}.
+              </p>
+            </aside>
+          )}
           <dl className="scorecard">
             <div>
               <dt>Closing value (USD)</dt>
               <dd>{number(report.value)}</dd>
             </div>
             <div>
-              <dt>Portfolio return</dt>
+              <dt>
+                {report.provisional
+                  ? "Estimated portfolio return"
+                  : "Portfolio return"}
+              </dt>
               <dd>{percent(report.return)}</dd>
             </div>
             <div>
@@ -359,10 +371,12 @@ export function Tracker({
       </details>
       <div id="decisions" className="decisions">
         <TradeScorecard account={account} ledger={ledger} />
-        <HitRate
-          key={`${account.id}:${ledger.entries.length}`}
-          accountId={account.id}
-        />
+        {!account.reconstruction && (
+          <HitRate
+            key={`${account.id}:${ledger.entries.length}`}
+            accountId={account.id}
+          />
+        )}
       </div>
     </section>
   );

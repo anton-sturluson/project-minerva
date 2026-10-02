@@ -90,7 +90,17 @@ class Period(BaseModel):
     end: date
 
 
-def calculate(entries, histories, start, end):
+def quote_symbol(security, provisional=False):
+    if (
+        provisional
+        and security.currency == "USD"
+        and (security.exchange in market.EXCHANGES or security.exchange == "UNVERIFIED")
+    ):
+        return security.ticker.replace(".", "-")
+    return market.symbol_for(security)
+
+
+def calculate(entries, histories, start, end, *, provisional=False):
     """No forward filling, shortened comparison window, or zero-valued missing positions."""
     spy, qqq = histories["SPY"], histories["QQQ"]
     days = sorted(d for d in spy.close if start <= d <= end)
@@ -99,9 +109,15 @@ def calculate(entries, histories, start, end):
     if (end - days[-1]).days > 4:
         raise ValueError("Benchmark history is stale at the requested end date")
     securities = {e.security_id: e.security for e in entries if e.security_id}
-    prices = {sid: histories[market.symbol_for(s)] for sid, s in securities.items()}
+    prices = {sid: histories[quote_symbol(s, provisional)] for sid, s in securities.items()}
     for sid, security in securities.items():
-        market.verify_exchange(security, prices[sid])
+        if provisional:
+            if prices[sid].exchange not in set().union(*market.EXCHANGES.values()):
+                raise ValueError(
+                    f"{security.ticker}: provider listing is not a supported US listing"
+                )
+        else:
+            market.verify_exchange(security, prices[sid])
     # If shares span a split, the ledger needs a corporate-action record (not supported yet).
     for sid, h in prices.items():
         for d in sorted(h.splits):
@@ -139,11 +155,15 @@ def calculate(entries, histories, start, end):
                 ZERO,
             )
             distributions[exdate] = distributions.get(exdate, ZERO) + shares * dividend
+    modeled_income = {}
     for exdate, expected in sorted(distributions.items()):
         income = sum(
             (e.amount for e in entries if e.kind == "income" and e.effective_date == exdate), ZERO
         )
-        if expected > 0 and abs(income - expected) > Decimal("0.01"):
+        if provisional:
+            # Fill only the missing gross amount on its ex-date; never write modeled income.
+            modeled_income[exdate] = max(ZERO, expected - income)
+        elif expected > 0 and abs(income - expected) > Decimal("0.01"):
             warnings.append(
                 f"Income needs reconciliation for {exdate}: expected gross distributions "
                 f"{expected:.2f}, recorded {income:.2f}. Record income on the ex-date."
@@ -152,6 +172,7 @@ def calculate(entries, histories, start, end):
     for d in days:
         prefix = [e for e in entries if e.effective_date <= d]
         cash, lots, _ = replay(prefix)
+        cash += sum((amount for day, amount in modeled_income.items() if day <= d), ZERO)
         holdings = []
         for sid, sl in lots.items():
             quantity = sum((lot.quantity for lot in sl), ZERO)
@@ -222,6 +243,18 @@ def calculate(entries, histories, start, end):
             row["portfolio"] = None
     last = values[-1]
     return {
+        "provisional": provisional,
+        "modeled_income": sum(modeled_income.values(), ZERO),
+        "assumptions": [
+            "Testing estimate: opening shares and cash are inferred, not verified broker balances.",
+            "Assumes no missing trades or external flows; excluded import rows are not included.",
+            "Uses provider USD listings for imported US tickers; confirm security identity.",
+            "Missing gross distributions are modeled on ex-dates and held as cash. Recorded income "
+            "offsets the model only on the same ex-date; payment-date income may double count it.",
+            "No unrecorded fees or taxes. Benchmarks reinvest distributions.",
+        ]
+        if provisional
+        else [],
         "start": days[0],
         "end": days[-1],
         "value": last["value"],
@@ -240,12 +273,7 @@ def calculate(entries, histories, start, end):
 @router.post("/{account_id}/performance")
 def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
-    if account.reconstruction:
-        raise HTTPException(
-            422,
-            "Portfolio returns are unavailable for an incomplete reconstruction: "
-            "opening cash and external flows are not verified.",
-        )
+    provisional = bool(account.reconstruction)
     entries = entries_for(session, account_id)
     if account.base_currency != "USD":
         raise HTTPException(
@@ -268,7 +296,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     entries = [e for e in entries if e.effective_date <= period.end]
     securities = {e.security_id: e.security for e in entries if e.security_id}
     try:
-        symbols = {market.symbol_for(s) for s in securities.values()} | {"SPY", "QQQ"}
+        symbols = {quote_symbol(s, provisional) for s in securities.values()} | {"SPY", "QQQ"}
         if len(securities) > 48 or entries[0].effective_date < today - timedelta(days=3660):
             raise ValueError(
                 "This first tracker supports up to 48 securities and ten years of ledger history"
@@ -277,7 +305,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         fetched = market.histories(symbols, entries[0].effective_date, period.end)
         with localcontext() as ctx:
             ctx.prec = 64
-            result = calculate(entries, fetched, period.start, period.end)
+            result = calculate(entries, fetched, period.start, period.end, provisional=provisional)
         return wire(
             {**result, "fetched_at": datetime.now(UTC), "source": "Yahoo Finance daily history"}
         )
