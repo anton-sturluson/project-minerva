@@ -393,3 +393,85 @@ h1 {
     align-items: center;
   }
 }
+
+.portfolio {
+  margin-top: 28px;
+  border-top: 3px double var(--ink);
+  padding-top: 16px;
+}
+.portfolio > h2 {
+  color: var(--plum);
+  font-size: 24px;
+  margin-bottom: 12px;
+}
+.entry-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  margin-top: 16px;
+}
+.entry-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 14px;
+  flex: 1 1 160px;
+}
+input,
+select,
+textarea {
+  min-width: 0;
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font:
+    15px Arial,
+    sans-serif;
+  padding: 7px;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.form-note {
+  flex-basis: 100%;
+  font:
+    12px/1.5 Arial,
+    sans-serif;
+}
+.error {
+  color: var(--error);
+  border-left: 3px solid var(--error);
+  padding-left: 12px;
+  margin: 12px 0;
+}
+.error button {
+  margin-top: 8px;
+}
+.account-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.account-line span {
+  font:
+    12px/1.5 "Courier New",
+    monospace;
+}
+@media (max-width: 650px) {
+  .entry-form label {
+    flex-basis: 100%;
+  }
+  .entry-form button {
+    min-height: 44px;
+  }
+}
