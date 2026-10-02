@@ -2,7 +2,7 @@
 
 A local investor workspace inside Minerva. The app will own its PostgreSQL data; any migration from existing portfolio records is a one-time operation, not an application dependency.
 
-IP-002 adds one persistent investment account to the Homepage Club workspace. Choose a name and base currency; the account survives service restarts. Cash and positions arrive in the next tickets.
+IP-003 adds an auditable cash ledger to the persistent account. Record opening cash, deposits, and withdrawals; the balance is derived from dated entries. Positions and trades arrive next.
 
 The interface uses the approved Homepage Club direction: warm paper, a serif masthead, bracket links, double rules, and small early-web badges. The [design reference and project skill](https://github.com/anton-sturluson/project-minerva/pull/103) are maintained separately from this app foundation.
 
@@ -74,3 +74,12 @@ Browser tests start both servers if needed, or reuse local servers on the docume
 - [IP-001 verification](docs/ip-001-verification.md): manual browser checks and automated coverage.
 
 No imports from the legacy harness, sheet adapters, financial data, or mock portfolio values are included. Hosted authentication and deployment are separate later work; the current launch command is local-only.
+
+## Cash ledger rules
+
+- Amounts are decimal strings, with at most 16 integer and 8 fractional digits. Browser displays retain exact stored values; no floating-point arithmetic is used for balances.
+- Opening cash is the first entry and defines the start of tracking. Later entries cannot precede it. Starting with a deposit is also supported; an opening balance cannot be added afterwards.
+- Dates are posting dates in UTC, not settlement accounting. No future-dated entries. Same-day order is the immutable database sequence, shown in activity order.
+- Every write locks the account, checks its complete dated history, and commits atomically. Cash cannot become negative at any point. Concurrent withdrawals obey the same rule.
+- A client-generated request key identifies a write. Retries with the same payload return the original entry; changed content with that key is rejected. The form retains its key after an uncertain response and its draft after validation errors.
+- Records include creation time and owner identity. Entries cannot yet be edited or deleted; corrections are IP-005. Use synthetic records until that increment and backup/restore are ready.

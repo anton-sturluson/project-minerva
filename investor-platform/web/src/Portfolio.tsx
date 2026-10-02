@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
 
+import { CashLedger } from "./CashLedger";
+
 export function Portfolio() {
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,7 +72,7 @@ export function Portfolio() {
             <h3>{account.name}</h3>
             <span>{account.base_currency} · Base currency</span>
           </div>
-          <p>Your account is saved. Cash and positions come next.</p>
+          <CashLedger account={account} />
         </>
       ) : (
         <>
