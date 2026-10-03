@@ -20,7 +20,7 @@ def test_archive_hashes_bytes_and_preserves_locations(tmp_path):
         "http://manager.com/letter",
         "https://hfbestideas.com/stock/A",
         "https://hfbestideas.substack.com/p/a",
-        "https://user:password@manager.com/a",
+        "https://user:password@example.com/a",
         "https://127.0.0.1/a",
     ],
 )
