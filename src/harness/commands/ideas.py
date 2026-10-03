@@ -6,6 +6,8 @@ from pathlib import Path
 from uuid import UUID
 from functools import wraps
 
+import httpx
+import subprocess
 import psycopg
 import typer
 from harness.ideas import store
@@ -18,7 +20,7 @@ def guarded(fn):
     def call(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (ValueError, OSError, psycopg.Error) as exc:
+        except (ValueError, OSError, psycopg.Error, httpx.HTTPError, subprocess.SubprocessError) as exc:
             # Connection errors may contain DSNs. Never echo driver details.
             message = "Postgres operation failed; check MINERVA_DATABASE_URL and database access." if isinstance(exc, psycopg.Error) else str(exc)
             typer.echo(message, err=True)
@@ -51,3 +53,11 @@ def import_issue(path: Path, run_id: UUID | None = typer.Option(None)):
 def status(run_id: UUID):
     """Return persisted progress and explicit research gaps as JSON."""
     emit(store.status(run_id))
+
+
+@app.command("source")
+@guarded
+def source(run_id: UUID, ordinal: int, url: str):
+    """Archive an original document candidate; this does not approve its thesis."""
+    from harness.ideas.documents import attach
+    emit(attach(run_id,ordinal,url))
