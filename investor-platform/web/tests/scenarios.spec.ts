@@ -70,6 +70,9 @@ test("compares exclusions and CAGR, preserves real holdings, clears selections a
   await expect(summary).toContainText("9.54%");
   await page.getByText("Exclude stocks", { exact: true }).click();
   await page.getByRole("checkbox", { name: "AAA · NYSE" }).check();
+  await expect(page.getByLabel("Holdings", { exact: true })).toContainText(
+    "AAA",
+  );
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(summary).toContainText("Without excluded stocks");
   expect(received).toEqual([security.id]);
