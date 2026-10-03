@@ -41,3 +41,5 @@ Each PR must include tests and a live check. Deployment to the shared Postgres r
 ## Validation
 
 PR 1: three focused tests passed against disposable PostgreSQL 17. Imported the archived September 30 issue through the actual CLI: 50 roster rows persisted. No model calls or Slack publication. The shared database connection is still being identified.
+
+PR 2 adds a nullable document reference to each item. `minerva ideas source RUN ORDINAL URL` archives a public manager PDF/HTML candidate with a byte hash and stable page/block IDs. It rejects HF evidence URLs and local endpoints. Source attachment is not semantic approval. Live check: fetched the Munro June 2026 manager PDF, archived all 12 pages, and persisted the document reference in disposable Postgres. Six document tests passed.

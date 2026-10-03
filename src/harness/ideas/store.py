@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS minerva_ideas.items (
     error text,
     PRIMARY KEY (run_id, ordinal)
 );
+ALTER TABLE minerva_ideas.items ADD COLUMN IF NOT EXISTS document jsonb;
 """
 
 
