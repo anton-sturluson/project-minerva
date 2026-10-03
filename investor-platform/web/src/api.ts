@@ -1,8 +1,12 @@
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+export async function api<T>(
+  path: string,
+  options?: RequestInit,
+  timeout = 8000,
+): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...options,
     headers: { "Content-Type": "application/json", ...options?.headers },
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(timeout),
     cache: "no-store",
   });
   if (!response.ok) {

@@ -6,6 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import { api, errorMessage, type Account } from "./api";
+import { Tracker } from "./Tracker";
 import { Trades } from "./Trades";
 import { exact, today, labels, type Entry, type Ledger } from "./records";
 
@@ -87,6 +88,7 @@ export function CashLedger({ account }: { account: Account }) {
       )}
       {ledger ? (
         <>
+          <Tracker account={account} ledger={ledger} />
           <div className="balance-line">
             <span>Cash balance</span>
             <strong data-testid="cash-balance">

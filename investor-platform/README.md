@@ -73,7 +73,7 @@ Browser tests start both servers if needed, or reuse local servers on the docume
 - [Architecture](docs/architecture.md): stack rationale and future boundaries, not a list of dependencies to install now.
 - Verification: [IP-001 shell](docs/ip-001-verification.md), [IP-002 account](docs/ip-002-verification.md), [IP-003 cash](docs/ip-003-verification.md), and [IP-004 trades](docs/ip-004-verification.md).
 
-No imports from the legacy harness, sheet adapters, live financial feeds, or seeded portfolio values are included. Hosted authentication and deployment are separate later work; the current launch command is local-only.
+No imports from the legacy harness, sheet adapters, or seeded portfolio values are included. Hit-rate comparisons optionally fetch public daily history from Yahoo Finance. Hosted authentication and deployment are separate later work; the current launch command is local-only.
 
 ## Cash ledger rules
 
@@ -96,3 +96,11 @@ Open **Record a position or trade** below Holdings. Enter an exchange-qualified 
 - Holdings and cash are derived from immutable entries. No editable balances, market valuations, returns, dividends, splits, shorts, margin, options, or foreign-currency trades in this increment. Corrections remain IP-005; backup/restore remains IP-007.
 
 The forms record activity only; they never place orders. The development demo uses a separate synthetic database. Portfolio migration and real-data onboarding remain separate tasks.
+
+## Trade scorecard
+
+Win rate, average dollar win/loss and payoff ratio use fully closed position episodes. Partial sales remain one episode; FIFO gains include fees and exclude dividends. Open positions and unknown basis are excluded and counted separately. Breakevens count in the win-rate denominator. Both wins and losses are required for a payoff ratio. Expand the scorecard for closed-position detail and conventions. This increment uses saved records only; benchmark comparisons follow in a stacked PR.
+
+## Decision hit rate
+
+Alongside payoff ratio and win rate, **Calculate hit rate** measures how many fully closed investment decisions beat SPY and QQQ over matching holding periods. A profitable decision can underperform the market. Partial exits count as one decision; unavailable comparisons are explicitly excluded. The report fetches market data on demand, while the original payoff scorecard remains available without it. See [definitions, matched-capital calculations and exclusions](docs/hit-rate.md).
