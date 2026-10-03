@@ -77,6 +77,7 @@ def test_reconciliation_requires_exact_content_route_and_fresh_receipt(
     monkeypatch.setattr(publication.store, "connect", connect)
     entry = {
         "summary": "Exact digest",
+        "status": "ok",
         "delivered": True,
         "deliveryStatus": "delivered",
         "ts": prepared.timestamp() * 1000 + 1000,
@@ -163,6 +164,7 @@ def test_postgres_duplicate_and_receipt_lifecycle(tmp_path, monkeypatch):
             publication.prepare(run_id, job_id)
         entry = {
             "summary": text,
+            "status": "ok",
             "delivered": True,
             "deliveryStatus": "delivered",
             "ts": datetime.now(timezone.utc).timestamp() * 1000 + 1000,
@@ -223,83 +225,21 @@ def test_render_gate_rejects_wrong_company_even_if_marked_ready(tmp_path, monkey
         publication.checked_view(row, {"issue_date": date(2026, 9, 30)})
 
 
-def test_truncated_summary_needs_full_bound_session_output(tmp_path, monkeypatch):
-    from contextlib import contextmanager
-    from datetime import datetime, timezone
-
-    job_id = uuid4()
-    run_id = uuid4()
-    now = datetime.now(timezone.utc)
-    text = "Original-source digest " + ("x" * 2200)
-    (tmp_path / "publications").mkdir()
-    (tmp_path / "publications/d.slack.txt").write_text(text)
-    route = {"channel": "slack", "to": "channel:T", "threadId": "t"}
-    record = {"digest": "d", "run_id": run_id, "route": route, "prepared_at": now}
-
-    class Connection:
-        def execute(self, *a):
-            return self
-
-        def fetchall(self):
-            return [record]
-
-    @contextmanager
-    def connect():
-        yield Connection()
-
-    monkeypatch.setattr(publication.store, "connect", connect)
-    monkeypatch.setattr(publication.store, "get_run", lambda _: {})
-    monkeypatch.setattr(publication.store, "run_folder", lambda _: tmp_path)
-    entry = {
-        "summary": text[:2000] + "…",
-        "delivered": True,
-        "deliveryStatus": "delivered",
-        "ts": now.timestamp() * 1000 + 1000,
-        "delivery": {"resolved": route},
-    }
-    monkeypatch.setattr(publication, "gateway_json", lambda *a: {"entries": [entry]})
-    monkeypatch.setattr(publication, "command_output_matches", lambda *a: False)
-    assert publication.reconcile(job_id)["confirmed_deliveries"] == 0
-    monkeypatch.setattr(publication, "command_output_matches", lambda *a: True)
-    assert publication.reconcile(job_id)["confirmed_deliveries"] == 1
-
-
-def test_command_receipt_requires_matching_output_and_execution(tmp_path):
-    import hashlib
-    import json
-    from datetime import datetime, timezone
-
-    from harness.ideas import store
-
-    now = datetime.now(timezone.utc)
-    text = "Actual command output"
-    argv = ["runner", "job"]
-    store.json_artifact(
-        tmp_path,
-        "publications/d.emitted.json",
-        {
-            "argv": argv,
-            "sha256": hashlib.sha256(text.encode()).hexdigest(),
-            "emitted_at": now.isoformat(),
-        },
-    )
-    diagnostic = {
-        "source": "exec",
-        "exitCode": 0,
-        "message": "command ok: " + " ".join(json.dumps(a) for a in argv),
+def test_native_receipt_requires_explicit_route_and_successful_execution():
+    route = {
+        "channel": "slack",
+        "to": "channel:T",
+        "threadId": "t",
+        "source": "explicit",
     }
     entry = {
         "status": "ok",
-        "runAtMs": now.timestamp() * 1000 - 1000,
-        "ts": now.timestamp() * 1000 + 1000,
-        "diagnostics": {"entries": [diagnostic]},
+        "delivery": {"intended": route},
+        "diagnostics": {"entries": [{"source": "exec", "exitCode": 0}]},
     }
-    assert publication.command_output_matches(entry, tmp_path, "d", text)
-    diagnostic["truncated"] = True
-    assert not publication.command_output_matches(entry, tmp_path, "d", text)
-    diagnostic["truncated"] = False
-    diagnostic["message"] = 'command ok: "another-runner"'
-    assert not publication.command_output_matches(entry, tmp_path, "d", text)
-    assert not publication.command_output_matches(
-        entry, tmp_path, "d", "Different content"
-    )
+    assert publication.delivered_route(entry) == publication.route_fields(route)
+    entry["diagnostics"]["entries"][0]["truncated"] = True
+    assert publication.delivered_route(entry) == {}
+    entry["diagnostics"]["entries"][0]["truncated"] = False
+    entry["delivery"]["fallbackUsed"] = True
+    assert publication.delivered_route(entry) == {}

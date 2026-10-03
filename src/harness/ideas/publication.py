@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timezone
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
@@ -122,11 +121,6 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
                 "Publication may already have been sent; reconcile delivery before another attempt"
             )
     run = store.get_run(run_id)
-    store.json_artifact(
-        store.run_folder(run),
-        f"publications/{digest}.intent.json",
-        {"argv": job["payload"]["argv"]},
-    )
     store.write_artifact(
         store.run_folder(run), f"publications/{digest}.slack.txt", text.encode()
     )
@@ -147,54 +141,26 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
     )
 
 
-def record_emission(run_id: UUID, job_id: UUID, text: str) -> None:
-    """Called only after flushing the exact command stdout; no model follows it."""
-    if text == "NO_REPLY":
-        return
-    folder = store.run_folder(store.get_run(run_id))
-    with store.connect() as conn:
-        rows = conn.execute(
-            "SELECT digest FROM minerva_ideas.publications WHERE run_id=%s AND job_id=%s AND state='sending'",
-            (run_id, job_id),
-        ).fetchall()
-    for row in rows:
-        digest = row["digest"]
-        if (folder / f"publications/{digest}.slack.txt").read_text() == text:
-            intent = json.loads(
-                (folder / f"publications/{digest}.intent.json").read_text()
-            )
-            store.json_artifact(
-                folder,
-                f"publications/{digest}.emitted.json",
-                {
-                    "argv": intent["argv"],
-                    "sha256": hashlib.sha256(text.encode()).hexdigest(),
-                    "emitted_at": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-            return
-    raise ValueError("No matching prepared publication for command output")
-
-
-def command_output_matches(entry: dict, folder, digest: str, text: str) -> bool:
-    marker = folder / f"publications/{digest}.emitted.json"
-    if not marker.exists() or entry.get("sessionId") or entry.get("status") != "ok":
-        return False
-    emitted = json.loads(marker.read_text())
-    if emitted["sha256"] != hashlib.sha256(text.encode()).hexdigest():
-        return False
-    at = datetime.fromisoformat(emitted["emitted_at"]).timestamp() * 1000
-    if not entry.get("runAtMs", 0) <= at <= entry.get("ts", 0):
-        return False
-    command = " ".join(json.dumps(arg, ensure_ascii=False) for arg in emitted["argv"])
-    diagnostics = entry.get("diagnostics", {}).get("entries", [])
-    return any(
-        d.get("source") == "exec"
-        and d.get("exitCode") == 0
-        and not d.get("truncated", False)
-        and d.get("message") == "command ok: " + command
-        for d in diagnostics
-    )
+def delivered_route(entry: dict) -> dict:
+    delivery = entry.get("delivery", {})
+    if delivery.get("resolved"):
+        return route_fields(delivery["resolved"])
+    # Native command receipts record the explicit destination without an agent session.
+    execution = entry.get("diagnostics", {}).get("entries", [])
+    if (
+        not entry.get("sessionId")
+        and entry.get("status") == "ok"
+        and not delivery.get("fallbackUsed", False)
+        and any(
+            d.get("source") == "exec"
+            and d.get("exitCode") == 0
+            and not d.get("truncated", False)
+            for d in execution
+        )
+        and delivery.get("intended", {}).get("source") == "explicit"
+    ):
+        return route_fields(delivery["intended"])
+    return {}
 
 
 def reconcile(job_id: UUID) -> dict:
@@ -215,24 +181,16 @@ def reconcile(job_id: UUID) -> dict:
             for entry in entries:
                 if entry.get("ts", 0) < publication["prepared_at"].timestamp() * 1000:
                     continue
-                resolved = entry.get("delivery", {}).get("resolved", {})
-                if route_fields(resolved) != publication["route"]:
+                resolved = delivered_route(entry)
+                if resolved != publication["route"] or entry.get("status") != "ok":
                     continue
                 if (
                     entry.get("delivered") is True
                     and entry.get("deliveryStatus") == "delivered"
                 ):
-                    summary = entry.get("summary", "").strip()
-                    if summary != text:
-                        if not summary.endswith("…") or not text.startswith(
-                            summary[:-1]
-                        ):
-                            continue
-                        if not command_output_matches(
-                            entry, store.run_folder(run), publication["digest"], text
-                        ):
-                            continue
-                    # Bind stdout evidence to the native command and its transport receipt.
+                    if entry.get("summary", "").strip() != text:
+                        continue
+                    # Native command history preserves full stdout; require exact equality.
                     conn.execute(
                         "UPDATE minerva_ideas.publications SET state='delivered',receipt=%s WHERE digest=%s",
                         (
