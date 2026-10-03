@@ -130,3 +130,31 @@ def resume(
     from harness.ideas.workflow import resume as resume_run
 
     emit(resume_run(run_id, limit=limit, model=model, retry_gaps=retry_gaps))
+
+
+@app.command("render")
+@guarded
+def render(run_id: UUID):
+    """Print publishable ideas without changing delivery state or calling a model."""
+    from harness.ideas.publication import render as render_digest
+
+    typer.echo(render_digest(run_id))
+
+
+@app.command("prepare")
+@guarded
+def prepare(run_id: UUID, job_id: UUID):
+    """Prepare a single delivery through the named existing OpenClaw job."""
+    from harness.ideas.publication import prepare as prepare_digest
+
+    with store.run_lock(run_id):
+        typer.echo(prepare_digest(run_id, job_id))
+
+
+@app.command("reconcile")
+@guarded
+def reconcile(job_id: UUID):
+    """Confirm the exact digest in OpenClaw's durable transport records."""
+    from harness.ideas.publication import reconcile as reconcile_delivery
+
+    emit(reconcile_delivery(job_id))

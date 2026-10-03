@@ -100,11 +100,41 @@ def test_provider_schema_avoids_unsupported_additional_properties():
 
 def test_archive_links_ignore_regulatory_footer_and_fact_sheets(tmp_path):
     from harness.ideas.research import linked_letters
-    path=tmp_path/'research/documents/a.html';path.parent.mkdir(parents=True)
-    path.write_text('<article><a href="/2026/q2-commentary.pdf">Q2 Commentary</a><a href="/2026/q2-fact-sheet.pdf">Q2 fact sheet</a></article><footer><a href="/2026/crs-fund.pdf">CRS</a></footer>')
-    assert linked_letters(tmp_path,{'sha256':'a','url':'https://manager.com/letter'},2026)==['https://manager.com/2026/q2-commentary.pdf']
+
+    path = tmp_path / "research/documents/a.html"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '<article><a href="/2026/q2-commentary.pdf">Q2 Commentary</a><a href="/2026/q2-fact-sheet.pdf">Q2 fact sheet</a></article><footer><a href="/2026/crs-fund.pdf">CRS</a></footer>'
+    )
+    assert linked_letters(
+        tmp_path, {"sha256": "a", "url": "https://manager.com/letter"}, 2026
+    ) == ["https://manager.com/2026/q2-commentary.pdf"]
 
 
 def test_identity_checks_tolerate_pdf_line_breaks_and_capitals():
-    m=match();m.fund_quote='ALPHA\nFUND';m.company_quote='ACME pricing power';m.publisher_quote='ALPHA CAPITAL'
-    validate_match(m,[{'text':'Alpha Capital Alpha Fund Q2 2026 Acme pricing power'}],date(2026,9,30))
+    m = match()
+    m.fund_quote = "ALPHA\nFUND"
+    m.company_quote = "ACME pricing power"
+    m.publisher_quote = "ALPHA CAPITAL"
+    validate_match(
+        m,
+        [{"text": "Alpha Capital Alpha Fund Q2 2026 Acme pricing power"}],
+        date(2026, 9, 30),
+    )
+
+
+def test_company_and_sibling_fund_cannot_be_substituted():
+    from harness.ideas.research import validate_target
+
+    m = match()
+    with pytest.raises(ValueError, match="company"):
+        validate_target(
+            m, {"company": "Samsung", "fund": "Alpha Fund", "symbol": "SSNLF US"}
+        )
+    with pytest.raises(ValueError, match="fund"):
+        validate_target(
+            m, {"company": "Acme", "fund": "Alpha Global Fund", "symbol": "ACM US"}
+        )
+    validate_target(
+        m, {"company": "Acme Corporation", "fund": "Alpha Strategy", "symbol": "ACM US"}
+    )
