@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS minerva_ideas.items (
 );
 ALTER TABLE minerva_ideas.items ADD COLUMN IF NOT EXISTS document jsonb;
 ALTER TABLE minerva_ideas.items ADD COLUMN IF NOT EXISTS view jsonb;
+CREATE TABLE IF NOT EXISTS minerva_ideas.publications (
+    digest text PRIMARY KEY,
+    run_id uuid NOT NULL REFERENCES minerva_ideas.runs(id),
+    job_id uuid NOT NULL,
+    state text NOT NULL CHECK(state IN ('sending','delivered','unknown')),
+    route jsonb NOT NULL,
+    prepared_at timestamptz NOT NULL DEFAULT now(),
+    receipt jsonb
+);
 """
 
 
