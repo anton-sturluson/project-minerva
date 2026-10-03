@@ -18,9 +18,9 @@ export function App() {
         <p className="subtitle">the patient investor’s home page</p>
       </header>
       <nav className="main-nav" aria-label="Main navigation">
-        <a href="#portfolio" aria-current="page">
-          [ Portfolio ]
-        </a>
+        <a href="#portfolio">[ Portfolio ]</a>
+        <a href="#performance">[ Performance ]</a>
+        <a href="#decisions">[ Decisions ]</a>
         <a href="#research">[ Research ]</a>
       </nav>
       <div className="welcome-strip">

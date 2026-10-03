@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("opening shares, buy, partial sale, oversell rejection, close and reload", async ({
   page,

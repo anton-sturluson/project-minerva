@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("creates an account and keeps it after reload", async ({ page }) => {
   await page.goto("/#portfolio");
