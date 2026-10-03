@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from harness.ideas import store
 from harness.ideas.documents import load_sections
-from harness.ideas.model import DEFAULT_MODEL, generate
+from harness.ideas.model import generate, resolve_models
 from harness.ideas.research import assess, resolve_identity, validate_match
 
 
@@ -81,7 +81,8 @@ def validate_review(view: View, review: Review) -> None:
         raise ValueError("Evidence review rejected the view: " + review.reason)
 
 
-def extract(run_id: UUID, ordinal: int, *, model=DEFAULT_MODEL) -> dict:
+def extract(run_id: UUID, ordinal: int, *, model=None) -> dict:
+    models = resolve_models(model)
     run = store.get_run(run_id)
     row = next((r for r in store.items(run_id) if r["ordinal"] == ordinal), None)
     if row is None or not row.get("document"):
@@ -96,9 +97,9 @@ def extract(run_id: UUID, ordinal: int, *, model=DEFAULT_MODEL) -> dict:
         )
     folder = store.run_folder(run)
     if not document.get("identity"):
-        document["identity"] = assess(row, run, document, model=model).model_dump(
-            mode="json"
-        )
+        document["identity"] = assess(
+            row, run, document, model=models.source
+        ).model_dump(mode="json")
     parts = load_sections(folder, document)
     try:
         validate_match(
@@ -123,7 +124,7 @@ Source passages: {json.dumps(spans, ensure_ascii=False)}"""
     reason = "No supported equity view"
     for _ in range(2):
         try:
-            view = generate(prompt + feedback, View, folder, model=model)
+            view = generate(prompt + feedback, View, folder, model=models.extraction)
             if (
                 not view.claims
                 or view.instrument != "equity"
@@ -142,7 +143,7 @@ Verified document identity: {json.dumps(document["identity"], ensure_ascii=False
 Proposed view with exact source passages: {json.dumps(candidate, ensure_ascii=False)}""",
                 Review,
                 folder,
-                model=model,
+                model=models.review,
             )
             validate_review(view, review)
             result = candidate
@@ -168,7 +169,7 @@ Proposed view with exact source passages: {json.dumps(candidate, ensure_ascii=Fa
             "document": document,
             "view": result,
             "review": review.model_dump(mode="json"),
-            "model": model,
+            "models": {"extraction": models.extraction, "review": models.review},
         },
     )
     with store.connect() as conn:

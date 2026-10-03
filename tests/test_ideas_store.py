@@ -70,3 +70,46 @@ def test_run_lock_releases_after_failure(monkeypatch):
             raise RuntimeError("interrupted")
     with store.run_lock(run_id):
         pass
+
+
+@pytest.mark.skipif(
+    not os.getenv("MINERVA_TEST_DATABASE_URL"),
+    reason="explicit Postgres test database required",
+)
+def test_fresh_run_preserves_previous_run_and_resume_reuses_latest(
+    tmp_path, monkeypatch
+):
+    from harness.ideas import workflow
+
+    monkeypatch.setenv("MINERVA_DATABASE_URL", os.environ["MINERVA_TEST_DATABASE_URL"])
+    monkeypatch.setenv("MINERVA_IDEAS_ROOT", str(tmp_path))
+    issue = {
+        "url": f"https://example.com/issue/{uuid4()}",
+        "date": "2026-09-30",
+        "roster": [{"company": "Acme", "fund": "Alpha", "symbol": ""}],
+    }
+    monkeypatch.setattr(workflow, "fetch_issue", lambda: (issue, b"feed: test\n"))
+    monkeypatch.setattr(workflow, "resume", lambda run_id, **kwargs: run_id)
+    store.initialize()
+    ids = []
+    try:
+        first = workflow.start()
+        ids.append(first)
+        second = workflow.start(fresh=True)
+        ids.append(second)
+        assert first != second
+        reused = workflow.start()
+        if reused not in ids:
+            ids.append(reused)
+        assert reused == second
+        assert len(store.items(first)) == len(store.items(second)) == 1
+        assert (
+            store.run_folder(store.get_run(first)) / "research/issue.json"
+        ).is_file()
+    finally:
+        with store.connect() as conn:
+            for run_id in ids:
+                conn.execute(
+                    "DELETE FROM minerva_ideas.items WHERE run_id=%s", (run_id,)
+                )
+                conn.execute("DELETE FROM minerva_ideas.runs WHERE id=%s", (run_id,))

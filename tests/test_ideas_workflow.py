@@ -8,7 +8,7 @@ from harness.ideas import workflow
 def test_resume_skips_ready_and_gaps_and_processes_only_limit(tmp_path, monkeypatch):
     run_id = uuid4()
     monkeypatch.setenv("BRAVE_API_KEY", "test-not-used")
-    monkeypatch.setenv("GEMINI_API_KEY", "test-not-used")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-used")
     monkeypatch.setattr(workflow.store, "run_lock", lambda _: nullcontext())
     monkeypatch.setattr(
         workflow.store,

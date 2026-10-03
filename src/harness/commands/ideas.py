@@ -85,7 +85,11 @@ def source(run_id: UUID, ordinal: int, url: str):
 @app.command("research")
 @guarded
 def research(
-    run_id: UUID, ordinal: int, model: str = typer.Option("gemini-2.5-flash-lite")
+    run_id: UUID,
+    ordinal: int,
+    model: str | None = typer.Option(
+        None, help="Override all stage models for this invocation."
+    ),
 ):
     """Find and verify an original manager source: at most 2 searches/6 downloads/3 assessments."""
     from harness.ideas.research import discover
@@ -97,7 +101,11 @@ def research(
 @app.command("extract")
 @guarded
 def extract(
-    run_id: UUID, ordinal: int, model: str = typer.Option("gemini-2.5-flash-lite")
+    run_id: UUID,
+    ordinal: int,
+    model: str | None = typer.Option(
+        None, help="Override all stage models for this invocation."
+    ),
 ):
     """Extract and independently review an equity view from its original source."""
     from harness.ideas.extraction import extract as extract_view
@@ -109,13 +117,19 @@ def extract(
 @app.command("run")
 @guarded
 def run(
+    fresh: bool = typer.Option(
+        False,
+        help="Create a new run and redo all research, preserving previous evidence.",
+    ),
     limit: int = typer.Option(50, min=1, max=50),
-    model: str = typer.Option("gemini-2.5-flash-lite"),
+    model: str | None = typer.Option(
+        None, help="Override all stage models for this invocation."
+    ),
 ):
     """Discover the latest issue and research its original manager sources."""
     from harness.ideas.workflow import start
 
-    emit(start(limit=limit, model=model))
+    emit(start(limit=limit, model=model, fresh=fresh))
 
 
 @app.command("resume")
@@ -123,7 +137,9 @@ def run(
 def resume(
     run_id: UUID,
     limit: int = typer.Option(50, min=1, max=50),
-    model: str = typer.Option("gemini-2.5-flash-lite"),
+    model: str | None = typer.Option(
+        None, help="Override all stage models for this invocation."
+    ),
     retry_gaps: bool = False,
 ):
     """Continue incomplete work; completed views and known gaps are skipped."""
@@ -164,7 +180,9 @@ def reconcile(job_id: UUID):
 @guarded
 def weekly(
     job_id: UUID,
-    model: str = typer.Option("gemini-2.5-flash-lite"),
+    model: str | None = typer.Option(
+        None, help="Override all stage models for this invocation."
+    ),
     limit: int = typer.Option(50, min=1, max=50),
 ):
     """Scheduled entry point: resume research and print only a prepared digest."""
