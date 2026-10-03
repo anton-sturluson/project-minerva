@@ -127,8 +127,11 @@ test("a ledger save reloads the comparison and ignores a late previous report", 
     "Loading portfolio and index returns",
   );
   // Records remain usable while the market provider is slow.
+  await page.getByRole("link", { name: "[ Activity ]", exact: true }).click();
+  await page.getByText("Record cash", { exact: true }).click();
   await page.getByLabel("Cash amount").fill("100");
   await page.getByRole("button", { name: "Save cash entry" }).click();
+  await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   await expect(page.getByText("1,300.00", { exact: true })).toBeVisible();
   const lateResponse = page.waitForResponse("**/performance");
   release();

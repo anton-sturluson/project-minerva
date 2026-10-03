@@ -130,11 +130,6 @@ export function Tracker({
           ? "Provisional portfolio vs. the market"
           : "Portfolio vs. the market"}
       </h2>
-      {account.reconstruction && (
-        <p className="form-note">
-          Estimated from incomplete records and inferred balances.
-        </p>
-      )}
       <form className="entry-form" onSubmit={submit}>
         <label>
           From
@@ -212,20 +207,6 @@ export function Tracker({
               {w} Portfolio return is withheld.
             </p>
           ))}
-          {report.provisional && (
-            <details aria-label="Estimate assumptions">
-              <summary>Estimate assumptions</summary>
-              <ul>
-                {report.assumptions?.map((a) => (
-                  <li key={a}>{a}</li>
-                ))}
-              </ul>
-              <p>
-                Modeled gross income included in cash: USD{" "}
-                {number(report.modeled_income ?? "0")}.
-              </p>
-            </details>
-          )}
           <dl className="scorecard">
             <div>
               <dt>Closing value (USD)</dt>
@@ -332,27 +313,6 @@ export function Tracker({
           </details>
         </>
       )}
-      <details className="methodology">
-        <summary>Return assumptions &amp; data limits</summary>
-        <p className="form-note">
-          Returns adjust for deposits and withdrawals at daily closes. The first
-          close establishes the baseline. SPY tracks the S&amp;P 500; QQQ tracks
-          the Nasdaq-100. Benchmarks reinvest distributions; portfolio income
-          stays in cash.
-        </p>
-        <p className="form-note">
-          USD only. Missing prices and splits while held block comparisons.
-          Gross dividends use ex-dates; missing income withholds ordinary
-          returns and is modeled for provisional estimates. No FX or tax
-          modeling.
-        </p>
-        {report && (
-          <p className="form-note">
-            Quotes fetched {new Date(report.fetched_at).toLocaleString()};
-            prices may be revised.
-          </p>
-        )}
-      </details>
       <div id="decisions" className="decisions">
         <TradeScorecard account={account} ledger={ledger} />
         {!account.reconstruction && (

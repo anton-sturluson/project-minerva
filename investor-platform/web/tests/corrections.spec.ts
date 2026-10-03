@@ -19,7 +19,8 @@ test("reviews a correction, retries a lost response once, preserves audit, and v
   const entry = await created.json();
   const path = `/api/accounts/${account.id}/ledger`;
   const before = await (await request.get(path)).json();
-  await page.goto("/");
+  await page.goto("/#activity");
+  await page.getByText("Account activity", { exact: true }).click();
   await page
     .getByRole("button", { name: `Correct entry ${entry.id}`, exact: true })
     .click();
@@ -55,6 +56,7 @@ test("reviews a correction, retries a lost response once, preserves audit, and v
     }),
   ).toBeVisible();
   await page.reload();
+  await page.getByText("Account activity", { exact: true }).click();
   const after = await (await request.get(path)).json();
   expect(Number(after.balance)).toBeCloseTo(Number(before.balance) + 100, 6);
   const audit = after.corrections.find(
@@ -118,7 +120,8 @@ test("rejects an overdraft correction and requires a fresh review after another 
   const entry = await (
     await request.post(`/api/accounts/${account.id}/cash`, { data: payload })
   ).json();
-  await page.goto("/");
+  await page.goto("/#activity");
+  await page.getByText("Account activity", { exact: true }).click();
   await page
     .getByRole("button", { name: `Correct entry ${entry.id}`, exact: true })
     .click();
