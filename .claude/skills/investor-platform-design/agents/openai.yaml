@@ -1,0 +1,4 @@
+interface:
+  display_name: "Investor Platform Design"
+  short_description: "Apply the Homepage Club investor platform style"
+  default_prompt: "Use $investor-platform-design to design or review this investor-platform interface in the approved Homepage Club style."
