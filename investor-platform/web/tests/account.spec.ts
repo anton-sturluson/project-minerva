@@ -44,3 +44,16 @@ test("explains a record load failure and recovers", async ({ page }) => {
   await page.getByRole("button", { name: "Reload account" }).click();
   await expect(page.getByRole("alert")).toBeHidden();
 });
+
+test("explains a proxy outage and recovers", async ({ page }) => {
+  await page.route("**/api/account", (route) =>
+    route.fulfill({ status: 502, body: "Bad Gateway" }),
+  );
+  await page.goto("/#portfolio");
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not reach your records",
+  );
+  await page.unroute("**/api/account");
+  await page.getByRole("button", { name: "Reload account" }).click();
+  await expect(page.getByRole("alert")).toBeHidden();
+});
