@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from .accounting import replay
 from .accounts import DB, Currency, Identity, owned_account
@@ -90,14 +91,11 @@ def entries_for(session, account_id):
     return list(
         session.scalars(
             select(LedgerEntry)
+            .options(joinedload(LedgerEntry.security))
             .where(LedgerEntry.account_id == account_id)
             .order_by(LedgerEntry.effective_date, LedgerEntry.id)
         )
     )
-
-
-def cash_balance(entries):
-    return replay(entries)[0]
 
 
 def fingerprint(data):
@@ -167,15 +165,12 @@ def record_cash(account_id: UUID, data: CashInput, session: DB, actor: Identity)
     entries = entries_for(session, account_id)
     if data.kind == "opening_cash" and entries:
         raise HTTPException(409, "Opening cash must be the first entry; use a deposit instead")
-    opening = next((e for e in entries if e.kind == "opening_cash"), None)
-    if opening and data.effective_date < opening.effective_date:
-        raise HTTPException(409, "Entries cannot precede the opening balance date")
     entry = LedgerEntry(
         account_id=account_id, created_by=actor.owner_id, request_body=body, **data.model_dump()
     )
     session.add(entry)
     session.flush()
-    cash_balance(entries_for(session, account_id))
+    replay(entries_for(session, account_id))
     session.commit()
     session.refresh(entry)
     return entry

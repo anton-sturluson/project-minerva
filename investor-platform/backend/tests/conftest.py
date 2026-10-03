@@ -24,7 +24,6 @@ def database():
     with engine.begin() as conn:
         config.attributes["connection"] = conn
         command.upgrade(config, "head")
-        command.upgrade(config, "head")
     yield engine
     engine.dispose()
     with admin.begin() as conn:

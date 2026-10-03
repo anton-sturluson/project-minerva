@@ -158,105 +158,11 @@ main,
 #research {
   scroll-margin-top: 16px;
 }
-.home-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 215px;
-  gap: 25px;
-  margin-top: 25px;
-}
-.workspace-intro {
-  min-width: 0;
-}
 h1 {
   font-size: 25px;
   line-height: 1.25;
   border-bottom: 2px solid var(--ink);
   padding-bottom: 8px;
-}
-.intro {
-  margin-top: 12px;
-  max-width: 510px;
-}
-.connection {
-  margin-top: 22px;
-  border-top: 1px solid var(--rule);
-  padding-top: 10px;
-}
-.connection-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 7px 14px;
-  margin-bottom: 9px;
-}
-.connection h2 {
-  font-size: 17px;
-}
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink);
-  font:
-    12px/1.5 Arial,
-    sans-serif;
-}
-.online .status {
-  color: var(--success);
-}
-.offline .status {
-  color: var(--error);
-}
-.status-symbol {
-  font-size: 15px;
-  font-weight: bold;
-}
-.connection-detail {
-  margin-top: 4px;
-  font:
-    12px/1.6 Arial,
-    sans-serif;
-}
-.connection button {
-  margin-top: 14px;
-}
-.notebook-margin {
-  border-left: 1px solid var(--rule);
-  padding-left: 18px;
-}
-.margin-label {
-  display: inline-block;
-  padding: 2px 4px;
-  background: var(--yellow);
-  border: 1px solid var(--ink);
-  font:
-    bold italic 11px/1.3 Arial,
-    sans-serif;
-  transform: rotate(-3deg);
-}
-.notebook-margin h2 {
-  margin: 12px 0 8px;
-  color: var(--plum);
-  font-size: 21px;
-  line-height: 1.2;
-}
-.notebook-margin p {
-  margin-top: 9px;
-  font-size: 14px;
-}
-.notebook-margin hr {
-  border: 0;
-  border-top: 1px solid var(--rule);
-  margin: 14px 0 10px;
-}
-.notebook-margin h3 {
-  font-size: 15px;
-}
-.notebook-margin .small-note {
-  font:
-    11px/1.5 Arial,
-    sans-serif;
 }
 .directory {
   display: grid;
@@ -336,15 +242,6 @@ h1 {
   .workspace {
     padding: 18px 18px 24px;
   }
-  .home-grid {
-    grid-template-columns: 1fr;
-    gap: 22px;
-  }
-  .notebook-margin {
-    border-left: 0;
-    border-top: 1px solid var(--rule);
-    padding: 18px 0 0;
-  }
   .masthead::before {
     left: 2%;
   }
@@ -377,9 +274,6 @@ h1 {
   h1 {
     font-size: 23px;
   }
-  .notebook-margin h2 br {
-    display: none;
-  }
 }
 @media (pointer: coarse) {
   a,
@@ -387,7 +281,6 @@ h1 {
     min-height: 44px;
   }
   .main-nav a,
-  .notebook-margin a,
   .page-footer a {
     display: inline-flex;
     align-items: center;
@@ -399,7 +292,7 @@ h1 {
   border-top: 3px double var(--ink);
   padding-top: 16px;
 }
-.portfolio > h2 {
+.portfolio > h1 {
   color: var(--plum);
   font-size: 24px;
   margin-bottom: 12px;
