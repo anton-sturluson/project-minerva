@@ -6,6 +6,7 @@ import json
 import os
 import time
 import xml.etree.ElementTree as ET
+from dataclasses import asdict
 from datetime import timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
@@ -16,7 +17,7 @@ import yaml
 
 from harness.ideas import store
 from harness.ideas.extraction import extract
-from harness.ideas.model import DEFAULT_MODEL, ModelError
+from harness.ideas.model import ModelError, check_model, resolve_models
 from harness.ideas.research import discover
 from harness.ideas.roster import parse_roster
 
@@ -62,7 +63,7 @@ def fetch_issue() -> tuple[dict, bytes]:
     return issue, readable
 
 
-def start(*, limit: int = 50, model: str = DEFAULT_MODEL) -> dict:
+def start(*, limit: int = 50, model: str | None = None, fresh: bool = False) -> dict:
     issue, feed = fetch_issue()
     # Avoid generating a duplicate run when the scheduler sees the same newsletter.
     with store.connect() as conn:
@@ -71,7 +72,7 @@ def start(*, limit: int = 50, model: str = DEFAULT_MODEL) -> dict:
             "SELECT id FROM minerva_ideas.runs WHERE issue_url=%s ORDER BY created_at DESC LIMIT 1",
             (issue["url"],),
         ).fetchone()
-        run_id = existing["id"] if existing else None
+        run_id = existing["id"] if existing and not fresh else None
         if run_id:
             previous_folder = store.run_folder(store.get_run(run_id))
             if (
@@ -90,15 +91,16 @@ def resume(
     run_id: UUID,
     *,
     limit: int = 50,
-    model: str = DEFAULT_MODEL,
+    model: str | None = None,
     retry_gaps: bool = False,
 ) -> dict:
     if not 1 <= limit <= 50:
         raise ValueError("limit must be between 1 and 50")
-    if not os.environ.get("BRAVE_API_KEY") or not os.environ.get("GEMINI_API_KEY"):
-        raise ValueError(
-            "BRAVE_API_KEY and GEMINI_API_KEY are required before starting research"
-        )
+    if not os.environ.get("BRAVE_API_KEY"):
+        raise ValueError("BRAVE_API_KEY is required before starting research")
+    models = resolve_models(model)
+    for selected in asdict(models).values():
+        check_model(selected)
     deadline = time.monotonic() + 1200
     processed = 0
     with store.run_lock(run_id):
@@ -106,7 +108,7 @@ def resume(
         store.json_artifact(
             store.run_folder(run),
             f"research/attempts/{uuid4()}.json",
-            {"model": model, "limit": limit, "retry_gaps": retry_gaps},
+            {"models": asdict(models), "limit": limit, "retry_gaps": retry_gaps},
         )
         for row in store.items(run_id):
             if row["state"] == "ready" or (row["state"] == "gap" and not retry_gaps):

@@ -20,7 +20,9 @@ Files are finalized before their database references are committed. Artifact wri
 
 ## Research and evidence
 
-Each lead has at most two searches, six downloads including archive navigation, and three identity assessments. The default model is `gemini-2.5-flash-lite`; `--model` can override it. Model calls have bounded time/output. Provider failures are operational errors, not unavailable-source claims.
+Each lead has at most two searches, six downloads including archive navigation, and three identity assessments. Source verification uses `gpt-6-luna`; thesis extraction and claim review each use `gpt-6.1-sol`. These are separate schema-constrained API calls, not agent sessions. OpenAI calls use low reasoning, a 180-second timeout, no automatic SDK retries and `store=False`.
+
+Set `MINERVA_IDEAS_SOURCE_MODEL`, `MINERVA_IDEAS_EXTRACTION_MODEL` and `MINERVA_IDEAS_REVIEW_MODEL` to override stages. An explicit `--model` overrides all three for a single invocation (for example, `--model gemini-2.5-flash-lite` for cheap diagnostics). OpenAI stages require `OPENAI_API_KEY`; Gemini stages require `GEMINI_API_KEY`. No silent model fallback is used. Model calls have bounded time/output. Provider failures are operational errors, not unavailable-source claims.
 
 Company and fund identity must match the discovery lead. Distinctive fund words are preserved; a sibling fund is not a substitute. The displayed period retains the source wording. A normalized period end is used only for the documented 190-day freshness window and the check against future commentary.
 
@@ -32,6 +34,7 @@ Models select source block/passage IDs. Python supplies the exact archived evide
 uv sync --extra jobwatch
 uv run minerva ideas init
 uv run minerva ideas run
+uv run minerva ideas run --fresh          # explicitly redo all research for this issue
 uv run minerva ideas status              # latest issue, including delivery receipts
 uv run minerva ideas status RUN_UUID
 uv run minerva ideas resume RUN_UUID
@@ -52,7 +55,7 @@ uv run minerva ideas extract RUN_UUID ORDINAL
 
 An import contains an issue URL/date and `roster` entries with `company`, `fund` and optional `symbol`. Reimporting the same UUID/content is idempotent. Duplicate roster rows are preserved by ordinal. Attaching a source does not approve its thesis.
 
-Unchanged newsletter rosters reuse their run. Completed views and known gaps are skipped; retries of gaps are explicit. A Postgres session lock prevents concurrent work on one run and releases on process failure. A run has a 20-minute processing budget; remaining work can be resumed.
+Unchanged newsletter rosters reuse their run. `run --fresh` creates a new run with no inherited approvals, preserving earlier evidence and publication receipts. A model configuration change alone does not invalidate completed views: use `--fresh` to reprocess them. Completed views and known gaps are skipped; retries of gaps are explicit. A Postgres session lock prevents concurrent work on one run and releases on process failure. A run has a 20-minute processing budget; remaining work can be resumed.
 
 | Item state | Meaning |
 | --- | --- |
@@ -70,7 +73,7 @@ The existing automation uses a native **command** payload with explicit argv:
 scripts/run_weekly_ideas.sh EXISTING_JOB_UUID
 ```
 
-Keep its owner, Saturday schedule and explicit Slack channel/thread. Configure `MINERVA_IDEAS_MODEL=gemini-2.5-flash-lite` in the command environment. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/Gemini keys are inherited from the Gateway environment. Native command execution avoids a reporting model rewriting content or generating fallback acknowledgements for a silent repeat.
+Keep its owner, Saturday schedule and explicit Slack channel/thread. Configure the three stage environment variables above in the command environment. The former `MINERVA_IDEAS_MODEL` wrapper setting is no longer used. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/OpenAI keys are inherited from the Gateway environment. Native command execution avoids a reporting model rewriting content or generating fallback acknowledgements for a silent repeat.
 
 `weekly` reconciles earlier delivery, researches incomplete work, and prepares output only when no pending, sourced or failed items remain. Gaps are omitted from the digest and retained in diagnostic status. Multiple fund views are grouped by company.
 
@@ -95,6 +98,10 @@ The PR series includes live Postgres import/source tests, bounded public-source 
 - [Store](../src/harness/ideas/store.py) — the three-table Postgres schema and filesystem contract.
 - [Research](../src/harness/ideas/research.py) and [extraction](../src/harness/ideas/extraction.py) — source budgets, identity checks and evidence gates.
 - [Publication](../src/harness/ideas/publication.py) — deterministic rendering, duplicate protection and transport verification.
+
+### Model API
+- [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs) — schema-constrained responses; application evidence checks remain mandatory.
+- [GPT-6 model guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.1-sol) — exact model IDs and supported reasoning settings.
 
 ### Platform behavior
 - [OpenClaw automation payloads](https://docs.openclaw.ai/automation/cron-jobs/payloads) — native command execution and silent-output handling.
