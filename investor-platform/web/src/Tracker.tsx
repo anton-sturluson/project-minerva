@@ -20,10 +20,20 @@ type Point = {
   SPY: string;
   QQQ: string;
 };
+type CAGR = {
+  portfolio: string | null;
+  SPY: string | null;
+  QQQ: string | null;
+};
 export type Report = {
+  cagr: CAGR;
+  scenario?:
+    | (Report & {
+        excluded: { id: string; ticker: string; exchange: string }[];
+      })
+    | null;
+  scenario_error?: string | null;
   provisional?: boolean;
-  assumptions?: string[];
-  modeled_income?: string;
   start: string;
   end: string;
   value: string;
@@ -69,12 +79,20 @@ export function Tracker({
     ledger.entries[0]?.effective_date ?? yesterday(),
   );
   const [end, setEnd] = useState(yesterday());
+  const [excluded, setExcluded] = useState<string[]>([]);
+  const securities = [
+    ...new Map(
+      ledger.entries
+        .filter((e) => e.security && e.effective_date <= end)
+        .map((e) => [e.security!.id, e.security!]),
+    ).values(),
+  ];
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
   const compare = useCallback(
-    async (from: string, through: string) => {
+    async (from: string, through: string, exclusions: string[] = []) => {
       const version = ++generation.current;
       setBusy(true);
       setError("");
@@ -84,7 +102,13 @@ export function Tracker({
           `/accounts/${account.id}/performance`,
           {
             method: "POST",
-            body: JSON.stringify({ start: from, end: through }),
+            body: JSON.stringify({
+              start: from,
+              end: through,
+              ...(exclusions.length
+                ? { exclude_security_ids: exclusions }
+                : {}),
+            }),
           },
           60000,
         );
@@ -101,6 +125,7 @@ export function Tracker({
     // New records reset the comparison to the full recorded history.
     const from = ledger.entries[0]?.effective_date ?? yesterday();
     const through = yesterday();
+    setExcluded([]);
     setStart(from);
     setEnd(through);
     setReport(null);
@@ -118,7 +143,7 @@ export function Tracker({
   }, [account.base_currency, account.reconstruction, ledger, compare]);
   function submit(e: FormEvent) {
     e.preventDefault();
-    void compare(start, end);
+    void compare(start, end, excluded);
   }
   return (
     <>
@@ -172,12 +197,51 @@ export function Tracker({
               max={yesterday()}
               onChange={(e) => {
                 setEnd(e.target.value);
+                setExcluded([]);
                 setReport(null);
                 setError("");
               }}
               disabled={busy}
             />
           </label>
+          {securities.length > 0 && (
+            <details className="scenario-picker">
+              <summary>
+                Exclude stocks{excluded.length ? ` (${excluded.length})` : ""}
+              </summary>
+              <fieldset disabled={busy}>
+                <legend>What if I never held these stocks?</legend>
+                {securities.map((security) => (
+                  <label key={security.id}>
+                    <input
+                      type="checkbox"
+                      checked={excluded.includes(security.id)}
+                      onChange={(e) => {
+                        setExcluded((current) =>
+                          e.target.checked
+                            ? [...current, security.id]
+                            : current.filter((id) => id !== security.id),
+                        );
+                        setReport(null);
+                        setError("");
+                      }}
+                    />
+                    {security.ticker} · {security.exchange}
+                  </label>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExcluded([]);
+                    setReport(null);
+                    setError("");
+                  }}
+                >
+                  Clear exclusions
+                </button>
+              </fieldset>
+            </details>
+          )}
           <button
             disabled={
               busy ||
@@ -220,39 +284,90 @@ export function Tracker({
                 {w} Portfolio return is withheld.
               </p>
             ))}
-            <dl className="scorecard">
-              <div>
-                <dt>Closing value (USD)</dt>
-                <dd>{number(report.value)}</dd>
-              </div>
-              <div>
-                <dt>
-                  {report.provisional
-                    ? "Estimated portfolio return"
-                    : "Portfolio return"}
-                </dt>
-                <dd>{percent(report.return)}</dd>
-              </div>
-              <div>
-                <dt>S&amp;P 500 · SPY</dt>
-                <dd>{percent(report.SPY)}</dd>
-              </div>
-              <div>
-                <dt>Nasdaq-100 · QQQ</dt>
-                <dd>{percent(report.QQQ)}</dd>
-              </div>
-            </dl>
             <p>
-              Excess return vs. S&amp;P 500 (SPY):{" "}
+              <span>Closing value (USD)</span>{" "}
+              <strong>{number(report.value)}</strong>
+            </p>
+            {report.scenario_error && (
+              <p role="alert" className="error">
+                {report.scenario_error}. Original performance is shown.
+              </p>
+            )}
+            {report.scenario && (
+              <p className="form-note">
+                Without{" "}
+                {report.scenario.excluded
+                  .map((s) => `${s.ticker} · ${s.exchange}`)
+                  .join(", ")}{" "}
+                · unused cash retained
+              </p>
+            )}
+            <div
+              className="table-scroll"
+              tabIndex={0}
+              aria-label="Performance summary"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>Return</th>
+                    <th className="number">Cumulative</th>
+                    <th className="number">CAGR</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      {report.provisional
+                        ? "Estimated portfolio return"
+                        : "Portfolio return"}
+                    </td>
+                    <td className="number">{percent(report.return)}</td>
+                    <td className="number">
+                      {percent(report.cagr?.portfolio ?? null)}
+                    </td>
+                  </tr>
+                  {report.scenario && (
+                    <tr>
+                      <td>Without excluded stocks</td>
+                      <td className="number">
+                        {percent(report.scenario.return)}
+                      </td>
+                      <td className="number">
+                        {percent(report.scenario.cagr.portfolio)}
+                      </td>
+                    </tr>
+                  )}
+                  <tr>
+                    <td>S&amp;P 500 · SPY</td>
+                    <td className="number">{percent(report.SPY)}</td>
+                    <td className="number">
+                      {percent(report.cagr?.SPY ?? null)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Nasdaq-100 · QQQ</td>
+                    <td className="number">{percent(report.QQQ)}</td>
+                    <td className="number">
+                      {percent(report.cagr?.QQQ ?? null)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {(Date.parse(report.end) - Date.parse(report.start)) / 86400000 <
+              365 && <p className="form-note">CAGR needs at least one year.</p>}
+            <p className="form-note">
+              Portfolio excess · SPY{" "}
               {report.excess_spy === null
                 ? "—"
                 : `${number(String(Number(report.excess_spy) * 100))} pp`}{" "}
-              · Nasdaq-100 (QQQ):{" "}
+              · QQQ{" "}
               {report.excess_qqq === null
                 ? "—"
                 : `${number(String(Number(report.excess_qqq) * 100))} pp`}
             </p>
-            <ReturnChart series={report.series} />
+            <ReturnChart series={report.series} scenario={report.scenario} />
             <details>
               <summary>Daily values</summary>
               <div
@@ -266,16 +381,24 @@ export function Tracker({
                       <th>Date</th>
                       <th>Value (USD)</th>
                       <th>Portfolio</th>
+                      {report.scenario && <th>Without excluded stocks</th>}
                       <th>SPY</th>
                       <th>QQQ</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {report.series.map((p) => (
+                    {report.series.map((p, i) => (
                       <tr key={p.date}>
                         <td>{p.date}</td>
                         <td>{number(p.value)}</td>
                         <td>{percent(p.portfolio)}</td>
+                        {report.scenario && (
+                          <td>
+                            {percent(
+                              report.scenario.series[i]?.portfolio ?? null,
+                            )}
+                          </td>
+                        )}
                         <td>{percent(p.SPY)}</td>
                         <td>{percent(p.QQQ)}</td>
                       </tr>
@@ -290,8 +413,18 @@ export function Tracker({
     </>
   );
 }
-function ReturnChart({ series }: { series: Point[] }) {
-  const keys = ["portfolio", "SPY", "QQQ"] as const;
+function ReturnChart({
+  series: actual,
+  scenario,
+}: {
+  series: Point[];
+  scenario?: Report | null;
+}) {
+  const series = actual.map((p, i) => ({
+    ...p,
+    scenario: scenario?.series[i]?.portfolio ?? null,
+  }));
+  const keys = ["portfolio", "SPY", "QQQ", "scenario"] as const;
   const values = series.flatMap((p) =>
     keys.flatMap((k) => (p[k] === null ? [] : [Number(p[k]) * 100])),
   );
@@ -304,6 +437,12 @@ function ReturnChart({ series }: { series: Point[] }) {
         Cumulative return · <span className="portfolio-key">Portfolio</span> /{" "}
         <span className="spy-key">S&amp;P 500 (SPY)</span> /{" "}
         <span className="qqq-key">Nasdaq-100 (QQQ)</span>
+        {scenario && (
+          <>
+            {" "}
+            / <span className="scenario-key">Without excluded stocks</span>
+          </>
+        )}
       </figcaption>
       <svg
         viewBox="0 0 800 220"
@@ -333,7 +472,13 @@ function ReturnChart({ series }: { series: Point[] }) {
                 fill="none"
                 strokeWidth="2"
                 strokeDasharray={
-                  index === 1 ? "7 4" : index === 2 ? "2 4" : undefined
+                  index === 1
+                    ? "7 4"
+                    : index === 2
+                      ? "2 4"
+                      : index === 3
+                        ? "10 3 2 3"
+                        : undefined
                 }
                 points={series
                   .map(

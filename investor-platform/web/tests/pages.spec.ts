@@ -13,6 +13,10 @@ test("separates pages, folds activity and preserves an entry draft on back navig
   ).toBeHidden();
   await page.getByText("Record cash", { exact: true }).click();
   await page.getByLabel("Cash amount", { exact: true }).fill("12.34");
+  await page.getByRole("link", { name: "Back to top ↑", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Activity", exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "[ Research ]", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Research", exact: true }),
@@ -20,6 +24,7 @@ test("separates pages, folds activity and preserves an entry draft on back navig
   await expect(page.getByLabel("Cash amount", { exact: true })).toBeHidden();
   await expect(page.getByTestId("payoff-ratio")).toBeHidden();
   await page.goBack();
+  await expect(page.getByLabel("Cash amount", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Cash amount", { exact: true })).toHaveValue(
     "12.34",
   );

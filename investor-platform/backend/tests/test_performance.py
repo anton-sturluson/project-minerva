@@ -183,3 +183,155 @@ def test_provisional_comparison_models_only_missing_income_without_writing(
     data["AAA"].splits.clear()
     del data["AAA"].close[DAYS[1]]
     assert report(db_client, aid).status_code == 422
+
+
+def scenario(client, aid, excluded, **period):
+    return client.post(
+        f"/api/accounts/{aid}/performance",
+        json={
+            "start": "2026-01-02",
+            "end": "2026-01-06",
+            "exclude_security_ids": excluded,
+            **period,
+        },
+    )
+
+
+def test_excluding_a_stock_removes_all_trades_and_fees_but_preserves_flows(db_client, portfolio):
+    aid, _ = portfolio
+    cash(db_client, aid, amount="100", day="2026-01-05")
+    trade(
+        db_client,
+        aid,
+        "sell",
+        "5",
+        "110",
+        ticker="AAA",
+        exchange="NYSE",
+        fees="2",
+        effective_date="2026-01-05",
+    )
+    cash(db_client, aid, "withdrawal", "50", day="2026-01-06")
+    before = ledger(db_client, aid)
+    sid = before["holdings"][0]["security"]["id"]
+    result = scenario(db_client, aid, [sid]).json()
+    alternative = result["scenario"]
+    assert D(alternative["cash"]) == 1050
+    assert D(alternative["return"]) == 0
+    assert alternative["holdings"] == []
+    assert alternative["SPY"] == result["SPY"]
+    assert alternative["excluded"][0]["id"] == sid
+    # A later window must still undo excluded trades from before that window.
+    later = scenario(db_client, aid, [sid], start="2026-01-05").json()["scenario"]
+    assert D(later["cash"]) == 1050 and D(later["return"]) == 0
+    assert ledger(db_client, aid) == before
+
+
+def test_scenario_converts_opening_shares_to_cash_and_preserves_other_positions(
+    db_client, portfolio
+):
+    aid, _ = portfolio
+    trade(
+        db_client,
+        aid,
+        "opening_position",
+        "2",
+        ticker="SPY",
+        exchange="ARCA",
+        effective_date="2026-01-03",
+    )
+    before = ledger(db_client, aid)
+    sid = next(h["security"]["id"] for h in before["holdings"] if h["security"]["ticker"] == "SPY")
+    result = scenario(db_client, aid, [sid]).json()
+    alternative = result["scenario"]
+    assert D(alternative["cash"]) == 200  # First session after the weekend, not cost basis.
+    assert D(alternative["value"]) == 1410
+    assert [h["ticker"] for h in alternative["holdings"]] == ["AAA"]
+    assert float(alternative["return"]) == pytest.approx(1.1 * 1410 / 1300 - 1)
+    assert ledger(db_client, aid) == before
+
+
+def test_excluded_stock_does_not_contribute_modeled_dividends(db_client, portfolio, database):
+    from uuid import UUID
+
+    from sqlalchemy.orm import Session
+
+    from investor_platform.models import Account
+
+    aid, data = portfolio
+    with Session(database) as session:
+        session.get(Account, UUID(aid)).reconstruction = {"testing": True}
+        session.commit()
+    data["AAA"].dividends[DAYS[1]] = D("1")
+    before = ledger(db_client, aid)
+    result = scenario(db_client, aid, [before["holdings"][0]["security"]["id"]]).json()
+    assert D(result["modeled_income"]) == 10
+    assert D(result["scenario"]["modeled_income"]) == 0
+    assert D(result["scenario"]["return"]) == 0
+    assert ledger(db_client, aid) == before
+
+
+@pytest.mark.parametrize("problem", ["income", "funding"])
+def test_invalid_scenario_keeps_original_report_and_ledger(db_client, portfolio, problem):
+    aid, _ = portfolio
+    sid = ledger(db_client, aid)["holdings"][0]["security"]["id"]
+    if problem == "income":
+        cash(db_client, aid, "income", "10", day="2026-01-05")
+    else:
+        trade(
+            db_client,
+            aid,
+            "sell",
+            "10",
+            "110",
+            ticker="AAA",
+            exchange="NYSE",
+            effective_date="2026-01-05",
+        )
+        cash(db_client, aid, "withdrawal", "1050", day="2026-01-05")
+    before = ledger(db_client, aid)
+    result = scenario(db_client, aid, [sid])
+    assert result.status_code == 200
+    assert result.json()["scenario"] is None
+    assert result.json()["scenario_error"]
+    assert result.json()["return"] is not None
+    assert ledger(db_client, aid) == before
+
+
+def test_scenario_rejects_unknown_security_and_deduplicates_selection(db_client, portfolio):
+    aid, _ = portfolio
+    assert scenario(db_client, aid, [str(uuid4())]).status_code == 422
+    sid = ledger(db_client, aid)["holdings"][0]["security"]["id"]
+    assert len(scenario(db_client, aid, [sid, sid]).json()["scenario"]["excluded"]) == 1
+
+
+def test_cagr_annualizes_linked_returns_instead_of_cash_growth(db_client, portfolio):
+    aid, data = portfolio
+    # Use historical dates so this remains a completed-session API request.
+    start = date(2024, 1, 2)
+    finish = date(2026, 1, 2)
+    from investor_platform.domain import EntryKind
+    from investor_platform.models import LedgerEntry
+    from investor_platform.performance import annualized_return, calculate
+
+    histories = {
+        key: History({start: D(100), finish: D(121)}, {start: D(100), finish: D(121)})
+        for key in ("SPY", "QQQ")
+    }
+    entries = [
+        LedgerEntry(
+            id=1, kind=EntryKind.OPENING_CASH, amount=D(100), effective_date=start, security_id=None
+        ),
+        LedgerEntry(
+            id=2, kind=EntryKind.DEPOSIT, amount=D(900), effective_date=finish, security_id=None
+        ),
+    ]
+    result = calculate(entries, histories, start, finish)
+    assert result["cagr"]["portfolio"] == 0  # A tenfold deposit is not investment growth.
+    assert float(result["cagr"]["SPY"]) == pytest.approx(1.21 ** (365.25 / 731) - 1)
+    assert annualized_return(D("0.21"), DAYS[0], DAYS[-1]) is None
+    assert annualized_return(None, start, finish) is None
+    assert annualized_return(D(-1), start, finish) == -1
+    # Reconciliation suppression propagates into the public CAGR field too.
+    data["AAA"].dividends[DAYS[1]] = D(1)
+    assert report(db_client, aid).json()["cagr"]["portfolio"] is None

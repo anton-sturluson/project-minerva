@@ -46,7 +46,7 @@ export function Portfolio({ page }: { page: Page }) {
   }
   return (
     <section
-      id="portfolio"
+      id={page === "activity" ? "activity" : "portfolio"}
       className="portfolio"
       aria-labelledby="portfolio-heading"
     >
