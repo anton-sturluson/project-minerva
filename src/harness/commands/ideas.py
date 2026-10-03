@@ -86,7 +86,19 @@ def source(run_id: UUID, ordinal: int, url: str):
 def research(
     run_id: UUID, ordinal: int, model: str = typer.Option("gemini-2.5-flash-lite")
 ):
-    """Find and verify an original manager source: at most 2 searches/6 downloads/3 assessments."""
+    """Find and verify an original manager source: at most 2 searches/3 documents."""
     from harness.ideas.research import discover
 
     emit(discover(run_id, ordinal, model=model))
+
+
+@app.command("extract")
+@guarded
+def extract(
+    run_id: UUID, ordinal: int, model: str = typer.Option("gemini-2.5-flash-lite")
+):
+    """Extract and independently review an equity view from its original source."""
+    from harness.ideas.extraction import extract as extract_view
+
+    with store.run_lock(run_id):
+        emit(extract_view(run_id, ordinal, model=model))
