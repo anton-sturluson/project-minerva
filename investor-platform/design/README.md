@@ -61,6 +61,10 @@ The fragment is the exact visual reference. These are the main tokens it uses:
 - Keep the homepage's warmth and personality. Large rounded cards, oversized metric tiles, pill navigation, glossy gradients, and a generic SaaS sidebar would move away from the selected direction.
 - Homepage Club alone is selected. Other experimental CSS embedded in the original fragment is inactive; Odd Lot and The Little Review are not additional approved themes.
 
+## Readability update · 3 October 2026
+
+The user requested a top theme control and removal of nonessential text. The app keeps the wordmark, star ornaments, serif type and bracket navigation, while removing slogans, welcome copy and motto badges. A System / Light / Dark selector remembers the local choice. Provisional status, metric labels, dates and actionable errors stay visible; import details and estimate assumptions expand on demand. The standalone study remains the original visual reference.
+
 ## Verification
 
 The saved standalone export was exercised in a browser at desktop and 320px widths. Checks covered portfolio, notebook, and source-index navigation; topic changes; marking a note for follow-up; and restoring the selected note and mark after reload. The narrow source-index view had no page-level horizontal overflow, and no browser console errors were observed. The original selected concept also had its narrow holdings layout checked. Skill validation and reference-link checks passed.

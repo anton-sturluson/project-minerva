@@ -64,13 +64,7 @@ export function Trades({
   return (
     <section className="positions" aria-labelledby="holdings-heading">
       <h3 id="holdings-heading">Holdings</h3>
-      <p className="form-note">
-        Long-only equities in {account.base_currency}. Cost basis is not market
-        value.{" "}
-        {account.reconstruction
-          ? "Reconstructed from available transactions; missing activity can change these quantities. USD amounts are rounded for display."
-          : "Closing market values are available in Performance."}
-      </p>
+      <p className="form-note">Basis is purchase cost, not market value.</p>
       {holdings.length ? (
         <div className="table-scroll" tabIndex={0} aria-label="Holdings">
           <table>
@@ -236,9 +230,8 @@ export function Trades({
           </label>
           <p className="form-note">
             {kind === "opening_position"
-              ? "Shares already owned when tracking starts; cash is unchanged. Leave total basis blank if unknown. Record before other trades in this security."
-              : "Buys use cash including fees; sells add proceeds less fees. Sales use the oldest shares first (FIFO)."}{" "}
-            These are records only; no orders are sent to a broker.
+              ? "Leave basis blank if unknown. Record opening shares before trades."
+              : "Fees affect cash and cost basis. Sales use FIFO."}
           </p>
           <button type="submit" disabled={saving}>
             {saving ? "Saving…" : "Save position entry"}

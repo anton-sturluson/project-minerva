@@ -160,10 +160,7 @@ export function Corrections({
     >
       <h3>Correct entry #{entry.id}</h3>
       <EntrySummary entry={entry} />
-      <p>
-        The original stays in the audit history. Review the resulting cash and
-        holdings before saving.
-      </p>
+      <p>Originals stay in correction history. Review before saving.</p>
       {error && (
         <p className="error" role="alert">
           {error} Your draft is preserved. If records changed, edit the draft or

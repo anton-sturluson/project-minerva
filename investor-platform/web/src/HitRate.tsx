@@ -66,9 +66,7 @@ export function HitRate({ accountId }: { accountId: string }) {
         })}
       </dl>
       <p className="form-note">
-        Hit rate = closed investment decisions that beat the market / evaluated
-        decisions. SPY tracks the S&amp;P 500; QQQ tracks the Nasdaq-100. A
-        profitable trade can still miss the benchmark.
+        Hit rate: closed decisions that beat each index.
       </p>
       <button disabled={busy} onClick={() => void calculate()}>
         {busy ? "Calculating hit rate…" : "Calculate hit rate"}
@@ -82,8 +80,7 @@ export function HitRate({ accountId }: { accountId: string }) {
         <>
           <p className="form-note">
             {result.excluded} closed decisions excluded · {result.open} open
-            positions excluded. All recorded history; independent of any chart
-            dates.
+            positions excluded · all recorded history.
           </p>
           {result.benchmarks.SPY.evaluated === 0 && (
             <p>

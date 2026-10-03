@@ -86,19 +86,17 @@ export function TradeScorecard({
           </dl>
           <p className="form-note">
             {stats.wins} wins · {stats.losses} losses · {stats.breakeven}{" "}
-            breakeven · {stats.unknown} unknown basis · {stats.open} open
-            positions. {stats.closed} fully closed positions.
+            breakeven. Excluded: {stats.unknown} unknown basis · {stats.open}{" "}
+            open positions.
           </p>
           <details>
             <summary>How the scorecard works &amp; closed positions</summary>
             <p className="form-note">
-              One trade runs from no shares to no shares in a security; partial
-              exits stay in the same trade. P&amp;L includes buy/sell fees,
-              excludes dividends. Win rate = winners / closed trades with known
-              basis, including breakevens. Payoff = average dollar win / average
-              absolute dollar loss; both are required. Open positions and
-              unknown-basis results are excluded. This is not risk-adjusted
-              alpha.
+              A decision runs from no shares to no shares. Win rate counts
+              profitable closed decisions with known basis; payoff is average
+              dollar gain / average absolute dollar loss. Fees included,
+              dividends excluded. Breakevens count toward win rate. Open and
+              unknown-basis positions are excluded.
             </p>
             {stats.episodes.length > 0 && (
               <div

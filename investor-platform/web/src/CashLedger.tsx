@@ -160,14 +160,14 @@ export function CashLedger({ account }: { account: Account }) {
                 disabled={saving}
               />
             </label>
-            <p className="form-note">
-              {kind === "opening_cash"
-                ? "Your balance when tracking starts, not a past deposit."
-                : "Entries are checked against the full dated history. Cash cannot go below zero."}{" "}
-              Income is investment return, not a deposit; record gross dividends
-              on their ex-date for comparisons. Same-day entries follow the
-              order saved. Use Correct in Activity to replace or void a record.
-            </p>
+            {kind === "income" && (
+              <p className="form-note">
+                Record gross dividends on their ex-date.
+              </p>
+            )}
+            {kind === "opening_cash" && (
+              <p className="form-note">Cash held when tracking begins.</p>
+            )}
             <button disabled={saving || loading} type="submit">
               {saving ? "Saving…" : "Save cash entry"}
             </button>
