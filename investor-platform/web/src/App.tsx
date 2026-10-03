@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Portfolio } from "./Portfolio";
+
 type Connection = "checking" | "online" | "offline";
 
 export function App() {
@@ -124,7 +126,7 @@ export function App() {
               </p>
               <p className="connection-detail">
                 {connection === "online"
-                  ? "The foundation is ready. Portfolio management comes next."
+                  ? "Your local service is ready. Open your portfolio below."
                   : connection === "offline"
                     ? "Check that the local service is running, then try again."
                     : "Checking the connection to your local service."}
@@ -157,29 +159,14 @@ export function App() {
               <a href="#research">The research notebook</a>
             </p>
             <p className="small-note">
-              Both are planned.
+              Research is planned.
               <br />
               Your workspace starts here.
             </p>
           </aside>
         </div>
+        <Portfolio />
         <div className="directory" aria-label="Planned capabilities">
-          <section id="portfolio" aria-labelledby="portfolio-heading">
-            <div className="directory-heading">
-              <h2 id="portfolio-heading">
-                <span aria-hidden="true">✳ </span>Portfolio
-              </h2>
-              <span className="planned">Planned</span>
-            </div>
-            <p>
-              Your holdings, activity, and performance.
-              <br />
-              One clear record of what you own.
-            </p>
-            <p className="directory-note">
-              First, the essentials: cash and positions.
-            </p>
-          </section>
           <section id="research" aria-labelledby="research-heading">
             <div className="directory-heading">
               <h2 id="research-heading">

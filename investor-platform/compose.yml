@@ -1,0 +1,19 @@
+name: minerva-investor
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: minerva
+      POSTGRES_PASSWORD: minerva-local-only
+      POSTGRES_DB: minerva
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - portfolio-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minerva -d minerva"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+volumes:
+  portfolio-data:

@@ -1,7 +1,7 @@
 # Investor Platform: one ticket, one PR
 
 Date: 2026-10-01
-Status: IP-001 implemented on its feature branch; later tickets remain specifications. No GitHub issues have been created.
+Status: IP-001 and IP-002 implemented on feature branches; later tickets remain specifications. No GitHub issues have been created.
 
 ## Product direction
 
@@ -14,7 +14,7 @@ Keep the previously proposed React/TypeScript, FastAPI/Python, and PostgreSQL st
 ## Delivery rules
 
 - Each ticket has one branch and one PR with the ticket ID, outcome, acceptance evidence, and relevant limitations. Proposed IDs below are not GitHub issue numbers.
-- Implement in order from the latest merged default branch. Avoid stacked feature PRs initially. Use `worktrees/investor-platform-<ticket>/` if a worktree is needed, following repository instructions. ([Project instructions](../../CLAUDE.md))
+- Implement in order. For the authorized IP-002 through IP-004 batch, stack each PR on its predecessor while the foundation remains open; merge in dependency order after review. Use `worktrees/investor-platform-<ticket>/` if a worktree is needed, following repository instructions. ([Project instructions](../../CLAUDE.md))
 - The first PR can carry these planning documents. Do not spend a separate PR solely on creating empty folders.
 - Each feature PR includes the UI/API/data changes necessary for its outcome and the tests protecting its behavior. Correctness and validation are part of the feature, not a final hardening phase.
 - CI starts in the first PR, then grows alongside persistence and financial behavior. Only synthetic fixtures enter the repository and CI.

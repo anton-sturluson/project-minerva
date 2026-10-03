@@ -3,7 +3,13 @@ name = "minerva-investor-platform"
 version = "0.1.0"
 description = "Local investor workspace API"
 requires-python = ">=3.12,<3.13"
-dependencies = ["fastapi", "uvicorn"]
+dependencies = [
+    "alembic>=1.20.0",
+    "fastapi",
+    "psycopg[binary]>=3.3.6",
+    "sqlalchemy>=2.1.1",
+    "uvicorn",
+]
 
 [project.scripts]
 investor-api = "investor_platform.app:main"

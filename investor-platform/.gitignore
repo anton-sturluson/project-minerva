@@ -7,3 +7,6 @@ web/playwright-report/
 web/.env*
 !web/.env.example
 .ruff_cache/
+
+backend/.env*
+!backend/.env.example
