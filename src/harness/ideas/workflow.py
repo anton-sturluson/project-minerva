@@ -74,7 +74,10 @@ def start(*, limit: int = 50, model: str = DEFAULT_MODEL) -> dict:
         run_id = existing["id"] if existing else None
         if run_id:
             previous_folder = store.run_folder(store.get_run(run_id))
-            if json.loads((previous_folder / "research/issue.json").read_text()) != issue:
+            if (
+                json.loads((previous_folder / "research/issue.json").read_text())
+                != issue
+            ):
                 run_id = None
         run_id = run_id or store.import_issue(issue)
         folder = store.run_folder(store.get_run(run_id))

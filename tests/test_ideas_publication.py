@@ -77,6 +77,7 @@ def test_reconciliation_requires_exact_content_route_and_fresh_receipt(
     monkeypatch.setattr(publication.store, "connect", connect)
     entry = {
         "summary": "Exact digest",
+        "status": "ok",
         "delivered": True,
         "deliveryStatus": "delivered",
         "ts": prepared.timestamp() * 1000 + 1000,
@@ -123,7 +124,10 @@ def test_postgres_duplicate_and_receipt_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr(
         publication,
         "gateway_json",
-        lambda *a: {"delivery": {"mode": "announce", **route}},
+        lambda *a: {
+            "delivery": {"mode": "announce", **route},
+            "payload": {"kind": "command", "argv": ["runner", str(job_id)]},
+        },
     )
     store.import_issue(
         {
@@ -160,6 +164,7 @@ def test_postgres_duplicate_and_receipt_lifecycle(tmp_path, monkeypatch):
             publication.prepare(run_id, job_id)
         entry = {
             "summary": text,
+            "status": "ok",
             "delivered": True,
             "deliveryStatus": "delivered",
             "ts": datetime.now(timezone.utc).timestamp() * 1000 + 1000,
@@ -174,7 +179,10 @@ def test_postgres_duplicate_and_receipt_lifecycle(tmp_path, monkeypatch):
         monkeypatch.setattr(
             publication,
             "gateway_json",
-            lambda *a: {"delivery": {"mode": "announce", **route}},
+            lambda *a: {
+                "delivery": {"mode": "announce", **route},
+                "payload": {"kind": "command", "argv": ["runner", str(job_id)]},
+            },
         )
         assert publication.prepare(run_id, job_id) == "NO_REPLY"
     finally:
@@ -215,3 +223,23 @@ def test_render_gate_rejects_wrong_company_even_if_marked_ready(tmp_path, monkey
     }
     with pytest.raises(ValueError, match="company"):
         publication.checked_view(row, {"issue_date": date(2026, 9, 30)})
+
+
+def test_native_receipt_requires_explicit_route_and_successful_execution():
+    route = {
+        "channel": "slack",
+        "to": "channel:T",
+        "threadId": "t",
+        "source": "explicit",
+    }
+    entry = {
+        "status": "ok",
+        "delivery": {"intended": route},
+        "diagnostics": {"entries": [{"source": "exec", "exitCode": 0}]},
+    }
+    assert publication.delivered_route(entry) == publication.route_fields(route)
+    entry["diagnostics"]["entries"][0]["truncated"] = True
+    assert publication.delivered_route(entry) == {}
+    entry["diagnostics"]["entries"][0]["truncated"] = False
+    entry["delivery"]["fallbackUsed"] = True
+    assert publication.delivered_route(entry) == {}

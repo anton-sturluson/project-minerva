@@ -168,6 +168,11 @@ def validate_match(
         raise ValueError(
             "Document period must be established and not later than the discovery issue"
         )
+    stated_years = set(re.findall(r"\b20[0-9]{2}\b", match.period))
+    if stated_years and str(match.period_end.year) not in stated_years:
+        raise ValueError(
+            "Normalized period year conflicts with the stated source period"
+        )
     if (issue_date - match.period_end).days > 190:
         raise ValueError("Document is older than the six-month research window")
     if (

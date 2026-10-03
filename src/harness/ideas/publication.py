@@ -41,24 +41,36 @@ def render(run_id: UUID) -> str:
     if not rows:
         return ""
     lines = [f"*Original manager ideas — {run['issue_date']}*", ""]
+    groups = {}
     for row in rows:
-        view = checked_view(row, run)
-        document = row["document"]
-        # Stored ready records are created by extraction after both validation gates.
-        if view["instrument"] != "equity" or view["stance"] == "unclear":
-            continue
-        period = document["identity"]["period"]
-        lines.append(
-            f"*{escape(document['identity'].get('company') or row['company'])}* — {escape(row['fund'])}"
+        groups.setdefault(row["company"], []).append(row)
+    for company_rows in groups.values():
+        company = (
+            company_rows[0]["document"]["identity"].get("company")
+            or company_rows[0]["company"]
         )
-        action = (
-            "" if view["action"] == "not stated" else f" · {escape(view['action'])}"
-        )
-        lines.append(f"{escape(view['stance'])}{action} · {escape(period)}")
-        for claim in view["claims"]:
-            lines.append("• " + escape(claim["text"]))
-        lines.extend([f"<{document['url']}|Original manager letter>", ""])
+        lines.append(f"*{escape(company)}*")
+        for row in company_rows:
+            lines.extend(render_fund(row, run))
+        lines.append("")
     return "\n".join(lines).strip()
+
+
+def render_fund(row, run):
+    lines = []
+    view = checked_view(row, run)
+    document = row["document"]
+    # Stored ready records are created by extraction after both validation gates.
+    if view["instrument"] != "equity" or view["stance"] == "unclear":
+        return []
+    period = document["identity"]["period"]
+    lines.append(f"*{escape(row['fund'])}*")
+    action = "" if view["action"] == "not stated" else f" · {escape(view['action'])}"
+    lines.append(f"{escape(view['stance'])}{action} · {escape(period)}")
+    for claim in view["claims"]:
+        lines.append("• " + escape(claim["text"]))
+    lines.extend([f"<{document['url']}|Original manager letter>", ""])
+    return lines
 
 
 def gateway_json(*args):
@@ -83,16 +95,31 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
     job = gateway_json("get", str(job_id))
     route = route_fields(job.get("delivery", {}))
     if (
-        job.get("delivery", {}).get("mode") != "announce"
+        job.get("payload", {}).get("kind") != "command"
+        or job.get("delivery", {}).get("mode") != "announce"
         or route["channel"] != "slack"
         or not route["to"]
     ):
         raise ValueError(
-            "Publication requires the existing explicit Slack announce route"
+            "Publication requires a native command job with the existing explicit Slack announce route"
         )
     digest = hashlib.sha256(
         (str(job_id) + json.dumps(route, sort_keys=True) + "\n" + text).encode()
     ).hexdigest()
+    with store.connect() as conn:
+        existing = conn.execute(
+            "SELECT state FROM minerva_ideas.publications WHERE digest=%s", (digest,)
+        ).fetchone()
+        if existing and existing["state"] == "delivered":
+            return "NO_REPLY"
+        pending = conn.execute(
+            "SELECT 1 FROM minerva_ideas.publications WHERE run_id=%s AND job_id=%s AND state!='delivered'",
+            (run_id, job_id),
+        ).fetchone()
+        if pending:
+            raise ValueError(
+                "Publication may already have been sent; reconcile delivery before another attempt"
+            )
     run = store.get_run(run_id)
     store.write_artifact(
         store.run_folder(run), f"publications/{digest}.slack.txt", text.encode()
@@ -114,6 +141,28 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
     )
 
 
+def delivered_route(entry: dict) -> dict:
+    delivery = entry.get("delivery", {})
+    if delivery.get("resolved"):
+        return route_fields(delivery["resolved"])
+    # Native command receipts record the explicit destination without an agent session.
+    execution = entry.get("diagnostics", {}).get("entries", [])
+    if (
+        not entry.get("sessionId")
+        and entry.get("status") == "ok"
+        and not delivery.get("fallbackUsed", False)
+        and any(
+            d.get("source") == "exec"
+            and d.get("exitCode") == 0
+            and not d.get("truncated", False)
+            for d in execution
+        )
+        and delivery.get("intended", {}).get("source") == "explicit"
+    ):
+        return route_fields(delivery["intended"])
+    return {}
+
+
 def reconcile(job_id: UUID) -> dict:
     entries = gateway_json("runs", "--id", str(job_id), "--limit", "20")["entries"]
     matched = 0
@@ -130,18 +179,18 @@ def reconcile(job_id: UUID) -> dict:
             )
             text = path.read_text()
             for entry in entries:
-                if entry.get("summary", "").strip() != text:
-                    continue
                 if entry.get("ts", 0) < publication["prepared_at"].timestamp() * 1000:
                     continue
-                resolved = entry.get("delivery", {}).get("resolved", {})
-                if route_fields(resolved) != publication["route"]:
+                resolved = delivered_route(entry)
+                if resolved != publication["route"] or entry.get("status") != "ok":
                     continue
                 if (
                     entry.get("delivered") is True
                     and entry.get("deliveryStatus") == "delivered"
                 ):
-                    # The receipt is the actual scheduler transport record, not a claim by the reporter.
+                    if entry.get("summary", "").strip() != text:
+                        continue
+                    # Native command history preserves full stdout; require exact equality.
                     conn.execute(
                         "UPDATE minerva_ideas.publications SET state='delivered',receipt=%s WHERE digest=%s",
                         (
