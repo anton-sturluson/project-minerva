@@ -592,3 +592,29 @@ summary:focus-visible {
   border-radius: 0;
   padding: 4px;
 }
+
+:root[data-theme="light"] {
+  --paper: #fffef9;
+  --ink: #191b20;
+  --blue: #00009b;
+  --plum: #62256c;
+  --yellow: #f5dc62;
+  --lilac: #e8dcf2;
+  --rule: #aaa69a;
+  --neutral: #e8e6dd;
+  --success: #285c3b;
+  --error: #a32432;
+}
+
+:root[data-theme="dark"] {
+  --paper: #222421;
+  --ink: #eeeeda;
+  --blue: #b1bfff;
+  --plum: #dcafe4;
+  --yellow: #6b5929;
+  --lilac: #44364e;
+  --rule: #686b61;
+  --neutral: #363933;
+  --success: #b0daba;
+  --error: #ffa7ac;
+}

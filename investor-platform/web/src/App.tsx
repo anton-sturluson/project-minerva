@@ -11,17 +11,20 @@ function savedTheme(): Theme {
   }
   return "system";
 }
+function applyTheme(value: Theme) {
+  document.documentElement.dataset.theme = value;
+  document.documentElement.style.colorScheme =
+    value === "system" ? "light dark" : value;
+}
 const initialTheme = savedTheme();
 // Apply before React renders to avoid flashing the wrong stored theme on reload.
-document.documentElement.style.colorScheme =
-  initialTheme === "system" ? "light dark" : initialTheme;
+applyTheme(initialTheme);
 
 export function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   function changeTheme(value: Theme) {
     setTheme(value);
-    document.documentElement.style.colorScheme =
-      value === "system" ? "light dark" : value;
+    applyTheme(value);
     try {
       localStorage.setItem("minerva-theme", value);
     } catch {
