@@ -70,39 +70,31 @@ export function Portfolio() {
         <>
           <div className="account-line">
             <h3>{account.name}</h3>
-            <span>{account.base_currency} · Base currency</span>
+            <span>{account.base_currency}</span>
           </div>
           {account.reconstruction && (
             <aside
               className="reconstruction"
               aria-label="Reconstruction assumptions"
             >
-              <strong>Testing copy · incomplete transaction history</strong>
-              <p>
-                Opening shares and cash are inferred minimums, not broker
-                balances. Holdings and performance are provisional until the
-                records are reconciled.
-              </p>
-              <p>
-                {account.reconstruction.imported_trades} transactions imported ·{" "}
-                {account.reconstruction.skipped.length} rows excluded ·{" "}
-                {Object.keys(account.reconstruction.opening_positions).length}{" "}
-                inferred opening positions.
-              </p>
+              <strong>Testing copy · incomplete history</strong>
               <details>
                 <summary>Import assumptions &amp; excluded rows</summary>
+                <p>
+                  {account.reconstruction.imported_trades} transactions imported
+                  · {account.reconstruction.skipped.length} rows excluded ·{" "}
+                  {Object.keys(account.reconstruction.opening_positions).length}{" "}
+                  inferred opening positions.
+                </p>
                 <p>
                   Minimum inferred opening cash: USD{" "}
                   {account.reconstruction.opening_cash}. This is balancing cash,
                   not a historical balance.
                 </p>
                 <p>
-                  Trade amounts use underlying shares and prices where
-                  available, rounded to eight decimal places. CSV imports use
-                  totals divided by recorded shares. No separate fees were
-                  supplied. {account.reconstruction.price_discrepancies.length}{" "}
-                  rows have a total that differs from displayed shares × price.
-                  Original rows are preserved in PostgreSQL.
+                  Original rows are preserved.{" "}
+                  {account.reconstruction.price_discrepancies.length} rows have
+                  inconsistent amounts; fees were not supplied.
                 </p>
                 {Object.entries(account.reconstruction.opening_positions).map(
                   ([ticker, quantity]) => (

@@ -131,16 +131,10 @@ export function Tracker({
           : "Portfolio vs. the market"}
       </h2>
       {account.reconstruction && (
-        <p className="reconstruction">
-          Testing estimate · inferred opening balances and incomplete
-          transactions. This is not verified account performance. Excluded
-          import rows are not included.
+        <p className="form-note">
+          Estimated from incomplete records and inferred balances.
         </p>
       )}
-      <p className="form-note">
-        Your portfolio alongside the S&amp;P 500 (SPY) and Nasdaq-100 (QQQ),
-        with distributions reinvested in the benchmarks.
-      </p>
       <form className="entry-form" onSubmit={submit}>
         <label>
           From
@@ -199,17 +193,10 @@ export function Tracker({
       )}
       {(!ledger.entries.length || start >= end) && (
         <p className="form-note">
-          A comparison needs at least two completed market sessions after
-          tracking begins. Choose an earlier start once you have dated records.
+          A comparison needs at least two completed market sessions.
         </p>
       )}
       {busy && <p role="status">Loading portfolio and index returns…</p>}
-      <p className="form-note">
-        SPY: S&amp;P 500 · QQQ: Nasdaq-100. Benchmarks reinvest distributions.
-        USD equities/ETFs on supported US exchanges; completed daily closes
-        only. The full recorded period loads automatically; choose dates to
-        compare a shorter period.
-      </p>
       {error && (
         <p role="alert" className="error">
           {error} Your saved records are unchanged.
@@ -218,8 +205,7 @@ export function Tracker({
       {report && (
         <>
           <p className="report-date">
-            {report.start} — {report.end} · {report.source} · fetched{" "}
-            {new Date(report.fetched_at).toLocaleString()}
+            {report.start} — {report.end} · {report.source}
           </p>
           {report.warnings.map((w) => (
             <p key={w} role="alert" className="error">
@@ -227,8 +213,8 @@ export function Tracker({
             </p>
           ))}
           {report.provisional && (
-            <aside className="reconstruction" aria-label="Estimate assumptions">
-              <strong>Provisional estimate · not verified performance</strong>
+            <details aria-label="Estimate assumptions">
+              <summary>Estimate assumptions</summary>
               <ul>
                 {report.assumptions?.map((a) => (
                   <li key={a}>{a}</li>
@@ -238,7 +224,7 @@ export function Tracker({
                 Modeled gross income included in cash: USD{" "}
                 {number(report.modeled_income ?? "0")}.
               </p>
-            </aside>
+            </details>
           )}
           <dl className="scorecard">
             <div>
@@ -349,25 +335,23 @@ export function Tracker({
       <details className="methodology">
         <summary>Return assumptions &amp; data limits</summary>
         <p className="form-note">
-          Daily linked return: (closing value − external contributions +
-          withdrawals) / previous close, compounded. Flows are assumed at the
-          close; intraday timing is not known. Opening shares added during the
-          period are in-kind contributions at that day’s close. The first
-          available session establishes the baseline; its trading gain is not
-          measured. Non-trading-day flows enter the next session. This is a
-          closing-flow approximation, not an audited or risk-adjusted return.
+          Returns adjust for deposits and withdrawals at daily closes. The first
+          close establishes the baseline. SPY tracks the S&amp;P 500; QQQ tracks
+          the Nasdaq-100. Benchmarks reinvest distributions; portfolio income
+          stays in cash.
         </p>
         <p className="form-note">
-          Record all trades, fees and gross investment income, using ex-dates
-          for dividends. Unreconciled provider distributions withhold portfolio
-          returns. Positions spanning splits are unsupported and block the
-          comparison. Missing prices are never zero-filled. Historical quotes
-          come from one provider and may be revised; check against broker
-          records. Benchmarks assume reinvestment; your portfolio keeps recorded
-          income as cash. No FX, shorts or tax modeling. Valuations stop at the
-          stated date; later ledger activity is excluded. Displayed figures are
-          rounded; the ledger retains exact decimals.
+          USD only. Missing prices and splits while held block comparisons.
+          Gross dividends use ex-dates; missing income withholds ordinary
+          returns and is modeled for provisional estimates. No FX or tax
+          modeling.
         </p>
+        {report && (
+          <p className="form-note">
+            Quotes fetched {new Date(report.fetched_at).toLocaleString()};
+            prices may be revised.
+          </p>
+        )}
       </details>
       <div id="decisions" className="decisions">
         <TradeScorecard account={account} ledger={ledger} />

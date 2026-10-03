@@ -66,6 +66,17 @@ test("shows provisional performance, recovers from failure, and preserves import
   await expect(page.getByText(/Quotes temporarily unavailable/)).toBeVisible();
   unavailable = false;
   await page.getByRole("button", { name: "Retry comparison" }).click();
+  await expect(
+    page.getByText("Opening cash is inferred, not a verified balance.", {
+      exact: true,
+    }),
+  ).toBeHidden();
+  await page.getByText("Estimate assumptions", { exact: true }).click();
+  await expect(
+    page.getByText("Opening cash is inferred, not a verified balance.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(page.getByLabel("Estimate assumptions")).toContainText(
     "Opening cash is inferred",
   );
