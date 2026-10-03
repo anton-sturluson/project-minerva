@@ -23,6 +23,10 @@ def replay(entries):
         seen = set()
         realized = {}
         opening_date = next((e.effective_date for e in entries if e.kind == "opening_cash"), None)
+        if sum(e.kind == "opening_cash" for e in entries) > 1:
+            raise HTTPException(409, "Only one opening cash entry is allowed")
+        if any(e.kind == "opening_cash" for e in entries[1:]):
+            raise HTTPException(409, "Opening cash must be the first entry")
         for e in entries:
             if opening_date and e.effective_date < opening_date:
                 raise HTTPException(409, "Entries cannot precede the opening balance date")

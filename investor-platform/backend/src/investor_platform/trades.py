@@ -62,6 +62,22 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
         if existing.request_body != body:
             raise HTTPException(409, "This retry key was already used for different entries")
         return existing
+    entry = build_trade(account, data, session, actor, body)
+    entries = entries_for(session, account_id)
+    if data.kind == "opening_position" and any(e.security_id == entry.security_id for e in entries):
+        raise HTTPException(
+            409, "Opening positions must be recorded before trades in that security"
+        )
+    session.add(entry)
+    session.flush()
+    replay(entries_for(session, account_id))
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def build_trade(account, data, session, actor, body):
+    account_id = account.id
     if data.currency != account.base_currency:
         raise HTTPException(422, "Security currency must match the account")
     security = session.scalar(
@@ -81,11 +97,6 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
         )
         session.add(security)
         session.flush()
-    entries = entries_for(session, account_id)
-    if data.kind == "opening_position" and any(e.security_id == security.id for e in entries):
-        raise HTTPException(
-            409, "Opening positions must be recorded before trades in that security"
-        )
     with localcontext() as context:
         context.prec = 64
         amount = Decimal(0)
@@ -94,7 +105,7 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
             amount = gross + data.fees if data.kind == "buy" else gross - data.fees
             if amount < 0:
                 raise HTTPException(422, "Sale fees cannot exceed proceeds")
-    entry = LedgerEntry(
+    return LedgerEntry(
         account_id=account_id,
         security_id=security.id,
         created_by=actor.owner_id,
@@ -102,9 +113,3 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
         amount=amount,
         **data.model_dump(exclude={"ticker", "exchange"}),
     )
-    session.add(entry)
-    session.flush()
-    replay(entries_for(session, account_id))
-    session.commit()
-    session.refresh(entry)
-    return entry

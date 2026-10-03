@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .accounts import router
+from .corrections import router as corrections_router
 from .db import make_engine
 from .hit_rate import router as hit_rate_router
 from .ledger import router as ledger_router
@@ -62,6 +63,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.include_router(router)
     app.include_router(ledger_router)
     app.include_router(trades_router)
+    app.include_router(corrections_router)
     app.include_router(performance_router)
     app.include_router(hit_rate_router)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)

@@ -373,7 +373,7 @@ export function Tracker({
         <TradeScorecard account={account} ledger={ledger} />
         {!account.reconstruction && (
           <HitRate
-            key={`${account.id}:${ledger.entries.length}`}
+            key={`${account.id}:${ledger.entries.map((e) => e.id).join(",")}`}
             accountId={account.id}
           />
         )}

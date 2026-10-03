@@ -30,6 +30,14 @@ export type Ledger = {
   currency: string;
   entries: Entry[];
   holdings: Holding[];
+  corrections?: {
+    id: number;
+    original: Entry;
+    replacement: Entry | null;
+    reason: string;
+    created_at: string;
+    created_by: string;
+  }[];
 };
 export function exact(value: string, minimumDecimals = 2) {
   const [whole, fraction = ""] = value.split(".");

@@ -6,12 +6,14 @@ import {
   type FormEvent,
 } from "react";
 import { api, errorMessage, type Account } from "./api";
+import { Corrections, EntrySummary } from "./Corrections";
 import { Tracker } from "./Tracker";
 import { number } from "./format";
 import { Trades } from "./Trades";
 import { exact, today, labels, type Entry, type Ledger } from "./records";
 
 export function CashLedger({ account }: { account: Account }) {
+  const [correcting, setCorrecting] = useState<Entry | null>(null);
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -164,13 +166,47 @@ export function CashLedger({ account }: { account: Account }) {
                 : "Entries are checked against the full dated history. Cash cannot go below zero."}{" "}
               Income is investment return, not a deposit; record gross dividends
               on their ex-date for comparisons. Same-day entries follow the
-              order saved. Corrections come in a later update.
+              order saved. Use Correct in Activity to replace or void a record.
             </p>
             <button disabled={saving || loading} type="submit">
               {saving ? "Saving…" : "Save cash entry"}
             </button>
           </form>
           <h3 className="activity-heading">Activity</h3>
+          {correcting && (
+            <Corrections
+              key={correcting.id}
+              account={account}
+              entry={correcting}
+              onSaved={async () => {
+                await load();
+                setMessage(
+                  "Correction saved. Original retained in audit history.",
+                );
+              }}
+              onCancel={() => setCorrecting(null)}
+            />
+          )}
+          {!!ledger.corrections?.length && (
+            <details className="entry-panel">
+              <summary>
+                Correction history ({ledger.corrections.length})
+              </summary>
+              {ledger.corrections.map((c) => (
+                <article key={c.id}>
+                  <h4>
+                    {c.replacement ? "Replaced" : "Voided"} entry #
+                    {c.original.id}
+                  </h4>
+                  <p>
+                    {c.reason} · {c.created_at}
+                  </p>
+                  <EntrySummary entry={c.original} />
+                  {c.replacement && <EntrySummary entry={c.replacement} />}
+                </article>
+              ))}
+            </details>
+          )}
           {ledger.entries.length ? (
             <div
               className="table-scroll"
@@ -186,6 +222,7 @@ export function CashLedger({ account }: { account: Account }) {
                       Cash change ({account.base_currency})
                     </th>
                     <th>Details / note</th>
+                    <th>Correction</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -249,6 +286,15 @@ export function CashLedger({ account }: { account: Account }) {
                         ) : (
                           e.note || "—"
                         )}
+                      </td>
+                      <td>
+                        <button
+                          disabled={saving || loading || correcting !== null}
+                          aria-label={`Correct entry ${e.id}`}
+                          onClick={() => setCorrecting(e)}
+                        >
+                          Correct
+                        </button>
                       </td>
                     </tr>
                   ))}
