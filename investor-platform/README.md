@@ -104,3 +104,6 @@ Win rate, average dollar win/loss and payoff ratio use fully closed position epi
 ## Decision hit rate
 
 Alongside payoff ratio and win rate, **Calculate hit rate** measures how many fully closed investment decisions beat SPY and QQQ over matching holding periods. A profitable decision can underperform the market. Partial exits count as one decision; unavailable comparisons are explicitly excluded. The report fetches market data on demand, while the original payoff scorecard remains available without it. See [definitions, matched-capital calculations and exclusions](docs/hit-rate.md).
+## Investment income
+
+Use **Investment income** in the cash form to distinguish portfolio earnings from external deposits. Income is positive, currency-matched, and protected by the same account lock and retry key as other cash entries. It does not change trade win/payoff statistics. Later return comparisons treat it as investment return. Gross dividends use ex-date book accounting for those comparisons; these book balances do not represent settled broker cash or a payment-date receivable ledger.

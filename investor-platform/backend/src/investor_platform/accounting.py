@@ -26,7 +26,7 @@ def replay(entries):
         for e in entries:
             if opening_date and e.effective_date < opening_date:
                 raise HTTPException(409, "Entries cannot precede the opening balance date")
-            if e.kind in {"opening_cash", "deposit"}:
+            if e.kind in {"opening_cash", "deposit", "income"}:
                 cash += e.amount
             elif e.kind in {"withdrawal", "buy"}:
                 cash -= e.amount
