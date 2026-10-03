@@ -29,11 +29,6 @@ class Actor:
     workspace_id: UUID
 
 
-def require_local_mode():
-    if os.environ.get("INVESTOR_MODE", "local") != "local":
-        raise RuntimeError("Hosted mode requires authentication; local identity is disabled")
-
-
 def get_actor(request: Request) -> Actor:
     if not getattr(request.state, "authenticated", False):
         raise HTTPException(status_code=403, detail="Access denied")

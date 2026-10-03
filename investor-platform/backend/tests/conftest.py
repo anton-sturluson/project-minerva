@@ -20,20 +20,24 @@ def database():
     with admin.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA "{schema}"'))
     engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
-    config = Config("alembic.ini")
-    with engine.begin() as conn:
-        config.attributes["connection"] = conn
-        command.upgrade(config, "head")
-    yield engine
-    engine.dispose()
-    with admin.begin() as conn:
-        conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-    admin.dispose()
+    try:
+        config = Config("alembic.ini")
+        with engine.begin() as conn:
+            config.attributes["connection"] = conn
+            command.upgrade(config, "head")
+        yield engine
+    finally:
+        engine.dispose()
+        with admin.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
 
 
 @pytest.fixture
 def db_client(database):
     app.state.engine = database
-    with TestClient(app, base_url="http://127.0.0.1:8010") as client:
-        yield client
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, base_url="http://127.0.0.1:8010") as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()

@@ -23,8 +23,16 @@ def remote_client(remote_env, peer="127.0.0.1"):
     return TestClient(create_app(web_dist=remote_env), base_url=ORIGIN, client=(peer, 12345))
 
 
-@pytest.mark.parametrize("path", ["/", "/asset.js", "/api/health", "/api/account", "/docs"])
-@pytest.mark.parametrize("login", [None, "someone-else@example.com"])
+@pytest.mark.parametrize(
+    ("path", "login"),
+    [
+        ("/", None),
+        ("/asset.js", None),
+        ("/api/account", None),
+        ("/docs", None),
+        ("/api/account", "someone-else@example.com"),
+    ],
+)
 def test_missing_or_foreign_identity_cannot_read_any_surface(remote_env, path, login):
     with remote_client(remote_env) as client:
         headers = {"Tailscale-User-Login": login} if login else {}

@@ -1,6 +1,5 @@
 """Daily closing-flow returns and fully closed position statistics."""
 
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
 from uuid import UUID
@@ -269,19 +268,10 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 "This first tracker supports up to 48 securities and ten years of ledger history"
             )
         # Fetch from inception to detect unrecorded historical splits, even for a recent report.
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            fetched = list(
-                pool.map(
-                    lambda symbol: (
-                        symbol,
-                        market.history(symbol, entries[0].effective_date, period.end),
-                    ),
-                    sorted(symbols),
-                )
-            )
+        fetched = market.histories(symbols, entries[0].effective_date, period.end)
         with localcontext() as ctx:
             ctx.prec = 64
-            result = calculate(entries, dict(fetched), period.start, period.end)
+            result = calculate(entries, fetched, period.start, period.end)
         return wire(
             {**result, "fetched_at": datetime.now(UTC), "source": "Yahoo Finance daily history"}
         )

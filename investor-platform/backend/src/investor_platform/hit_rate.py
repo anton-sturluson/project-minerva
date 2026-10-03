@@ -1,6 +1,5 @@
 """Closed investment decisions versus capital- and holding-period-matched benchmarks."""
 
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal, DecimalException, localcontext
 from uuid import UUID
@@ -153,10 +152,7 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
                 raise ValueError("Hit rate supports up to 48 securities plus SPY and QQQ")
             start = min(e[0].effective_date for e in candidates)
             end = max(e[-1].effective_date for e in candidates)
-            with ThreadPoolExecutor(max_workers=6) as pool:
-                histories = dict(
-                    pool.map(lambda s: (s, market.history(s, start, end)), sorted(symbols))
-                )
+            histories = market.histories(symbols, start, end)
         with localcontext() as ctx:
             ctx.prec = 64
             result = calculate_hit_rate(episodes, open_count, histories, today)

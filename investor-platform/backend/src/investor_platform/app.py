@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .accounts import router
-from .db import make_engine, require_local_mode
+from .db import make_engine
 from .hit_rate import router as hit_rate_router
 from .ledger import router as ledger_router
 from .performance import router as performance_router
@@ -40,7 +40,10 @@ class Health(BaseModel):
 
 
 def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
-    remote = os.environ.get("INVESTOR_MODE", "local") == "tailscale"
+    mode = os.environ.get("INVESTOR_MODE", "local")
+    if mode not in {"local", "tailscale"}:
+        raise RuntimeError("Unknown INVESTOR_MODE; use local or tailscale")
+    remote = mode == "tailscale"
     origin = os.environ.get("TAILSCALE_ORIGIN", "")
     login = os.environ.get("TAILSCALE_USER_LOGIN", "")
     if remote:
@@ -53,7 +56,6 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
             raise RuntimeError("Build the frontend first: cd investor-platform/web && pnpm build")
         hosts = [urlsplit(origin).hostname]
     else:
-        require_local_mode()
         hosts = ["127.0.0.1", "localhost"]
 
     app = FastAPI(title="Minerva Investor Platform", version="0.1.0", lifespan=lifespan)
