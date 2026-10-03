@@ -96,7 +96,9 @@ export function Tracker({
       const version = ++generation.current;
       setBusy(true);
       setError("");
-      setReport(null);
+      setReport((current) =>
+        current ? { ...current, scenario: null, scenario_error: null } : null,
+      );
       try {
         const r = await api<Report>(
           `/accounts/${account.id}/performance`,
@@ -114,7 +116,10 @@ export function Tracker({
         );
         if (version === generation.current) setReport(r);
       } catch (e) {
-        if (version === generation.current) setError(errorMessage(e));
+        if (version === generation.current) {
+          setReport(null);
+          setError(errorMessage(e));
+        }
       } finally {
         if (version === generation.current) setBusy(false);
       }
@@ -168,7 +173,7 @@ export function Tracker({
             ? "Provisional portfolio vs. the market"
             : "Portfolio vs. the market"}
         </h2>
-        <form className="entry-form" onSubmit={submit}>
+        <form className="entry-form performance-controls" onSubmit={submit}>
           <label>
             From
             <input
@@ -204,6 +209,21 @@ export function Tracker({
               disabled={busy}
             />
           </label>
+          <button
+            disabled={
+              busy ||
+              !ledger.entries.length ||
+              start >= end ||
+              account.base_currency !== "USD"
+            }
+            type="submit"
+          >
+            {busy
+              ? "Fetching closes…"
+              : error
+                ? "Retry comparison"
+                : "Compare performance"}
+          </button>
           {securities.length > 0 && (
             <details className="scenario-picker">
               <summary>
@@ -222,7 +242,15 @@ export function Tracker({
                             ? [...current, security.id]
                             : current.filter((id) => id !== security.id),
                         );
-                        setReport(null);
+                        setReport((current) =>
+                          current
+                            ? {
+                                ...current,
+                                scenario: null,
+                                scenario_error: null,
+                              }
+                            : null,
+                        );
                         setError("");
                       }}
                     />
@@ -233,7 +261,11 @@ export function Tracker({
                   type="button"
                   onClick={() => {
                     setExcluded([]);
-                    setReport(null);
+                    setReport((current) =>
+                      current
+                        ? { ...current, scenario: null, scenario_error: null }
+                        : null,
+                    );
                     setError("");
                   }}
                 >
@@ -242,21 +274,6 @@ export function Tracker({
               </fieldset>
             </details>
           )}
-          <button
-            disabled={
-              busy ||
-              !ledger.entries.length ||
-              start >= end ||
-              account.base_currency !== "USD"
-            }
-            type="submit"
-          >
-            {busy
-              ? "Fetching closes…"
-              : error
-                ? "Retry comparison"
-                : "Compare performance"}
-          </button>
         </form>
         {account.base_currency !== "USD" && (
           <p className="form-note">
@@ -445,7 +462,7 @@ function ReturnChart({
         )}
       </figcaption>
       <svg
-        viewBox="0 0 800 220"
+        viewBox="0 0 800 240"
         role="img"
         aria-label="Cumulative portfolio and benchmark returns; exact values in Daily values"
       >
@@ -463,6 +480,12 @@ function ReturnChart({
           stroke="currentColor"
           opacity="0.3"
         />
+        <text x="58" y="229">
+          {actual[0]?.date}
+        </text>
+        <text x="795" y="229" textAnchor="end">
+          {actual.at(-1)?.date}
+        </text>
         {keys.map(
           (k, index) =>
             series.every((p) => p[k] !== null) && (
