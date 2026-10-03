@@ -51,6 +51,9 @@ export const test = base.extend({
     await page.route("**/api/accounts/*/performance", (route) =>
       route.fulfill({ json: performance }),
     );
+    await page.route("**/api/accounts/*/valuation", (route) =>
+      route.fulfill({ json: { ...performance, complete: true } }),
+    );
     await use(page);
   },
 });

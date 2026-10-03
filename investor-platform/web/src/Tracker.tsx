@@ -47,16 +47,6 @@ export type Report = {
   source: string;
   warnings: string[];
   series: Point[];
-  holdings: {
-    ticker: string;
-    exchange: string;
-    quantity: string;
-    close: string;
-    value: string;
-    weight: string | null;
-    basis: string | null;
-    unrealized_pnl: string | null;
-  }[];
 };
 const yesterday = () => {
   // Date selection is based on completed US sessions, never an intraday quote.
@@ -162,7 +152,7 @@ export function Tracker({
         )}
       </div>
 
-      <Holdings ledger={ledger} report={report} />
+      <Holdings ledger={ledger} accountId={account.id} />
       <section
         id="performance"
         className="tracker"

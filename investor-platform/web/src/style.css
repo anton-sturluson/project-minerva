@@ -800,3 +800,7 @@ summary:focus-visible {
 .scenario-key {
   color: var(--error);
 }
+
+.refresh-prices {
+  margin-block: 12px;
+}

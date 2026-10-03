@@ -225,10 +225,11 @@ test("shows one holdings table above returns and retains recorded positions duri
       },
     }),
   );
-  await page.route("**/performance", (route) =>
+  await page.route("**/valuation", (route) =>
     route.fulfill({
       json: {
         ...performance,
+        complete: true,
         holdings: performance.holdings.map((h) => ({
           ...h,
           basis: "800",
@@ -268,6 +269,16 @@ test("shows one holdings table above returns and retains recorded positions duri
   );
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toContainText("Synthetic quote outage");
+  await expect(allocation).toBeVisible();
+  await page.route("**/valuation", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { detail: "Synthetic holdings outage" },
+    }),
+  );
+  await page
+    .getByRole("button", { name: "Refresh prices", exact: true })
+    .click();
   await expect(holdings).toContainText("800.00");
   await expect(
     holdings.getByRole("row").filter({ hasText: "AAA" }),
@@ -299,4 +310,70 @@ test("withholds all cost weights when any position has unknown basis", async ({
     "—",
   );
   await expect(allocation.getByLabel("Cash allocation")).toContainText("—");
+});
+
+test("partial holdings quotes remain visible and retry restores full allocation", async ({
+  page,
+}) => {
+  let partial = true;
+  await page.route("**/ledger", (route) => route.fulfill({ json: ledger }));
+  await page.route("**/valuation", (route) =>
+    route.fulfill({
+      json: {
+        ...performance,
+        complete: !partial,
+        value: partial ? null : "1200",
+        holdings: [
+          {
+            ...performance.holdings[0],
+            basis: "800",
+            weight: partial ? null : "0.8333333",
+          },
+          ...(partial
+            ? [
+                {
+                  ticker: "BBB",
+                  exchange: "NASDAQ",
+                  quantity: "2",
+                  basis: "100",
+                  close: null,
+                  value: null,
+                  weight: null,
+                  unrealized_pnl: null,
+                  price_error: "Close unavailable",
+                },
+              ]
+            : []),
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  const holdings = page.getByLabel("Holdings", { exact: true });
+  await expect(
+    holdings.getByRole("row").filter({ hasText: "AAA" }),
+  ).toContainText("1,000.00");
+  await expect(
+    holdings.getByRole("row").filter({ hasText: "BBB" }),
+  ).toContainText("Quote unavailable");
+  await expect(
+    page.getByLabel("Portfolio allocation by market value"),
+  ).toBeHidden();
+  await expect(
+    page.getByText(
+      "Some closes are unavailable. Portfolio value and market weights are withheld.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  partial = false;
+  await page
+    .getByRole("button", { name: "Refresh prices", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Portfolio allocation by market value"),
+  ).toBeVisible();
+  await expect(holdings).toContainText("83.33%");
+  await expect(
+    page.getByText("Quote unavailable", { exact: true }),
+  ).toHaveCount(0);
 });
