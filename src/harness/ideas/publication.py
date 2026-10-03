@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import tempfile
+from pathlib import Path
 import subprocess
 from uuid import UUID
 
@@ -114,6 +117,49 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
     )
 
 
+def session_output(entry: dict, folder: Path, job_id: UUID) -> str:
+    """Read only this completed run's full final text through the supported export CLI."""
+    session_id = str(UUID(entry['sessionId']))
+    key = entry.get('sessionKey', '')
+    match = re.fullmatch(r'agent:([a-zA-Z0-9_-]+):cron:' + re.escape(str(job_id)) + r':run:' + re.escape(session_id), key)
+    if not match:
+        raise ValueError('Delivery record is not bound to this job session')
+    relative = f'research/delivery/{session_id}.json'
+    cached = folder / relative
+    if cached.exists():
+        saved = json.loads(cached.read_text())
+        if saved['session_key'] != key:
+            raise ValueError('Delivery evidence belongs to another session')
+        return saved['final_text']
+    with tempfile.TemporaryDirectory(prefix='delivery-export-', dir=folder/'research') as temporary:
+        completed = subprocess.run([
+            'openclaw','sessions','export-trajectory','--agent',match[1],
+            '--session-key',key,'--workspace',temporary,'--output','delivery','--json',
+        ],capture_output=True,text=True,timeout=60,check=True)
+        metadata = json.loads(completed.stdout)
+        if metadata.get('sessionId') != session_id:
+            raise ValueError('Exported delivery session does not match the job run')
+        exported = Path(metadata['outputDir']).resolve()
+        if not exported.is_relative_to(Path(temporary).resolve()):
+            raise ValueError('Unexpected trajectory export location')
+        final = None
+        for line in (exported/'events.jsonl').read_text().splitlines():
+            event = json.loads(line)
+            if event.get('sessionId') != session_id or event.get('type') != 'assistant.message':
+                continue
+            message = event.get('data',{}).get('message',{})
+            if any(part.get('type') == 'toolCall' for part in message.get('content',[])):
+                continue
+            texts = [part['text'] for part in message.get('content',[]) if part.get('type')=='text']
+            if texts:
+                final = '\n'.join(texts).strip()
+        if final is None:
+            raise ValueError('No final assistant output in the completed job session')
+    # Retain only the relevant final output, not prompts or unrelated runtime metadata.
+    store.json_artifact(folder,relative,{'session_key':key,'final_text':final})
+    return final
+
+
 def reconcile(job_id: UUID) -> dict:
     entries = gateway_json("runs", "--id", str(job_id), "--limit", "20")["entries"]
     matched = 0
@@ -130,8 +176,6 @@ def reconcile(job_id: UUID) -> dict:
             )
             text = path.read_text()
             for entry in entries:
-                if entry.get("summary", "").strip() != text:
-                    continue
                 if entry.get("ts", 0) < publication["prepared_at"].timestamp() * 1000:
                     continue
                 resolved = entry.get("delivery", {}).get("resolved", {})
@@ -141,7 +185,13 @@ def reconcile(job_id: UUID) -> dict:
                     entry.get("delivered") is True
                     and entry.get("deliveryStatus") == "delivered"
                 ):
-                    # The receipt is the actual scheduler transport record, not a claim by the reporter.
+                    summary = entry.get('summary', '').strip()
+                    if summary != text:
+                        if not summary.endswith('…') or not text.startswith(summary[:-1]):
+                            continue
+                        if session_output(entry, store.run_folder(run), job_id) != text:
+                            continue
+                    # Full output equality plus the same run's transport receipt is required.
                     conn.execute(
                         "UPDATE minerva_ideas.publications SET state='delivered',receipt=%s WHERE digest=%s",
                         (
