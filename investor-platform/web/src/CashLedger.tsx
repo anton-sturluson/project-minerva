@@ -6,31 +6,8 @@ import {
   type FormEvent,
 } from "react";
 import { api, errorMessage, type Account } from "./api";
-export type Entry = {
-  id: number;
-  kind: string;
-  effective_date: string;
-  amount: string;
-  currency: string;
-  note: string;
-  created_at: string;
-  created_by: string;
-};
-export type Ledger = { balance: string; currency: string; entries: Entry[] };
-export function exact(value: string) {
-  const [whole, fraction = ""] = value.split(".");
-  const decimals = fraction.replace(/0+$/, "");
-  return (
-    whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") +
-    (decimals ? "." + decimals : ".00")
-  );
-}
-export const today = () => new Date().toISOString().slice(0, 10);
-const labels: Record<string, string> = {
-  opening_cash: "Opening cash",
-  deposit: "Deposit",
-  withdrawal: "Withdrawal",
-};
+import { Trades } from "./Trades";
+import { exact, today, labels, type Entry, type Ledger } from "./records";
 
 export function CashLedger({ account }: { account: Account }) {
   const [ledger, setLedger] = useState<Ledger | null>(null);
@@ -116,6 +93,7 @@ export function CashLedger({ account }: { account: Account }) {
               {account.base_currency} {exact(ledger.balance)}
             </strong>
           </div>
+          <Trades account={account} holdings={ledger.holdings} onSaved={load} />
           <h3>Record cash</h3>
           <form className="entry-form" onSubmit={(e) => void save(e)}>
             <label>
@@ -146,7 +124,7 @@ export function CashLedger({ account }: { account: Account }) {
               />
             </label>
             <label>
-              Amount ({account.base_currency})
+              Cash change ({account.base_currency})
               <input
                 aria-label="Cash amount"
                 required
@@ -185,38 +163,92 @@ export function CashLedger({ account }: { account: Account }) {
             <div
               className="table-scroll"
               tabIndex={0}
-              aria-label="Cash activity"
+              aria-label="Account activity"
             >
               <table>
                 <thead>
                   <tr>
                     <th>Date</th>
                     <th>Entry</th>
-                    <th className="number">Amount ({account.base_currency})</th>
-                    <th>Note</th>
+                    <th className="number">
+                      Cash change ({account.base_currency})
+                    </th>
+                    <th>Details / note</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ledger.entries.map((e) => (
                     <tr key={e.id}>
                       <td>{e.effective_date}</td>
-                      <td>{labels[e.kind] ?? e.kind}</td>
+                      <td>
+                        {labels[e.kind] ?? e.kind}
+                        {e.security && <> · {e.security.ticker}</>}
+                      </td>
                       <td className="number">
-                        {e.kind === "withdrawal" ? "−" : ""}
+                        {["withdrawal", "buy"].includes(e.kind) ? "−" : ""}
                         {exact(e.amount)}
                       </td>
-                      <td>{e.note || "—"}</td>
+                      <td>
+                        {e.security ? (
+                          <details>
+                            <summary>Entry #{e.id}</summary>
+                            <dl className="entry-detail">
+                              <dt>Security</dt>
+                              <dd>
+                                {e.security.ticker} · {e.security.exchange} ·{" "}
+                                {e.currency}
+                              </dd>
+                              <dt>Shares</dt>
+                              <dd>{exact(e.quantity!, 0)}</dd>
+                              {e.price !== null && (
+                                <>
+                                  <dt>Price per share</dt>
+                                  <dd>{exact(e.price)}</dd>
+                                  <dt>Fees</dt>
+                                  <dd>{exact(e.fees)}</dd>
+                                </>
+                              )}
+                              {e.kind === "opening_position" && (
+                                <>
+                                  <dt>Opening total basis</dt>
+                                  <dd>
+                                    {e.cost_basis === null
+                                      ? "Unknown"
+                                      : exact(e.cost_basis)}
+                                  </dd>
+                                </>
+                              )}
+                              {e.kind === "sell" && (
+                                <>
+                                  <dt>Realized P&amp;L (FIFO, after fees)</dt>
+                                  <dd>
+                                    {e.realized_pnl === null
+                                      ? "Unknown: opening basis unavailable"
+                                      : exact(e.realized_pnl)}
+                                  </dd>
+                                </>
+                              )}
+                              <dt>Recorded</dt>
+                              <dd>{e.created_at}</dd>
+                              <dt>Note</dt>
+                              <dd>{e.note || "—"}</dd>
+                            </dl>
+                          </details>
+                        ) : (
+                          e.note || "—"
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : (
-            <p>No cash entries yet.</p>
+            <p>No activity yet.</p>
           )}
         </>
       ) : loading ? (
-        <p>Loading cash records…</p>
+        <p>Loading account records…</p>
       ) : null}
     </div>
   );

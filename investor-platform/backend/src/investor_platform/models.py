@@ -17,7 +17,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -56,9 +56,32 @@ class LedgerEntry(Base):
     __tablename__ = "ledger_entries"
     __table_args__ = (
         UniqueConstraint("account_id", "request_key", name="ledger_request_key"),
-        CheckConstraint("kind IN ('opening_cash','deposit','withdrawal')", name="ledger_kind"),
         CheckConstraint(
-            "amount >= 0 AND (kind = 'opening_cash' OR amount > 0)", name="ledger_amount"
+            "kind IN ('opening_cash','deposit','withdrawal','opening_position','buy','sell')",
+            name="ledger_kind",
+        ),
+        CheckConstraint(
+            "amount >= 0 AND (kind IN ('opening_cash','opening_position','sell') OR amount > 0)",
+            name="ledger_amount",
+        ),
+        CheckConstraint(
+            """
+      (kind IN ('opening_cash','deposit','withdrawal') AND security_id IS NULL
+        AND quantity IS NULL AND price IS NULL AND fees = 0 AND cost_basis IS NULL)
+      OR (kind = 'opening_position' AND security_id IS NOT NULL AND quantity > 0
+        AND quantity IS NOT NULL AND price IS NULL AND fees = 0 AND amount = 0
+        AND (cost_basis IS NULL OR cost_basis >= 0))
+      OR (kind IN ('buy','sell') AND security_id IS NOT NULL AND quantity IS NOT NULL
+        AND quantity > 0 AND price IS NOT NULL AND price > 0 AND fees >= 0 AND cost_basis IS NULL)
+    """,
+            name="entry_shape",
+        ),
+        Index(
+            "one_opening_position",
+            "account_id",
+            "security_id",
+            unique=True,
+            postgresql_where=text("kind = 'opening_position'"),
         ),
         Index("ledger_order", "account_id", "effective_date", "id"),
         Index(
@@ -72,10 +95,31 @@ class LedgerEntry(Base):
     account_id: Mapped[UUID] = mapped_column(ForeignKey("accounts.id"))
     kind: Mapped[str] = mapped_column(String(24))
     effective_date: Mapped[date] = mapped_column(Date)
-    amount: Mapped[Decimal] = mapped_column(Numeric(24, 8))
+    amount: Mapped[Decimal] = mapped_column(Numeric(48, 16))
     currency: Mapped[str] = mapped_column(String(3))
     note: Mapped[str] = mapped_column(String(240))
     created_by: Mapped[UUID] = mapped_column(ForeignKey("owners.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     request_key: Mapped[UUID]
     request_body: Mapped[str] = mapped_column(Text)
+
+    security_id: Mapped[UUID | None] = mapped_column(ForeignKey("securities.id"))
+    security: Mapped["Security | None"] = relationship()
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    fees: Mapped[Decimal] = mapped_column(Numeric(24, 8), default=Decimal(0), server_default="0")
+    cost_basis: Mapped[Decimal | None] = mapped_column(Numeric(24, 8))
+
+
+class Security(Base):
+    __tablename__ = "securities"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "ticker", "exchange", "currency", name="security_identity"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    ticker: Mapped[str] = mapped_column(String(20))
+    exchange: Mapped[str] = mapped_column(String(12))
+    currency: Mapped[str] = mapped_column(String(3))

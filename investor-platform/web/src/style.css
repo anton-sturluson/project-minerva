@@ -535,3 +535,42 @@ td:last-child {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+.positions {
+  margin: 20px 0 25px;
+}
+.positions .form-note {
+  margin: 8px 0 12px;
+}
+.entry-panel {
+  margin: 16px 0;
+  border-block: 1px solid var(--rule);
+  padding: 12px 0;
+}
+summary {
+  cursor: pointer;
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+summary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 4px;
+}
+.entry-detail {
+  min-width: 210px;
+  max-width: 320px;
+  font-size: 12px;
+}
+.entry-detail dt {
+  margin-top: 8px;
+  font-weight: bold;
+}
+.entry-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.balance-line strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}

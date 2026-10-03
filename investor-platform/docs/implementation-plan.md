@@ -1,7 +1,7 @@
 # Investor Platform: one ticket, one PR
 
 Date: 2026-10-01
-Status: IP-001 through IP-003 implemented on feature branches; later tickets remain specifications. No GitHub issues have been created.
+Status: IP-001 through IP-004 implemented on feature branches; later tickets remain specifications. No GitHub issues have been created.
 
 ## Product direction
 
