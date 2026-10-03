@@ -61,9 +61,7 @@ test("shows market hit rate, exclusions, outage recovery, and invalidates after 
   await expect(page.getByTestId("hit-rate-SPY")).toHaveText("50.00%");
   await expect(page.getByTestId("hit-rate-QQQ")).toHaveText("0.00%");
   await expect(page.getByRole("alert")).toBeHidden();
-  await page
-    .getByText("Hit rate method & decision results", { exact: true })
-    .click();
+  await page.getByText("Decision results", { exact: true }).click();
   await expect(page.getByLabel("Hit rate decisions")).toContainText(
     "original purchase dates are unknown",
   );
@@ -72,12 +70,15 @@ test("shows market hit rate, exclusions, outage recovery, and invalidates after 
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  await page.getByRole("link", { name: "[ Activity ]", exact: true }).click();
+  await page.getByText("Record cash", { exact: true }).click();
   await page.getByLabel("Cash amount").fill("1");
   await page.getByLabel("Cash note").fill("Synthetic hit-rate invalidation");
   await page.getByRole("button", { name: "Save cash entry" }).click();
   await expect(
     page.getByText("Cash entry saved.", { exact: true }),
   ).toBeVisible();
+  await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   await expect(page.getByTestId("hit-rate-SPY")).toHaveText("—");
   state = "empty";
   await calculate.click();

@@ -94,25 +94,7 @@ export function HitRate({ accountId }: { accountId: string }) {
         </>
       )}
       <details>
-        <summary>Hit rate method &amp; decision results</summary>
-        <p className="form-note">
-          Each decision runs from no shares to no shares. Benchmark investments
-          match each purchase’s cost (including fees), with FIFO portions
-          exiting on your sale dates. Compare your net dollar P&amp;L with the
-          matched benchmark gain using daily total-return closes. Ties after
-          rounding excess dollars to cents count in the denominator, but are not
-          hits. This is a closing-price approximation, not intraday execution
-          matching.
-        </p>
-        <p className="form-note">
-          Opening positions lack original purchase dates. Positions with
-          distributions, splits, incomplete prices or unsupported listings are
-          excluded; income is not yet linked to individual stocks. Only
-          completed sessions in the past ten years are supported. Provider data
-          is single-source and may be revised. Payoff ratio remains average
-          profitable dollar gain / average absolute dollar loss; its winners are
-          defined by profit, not market outperformance.
-        </p>
+        <summary>Decision results</summary>
         {result && result.episodes.length > 0 && (
           <div
             className="table-scroll"

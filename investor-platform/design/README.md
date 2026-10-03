@@ -63,7 +63,7 @@ The fragment is the exact visual reference. These are the main tokens it uses:
 
 ## Readability update · 3 October 2026
 
-The user requested a top theme control and removal of nonessential text. The app keeps the wordmark, star ornaments, serif type and bracket navigation, while removing slogans, welcome copy and motto badges. A System / Light / Dark selector remembers the local choice. Provisional status, metric labels, dates and actionable errors stay visible; import details and estimate assumptions expand on demand. The standalone study remains the original visual reference.
+The user requested a top theme control and removal of nonessential text. The app keeps the wordmark, star ornaments, serif type and bracket navigation, while removing slogans, welcome copy and motto badges. A System / Light / Dark selector remembers the local choice. Provisional status, metric labels, dates and actionable errors stay visible; methodology and import explanations live in docs. Activity and Research have separate views, and entry forms and activity history fold independently. The standalone study remains the original visual reference.
 
 ## Verification
 

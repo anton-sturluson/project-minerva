@@ -14,7 +14,8 @@ test("records cash, rejects overdraft, and keeps the draft", async ({
   const before = await (
     await request.get(`/api/accounts/${account.id}/ledger`)
   ).json();
-  await page.goto("/#portfolio");
+  await page.goto("/#activity");
+  await page.getByText("Record cash", { exact: true }).click();
   await page.getByLabel("Entry type", { exact: true }).selectOption("deposit");
   await page.getByLabel("Cash amount", { exact: true }).fill("3.25");
   await page
@@ -69,7 +70,8 @@ test("retry after a lost response does not duplicate cash", async ({
   const account = await (await request.get("/api/account")).json();
   const url = `/api/accounts/${account.id}/ledger`;
   const before = await (await request.get(url)).json();
-  await page.goto("/#portfolio");
+  await page.goto("/#activity");
+  await page.getByText("Record cash", { exact: true }).click();
   await page.getByLabel("Entry type", { exact: true }).selectOption("deposit");
   await page.getByLabel("Cash amount", { exact: true }).fill("0.10");
   await page.route(

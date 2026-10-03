@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
 
+import type { Page } from "./App";
 import { CashLedger } from "./CashLedger";
 
-export function Portfolio() {
+export function Portfolio({ page }: { page: Page }) {
   const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
@@ -50,7 +51,8 @@ export function Portfolio() {
       aria-labelledby="portfolio-heading"
     >
       <h1 id="portfolio-heading">
-        <span aria-hidden="true">✳ </span>My portfolio
+        <span aria-hidden="true">✳ </span>
+        {page === "activity" ? "Activity" : "My portfolio"}
       </h1>
       {error && (
         <div className="error" role="alert">
@@ -72,47 +74,7 @@ export function Portfolio() {
             <h3>{account.name}</h3>
             <span>{account.base_currency}</span>
           </div>
-          {account.reconstruction && (
-            <aside
-              className="reconstruction"
-              aria-label="Reconstruction assumptions"
-            >
-              <strong>Testing copy · incomplete history</strong>
-              <details>
-                <summary>Import assumptions &amp; excluded rows</summary>
-                <p>
-                  {account.reconstruction.imported_trades} transactions imported
-                  · {account.reconstruction.skipped.length} rows excluded ·{" "}
-                  {Object.keys(account.reconstruction.opening_positions).length}{" "}
-                  inferred opening positions.
-                </p>
-                <p>
-                  Minimum inferred opening cash: USD{" "}
-                  {account.reconstruction.opening_cash}. This is balancing cash,
-                  not a historical balance.
-                </p>
-                <p>
-                  Original rows are preserved.{" "}
-                  {account.reconstruction.price_discrepancies.length} rows have
-                  inconsistent amounts; fees were not supplied.
-                </p>
-                {Object.entries(account.reconstruction.opening_positions).map(
-                  ([ticker, quantity]) => (
-                    <p key={ticker}>
-                      {ticker}: {quantity} inferred shares, unknown acquisition
-                      date and cost basis.
-                    </p>
-                  ),
-                )}
-                {account.reconstruction.skipped.map((row) => (
-                  <p key={row.row}>
-                    Row {row.row}: {row.reason}
-                  </p>
-                ))}
-              </details>
-            </aside>
-          )}
-          <CashLedger account={account} />
+          <CashLedger account={account} page={page} />
         </>
       ) : (
         <>
