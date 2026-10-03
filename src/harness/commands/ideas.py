@@ -78,7 +78,8 @@ def source(run_id: UUID, ordinal: int, url: str):
     """Archive an original document candidate; this does not approve its thesis."""
     from harness.ideas.documents import attach
 
-    emit(attach(run_id, ordinal, url))
+    with store.run_lock(run_id):
+        emit(attach(run_id, ordinal, url))
 
 
 @app.command("research")
@@ -86,10 +87,11 @@ def source(run_id: UUID, ordinal: int, url: str):
 def research(
     run_id: UUID, ordinal: int, model: str = typer.Option("gemini-2.5-flash-lite")
 ):
-    """Find and verify an original manager source: at most 2 searches/3 documents."""
+    """Find and verify an original manager source: at most 2 searches/6 downloads/3 assessments."""
     from harness.ideas.research import discover
 
-    emit(discover(run_id, ordinal, model=model))
+    with store.run_lock(run_id):
+        emit(discover(run_id, ordinal, model=model))
 
 
 @app.command("extract")
@@ -102,3 +104,29 @@ def extract(
 
     with store.run_lock(run_id):
         emit(extract_view(run_id, ordinal, model=model))
+
+
+@app.command("run")
+@guarded
+def run(
+    limit: int = typer.Option(50, min=1, max=50),
+    model: str = typer.Option("gemini-2.5-flash-lite"),
+):
+    """Discover the latest issue and research its original manager sources."""
+    from harness.ideas.workflow import start
+
+    emit(start(limit=limit, model=model))
+
+
+@app.command("resume")
+@guarded
+def resume(
+    run_id: UUID,
+    limit: int = typer.Option(50, min=1, max=50),
+    model: str = typer.Option("gemini-2.5-flash-lite"),
+    retry_gaps: bool = False,
+):
+    """Continue incomplete work; completed views and known gaps are skipped."""
+    from harness.ideas.workflow import resume as resume_run
+
+    emit(resume_run(run_id, limit=limit, model=model, retry_gaps=retry_gaps))
