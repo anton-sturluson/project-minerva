@@ -202,3 +202,52 @@ for (const currency of ["USD", "EUR"]) {
     expect(calls).toBe(0);
   });
 }
+
+test("shows one holdings table above returns and retains recorded positions during quote failure", async ({
+  page,
+}) => {
+  await page.route("**/ledger", (route) =>
+    route.fulfill({
+      json: {
+        ...ledger,
+        holdings: [
+          {
+            security: {
+              id: "aaa",
+              ticker: "AAA",
+              exchange: "NYSE",
+              currency: "USD",
+            },
+            quantity: "10",
+            cost_basis: "800",
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  const holdings = page.getByLabel("Holdings", { exact: true });
+  await expect(holdings).toHaveCount(1);
+  await expect(holdings).toContainText("83.33%");
+  const allocation = page.getByLabel("Portfolio allocation by market value");
+  await expect(allocation).toContainText("16.67%");
+  const score = await page.getByTestId("payoff-ratio").boundingBox();
+  const table = await holdings.boundingBox();
+  const plot = await page
+    .getByRole("img", { name: /Cumulative portfolio/ })
+    .boundingBox();
+  expect(score!.y).toBeLessThan(table!.y);
+  expect(table!.y).toBeLessThan(plot!.y);
+  await page.route("**/performance", (route) =>
+    route.fulfill({ status: 503, json: { detail: "Synthetic quote outage" } }),
+  );
+  await page.getByRole("button", { name: "Compare performance" }).click();
+  await expect(page.getByRole("alert")).toContainText("Synthetic quote outage");
+  await expect(holdings).toContainText("800.00");
+  await expect(allocation).toBeHidden();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

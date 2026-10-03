@@ -9,6 +9,7 @@ import { api, errorMessage, type Account } from "./api";
 import { TradeScorecard } from "./TradeScorecard";
 import { number, percent } from "./format";
 import { HitRate } from "./HitRate";
+import { Holdings } from "./Holdings";
 import { type Ledger } from "./records";
 
 type Point = {
@@ -19,7 +20,7 @@ type Point = {
   SPY: string;
   QQQ: string;
 };
-type Report = {
+export type Report = {
   provisional?: boolean;
   assumptions?: string[];
   modeled_income?: string;
@@ -120,199 +121,7 @@ export function Tracker({
     void compare(start, end);
   }
   return (
-    <section
-      id="performance"
-      className="tracker"
-      aria-labelledby="performance-heading"
-    >
-      <h2 id="performance-heading">
-        {account.reconstruction
-          ? "Provisional portfolio vs. the market"
-          : "Portfolio vs. the market"}
-      </h2>
-      <form className="entry-form" onSubmit={submit}>
-        <label>
-          From
-          <input
-            aria-label="Performance start"
-            type="date"
-            required
-            value={start}
-            min={ledger.entries[0]?.effective_date}
-            max={end}
-            onChange={(e) => {
-              setStart(e.target.value);
-              setReport(null);
-              setError("");
-            }}
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Through
-          <input
-            aria-label="Performance end"
-            type="date"
-            required
-            value={end}
-            min={start}
-            max={yesterday()}
-            onChange={(e) => {
-              setEnd(e.target.value);
-              setReport(null);
-              setError("");
-            }}
-            disabled={busy}
-          />
-        </label>
-        <button
-          disabled={
-            busy ||
-            !ledger.entries.length ||
-            start >= end ||
-            account.base_currency !== "USD"
-          }
-          type="submit"
-        >
-          {busy
-            ? "Fetching closes…"
-            : error
-              ? "Retry comparison"
-              : "Compare performance"}
-        </button>
-      </form>
-      {account.base_currency !== "USD" && (
-        <p className="form-note">
-          Index comparisons currently support USD accounts only.
-        </p>
-      )}
-      {(!ledger.entries.length || start >= end) && (
-        <p className="form-note">
-          A comparison needs at least two completed market sessions.
-        </p>
-      )}
-      {busy && <p role="status">Loading portfolio and index returns…</p>}
-      {error && (
-        <p role="alert" className="error">
-          {error} Your saved records are unchanged.
-        </p>
-      )}
-      {report && (
-        <>
-          <p className="report-date">
-            {report.start} — {report.end} · {report.source}
-          </p>
-          {report.warnings.map((w) => (
-            <p key={w} role="alert" className="error">
-              {w} Portfolio return is withheld.
-            </p>
-          ))}
-          <dl className="scorecard">
-            <div>
-              <dt>Closing value (USD)</dt>
-              <dd>{number(report.value)}</dd>
-            </div>
-            <div>
-              <dt>
-                {report.provisional
-                  ? "Estimated portfolio return"
-                  : "Portfolio return"}
-              </dt>
-              <dd>{percent(report.return)}</dd>
-            </div>
-            <div>
-              <dt>S&amp;P 500 · SPY</dt>
-              <dd>{percent(report.SPY)}</dd>
-            </div>
-            <div>
-              <dt>Nasdaq-100 · QQQ</dt>
-              <dd>{percent(report.QQQ)}</dd>
-            </div>
-          </dl>
-          <p>
-            Excess return vs. S&amp;P 500 (SPY):{" "}
-            {report.excess_spy === null
-              ? "—"
-              : `${number(String(Number(report.excess_spy) * 100))} pp`}{" "}
-            · Nasdaq-100 (QQQ):{" "}
-            {report.excess_qqq === null
-              ? "—"
-              : `${number(String(Number(report.excess_qqq) * 100))} pp`}
-          </p>
-          <ReturnChart series={report.series} />
-          <div
-            className="table-scroll"
-            tabIndex={0}
-            aria-label="Closing valuations"
-          >
-            <table>
-              <thead>
-                <tr>
-                  <th>Security</th>
-                  <th className="number">Shares</th>
-                  <th className="number">Close</th>
-                  <th className="number">Value (USD)</th>
-                  <th className="number">Weight</th>
-                  <th className="number">Unrealized P&amp;L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.holdings.map((h) => (
-                  <tr key={`${h.ticker}-${h.exchange}`}>
-                    <td>
-                      {h.ticker} · {h.exchange}
-                    </td>
-                    <td className="number">{number(h.quantity, 4)}</td>
-                    <td className="number">{number(h.close)}</td>
-                    <td className="number">{number(h.value)}</td>
-                    <td className="number">{percent(h.weight)}</td>
-                    <td className="number">{number(h.unrealized_pnl)}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td>Cash</td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td className="number">{number(report.cash)}</td>
-                  <td>—</td>
-                  <td>—</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <details>
-            <summary>Daily values</summary>
-            <div
-              className="table-scroll"
-              tabIndex={0}
-              aria-label="Daily performance"
-            >
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Value (USD)</th>
-                    <th>Portfolio</th>
-                    <th>SPY</th>
-                    <th>QQQ</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.series.map((p) => (
-                    <tr key={p.date}>
-                      <td>{p.date}</td>
-                      <td>{number(p.value)}</td>
-                      <td>{percent(p.portfolio)}</td>
-                      <td>{percent(p.SPY)}</td>
-                      <td>{percent(p.QQQ)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        </>
-      )}
+    <>
       <div id="decisions" className="decisions">
         <TradeScorecard account={account} ledger={ledger} />
         {!account.reconstruction && (
@@ -322,7 +131,163 @@ export function Tracker({
           />
         )}
       </div>
-    </section>
+
+      <Holdings ledger={ledger} report={report} />
+      <section
+        id="performance"
+        className="tracker"
+        aria-labelledby="performance-heading"
+      >
+        <h2 id="performance-heading">
+          {account.reconstruction
+            ? "Provisional portfolio vs. the market"
+            : "Portfolio vs. the market"}
+        </h2>
+        <form className="entry-form" onSubmit={submit}>
+          <label>
+            From
+            <input
+              aria-label="Performance start"
+              type="date"
+              required
+              value={start}
+              min={ledger.entries[0]?.effective_date}
+              max={end}
+              onChange={(e) => {
+                setStart(e.target.value);
+                setReport(null);
+                setError("");
+              }}
+              disabled={busy}
+            />
+          </label>
+          <label>
+            Through
+            <input
+              aria-label="Performance end"
+              type="date"
+              required
+              value={end}
+              min={start}
+              max={yesterday()}
+              onChange={(e) => {
+                setEnd(e.target.value);
+                setReport(null);
+                setError("");
+              }}
+              disabled={busy}
+            />
+          </label>
+          <button
+            disabled={
+              busy ||
+              !ledger.entries.length ||
+              start >= end ||
+              account.base_currency !== "USD"
+            }
+            type="submit"
+          >
+            {busy
+              ? "Fetching closes…"
+              : error
+                ? "Retry comparison"
+                : "Compare performance"}
+          </button>
+        </form>
+        {account.base_currency !== "USD" && (
+          <p className="form-note">
+            Index comparisons currently support USD accounts only.
+          </p>
+        )}
+        {(!ledger.entries.length || start >= end) && (
+          <p className="form-note">
+            A comparison needs at least two completed market sessions.
+          </p>
+        )}
+        {busy && <p role="status">Loading portfolio and index returns…</p>}
+        {error && (
+          <p role="alert" className="error">
+            {error} Your saved records are unchanged.
+          </p>
+        )}
+        {report && (
+          <>
+            <p className="report-date">
+              {report.start} — {report.end} · {report.source}
+            </p>
+            {report.warnings.map((w) => (
+              <p key={w} role="alert" className="error">
+                {w} Portfolio return is withheld.
+              </p>
+            ))}
+            <dl className="scorecard">
+              <div>
+                <dt>Closing value (USD)</dt>
+                <dd>{number(report.value)}</dd>
+              </div>
+              <div>
+                <dt>
+                  {report.provisional
+                    ? "Estimated portfolio return"
+                    : "Portfolio return"}
+                </dt>
+                <dd>{percent(report.return)}</dd>
+              </div>
+              <div>
+                <dt>S&amp;P 500 · SPY</dt>
+                <dd>{percent(report.SPY)}</dd>
+              </div>
+              <div>
+                <dt>Nasdaq-100 · QQQ</dt>
+                <dd>{percent(report.QQQ)}</dd>
+              </div>
+            </dl>
+            <p>
+              Excess return vs. S&amp;P 500 (SPY):{" "}
+              {report.excess_spy === null
+                ? "—"
+                : `${number(String(Number(report.excess_spy) * 100))} pp`}{" "}
+              · Nasdaq-100 (QQQ):{" "}
+              {report.excess_qqq === null
+                ? "—"
+                : `${number(String(Number(report.excess_qqq) * 100))} pp`}
+            </p>
+            <ReturnChart series={report.series} />
+            <details>
+              <summary>Daily values</summary>
+              <div
+                className="table-scroll"
+                tabIndex={0}
+                aria-label="Daily performance"
+              >
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Value (USD)</th>
+                      <th>Portfolio</th>
+                      <th>SPY</th>
+                      <th>QQQ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.series.map((p) => (
+                      <tr key={p.date}>
+                        <td>{p.date}</td>
+                        <td>{number(p.value)}</td>
+                        <td>{percent(p.portfolio)}</td>
+                        <td>{percent(p.SPY)}</td>
+                        <td>{percent(p.QQQ)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </>
+        )}
+      </section>
+    </>
   );
 }
 function ReturnChart({ series }: { series: Point[] }) {
