@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import socket
 from collections import deque
 from datetime import date
 from urllib.parse import urljoin, urlsplit
@@ -56,9 +58,9 @@ def search(query: str) -> list[dict]:
 def validate_match(match: Match, parts: list[dict], issue_date: date) -> None:
     if not match.accepted:
         raise ValueError(match.reason or "Not a matching original")
-    text = " ".join(" ".join(p["text"].split()) for p in parts)
+    text = " ".join(" ".join(p["text"].split()) for p in parts).casefold()
     for field in ("publisher_quote", "fund_quote", "company_quote", "period_quote"):
-        quote = " ".join(getattr(match, field).split())
+        quote = " ".join(getattr(match, field).split()).casefold()
         if not quote or quote not in text:
             raise ValueError(f"{field} must be a verbatim source passage")
     if not match.period or match.period not in match.period_quote:
@@ -71,9 +73,9 @@ def validate_match(match: Match, parts: list[dict], issue_date: date) -> None:
         raise ValueError("Document is older than the six-month research window")
     if (
         not match.fund
-        or match.fund not in match.fund_quote
+        or " ".join(match.fund.casefold().split()) not in " ".join(match.fund_quote.casefold().split())
         or not match.company
-        or match.company not in match.company_quote
+        or " ".join(match.company.casefold().split()) not in " ".join(match.company_quote.casefold().split())
     ):
         raise ValueError(
             "Fund and company must appear in their source identity passages"
@@ -102,11 +104,16 @@ def linked_letters(folder, document, year):
     if not path.exists():
         return []
     tree = html.fromstring(path.read_bytes())
+    for node in tree.xpath('//nav | //footer | //header'):
+        node.drop_tree()
     links = []
     for node in tree.xpath("//a[@href]"):
         url = urljoin(document["url"], node.get("href"))
         label = " ".join(node.text_content().split())
-        if ".pdf" in url.lower() and str(year) in (url + label):
+        target = (url + " " + label).lower()
+        is_letter = re.search(r"letter|commentary|qcommentary|q[1-4]|[1-4]q(?:20)?[0-9]{2}", target)
+        is_legal = re.search(r"form.?crs|crs-|prospectus|fact.?sheet|privacy", target)
+        if ".pdf" in url.lower() and str(year) in (url + label) and is_letter and not is_legal:
             if url not in links:
                 links.append(url)
     return links[:2]
@@ -180,7 +187,7 @@ def discover(
                             (Jsonb(document), run_id, ordinal),
                         )
                     return document
-                except (ValueError, httpx.HTTPError) as exc:
+                except (ValueError, httpx.HTTPError, socket.gaierror) as exc:
                     trace["candidates"].append(
                         {"url": url, "accepted": False, "reason": str(exc)[:500]}
                     )
