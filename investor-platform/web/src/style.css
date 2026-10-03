@@ -578,3 +578,17 @@ summary:focus-visible {
   font-weight: bold;
   margin-bottom: 0.5rem;
 }
+
+.theme-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.theme-picker select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 4px;
+}
