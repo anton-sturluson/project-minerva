@@ -225,12 +225,37 @@ test("shows one holdings table above returns and retains recorded positions duri
       },
     }),
   );
+  await page.route("**/performance", (route) =>
+    route.fulfill({
+      json: {
+        ...performance,
+        holdings: performance.holdings.map((h) => ({
+          ...h,
+          basis: "800",
+          unrealized_pnl: "200",
+        })),
+      },
+    }),
+  );
   await page.goto("/");
   const holdings = page.getByLabel("Holdings", { exact: true });
   await expect(holdings).toHaveCount(1);
   await expect(holdings).toContainText("83.33%");
   const allocation = page.getByLabel("Portfolio allocation by market value");
   await expect(allocation).toContainText("16.67%");
+  await expect(allocation.getByLabel("AAA · NYSE allocation")).toContainText(
+    "80.00%",
+  );
+  await expect(allocation.getByLabel("Cash allocation")).toContainText(
+    "20.00%",
+  );
+  await expect(
+    holdings.getByRole("row").filter({ hasText: "AAA" }),
+  ).toContainText("80.00%");
+  await page.getByLabel("Theme", { exact: true }).selectOption("dark");
+  await expect(
+    holdings.getByRole("columnheader", { name: "Cost %", exact: true }),
+  ).toBeVisible();
   const score = await page.getByTestId("payoff-ratio").boundingBox();
   const table = await holdings.boundingBox();
   const plot = await page
@@ -244,10 +269,34 @@ test("shows one holdings table above returns and retains recorded positions duri
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toContainText("Synthetic quote outage");
   await expect(holdings).toContainText("800.00");
+  await expect(
+    holdings.getByRole("row").filter({ hasText: "AAA" }),
+  ).toContainText("44.44%");
   await expect(allocation).toBeHidden();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("withholds all cost weights when any position has unknown basis", async ({
+  page,
+}) => {
+  await page.route("**/ledger", (route) => route.fulfill({ json: ledger }));
+  await page.goto("/");
+  await expect(page.getByLabel("Holdings", { exact: true })).toContainText(
+    "AAA",
+  );
+  await expect(
+    page.getByText(
+      "Cost weights unavailable · some positions have unknown basis.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  const allocation = page.getByLabel("Portfolio allocation by market value");
+  await expect(allocation.getByLabel("AAA · NYSE allocation")).toContainText(
+    "—",
+  );
+  await expect(allocation.getByLabel("Cash allocation")).toContainText("—");
 });
