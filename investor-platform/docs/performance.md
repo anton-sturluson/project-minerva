@@ -14,7 +14,13 @@ The first available session establishes the baseline (its trading gain is exclud
 
 Gross dividends/capital-gain distributions must be entered as investment income on their ex-dates. The tracker compares recorded daily income to provider distributions on prior-day shares, including dates before the selected period. Differences above one cent withhold portfolio return. No income is automatically invented or posted. This is a deliberately limited reconciliation: withholding taxes, payment-date receivables, interest mixed with dividends, special entitlement rules and missing provider events require further accounting. It is not evidence that every corporate action was captured. Benchmark distributions are reinvested; portfolio distributions remain recorded cash.
 
-Shares held across a provider-reported split block the report until split accounting exists. Provider identity, currency and instrument type are validated. Histories are fetched on request, not cached or saved; source and fetch time are displayed. **Single-provider data is unverified against an independent source and may be revised.** Ledger changes and date changes clear old reports. No future session or intraday quote is presented as a completed close.
+Shares held across a provider-reported split block the report until split accounting exists. Provider identity, currency and instrument type are validated. Histories are fetched on request, not cached or saved; source and report dates are displayed; fetch time is retained in the API response. **Single-provider data is unverified against an independent source and may be revised.** Ledger changes and date changes clear old reports. No future session or intraday quote is presented as a completed close.
+
+## CAGR and stock exclusions
+
+CAGR annualizes the geometrically linked, flow-adjusted cumulative return: `(1 + return) ** (365.25 / elapsed calendar days) - 1`. The actual first and last displayed sessions define elapsed days; this project uses an ACT/365.25 convention. It does not annualize the raw change in portfolio balance, which includes contributions. The same formula applies to SPY, QQQ and a valid scenario. A withheld cumulative return also withholds CAGR. Periods shorter than 365 elapsed days display no CAGR; this avoids presenting an extrapolated short-period return as annual performance. This follows GIPS guidance on avoiding sub-year annualization, without claiming compliance. ([GIPS partial-period guidance](https://www.gipsstandards.org/qadatabase/5001/))
+
+Select stocks under **Exclude stocks**, then compare. The original portfolio stays visible; a fourth chart line and summary row show the hypothetical cash alternative. Clearing exclusions and comparing restores the ordinary view. See [ADR 0002](decisions/0002-stock-exclusion-scenarios.md) for opening-position valuation, income attribution and funding rules. Hypotheticals never write ledger records, change real holdings or recalculate the trade scorecard.
 
 ## Trade scorecard
 
@@ -30,6 +36,7 @@ These are project conventions; average-win/average-loss is a standard profit/los
 ## References
 
 ### Methodology
+- [GIPS partial-period guidance](https://www.gipsstandards.org/qadatabase/5001/) — avoiding annualization for periods under one year.
 - [GIPS handbook](https://www.gipsstandards.org/standards/gips-standards-for-firms/gips-standards-handbook-for-firms/) — cash-flow-aware return measurement and geometric linking.
 - [QuantConnect glossary](https://www.quantconnect.com/docs/v2/writing-algorithms/key-concepts/glossary) — average win/loss and win-rate terminology.
 
