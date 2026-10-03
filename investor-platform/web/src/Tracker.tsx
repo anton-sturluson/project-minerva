@@ -103,6 +103,7 @@ export function Tracker({
     setError("");
     setBusy(false);
     if (
+      !account.reconstruction &&
       ledger.entries.length &&
       from < through &&
       account.base_currency === "USD"
@@ -111,11 +112,30 @@ export function Tracker({
     return () => {
       generation.current += 1;
     };
-  }, [account.base_currency, ledger, compare]);
+  }, [account.base_currency, account.reconstruction, ledger, compare]);
   function submit(e: FormEvent) {
     e.preventDefault();
     void compare(start, end);
   }
+  if (account.reconstruction)
+    return (
+      <section
+        id="performance"
+        className="tracker"
+        aria-labelledby="performance-heading"
+      >
+        <h2 id="performance-heading">Provisional trade statistics</h2>
+        <p>
+          Portfolio vs. index returns are unavailable until opening balances and
+          cash flows are verified. These trade statistics describe only the
+          imported decisions; missing trades and rounded source amounts can
+          change them.
+        </p>
+        <div id="decisions">
+          <TradeScorecard account={account} ledger={ledger} />
+        </div>
+      </section>
+    );
   return (
     <section
       id="performance"

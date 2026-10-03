@@ -97,6 +97,10 @@ Open **Record a position or trade** below Holdings. Enter an exchange-qualified 
 
 The forms record activity only; they never place orders. The development demo uses a separate synthetic database. Portfolio migration and real-data onboarding remain separate tasks.
 
+## Transaction reconstruction
+
+The [transaction import CLI](docs/transaction-import.md) downloads or reads a source export, previews the reconstruction and writes a separate testing database. It preserves fractional shares, raw evidence, exclusions and inferred balances. Incomplete imports are labeled and cannot report portfolio returns.
+
 ## Portfolio tracker
 
 The win/payoff scorecard loads from saved records and needs no market feed. It groups each security's flat-to-flat position into one closed trade; partial sales stay in that episode. It shows win rate, average dollar win/loss, payoff ratio, and excluded open/unknown-basis positions. FIFO P&L includes transaction fees and excludes dividends.

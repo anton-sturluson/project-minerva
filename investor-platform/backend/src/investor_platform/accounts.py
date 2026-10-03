@@ -23,10 +23,21 @@ class AccountInput(BaseModel):
     base_currency: Currency
 
 
+class ReconstructionView(BaseModel):
+    warning: str
+    source_sha256: str
+    imported_trades: int
+    skipped: list[dict]
+    opening_cash: str
+    opening_positions: dict[str, str]
+    price_discrepancies: list[int]
+
+
 class AccountView(AccountInput):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     created_at: datetime
+    reconstruction: ReconstructionView | None = None
 
 
 def owned_account(session, actor, account_id, *, lock=False):

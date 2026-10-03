@@ -34,4 +34,13 @@ export type Account = {
   name: string;
   base_currency: string;
   created_at: string;
+  reconstruction?: {
+    warning: string;
+    source_sha256: string;
+    imported_trades: number;
+    skipped: { row: number; reason: string }[];
+    opening_cash: string;
+    opening_positions: Record<string, string>;
+    price_discrepancies: number[];
+  } | null;
 };

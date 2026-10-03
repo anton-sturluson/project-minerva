@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
+import { number } from "./format";
 import { exact, today, type Entry, type Holding } from "./records";
 
 export function Trades({
@@ -65,7 +66,10 @@ export function Trades({
       <h3 id="holdings-heading">Holdings</h3>
       <p className="form-note">
         Long-only equities in {account.base_currency}. Cost basis is not market
-        value. Closing market values are available in Performance.
+        value.{" "}
+        {account.reconstruction
+          ? "Reconstructed from available transactions; missing activity can change these quantities. USD amounts are rounded for display."
+          : "Closing market values are available in Performance."}
       </p>
       {holdings.length ? (
         <div className="table-scroll" tabIndex={0} aria-label="Holdings">
@@ -87,7 +91,11 @@ export function Trades({
                   <td>{h.security.exchange}</td>
                   <td className="number">{exact(h.quantity, 0)}</td>
                   <td className="number">
-                    {h.cost_basis === null ? "Unknown" : exact(h.cost_basis)}
+                    {h.cost_basis === null
+                      ? "Unknown"
+                      : account.reconstruction
+                        ? number(h.cost_basis)
+                        : exact(h.cost_basis)}
                   </td>
                 </tr>
               ))}
