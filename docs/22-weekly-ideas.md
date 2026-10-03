@@ -61,3 +61,15 @@ PR 6 adds the third and final table, `publications`: payload hash, run/job IDs, 
 Reading the live rendered output caught false approvals that unit tests had not exposed: sibling-fund attribution, manager names substituted for companies, and performance-only views. Deterministic issuer/fund checks now reject these, and semantic review explicitly requires investment reasoning. Identity assessment also selects source block IDs rather than copying quotes. Source text remains on disk; the database stores compact references. Existing original URLs from the earlier work were rechecked as candidate inputs, not accepted without verification.
 
 After these stricter gates and rechecking supplied originals, the current issue has 12 eligible views and 38 gaps. This supersedes the earlier 14-view count. Postgres duplicate/receipt lifecycle tests passed with isolated rows removed afterward; no Slack message was sent during those tests.
+
+## OpenClaw deployment
+
+Run `uv sync --extra jobwatch` once in the reviewed checkout. Supply `MINERVA_DATABASE_URL` and `MINERVA_IDEAS_ROOT` in its ignored `.env.local`, or in the scheduled environment. Brave and Gemini keys are inherited from the Gateway environment. The scheduled wrapper uses the installed `.venv/bin/minerva`; it does not resolve/install dependencies on each run.
+
+```sh
+scripts/run_weekly_ideas.sh EXISTING_JOB_UUID
+```
+
+Keep the existing agent-turn job, ownership, schedule, tools and Slack route. Its prompt must execute that one command and relay stdout exactly; it must not summarize the digest into a receipt. `NO_REPLY` means a duplicate or no eligible content, not an invitation to post an acknowledgement. On failure, report the error without claiming delivery. Use a low-cost reporting model for live tests.
+
+After a completed job, `minerva ideas reconcile JOB_UUID` confirms the exact delivered digest from durable transport records. The next scheduled invocation also reconciles before preparing a publication. Unknown delivery requires investigation; do not delete publication rows to force a resend. Keep a configuration backup before changing the existing job, and restore it if live acceptance fails.

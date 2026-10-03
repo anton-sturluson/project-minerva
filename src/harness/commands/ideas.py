@@ -158,3 +158,34 @@ def reconcile(job_id: UUID):
     from harness.ideas.publication import reconcile as reconcile_delivery
 
     emit(reconcile_delivery(job_id))
+
+
+@app.command("weekly")
+@guarded
+def weekly(
+    job_id: UUID,
+    model: str = typer.Option("gemini-2.5-flash-lite"),
+    limit: int = typer.Option(50, min=1, max=50),
+):
+    """Scheduled entry point: resume research and print only a prepared digest."""
+    from harness.ideas.publication import (
+        prepare as prepare_digest,
+    )
+    from harness.ideas.publication import (
+        reconcile as reconcile_delivery,
+    )
+    from harness.ideas.workflow import start
+
+    reconcile_delivery(job_id)
+    result = start(limit=limit, model=model)
+    run_id = UUID(result["run_id"])
+    if (
+        result["counts"]["failed"]
+        or result["counts"]["pending"]
+        or result["counts"]["sourced"]
+    ):
+        raise ValueError(
+            f"Research incomplete; resume run {run_id}. No publication prepared."
+        )
+    with store.run_lock(run_id):
+        typer.echo(prepare_digest(run_id, job_id))
