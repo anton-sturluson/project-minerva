@@ -507,6 +507,51 @@ summary:focus-visible {
 .tracker details {
   margin-top: 14px;
 }
+.report-date {
+  font:
+    12px/1.5 "Courier New",
+    monospace;
+  background: var(--lilac);
+  padding: 8px;
+  margin-top: 18px;
+}
+.return-chart {
+  margin: 18px 0;
+}
+.return-chart figcaption {
+  font:
+    12px/1.5 Arial,
+    sans-serif;
+}
+.return-chart svg {
+  width: 100%;
+  height: auto;
+  color: var(--ink);
+}
+.return-chart text {
+  fill: currentColor;
+  font:
+    12px Arial,
+    sans-serif;
+}
+.portfolio-line {
+  stroke: var(--blue);
+}
+.spy-line {
+  stroke: var(--plum);
+}
+.qqq-line {
+  stroke: var(--success);
+}
+.portfolio-key {
+  color: var(--blue);
+}
+.spy-key {
+  color: var(--plum);
+}
+.qqq-key {
+  color: var(--success);
+}
 @media (max-width: 650px) {
   .scorecard {
     grid-template-columns: repeat(2, minmax(0, 1fr));

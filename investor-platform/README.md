@@ -2,7 +2,7 @@
 
 A local investor workspace inside Minerva. The app will own its PostgreSQL data; any migration from existing portfolio records is a one-time operation, not an application dependency.
 
-IP-004 adds opening positions, buys, sells, FIFO cost tracking, and a derived holdings table. Cash and positions commit together; account records survive restarts.
+Accounts, cash, equity trades, investment income and FIFO cost tracking live in PostgreSQL. The tracker adds dated market valuations, SPY/QQQ comparisons and closed-position statistics. Cash and positions commit together; account records survive restarts.
 
 The interface uses the approved Homepage Club direction: warm paper, a serif masthead, bracket links, double rules, and small early-web badges. The [design reference and project skill](https://github.com/anton-sturluson/project-minerva/pull/103) are maintained separately from this app foundation.
 
@@ -73,7 +73,7 @@ Browser tests start both servers if needed, or reuse local servers on the docume
 - [Architecture](docs/architecture.md): stack rationale and future boundaries, not a list of dependencies to install now.
 - Verification: [IP-001 shell](docs/ip-001-verification.md), [IP-002 account](docs/ip-002-verification.md), [IP-003 cash](docs/ip-003-verification.md), and [IP-004 trades](docs/ip-004-verification.md).
 
-No imports from the legacy harness, sheet adapters, or seeded portfolio values are included. Hit-rate comparisons optionally fetch public daily history from Yahoo Finance. Hosted authentication and deployment are separate later work; the current launch command is local-only.
+No imports from the legacy harness, sheet adapters, or seeded portfolio values are included. The optional comparison fetches public daily history from Yahoo Finance. Hosted authentication and deployment are separate later work; the current launch command is local-only.
 
 ## Cash ledger rules
 
@@ -93,17 +93,22 @@ Open **Record a position or trade** below Holdings. Enter an exchange-qualified 
 - Sales consume the oldest shares first (FIFO), ordered by effective date then saved sequence. Buy fees are included in lot basis and sell fees reduce proceeds. A partial lot's allocated basis rounds half-even at 16 decimal places; its final sale consumes the exact remaining basis so residuals reconcile.
 - Unknown opening basis stays unknown. A sale that consumes any unknown-basis shares has no reported realized gain. Remaining holdings show unknown basis until those shares are exhausted. Sale details include FIFO realized P&L only when all consumed basis is known.
 - Cash and shares must stay nonnegative throughout the full history, including after backdated writes. All cash and trade writers use the same account lock. A rejected write also rolls back any newly created security.
-- Holdings and cash are derived from immutable entries. No editable balances, market valuations, returns, dividends, splits, shorts, margin, options, or foreign-currency trades in this increment. Corrections remain IP-005; backup/restore remains IP-007.
+- Holdings and cash are derived from immutable entries. No editable balances, splits, shorts, margin, options, or foreign-currency trades. Investment income is entered through the cash form; valuation and return rules are below. Corrections remain IP-005; backup/restore remains IP-007.
 
 The forms record activity only; they never place orders. The development demo uses a separate synthetic database. Portfolio migration and real-data onboarding remain separate tasks.
 
-## Trade scorecard
+## Portfolio tracker
 
-Win rate, average dollar win/loss and payoff ratio use fully closed position episodes. Partial sales remain one episode; FIFO gains include fees and exclude dividends. Open positions and unknown basis are excluded and counted separately. Breakevens count in the win-rate denominator. Both wins and losses are required for a payoff ratio. Expand the scorecard for closed-position detail and conventions. This increment uses saved records only; benchmark comparisons follow in a stacked PR.
+The win/payoff scorecard loads from saved records and needs no market feed. It groups each security's flat-to-flat position into one closed trade; partial sales stay in that episode. It shows win rate, average dollar win/loss, payoff ratio, and excluded open/unknown-basis positions. FIFO P&L includes transaction fees and excludes dividends.
+
+Choose **From / Through**, then **Compare performance** to fetch completed daily closes. The result includes portfolio value, cash, holdings weights, unrealized P&L, a daily return chart/table, and excess return against SPY and QQQ total-return proxies. The period ends before today in New York; actual baseline/end dates are shown. Reports disappear after dates or ledger records change. Market requests do not alter ledger records and are not saved as audit snapshots.
+
+This first feed supports USD equities/ETFs on NYSE, NASDAQ, NYSEARCA/ARCA, AMEX and BATS (plus XNYS/XNAS/ARCX aliases), with matching provider listing metadata. It supports at most 48 portfolio securities and ten years of ledger history. No API key or new market-data dependency is needed. Only public tickers and date ranges go to Yahoo; account names, quantities and transactions stay local. A provider outage leaves record entry and the scorecard usable.
+
+Returns use a documented end-of-day cash-flow convention. Missing prices, positions spanning splits, unsupported listings/currencies, and undefined zero-balance periods block comparisons. Missing gross distributions withhold portfolio return; record investment income on the ex-date and reconcile against broker history. This uses book accounting, not settled broker cash or payment-date receivables. These checks do not establish complete corporate-action coverage. Quotes are single-provider and revisable. This is local exploratory tracking, not an audited return or a data-redistribution service.
+
+See [calculation definitions and sources](docs/performance.md). Corrections, split accounting, verified backup/restore and real-portfolio migration remain separate work.
 
 ## Decision hit rate
 
 Alongside payoff ratio and win rate, **Calculate hit rate** measures how many fully closed investment decisions beat SPY and QQQ over matching holding periods. A profitable decision can underperform the market. Partial exits count as one decision; unavailable comparisons are explicitly excluded. The report fetches market data on demand, while the original payoff scorecard remains available without it. See [definitions, matched-capital calculations and exclusions](docs/hit-rate.md).
-## Investment income
-
-Use **Investment income** in the cash form to distinguish portfolio earnings from external deposits. Income is positive, currency-matched, and protected by the same account lock and retry key as other cash entries. It does not change trade win/payoff statistics. Later return comparisons treat it as investment return. Gross dividends use ex-date book accounting for those comparisons; these book balances do not represent settled broker cash or a payment-date receivable ledger.

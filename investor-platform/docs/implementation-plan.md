@@ -1,7 +1,17 @@
 # Investor Platform: one ticket, one PR
 
 Date: 2026-10-01
-Status: IP-001 through IP-004 implemented on feature branches; later tickets remain specifications. No GitHub issues have been created.
+Status: IP-001 through IP-004 implemented; a cleanup, trade scorecard, investment income and benchmark comparison are stacked above them. No GitHub issues have been created.
+
+## Current delivery order
+
+The user subsequently asked to review/cut the existing stack, then build market comparisons and payoff statistics. This supersedes the original strict sequence below:
+
+1. Review cleanup: remove health polling/placeholder sidebar, unused styles and eight status-only browser checks; retain accounting, ownership and retry tests.
+2. Portfolio tracker, delivered as three stacked PRs: trade scorecard (#108), investment income, then daily valuations and SPY/QQQ total-return comparisons. Each increment is browser-tested with a separate synthetic portfolio. See [methodology](performance.md).
+3. Next: atomic corrections, split/corporate-action accounting, verified backup/restore, then a reconciled one-time portfolio migration. These remain unfinished.
+
+The original IP-006 manual-price-only scope is superseded by the tracker. No unused price CRUD, import adapter, scheduler, auth framework or cache service is being built. Prior verification notes describe their original increments, not current screens.
 
 ## Product direction
 
