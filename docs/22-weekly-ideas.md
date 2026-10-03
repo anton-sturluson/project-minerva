@@ -1,79 +1,100 @@
 # Original-source weekly ideas
 
-HF Best Ideas supplies company/fund leads only. Original manager letters supply thesis evidence. The workflow is part of `minerva ideas`.
+`minerva ideas` uses HF Best Ideas only to discover company/fund leads. Investment reasoning comes from original manager documents. It uses the existing shared Postgres server and ordinary report files.
 
 ## Storage
 
-Set `MINERVA_DATABASE_URL` to the existing shared Postgres connection. Minerva owns only schema `minerva_ideas`; it does not modify OpenClaw tables. Credentials are not printed. Set `MINERVA_IDEAS_ROOT` to the report root (default `hard-disk/reports/05-weekly-ideas`).
+Set `MINERVA_DATABASE_URL` to the shared database connection and `MINERVA_IDEAS_ROOT` to the canonical report directory. The default report directory is `hard-disk/reports/05-weekly-ideas`. Credentials belong in the scheduled environment or an ignored deployment-owned `.env.local`, never in Git or an automation prompt.
 
-The initial schema has two tables: `runs` (issue identity and creation time) and `items` (roster identity and current work state). Source material and readable exports live under `<root>/<issue-date>/runs/<run-id>/research/`. Paths are derived from the configured root. There is no company master, alias registry, generic task queue, or event store.
+Minerva owns only the `minerva_ideas` schema, with three tables:
 
-Files are finalized before their database records are committed. Interrupted work may leave unregistered files; it cannot commit a partial roster. Existing artifact files cannot be silently replaced.
+| Table | Purpose |
+| --- | --- |
+| `runs` | Issue URL/date and run identity. |
+| `items` | Roster ordinal, company/fund/symbol, current state/error, compact document identity and view references. |
+| `publications` | Payload hash, run/job IDs, destination, attempt state and compact delivery receipt. |
+
+Original PDF/HTML, readable text, search/model traces and publication payloads live beneath `<root>/<issue-date>/runs/<run-id>/`. Source materials are co-located in `research/`. Database evidence points to source blocks; it does not duplicate full documents. There is no company master, speculative alias registry, general task queue or event store.
+
+Files are finalized before their database references are committed. Artifact writes cannot silently replace existing content. Paths are relative to the configured report root. `init` applies additive schema changes without touching other schemas.
+
+## Research and evidence
+
+Each lead has at most two searches, six downloads including archive navigation, and three identity assessments. The default model is `gemini-2.5-flash-lite`; `--model` can override it. Model calls have bounded time/output. Provider failures are operational errors, not unavailable-source claims.
+
+Company and fund identity must match the discovery lead. Distinctive fund words are preserved; a sibling fund is not a substitute. The displayed period retains the source wording. A normalized period end is used only for the documented 190-day freshness window and the check against future commentary.
+
+Models select source block/passage IDs. Python supplies the exact archived evidence. Claims require investment reasoning about the featured company; holdings weights, performance attribution and general manager commentary alone are excluded. A separate support review checks each claim against its selected evidence, with at most one correction. Equity/credit, stance and explicitly stated action are separate fields. Semantic review remains fallible; inspect the retained evidence when reviewing a view.
 
 ## Commands
 
 ```sh
+uv sync --extra jobwatch
 uv run minerva ideas init
-uv run minerva ideas import issue.json --run-id <uuid>
-uv run minerva ideas status <uuid>
+uv run minerva ideas run
+uv run minerva ideas status              # latest issue, including delivery receipts
+uv run minerva ideas status RUN_UUID
+uv run minerva ideas resume RUN_UUID
+uv run minerva ideas resume RUN_UUID --retry-gaps --limit 10
+uv run minerva ideas render RUN_UUID
 ```
 
-Input format:
+Use `render` for a preview: it has no model calls or delivery side effects. The diagnostic commands return JSON. `weekly` returns only the publishable digest or `NO_REPLY`.
 
-```json
-{"url":"https://hfbestideas.substack.com/p/example","date":"2026-09-30","roster":[{"company":"Example","fund":"Example Fund","symbol":"EX US"}]}
+For explicit candidate inputs:
+
+```sh
+uv run minerva ideas import issue.json --run-id RUN_UUID
+uv run minerva ideas source RUN_UUID ORDINAL ORIGINAL_URL
+uv run minerva ideas research RUN_UUID ORDINAL
+uv run minerva ideas extract RUN_UUID ORDINAL
 ```
 
-A repeated import with the same UUID and content is idempotent. A new UUID is a separate run. Duplicate company/fund roster rows are preserved by ordinal.
+An import contains an issue URL/date and `roster` entries with `company`, `fund` and optional `symbol`. Reimporting the same UUID/content is idempotent. Duplicate roster rows are preserved by ordinal. Attaching a source does not approve its thesis.
 
-## PR sequence
+Unchanged newsletter rosters reuse their run. Completed views and known gaps are skipped; retries of gaps are explicit. A Postgres session lock prevents concurrent work on one run and releases on process failure. A run has a 20-minute processing budget; remaining work can be resumed.
 
-1. Postgres and filesystem contract; roster import and status.
-2. Original-document collection and scoped evidence locations.
-3. Bounded source research from newsletter leads.
-4. Evidence-backed extraction using a low-cost model.
-5. Resumable workflow.
-6. Publication preparation and delivery tracking.
-7. Existing OpenClaw job integration and live acceptance.
+| Item state | Meaning |
+| --- | --- |
+| `pending` | Research has not completed. |
+| `sourced` | A document candidate exists; no publishable view is approved. |
+| `ready` | Evidence-backed view passed the current checks. |
+| `gap` | No eligible view within the research/validation budget. This does not prove an original does not exist. |
+| `failed` | Operational failure requiring retry or repair. |
 
-Each PR must include tests and a live check. Deployment to the shared Postgres requires the actual connection; a disposable Postgres integration test does not establish deployment access. Never store credentials or private transcripts in Git.
+## OpenClaw operation
 
-## Validation
-
-PR 1: three focused tests passed against disposable PostgreSQL 17. Imported the archived September 30 issue through the actual CLI: 50 roster rows persisted. No model calls or Slack publication. The shared database connection is still being identified.
-
-PR 2 adds a nullable document reference to each item. `minerva ideas source RUN ORDINAL URL` archives a public manager PDF/HTML candidate with a byte hash and stable page/block IDs. It rejects HF evidence URLs and local endpoints. Source attachment is not semantic approval. Live check: fetched the Munro June 2026 manager PDF, archived all 12 pages, and persisted the document reference in disposable Postgres. Six document tests passed.
-
-PR 3 adds `minerva ideas research RUN ORDINAL --model gemini-2.5-flash-lite`. Each lead has at most two Brave searches, six downloads (including archive navigation), and three model assessments. Manager archive links are followed to original PDFs. Aggregator results are not thesis evidence. Provider failures propagate as operational errors rather than being mislabeled as unavailable sources. Search/model traces remain files, with no new database tables.
-
-Live checks now use the existing shared PostgreSQL instance on loopback port 55432, database `minerva`, exclusively within `minerva_ideas`. The 50-row issue was imported there. Discovery found the Munro original and recovered Greenhaven's Q2 2026 PDF for Burford without a catalog mapping. These checks supersede the earlier pending shared-connection note. Gemini 2.5 Flash-Lite was used; public-source transfers were explicitly approved. Schema compatibility and manager-archive navigation were fixed based on these live tests.
-
-PR 4 adds one `view` JSONB field containing summary claims and passage IDs. Exact evidence and model transcripts stay on disk. The model selects IDs; Python copies the original passages, avoiding quote-transcription failures. Each view undergoes a separate semantic support review with at most one correction. Equity versus credit, stance, and explicitly stated action remain separate. Re-extraction first clears the previous approved view.
-
-Live extraction passed on AMD and Burford using Gemini 2.5 Flash-Lite. An authentic quote paired with a fabricated guarantee was rejected. The Burford check exposed a claim whose selected quote omitted the comparison it made; replacing model-copied quotes with deterministic passage references resolved it. Semantic review reduces unsupported claims but is not a proof of factual correctness.
-
-PR 5 adds `run` and `resume`. The live RSS parser handles HTML-encoded roster bullets and saves the selected XML content as YAML. Unchanged issues reuse their run; changed rosters start a new run. Completed views and known gaps are skipped unless `--retry-gaps` is explicit. A Postgres session advisory lock prevents concurrent work and releases on process failure. Provider/configuration failures stop the batch instead of being counted as source gaps.
-
-Full live pass: all 50 views attempted, 12 ready and 38 gaps, zero execution failures. A targeted ten-gap retry after correcting regulatory-footer navigation and PDF line-break matching produced 14 ready / 36 gaps. The real feed-to-run command then returned the same run with `processed=0`. A concurrent invocation was rejected before additional research. Gaps mean no verified evidence within the configured budget, not that a letter does not exist.
-
-PR 6 adds the third and final table, `publications`: payload hash, run/job IDs, route, state, preparation time, and a compact confirmed receipt. The payload itself stays on disk. `render` has no model calls; it rechecks original source identity and claim references. `prepare` records a single attempt for the configured Slack route; an uncertain attempt cannot be blindly repeated. `reconcile` requires exact content, the expected destination, and a fresh successful Gateway transport record. A confirmed duplicate returns `NO_REPLY`.
-
-Reading the live rendered output caught false approvals that unit tests had not exposed: sibling-fund attribution, manager names substituted for companies, and performance-only views. Deterministic issuer/fund checks now reject these, and semantic review explicitly requires investment reasoning. Identity assessment also selects source block IDs rather than copying quotes. Source text remains on disk; the database stores compact references. Existing original URLs from the earlier work were rechecked as candidate inputs, not accepted without verification.
-
-After these stricter gates and rechecking supplied originals, the current issue has 12 eligible views and 38 gaps. This supersedes the earlier 14-view count. Postgres duplicate/receipt lifecycle tests passed with isolated rows removed afterward; no Slack message was sent during those tests.
-
-## OpenClaw deployment
-
-Run `uv sync --extra jobwatch` once in the reviewed checkout. Supply `MINERVA_DATABASE_URL` and `MINERVA_IDEAS_ROOT` in its ignored `.env.local`, or in the scheduled environment. Brave and Gemini keys are inherited from the Gateway environment. The scheduled wrapper uses the installed `.venv/bin/minerva`; it does not resolve/install dependencies on each run.
+The existing automation uses a native **command** payload with explicit argv:
 
 ```sh
 scripts/run_weekly_ideas.sh EXISTING_JOB_UUID
 ```
 
-Keep the existing agent-turn job, ownership, schedule, tools and Slack route. Its prompt must execute that one command and relay stdout exactly; it must not summarize the digest into a receipt. `NO_REPLY` means a duplicate or no eligible content, not an invitation to post an acknowledgement. On failure, report the error without claiming delivery. Use a low-cost reporting model for live tests.
+Keep its owner, Saturday schedule and explicit Slack channel/thread. Configure `MINERVA_IDEAS_MODEL=gemini-2.5-flash-lite` in the command environment. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/Gemini keys are inherited from the Gateway environment. Native command execution avoids a reporting model rewriting content or generating fallback acknowledgements for a silent repeat.
 
-After a completed job, `minerva ideas reconcile JOB_UUID` confirms the exact delivered digest from durable transport records. The next scheduled invocation also reconciles before preparing a publication. Unknown delivery requires investigation; do not delete publication rows to force a resend. Keep a configuration backup before changing the existing job, and restore it if live acceptance fails.
+`weekly` reconciles earlier delivery, researches incomplete work, and prepares output only when no pending, sourced or failed items remain. Gaps are omitted from the digest and retained in diagnostic status. Multiple fund views are grouped by company.
 
-Live acceptance: the existing job ran with a low-cost Luna reporter and Gemini 2.5 Flash-Lite extraction, including one deliberately requeued real lead. Its full final output matched the prepared digest, and the Gateway transport record confirmed delivery to the existing Slack thread. Direct readback through the separate Slack connector was unavailable for this channel.
+`prepare RUN_UUID JOB_UUID` claims a delivery attempt; it is not a preview command. Confirmed duplicates return `NO_REPLY`, which the native command scheduler suppresses. An uncertain attempt cannot be blindly repeated.
 
-The test revealed that OpenClaw run summaries truncate at 2,000 characters. For a truncated matching prefix, reconciliation now uses the supported redacted session export for that exact job/run, compares the full final output, and combines it with the same run's successful transport receipt. Only the relevant final output is retained; temporary exports containing prompts/runtime metadata are removed. A truncated prefix alone cannot confirm delivery.
+```sh
+uv run minerva ideas reconcile EXISTING_JOB_UUID
+```
+
+Reconciliation requires exact equality between the prepared payload and the native run's full stdout summary, a successful execution, a fresh transport receipt and the expected explicit destination. Truncated or ambiguous records do not confirm delivery. Investigate uncertainty before another attempt; do not delete publication rows to force a resend.
+
+The runtime currently uses a reviewed worktree pending merge. Keep that checkout and its ignored environment file until a verified deployment replaces it. Back up the existing job configuration before changing it; do not create a duplicate automation or restart the Gateway for this workflow.
+
+## Validation
+
+The PR series includes live Postgres import/source tests, bounded public-source discovery and extraction with Flash-Lite, full-issue processing, explicit gap retries, no-op resume, concurrency rejection, publication-state integration tests, and actual OpenClaw delivery tests. Full native stdout and transport receipts are used for verification; a process exit code alone is insufficient. The separate Slack connector may not have access to the Gateway's Slack workspace, so direct channel readback is a distinct capability.
+
+## References
+
+### Implementation
+- [CLI](../src/harness/commands/ideas.py) — command contracts and scheduled entry point.
+- [Store](../src/harness/ideas/store.py) — the three-table Postgres schema and filesystem contract.
+- [Research](../src/harness/ideas/research.py) and [extraction](../src/harness/ideas/extraction.py) — source budgets, identity checks and evidence gates.
+- [Publication](../src/harness/ideas/publication.py) — deterministic rendering, duplicate protection and transport verification.
+
+### Platform behavior
+- [OpenClaw automation payloads](https://docs.openclaw.ai/automation/cron-jobs/payloads) — native command execution and silent-output handling.

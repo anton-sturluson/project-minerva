@@ -67,8 +67,8 @@ def import_issue(path: Path, run_id: UUID | None = typer.Option(None)):
 
 @app.command("status")
 @guarded
-def status(run_id: UUID):
-    """Return persisted progress and explicit research gaps as JSON."""
+def status(run_id: UUID | None = typer.Argument(None)):
+    """Return research and delivery state as JSON; defaults to the latest issue."""
     emit(store.status(run_id))
 
 

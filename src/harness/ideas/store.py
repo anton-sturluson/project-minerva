@@ -157,18 +157,32 @@ def import_issue(issue: dict, *, run_id: UUID | None = None) -> UUID:
     return run_id
 
 
-def status(run_id: UUID) -> dict:
+def status(run_id: UUID | None = None) -> dict:
+    if run_id is None:
+        with connect() as conn:
+            latest = conn.execute(
+                "SELECT id FROM minerva_ideas.runs ORDER BY issue_date DESC,created_at DESC LIMIT 1"
+            ).fetchone()
+        if latest is None:
+            raise ValueError("No weekly ideas runs yet; use minerva ideas run")
+        run_id = latest["id"]
     run = get_run(run_id)
     rows = items(run_id)
     counts = {
         state: sum(r["state"] == state for r in rows)
         for state in ("pending", "sourced", "ready", "gap", "failed")
     }
+    with connect() as conn:
+        publications = conn.execute(
+            "SELECT digest,job_id,state,route,receipt FROM minerva_ideas.publications WHERE run_id=%s ORDER BY prepared_at DESC",
+            (run_id,),
+        ).fetchall()
     return {
         "run_id": str(run_id),
         "issue_date": str(run["issue_date"]),
         "roster": len(rows),
         "counts": counts,
+        "publications": publications,
         "artifact_dir": str(run_folder(run)),
         "gaps": [
             {

@@ -138,3 +138,15 @@ def test_company_and_sibling_fund_cannot_be_substituted():
     validate_target(
         m, {"company": "Acme Corporation", "fund": "Alpha Strategy", "symbol": "ACM US"}
     )
+
+
+def test_normalized_year_cannot_make_an_old_letter_look_current():
+    m = match()
+    m.period = "Q2 2025"
+    m.period_quote = "Q2 2025"
+    with pytest.raises(ValueError, match="year conflicts"):
+        validate_match(
+            m,
+            [{"text": "Alpha Capital Alpha Fund Q2 2025 Acme pricing power"}],
+            date(2026, 9, 30),
+        )
