@@ -10,7 +10,15 @@ import { Corrections, EntrySummary } from "./Corrections";
 import { Tracker } from "./Tracker";
 import { number } from "./format";
 import { Trades } from "./Trades";
-import { exact, today, labels, type Entry, type Ledger } from "./records";
+import {
+  exact,
+  today,
+  labels,
+  type Entry,
+  type Ledger,
+  type CashKind,
+  cashKinds,
+} from "./records";
 
 export function CashLedger({ account }: { account: Account }) {
   const [correcting, setCorrecting] = useState<Entry | null>(null);
@@ -19,7 +27,7 @@ export function CashLedger({ account }: { account: Account }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [kind, setKind] = useState("opening_cash");
+  const [kind, setKind] = useState<CashKind>("opening_cash");
   const [date, setDate] = useState(today());
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
@@ -113,15 +121,18 @@ export function CashLedger({ account }: { account: Account }) {
               <select
                 aria-label="Entry type"
                 value={kind}
-                onChange={(e) => setKind(e.target.value)}
+                onChange={(e) => setKind(e.target.value as CashKind)}
                 disabled={saving}
               >
-                {!ledger.entries.length && (
-                  <option value="opening_cash">Opening cash</option>
-                )}
-                <option value="deposit">Deposit</option>
-                <option value="withdrawal">Withdrawal</option>
-                <option value="income">Investment income</option>
+                {cashKinds
+                  .filter(
+                    (kind) => kind !== "opening_cash" || !ledger.entries.length,
+                  )
+                  .map((kind) => (
+                    <option key={kind} value={kind}>
+                      {labels[kind]}
+                    </option>
+                  ))}
               </select>
             </label>
             <label>
@@ -230,7 +241,7 @@ export function CashLedger({ account }: { account: Account }) {
                     <tr key={e.id}>
                       <td>{e.effective_date}</td>
                       <td>
-                        {labels[e.kind] ?? e.kind}
+                        {labels[e.kind]}
                         {e.security && <> · {e.security.ticker}</>}
                       </td>
                       <td className="number">

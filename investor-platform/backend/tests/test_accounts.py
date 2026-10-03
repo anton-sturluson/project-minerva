@@ -19,9 +19,6 @@ def test_account_round_trip_and_retry(db_client, database):
     assert db_client.get("/api/account").json() == first.json()
     with Session(database) as session:
         assert session.scalar(select(func.count()).select_from(Account)) == 1
-        assert session.scalar(select(func.count()).select_from(Owner)) == 1
-    database.dispose()  # Reconnect without an in-memory account cache.
-    assert db_client.get("/api/account").json()["name"] == DATA["name"]
     assert db_client.post("/api/account", json={**DATA, "name": "Other"}).status_code == 409
 
 

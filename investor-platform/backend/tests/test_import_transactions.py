@@ -67,9 +67,12 @@ def test_import_is_atomic_idempotent_and_preserves_existing_account(database, db
 
 
 def test_bad_rows_are_reported_without_dropping_valid_rows():
-    bad = CSV + b"1/1/2099,Buy,AAA,1,$1,$1,,,\n7/20/24,Hold,AAA,1,$1,$1,,,\n"
+    bad = CSV + (
+        b"1/1/2099,Buy,AAA,1,$1,$1,,,\n7/20/24,Hold,AAA,1,$1,$1,,,\n"
+        b"7/20/24,Buy,AAA,0.0000000001,$1,$1,,,\n"
+    )
     _, report = reconstruct(bad, LISTINGS)
-    assert [r["row"] for r in report["skipped"]] == [5, 6, 7]
+    assert [r["row"] for r in report["skipped"]] == [5, 6, 7, 8]
     with pytest.raises(ValueError, match="No importable"):
         reconstruct(CSV, {})
     with pytest.raises(ValueError, match="CSV needs"):

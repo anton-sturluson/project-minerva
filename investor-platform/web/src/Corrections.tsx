@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
-import { exact, labels, today, type Entry, type Holding } from "./records";
+import {
+  exact,
+  labels,
+  today,
+  type Entry,
+  type Holding,
+  isPositionKind,
+} from "./records";
 
 type Preview = {
   revision: string;
@@ -79,7 +86,7 @@ export function Corrections({
     setError("");
     key.current = crypto.randomUUID();
   }
-  const position = ["buy", "sell", "opening_position"].includes(draft.kind);
+  const position = isPositionKind(draft.kind);
   function replacement() {
     if (action === "void") return null;
     const common = {

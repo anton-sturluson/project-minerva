@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
+from .domain import ACCOUNTING_PRECISION, EntryKind
 from .ledger import EntryInput, EntryView, Money, entries_for, fingerprint
 from .models import LedgerEntry, Security
 
@@ -16,7 +17,7 @@ Quantity = Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=8, allow
 
 
 class TradeInput(EntryInput):
-    kind: Literal["opening_position", "buy", "sell"]
+    kind: Literal[EntryKind.OPENING_POSITION, EntryKind.BUY, EntryKind.SELL]
     ticker: Annotated[
         str,
         StringConstraints(pattern=r"^[A-Z0-9][A-Z0-9.\-]{0,19}$"),
@@ -37,7 +38,7 @@ class TradeInput(EntryInput):
 
     @model_validator(mode="after")
     def valid_trade(self):
-        if self.kind == "opening_position":
+        if self.kind == EntryKind.OPENING_POSITION:
             if self.price is not None or self.fees != 0:
                 raise ValueError(
                     "Opening positions use optional total cost basis, not a price or fee"
@@ -64,7 +65,9 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
         return existing
     entry = build_trade(account, data, session, actor, body)
     entries = entries_for(session, account_id)
-    if data.kind == "opening_position" and any(e.security_id == entry.security_id for e in entries):
+    if data.kind == EntryKind.OPENING_POSITION and any(
+        e.security_id == entry.security_id for e in entries
+    ):
         raise HTTPException(
             409, "Opening positions must be recorded before trades in that security"
         )
@@ -98,11 +101,11 @@ def build_trade(account, data, session, actor, body):
         session.add(security)
         session.flush()
     with localcontext() as context:
-        context.prec = 64
+        context.prec = ACCOUNTING_PRECISION
         amount = Decimal(0)
-        if data.kind != "opening_position":
+        if data.kind != EntryKind.OPENING_POSITION:
             gross = data.quantity * data.price
-            amount = gross + data.fees if data.kind == "buy" else gross - data.fees
+            amount = gross + data.fees if data.kind == EntryKind.BUY else gross - data.fees
             if amount < 0:
                 raise HTTPException(422, "Sale fees cannot exceed proceeds")
     return LedgerEntry(

@@ -5,6 +5,8 @@ from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 
 from fastapi import HTTPException
 
+from .domain import ACCOUNTING_PRECISION, EntryKind
+
 UNIT = Decimal("0.0000000000000001")
 
 
@@ -17,38 +19,43 @@ class Lot:
 def replay(entries):
     # Products can contain 40 significant digits; never use the default 28-digit context.
     with localcontext() as context:
-        context.prec = 64
+        context.prec = ACCOUNTING_PRECISION
         cash = Decimal(0)
         lots = {}
         seen = set()
         realized = {}
-        opening_date = next((e.effective_date for e in entries if e.kind == "opening_cash"), None)
-        if sum(e.kind == "opening_cash" for e in entries) > 1:
+        opening_date = next(
+            (e.effective_date for e in entries if e.kind == EntryKind.OPENING_CASH), None
+        )
+        if sum(e.kind == EntryKind.OPENING_CASH for e in entries) > 1:
             raise HTTPException(409, "Only one opening cash entry is allowed")
-        if any(e.kind == "opening_cash" for e in entries[1:]):
+        if any(e.kind == EntryKind.OPENING_CASH for e in entries[1:]):
             raise HTTPException(409, "Opening cash must be the first entry")
         for e in entries:
             if opening_date and e.effective_date < opening_date:
                 raise HTTPException(409, "Entries cannot precede the opening balance date")
-            if e.kind in {"opening_cash", "deposit", "income"}:
+            if e.kind in {EntryKind.OPENING_CASH, EntryKind.DEPOSIT, EntryKind.INCOME}:
                 cash += e.amount
-            elif e.kind in {"withdrawal", "buy"}:
+            elif e.kind in {EntryKind.WITHDRAWAL, EntryKind.BUY}:
                 cash -= e.amount
-            elif e.kind == "sell":
+            elif e.kind == EntryKind.SELL:
                 cash += e.amount
             if cash < 0:
                 raise HTTPException(
                     409, "This entry would make cash negative in the account history"
                 )
-            if e.kind in {"opening_position", "buy"}:
-                if e.kind == "opening_position" and e.security_id in seen:
+            if e.kind in {EntryKind.OPENING_POSITION, EntryKind.BUY}:
+                if e.kind == EntryKind.OPENING_POSITION and e.security_id in seen:
                     raise HTTPException(
                         409, "An opening position must precede all trades in that security"
                     )
                 lots.setdefault(e.security_id, []).append(
-                    Lot(e.quantity, e.cost_basis if e.kind == "opening_position" else e.amount)
+                    Lot(
+                        e.quantity,
+                        e.cost_basis if e.kind == EntryKind.OPENING_POSITION else e.amount,
+                    )
                 )
-            elif e.kind == "sell":
+            elif e.kind == EntryKind.SELL:
                 remaining = e.quantity
                 basis = Decimal(0)
                 unknown = False

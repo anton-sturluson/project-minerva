@@ -1,9 +1,8 @@
 """Daily closing-flow returns and fully closed position statistics."""
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal, DecimalException, localcontext
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -13,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from . import market
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
+from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
 from .ledger import entries_for
 
 router = APIRouter(prefix="/api/accounts")
@@ -33,7 +33,7 @@ def position_episodes(entries):
             continue
         active.setdefault(sid, []).append(entry)
         quantities[sid] = quantities.get(sid, ZERO) + entry.quantity * (
-            -1 if entry.kind == "sell" else 1
+            -1 if entry.kind == EntryKind.SELL else 1
         )
         if quantities[sid] == 0:
             closed.append(active.pop(sid))
@@ -46,7 +46,7 @@ def trade_statistics(entries):
     closed = []
     for episode in episodes:
         last = episode[-1]
-        gains = [realized[e.id] for e in episode if e.kind == "sell"]
+        gains = [realized[e.id] for e in episode if e.kind == EntryKind.SELL]
         closed.append(
             {
                 "ticker": last.security.ticker,
@@ -80,7 +80,7 @@ def trade_statistics(entries):
 def statistics(account_id: UUID, session: DB, actor: Identity):
     owned_account(session, actor, account_id)
     with localcontext() as ctx:
-        ctx.prec = 64
+        ctx.prec = ACCOUNTING_PRECISION
         return wire(trade_statistics(entries_for(session, account_id)))
 
 
@@ -88,16 +88,6 @@ class Period(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: date
     end: date
-
-
-def quote_symbol(security, provisional=False):
-    if (
-        provisional
-        and security.currency == "USD"
-        and (security.exchange in market.EXCHANGES or security.exchange == "UNVERIFIED")
-    ):
-        return security.ticker.replace(".", "-")
-    return market.symbol_for(security)
 
 
 def calculate(entries, histories, start, end, *, provisional=False):
@@ -109,15 +99,12 @@ def calculate(entries, histories, start, end, *, provisional=False):
     if (end - days[-1]).days > 4:
         raise ValueError("Benchmark history is stale at the requested end date")
     securities = {e.security_id: e.security for e in entries if e.security_id}
-    prices = {sid: histories[quote_symbol(s, provisional)] for sid, s in securities.items()}
+    prices = {
+        sid: histories[market.symbol_for(s, provisional=provisional)]
+        for sid, s in securities.items()
+    }
     for sid, security in securities.items():
-        if provisional:
-            if prices[sid].exchange not in set().union(*market.EXCHANGES.values()):
-                raise ValueError(
-                    f"{security.ticker}: provider listing is not a supported US listing"
-                )
-        else:
-            market.verify_exchange(security, prices[sid])
+        market.verify_exchange(security, prices[sid], provisional=provisional)
     # If shares span a split, the ledger needs a corporate-action record (not supported yet).
     for sid, h in prices.items():
         for d in sorted(h.splits):
@@ -125,7 +112,7 @@ def calculate(entries, histories, start, end, *, provisional=False):
                 continue
             quantity = sum(
                 (
-                    e.quantity * (-1 if e.kind == "sell" else 1)
+                    e.quantity * (-1 if e.kind == EntryKind.SELL else 1)
                     for e in entries
                     if e.security_id == sid and e.effective_date < d
                 ),
@@ -148,7 +135,7 @@ def calculate(entries, histories, start, end, *, provisional=False):
                 continue
             shares = sum(
                 (
-                    e.quantity * (-1 if e.kind == "sell" else 1)
+                    e.quantity * (-1 if e.kind == EntryKind.SELL else 1)
                     for e in entries
                     if e.security_id == sid and e.effective_date < exdate
                 ),
@@ -158,7 +145,12 @@ def calculate(entries, histories, start, end, *, provisional=False):
     modeled_income = {}
     for exdate, expected in sorted(distributions.items()):
         income = sum(
-            (e.amount for e in entries if e.kind == "income" and e.effective_date == exdate), ZERO
+            (
+                e.amount
+                for e in entries
+                if e.kind == EntryKind.INCOME and e.effective_date == exdate
+            ),
+            ZERO,
         )
         if provisional:
             # Fill only the missing gross amount on its ex-date; never write modeled income.
@@ -204,11 +196,11 @@ def calculate(entries, histories, start, end, *, provisional=False):
             interval = [e for e in entries if previous_day < e.effective_date <= d]
             flow = ZERO
             for e in interval:
-                if e.kind in {"deposit", "opening_cash"}:
+                if e.kind in {EntryKind.DEPOSIT, EntryKind.OPENING_CASH}:
                     flow += e.amount
-                elif e.kind == "withdrawal":
+                elif e.kind == EntryKind.WITHDRAWAL:
                     flow -= e.amount
-                elif e.kind == "opening_position":
+                elif e.kind == EntryKind.OPENING_POSITION:
                     price = prices[e.security_id].close.get(d)
                     if price is None:
                         raise ValueError("Missing price for an in-kind contribution")
@@ -275,16 +267,16 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
     provisional = bool(account.reconstruction)
     entries = entries_for(session, account_id)
-    if account.base_currency != "USD":
+    if account.base_currency != Currency.USD:
         raise HTTPException(
             422,
             "Market comparisons currently require a USD account; FX conversion is not supported",
         )
-    today = datetime.now(ZoneInfo("America/New_York")).date()
+    today = datetime.now(market.MARKET_TIMEZONE).date()
     if (
         period.start >= period.end
         or period.end >= today
-        or period.start < today - timedelta(days=3660)
+        or period.start < today - market.HISTORY_WINDOW
     ):
         raise HTTPException(
             422,
@@ -296,19 +288,23 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     entries = [e for e in entries if e.effective_date <= period.end]
     securities = {e.security_id: e.security for e in entries if e.security_id}
     try:
-        symbols = {quote_symbol(s, provisional) for s in securities.values()} | {"SPY", "QQQ"}
-        if len(securities) > 48 or entries[0].effective_date < today - timedelta(days=3660):
+        symbols = {
+            market.symbol_for(s, provisional=provisional) for s in securities.values()
+        } | set(market.BENCHMARKS)
+        if (
+            len(securities) > market.MAX_SECURITIES
+            or entries[0].effective_date < today - market.HISTORY_WINDOW
+        ):
             raise ValueError(
-                "This first tracker supports up to 48 securities and ten years of ledger history"
+                f"This tracker supports up to {market.MAX_SECURITIES} securities "
+                "and ten years of ledger history"
             )
         # Fetch from inception to detect unrecorded historical splits, even for a recent report.
         fetched = market.histories(symbols, entries[0].effective_date, period.end)
         with localcontext() as ctx:
-            ctx.prec = 64
+            ctx.prec = ACCOUNTING_PRECISION
             result = calculate(entries, fetched, period.start, period.end, provisional=provisional)
-        return wire(
-            {**result, "fetched_at": datetime.now(UTC), "source": "Yahoo Finance daily history"}
-        )
+        return wire({**result, "fetched_at": datetime.now(UTC), "source": market.SOURCE})
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except (OSError, KeyError, TypeError, IndexError, DecimalException) as exc:

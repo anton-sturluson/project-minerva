@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,12 +9,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import Actor, get_actor, get_session
+from .domain import Currency
 from .models import Account, Workspace
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_session)]
 Identity = Annotated[Actor, Depends(get_actor)]
-Currency = Literal["USD", "EUR", "GBP", "CAD", "AUD", "JPY", "CHF", "HKD", "SGD"]
 
 
 class AccountInput(BaseModel):

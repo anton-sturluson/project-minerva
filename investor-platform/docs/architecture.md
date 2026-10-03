@@ -1,6 +1,6 @@
 # Investor Platform architecture
 
-Updated: 2026-10-02. This describes the implemented application.
+Updated: 2026-10-03. This describes the implemented application.
 
 ## Runtime
 
@@ -19,7 +19,11 @@ These boundaries are implemented in the [backend](../backend/src/investor_platfo
 
 A local owner/workspace is seeded by migrations. Every account route verifies ownership. Default mode accepts loopback access; private Tailscale mode verifies the configured identity, host and origin. Public hosting and multi-user login are not implemented. ([Identity boundary](../backend/src/investor_platform/db.py), [Tailscale setup](tailscale.md))
 
-PostgreSQL owns portfolio state. There is no spreadsheet sync or runtime dependency on legacy Minerva packages. A future import is a deliberate migration into the ledger. Public Yahoo history receives only symbols and dates; financial reports are computed on demand and are not persisted snapshots. Missing or unsupported data stays explicit. ([Ledger rules](../README.md#cash-ledger-rules), [performance methodology](performance.md), [hit-rate methodology](hit-rate.md))
+PostgreSQL owns portfolio state. There is no spreadsheet sync or runtime dependency on legacy Minerva packages. The transaction CLI imports a separate testing copy with retained source evidence; reconciliation remains explicit. Public Yahoo history receives only symbols and dates; financial reports are computed on demand and are not persisted snapshots. Missing or unsupported data stays explicit. ([Ledger rules](../README.md#cash-ledger-rules), [performance methodology](performance.md), [hit-rate methodology](hit-rate.md))
+
+## Domain values and shared calculations
+
+[Domain definitions](../backend/src/investor_platform/domain.py) define the stable `EntryKind` and `Currency` string enums and exact-arithmetic precision. API values and existing VARCHAR storage remain unchanged; historical SQL migrations retain their original literals. Provider limits and supported listings live in the market adapter. Imports and HTTP writes share trade construction, and correction previews reuse the active ledger view without rebuilding audit history. Frontend entry types and form choices derive from the same local [label and kind definitions](../web/src/records.ts). See the [ledger view](../backend/src/investor_platform/ledger.py) and [trade builder](../backend/src/investor_platform/trades.py).
 
 ## Future work
 

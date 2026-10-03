@@ -1,30 +1,29 @@
 """Closed investment decisions versus capital- and holding-period-matched benchmarks."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal, DecimalException, localcontext
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
 from . import market
 from .accounting import UNIT
 from .accounts import DB, Identity, owned_account
+from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
 from .ledger import entries_for
 from .performance import position_episodes, wire
 
 router = APIRouter(prefix="/api/accounts")
-BENCHMARKS = ("SPY", "QQQ")
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
 
 
 def exclusion(episode, today):
-    if any(e.kind == "opening_position" for e in episode):
+    if any(e.kind == EntryKind.OPENING_POSITION for e in episode):
         return "Opening position: original purchase dates are unknown"
     if episode[-1].effective_date >= today:
         return "Wait for completed closing prices after today's trades"
-    if episode[0].effective_date < today - timedelta(days=3660):
+    if episode[0].effective_date < today - market.HISTORY_WINDOW:
         return "Purchase history exceeds the ten-year data window"
     try:
         market.symbol_for(episode[0].security)
@@ -42,7 +41,7 @@ def compare_episode(episode, histories):
         if start < day <= end:
             quantity = sum(
                 (
-                    e.quantity * (-1 if e.kind == "sell" else 1)
+                    e.quantity * (-1 if e.kind == EntryKind.SELL else 1)
                     for e in episode
                     if e.effective_date < day
                 ),
@@ -57,15 +56,15 @@ def compare_episode(episode, histories):
     # Require actual sessions on every trade date; no previous/next-day substitution.
     for entry in episode:
         if entry.effective_date not in history.close or any(
-            entry.effective_date not in histories[b].adjusted for b in BENCHMARKS
+            entry.effective_date not in histories[b].adjusted for b in market.BENCHMARKS
         ):
             raise ValueError("Missing matching closing prices on a trade date")
     lots = []
-    invested = sum((e.amount for e in episode if e.kind == "buy"), ZERO)
-    pnl = sum((e.amount for e in episode if e.kind == "sell"), ZERO) - invested
-    benchmark_pnl = dict.fromkeys(BENCHMARKS, ZERO)
+    invested = sum((e.amount for e in episode if e.kind == EntryKind.BUY), ZERO)
+    pnl = sum((e.amount for e in episode if e.kind == EntryKind.SELL), ZERO) - invested
+    benchmark_pnl = dict.fromkeys(market.BENCHMARKS, ZERO)
     for entry in episode:
-        if entry.kind == "buy":
+        if entry.kind == EntryKind.BUY:
             lots.append(
                 {"quantity": entry.quantity, "cost": entry.amount, "date": entry.effective_date}
             )
@@ -80,7 +79,7 @@ def compare_episode(episode, histories):
                 if take == lot["quantity"]
                 else (lot["cost"] * take / lot["quantity"]).quantize(UNIT, ROUND_HALF_EVEN)
             )
-            for benchmark in BENCHMARKS:
+            for benchmark in market.BENCHMARKS:
                 adjusted = histories[benchmark].adjusted
                 benchmark_pnl[benchmark] += cost * (
                     adjusted[entry.effective_date] / adjusted[lot["date"]] - 1
@@ -95,7 +94,7 @@ def compare_episode(episode, histories):
                 "pnl": benchmark_pnl[b],
                 "excess": (pnl - benchmark_pnl[b]).quantize(CENT, ROUND_HALF_EVEN),
             }
-            for b in BENCHMARKS
+            for b in market.BENCHMARKS
         },
     }
 
@@ -119,7 +118,7 @@ def calculate_hit_rate(episodes, open_count, histories, today):
         rows.append(row)
     eligible = [r for r in rows if not r["excluded"]]
     metrics = {}
-    for benchmark in BENCHMARKS:
+    for benchmark in market.BENCHMARKS:
         excess = [r["benchmarks"][benchmark]["excess"] for r in eligible]
         hits = sum(x > ZERO for x in excess)
         metrics[benchmark] = {
@@ -139,28 +138,32 @@ def calculate_hit_rate(episodes, open_count, histories, today):
 @router.post("/{account_id}/hit-rate")
 def hit_rate(account_id: UUID, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
-    if account.base_currency != "USD":
+    if account.base_currency != Currency.USD:
         raise HTTPException(422, "Hit rate currently requires a USD account")
     episodes, open_count = position_episodes(entries_for(session, account_id))
-    today = datetime.now(ZoneInfo("America/New_York")).date()
+    today = datetime.now(market.MARKET_TIMEZONE).date()
     candidates = [e for e in episodes if not exclusion(e, today)]
     try:
         histories = {}
         if candidates:
-            symbols = {market.symbol_for(e[0].security) for e in candidates} | set(BENCHMARKS)
-            if len({e[0].security_id for e in candidates}) > 48:
-                raise ValueError("Hit rate supports up to 48 securities plus SPY and QQQ")
+            symbols = {market.symbol_for(e[0].security) for e in candidates} | set(
+                market.BENCHMARKS
+            )
+            if len({e[0].security_id for e in candidates}) > market.MAX_SECURITIES:
+                raise ValueError(
+                    f"Hit rate supports up to {market.MAX_SECURITIES} securities plus SPY and QQQ"
+                )
             start = min(e[0].effective_date for e in candidates)
             end = max(e[-1].effective_date for e in candidates)
             histories = market.histories(symbols, start, end)
         with localcontext() as ctx:
-            ctx.prec = 64
+            ctx.prec = ACCOUNTING_PRECISION
             result = calculate_hit_rate(episodes, open_count, histories, today)
         return wire(
             {
                 **result,
                 "fetched_at": datetime.now(UTC),
-                "source": "Yahoo Finance daily history" if candidates else "Saved records",
+                "source": market.SOURCE if candidates else "Saved records",
             }
         )
     except ValueError as exc:

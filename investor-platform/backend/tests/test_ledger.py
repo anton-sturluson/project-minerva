@@ -74,7 +74,8 @@ def test_full_history_is_validated_and_rejection_is_atomic(db_client, account_id
 @pytest.mark.parametrize(
     "extra",
     [
-        {"amount": "-1"},
+        {"kind": "income", "amount": "0"},
+        {"kind": "opening_cash", "amount": "-1"},
         {"amount": "0"},
         {"amount": "NaN"},
         {"amount": "Infinity"},
