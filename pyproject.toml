@@ -19,6 +19,7 @@ dependencies = [
     "requests>=2.31.0",
     "pyyaml>=6.0",
     "xmltodict>=0.13.0",
+    "psycopg[binary]>=3.2,<4",
 ]
 
 [build-system]
