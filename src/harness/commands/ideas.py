@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from functools import wraps
 from pathlib import Path
 from uuid import UUID
@@ -148,7 +149,12 @@ def prepare(run_id: UUID, job_id: UUID):
     from harness.ideas.publication import prepare as prepare_digest
 
     with store.run_lock(run_id):
-        typer.echo(prepare_digest(run_id, job_id))
+        from harness.ideas.publication import record_emission
+
+        text = prepare_digest(run_id, job_id)
+        typer.echo(text)
+        sys.stdout.flush()
+        record_emission(run_id, job_id, text)
 
 
 @app.command("reconcile")
@@ -188,4 +194,9 @@ def weekly(
             f"Research incomplete; resume run {run_id}. No publication prepared."
         )
     with store.run_lock(run_id):
-        typer.echo(prepare_digest(run_id, job_id))
+        from harness.ideas.publication import record_emission
+
+        text = prepare_digest(run_id, job_id)
+        typer.echo(text)
+        sys.stdout.flush()
+        record_emission(run_id, job_id, text)

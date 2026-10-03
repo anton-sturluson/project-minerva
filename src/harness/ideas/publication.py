@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-import tempfile
-from pathlib import Path
 import subprocess
+from datetime import datetime, timezone
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
@@ -44,24 +42,36 @@ def render(run_id: UUID) -> str:
     if not rows:
         return ""
     lines = [f"*Original manager ideas — {run['issue_date']}*", ""]
+    groups = {}
     for row in rows:
-        view = checked_view(row, run)
-        document = row["document"]
-        # Stored ready records are created by extraction after both validation gates.
-        if view["instrument"] != "equity" or view["stance"] == "unclear":
-            continue
-        period = document["identity"]["period"]
-        lines.append(
-            f"*{escape(document['identity'].get('company') or row['company'])}* — {escape(row['fund'])}"
+        groups.setdefault(row["company"], []).append(row)
+    for company_rows in groups.values():
+        company = (
+            company_rows[0]["document"]["identity"].get("company")
+            or company_rows[0]["company"]
         )
-        action = (
-            "" if view["action"] == "not stated" else f" · {escape(view['action'])}"
-        )
-        lines.append(f"{escape(view['stance'])}{action} · {escape(period)}")
-        for claim in view["claims"]:
-            lines.append("• " + escape(claim["text"]))
-        lines.extend([f"<{document['url']}|Original manager letter>", ""])
+        lines.append(f"*{escape(company)}*")
+        for row in company_rows:
+            lines.extend(render_fund(row, run))
+        lines.append("")
     return "\n".join(lines).strip()
+
+
+def render_fund(row, run):
+    lines = []
+    view = checked_view(row, run)
+    document = row["document"]
+    # Stored ready records are created by extraction after both validation gates.
+    if view["instrument"] != "equity" or view["stance"] == "unclear":
+        return []
+    period = document["identity"]["period"]
+    lines.append(f"*{escape(row['fund'])}*")
+    action = "" if view["action"] == "not stated" else f" · {escape(view['action'])}"
+    lines.append(f"{escape(view['stance'])}{action} · {escape(period)}")
+    for claim in view["claims"]:
+        lines.append("• " + escape(claim["text"]))
+    lines.extend([f"<{document['url']}|Original manager letter>", ""])
+    return lines
 
 
 def gateway_json(*args):
@@ -86,17 +96,37 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
     job = gateway_json("get", str(job_id))
     route = route_fields(job.get("delivery", {}))
     if (
-        job.get("delivery", {}).get("mode") != "announce"
+        job.get("payload", {}).get("kind") != "command"
+        or job.get("delivery", {}).get("mode") != "announce"
         or route["channel"] != "slack"
         or not route["to"]
     ):
         raise ValueError(
-            "Publication requires the existing explicit Slack announce route"
+            "Publication requires a native command job with the existing explicit Slack announce route"
         )
     digest = hashlib.sha256(
         (str(job_id) + json.dumps(route, sort_keys=True) + "\n" + text).encode()
     ).hexdigest()
+    with store.connect() as conn:
+        existing = conn.execute(
+            "SELECT state FROM minerva_ideas.publications WHERE digest=%s", (digest,)
+        ).fetchone()
+        if existing and existing["state"] == "delivered":
+            return "NO_REPLY"
+        pending = conn.execute(
+            "SELECT 1 FROM minerva_ideas.publications WHERE run_id=%s AND job_id=%s AND state!='delivered'",
+            (run_id, job_id),
+        ).fetchone()
+        if pending:
+            raise ValueError(
+                "Publication may already have been sent; reconcile delivery before another attempt"
+            )
     run = store.get_run(run_id)
+    store.json_artifact(
+        store.run_folder(run),
+        f"publications/{digest}.intent.json",
+        {"argv": job["payload"]["argv"]},
+    )
     store.write_artifact(
         store.run_folder(run), f"publications/{digest}.slack.txt", text.encode()
     )
@@ -117,47 +147,54 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
     )
 
 
-def session_output(entry: dict, folder: Path, job_id: UUID) -> str:
-    """Read only this completed run's full final text through the supported export CLI."""
-    session_id = str(UUID(entry['sessionId']))
-    key = entry.get('sessionKey', '')
-    match = re.fullmatch(r'agent:([a-zA-Z0-9_-]+):cron:' + re.escape(str(job_id)) + r':run:' + re.escape(session_id), key)
-    if not match:
-        raise ValueError('Delivery record is not bound to this job session')
-    relative = f'research/delivery/{session_id}.json'
-    cached = folder / relative
-    if cached.exists():
-        saved = json.loads(cached.read_text())
-        if saved['session_key'] != key:
-            raise ValueError('Delivery evidence belongs to another session')
-        return saved['final_text']
-    with tempfile.TemporaryDirectory(prefix='delivery-export-', dir=folder/'research') as temporary:
-        completed = subprocess.run([
-            'openclaw','sessions','export-trajectory','--agent',match[1],
-            '--session-key',key,'--workspace',temporary,'--output','delivery','--json',
-        ],capture_output=True,text=True,timeout=60,check=True)
-        metadata = json.loads(completed.stdout)
-        if metadata.get('sessionId') != session_id:
-            raise ValueError('Exported delivery session does not match the job run')
-        exported = Path(metadata['outputDir']).resolve()
-        if not exported.is_relative_to(Path(temporary).resolve()):
-            raise ValueError('Unexpected trajectory export location')
-        final = None
-        for line in (exported/'events.jsonl').read_text().splitlines():
-            event = json.loads(line)
-            if event.get('sessionId') != session_id or event.get('type') != 'assistant.message':
-                continue
-            message = event.get('data',{}).get('message',{})
-            if any(part.get('type') == 'toolCall' for part in message.get('content',[])):
-                continue
-            texts = [part['text'] for part in message.get('content',[]) if part.get('type')=='text']
-            if texts:
-                final = '\n'.join(texts).strip()
-        if final is None:
-            raise ValueError('No final assistant output in the completed job session')
-    # Retain only the relevant final output, not prompts or unrelated runtime metadata.
-    store.json_artifact(folder,relative,{'session_key':key,'final_text':final})
-    return final
+def record_emission(run_id: UUID, job_id: UUID, text: str) -> None:
+    """Called only after flushing the exact command stdout; no model follows it."""
+    if text == "NO_REPLY":
+        return
+    folder = store.run_folder(store.get_run(run_id))
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT digest FROM minerva_ideas.publications WHERE run_id=%s AND job_id=%s AND state='sending'",
+            (run_id, job_id),
+        ).fetchall()
+    for row in rows:
+        digest = row["digest"]
+        if (folder / f"publications/{digest}.slack.txt").read_text() == text:
+            intent = json.loads(
+                (folder / f"publications/{digest}.intent.json").read_text()
+            )
+            store.json_artifact(
+                folder,
+                f"publications/{digest}.emitted.json",
+                {
+                    "argv": intent["argv"],
+                    "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                    "emitted_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            return
+    raise ValueError("No matching prepared publication for command output")
+
+
+def command_output_matches(entry: dict, folder, digest: str, text: str) -> bool:
+    marker = folder / f"publications/{digest}.emitted.json"
+    if not marker.exists() or entry.get("sessionId") or entry.get("status") != "ok":
+        return False
+    emitted = json.loads(marker.read_text())
+    if emitted["sha256"] != hashlib.sha256(text.encode()).hexdigest():
+        return False
+    at = datetime.fromisoformat(emitted["emitted_at"]).timestamp() * 1000
+    if not entry.get("runAtMs", 0) <= at <= entry.get("ts", 0):
+        return False
+    command = " ".join(json.dumps(arg, ensure_ascii=False) for arg in emitted["argv"])
+    diagnostics = entry.get("diagnostics", {}).get("entries", [])
+    return any(
+        d.get("source") == "exec"
+        and d.get("exitCode") == 0
+        and not d.get("truncated", False)
+        and d.get("message") == "command ok: " + command
+        for d in diagnostics
+    )
 
 
 def reconcile(job_id: UUID) -> dict:
@@ -185,13 +222,17 @@ def reconcile(job_id: UUID) -> dict:
                     entry.get("delivered") is True
                     and entry.get("deliveryStatus") == "delivered"
                 ):
-                    summary = entry.get('summary', '').strip()
+                    summary = entry.get("summary", "").strip()
                     if summary != text:
-                        if not summary.endswith('…') or not text.startswith(summary[:-1]):
+                        if not summary.endswith("…") or not text.startswith(
+                            summary[:-1]
+                        ):
                             continue
-                        if session_output(entry, store.run_folder(run), job_id) != text:
+                        if not command_output_matches(
+                            entry, store.run_folder(run), publication["digest"], text
+                        ):
                             continue
-                    # Full output equality plus the same run's transport receipt is required.
+                    # Bind stdout evidence to the native command and its transport receipt.
                     conn.execute(
                         "UPDATE minerva_ideas.publications SET state='delivered',receipt=%s WHERE digest=%s",
                         (

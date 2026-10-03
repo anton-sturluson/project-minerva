@@ -123,7 +123,10 @@ def test_postgres_duplicate_and_receipt_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr(
         publication,
         "gateway_json",
-        lambda *a: {"delivery": {"mode": "announce", **route}},
+        lambda *a: {
+            "delivery": {"mode": "announce", **route},
+            "payload": {"kind": "command", "argv": ["runner", str(job_id)]},
+        },
     )
     store.import_issue(
         {
@@ -174,7 +177,10 @@ def test_postgres_duplicate_and_receipt_lifecycle(tmp_path, monkeypatch):
         monkeypatch.setattr(
             publication,
             "gateway_json",
-            lambda *a: {"delivery": {"mode": "announce", **route}},
+            lambda *a: {
+                "delivery": {"mode": "announce", **route},
+                "payload": {"kind": "command", "argv": ["runner", str(job_id)]},
+            },
         )
         assert publication.prepare(run_id, job_id) == "NO_REPLY"
     finally:
@@ -217,31 +223,83 @@ def test_render_gate_rejects_wrong_company_even_if_marked_ready(tmp_path, monkey
         publication.checked_view(row, {"issue_date": date(2026, 9, 30)})
 
 
-def test_truncated_summary_needs_full_bound_session_output(tmp_path,monkeypatch):
+def test_truncated_summary_needs_full_bound_session_output(tmp_path, monkeypatch):
     from contextlib import contextmanager
-    from datetime import datetime,timezone
-    job_id=uuid4();run_id=uuid4();now=datetime.now(timezone.utc)
-    text='Original-source digest '+('x'*2200)
-    (tmp_path/'publications').mkdir();(tmp_path/'publications/d.slack.txt').write_text(text)
-    route={'channel':'slack','to':'channel:T','threadId':'t'}
-    record={'digest':'d','run_id':run_id,'route':route,'prepared_at':now}
+    from datetime import datetime, timezone
+
+    job_id = uuid4()
+    run_id = uuid4()
+    now = datetime.now(timezone.utc)
+    text = "Original-source digest " + ("x" * 2200)
+    (tmp_path / "publications").mkdir()
+    (tmp_path / "publications/d.slack.txt").write_text(text)
+    route = {"channel": "slack", "to": "channel:T", "threadId": "t"}
+    record = {"digest": "d", "run_id": run_id, "route": route, "prepared_at": now}
+
     class Connection:
-        def execute(self,*a):return self
-        def fetchall(self):return [record]
+        def execute(self, *a):
+            return self
+
+        def fetchall(self):
+            return [record]
+
     @contextmanager
-    def connect():yield Connection()
-    monkeypatch.setattr(publication.store,'connect',connect)
-    monkeypatch.setattr(publication.store,'get_run',lambda _:{})
-    monkeypatch.setattr(publication.store,'run_folder',lambda _:tmp_path)
-    entry={'summary':text[:2000]+'…','delivered':True,'deliveryStatus':'delivered','ts':now.timestamp()*1000+1000,'delivery':{'resolved':route}}
-    monkeypatch.setattr(publication,'gateway_json',lambda *a:{'entries':[entry]})
-    monkeypatch.setattr(publication,'session_output',lambda *a:'Different full content')
-    assert publication.reconcile(job_id)['confirmed_deliveries']==0
-    monkeypatch.setattr(publication,'session_output',lambda *a:text)
-    assert publication.reconcile(job_id)['confirmed_deliveries']==1
+    def connect():
+        yield Connection()
+
+    monkeypatch.setattr(publication.store, "connect", connect)
+    monkeypatch.setattr(publication.store, "get_run", lambda _: {})
+    monkeypatch.setattr(publication.store, "run_folder", lambda _: tmp_path)
+    entry = {
+        "summary": text[:2000] + "…",
+        "delivered": True,
+        "deliveryStatus": "delivered",
+        "ts": now.timestamp() * 1000 + 1000,
+        "delivery": {"resolved": route},
+    }
+    monkeypatch.setattr(publication, "gateway_json", lambda *a: {"entries": [entry]})
+    monkeypatch.setattr(publication, "command_output_matches", lambda *a: False)
+    assert publication.reconcile(job_id)["confirmed_deliveries"] == 0
+    monkeypatch.setattr(publication, "command_output_matches", lambda *a: True)
+    assert publication.reconcile(job_id)["confirmed_deliveries"] == 1
 
 
-def test_session_export_must_belong_to_the_same_job(tmp_path):
-    session_id=uuid4()
-    with pytest.raises(ValueError,match='bound'):
-        publication.session_output({'sessionId':str(session_id),'sessionKey':f'agent:main:cron:{uuid4()}:run:{session_id}'},tmp_path,uuid4())
+def test_command_receipt_requires_matching_output_and_execution(tmp_path):
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    from harness.ideas import store
+
+    now = datetime.now(timezone.utc)
+    text = "Actual command output"
+    argv = ["runner", "job"]
+    store.json_artifact(
+        tmp_path,
+        "publications/d.emitted.json",
+        {
+            "argv": argv,
+            "sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "emitted_at": now.isoformat(),
+        },
+    )
+    diagnostic = {
+        "source": "exec",
+        "exitCode": 0,
+        "message": "command ok: " + " ".join(json.dumps(a) for a in argv),
+    }
+    entry = {
+        "status": "ok",
+        "runAtMs": now.timestamp() * 1000 - 1000,
+        "ts": now.timestamp() * 1000 + 1000,
+        "diagnostics": {"entries": [diagnostic]},
+    }
+    assert publication.command_output_matches(entry, tmp_path, "d", text)
+    diagnostic["truncated"] = True
+    assert not publication.command_output_matches(entry, tmp_path, "d", text)
+    diagnostic["truncated"] = False
+    diagnostic["message"] = 'command ok: "another-runner"'
+    assert not publication.command_output_matches(entry, tmp_path, "d", text)
+    assert not publication.command_output_matches(
+        entry, tmp_path, "d", "Different content"
+    )
