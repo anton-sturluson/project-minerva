@@ -123,11 +123,7 @@ export function CashLedger({
                   : exact(ledger.balance)}
               </strong>
             </div>
-            <Trades
-              account={account}
-              holdings={ledger.holdings}
-              onSaved={load}
-            />
+            <Trades account={account} onSaved={load} />
             <details className="entry-panel">
               <summary>Record cash</summary>
               <form className="entry-form" onSubmit={(e) => void save(e)}>

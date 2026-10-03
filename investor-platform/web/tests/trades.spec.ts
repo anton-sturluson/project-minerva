@@ -35,10 +35,15 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
   await expect(
     page.getByText("Position entry saved.", { exact: true }),
   ).toBeVisible();
-  const holdings = page.getByLabel("Holdings", { exact: true });
-  await expect(
-    holdings.getByRole("row").filter({ hasText: ticker }),
-  ).toContainText("Unknown");
+  async function holding() {
+    const latest = await (
+      await request.get(`/api/accounts/${account.id}/ledger`)
+    ).json();
+    return latest.holdings.find(
+      (h: { security: { ticker: string } }) => h.security.ticker === ticker,
+    );
+  }
+  expect((await holding()).cost_basis).toBeNull();
   await page.getByLabel("Position action", { exact: true }).selectOption("buy");
   await page.getByLabel("Shares", { exact: true }).fill("2");
   await page.getByLabel("Price per share", { exact: true }).fill("10");
@@ -60,9 +65,7 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
     .getByRole("button", { name: "Save position entry", exact: true })
     .click();
   await expect(page.getByRole("alert")).toBeHidden();
-  await expect(
-    holdings.getByRole("row").filter({ hasText: ticker }),
-  ).toContainText("5");
+  expect(Number((await holding()).quantity)).toBe(5);
   await page
     .getByLabel("Position action", { exact: true })
     .selectOption("sell");
@@ -78,9 +81,7 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
     .getByRole("button", { name: "Save position entry", exact: true })
     .click();
   await expect(page.getByRole("alert")).toBeHidden();
-  await expect(
-    holdings.getByRole("row").filter({ hasText: ticker }),
-  ).toContainText("10.50");
+  expect(Number((await holding()).cost_basis)).toBe(10.5);
   await page.getByText("Account activity", { exact: true }).click();
   const sale = page.getByRole("row").filter({ hasText: `Sell · ${ticker}` });
   await sale.locator("summary").click();
@@ -89,9 +90,8 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
   await page
     .getByRole("button", { name: "Save position entry", exact: true })
     .click();
-  await expect(
-    holdings.getByRole("row").filter({ hasText: ticker }),
-  ).toHaveCount(0);
+  await expect(page.getByLabel("Shares", { exact: true })).toHaveValue("");
+  expect(await holding()).toBeUndefined();
   await page.reload();
   await expect(page.getByTestId("cash-balance")).toBeVisible();
   const after = await (

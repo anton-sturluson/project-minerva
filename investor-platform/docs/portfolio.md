@@ -56,3 +56,7 @@ Migration `0006` adds the audit table and replaces opening-entry database indexe
 - [Accounting](../backend/src/investor_platform/accounting.py) — cash validation and FIFO calculations.
 - [Corrections](../backend/src/investor_platform/corrections.py) — preview, replacement, void and audit behavior.
 - [Performance methodology](performance.md) and [hit-rate methodology](hit-rate.md) — benchmark comparisons.
+
+## Overview and pages
+
+Portfolio shows the trade scorecard, one holdings table with allocation bars, then performance. Allocation uses closing market values as of the selected report end date, including cash in the denominator. The five largest securities are shown separately, with smaller positions grouped as Other holdings. Without quotes, recorded shares and basis remain available; market values and allocation stay unavailable. Activity contains collapsible cash/trade forms and transaction history. Research is a separate placeholder view.

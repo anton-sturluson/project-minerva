@@ -1,11 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
-import { number } from "./format";
 import {
-  exact,
   today,
   type Entry,
-  type Holding,
   type PositionKind,
   positionKinds,
   labels,
@@ -13,11 +10,9 @@ import {
 
 export function Trades({
   account,
-  holdings,
   onSaved,
 }: {
   account: Account;
-  holdings: Holding[];
   onSaved: () => Promise<void>;
 }) {
   const [kind, setKind] = useState<PositionKind>("buy");
@@ -70,43 +65,7 @@ export function Trades({
     }
   }
   return (
-    <section className="positions" aria-labelledby="holdings-heading">
-      <h3 id="holdings-heading">Holdings</h3>
-      <p className="form-note">Basis is purchase cost, not market value.</p>
-      {holdings.length ? (
-        <div className="table-scroll" tabIndex={0} aria-label="Holdings">
-          <table>
-            <thead>
-              <tr>
-                <th>Security</th>
-                <th>Exchange</th>
-                <th className="number">Shares</th>
-                <th className="number">
-                  Remaining basis ({account.base_currency})
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {holdings.map((h) => (
-                <tr key={h.security.id}>
-                  <td>{h.security.ticker}</td>
-                  <td>{h.security.exchange}</td>
-                  <td className="number">{exact(h.quantity, 0)}</td>
-                  <td className="number">
-                    {h.cost_basis === null
-                      ? "Unknown"
-                      : account.reconstruction
-                        ? number(h.cost_basis)
-                        : exact(h.cost_basis)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p>No open positions.</p>
-      )}
+    <section className="positions" aria-label="Trade entry">
       <details className="entry-panel">
         <summary>Record a position or trade</summary>
         {error && (
