@@ -1,0 +1,60 @@
+name: Investor platform
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: investor-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.10"
+          enable-cache: true
+          cache-dependency-glob: investor-platform/backend/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: investor-platform/web/.node-version
+      - name: Install pnpm
+        run: npm install --global pnpm@11.19.0
+      - name: Install Python dependencies
+        working-directory: investor-platform/backend
+        run: uv sync --frozen
+      - name: Check Python
+        working-directory: investor-platform/backend
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
+          uv run --frozen pytest
+      - name: Install frontend dependencies
+        working-directory: investor-platform/web
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        working-directory: investor-platform/web
+        run: |
+          pnpm format:check
+          pnpm build
+      - name: Install test browser
+        working-directory: investor-platform/web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test browser flows
+        working-directory: investor-platform/web
+        run: pnpm test
+      - name: Save browser failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: investor-platform-browser-traces
+          path: investor-platform/web/test-results/
+          retention-days: 7
