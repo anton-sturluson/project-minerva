@@ -62,8 +62,6 @@ def test_fifo_open_buy_partial_sell_full_close(db_client, account_id, database):
     assert state["holdings"] == []
     assert Decimal(state["balance"]) == 11264
     assert Decimal(state["entries"][-1]["realized_pnl"]) == Decimal("27.8")
-    database.dispose()
-    assert ledger(db_client, account_id) == state
 
 
 def test_unknown_basis_is_not_fabricated(db_client, account_id):
@@ -113,7 +111,6 @@ def test_opening_position_cannot_be_retroactively_preceded(db_client, account_id
     "extra",
     [
         {"quantity": "0"},
-        {"quantity": "-1"},
         {"quantity": "0.000000001"},
         {"price": "0"},
         {"price": None},

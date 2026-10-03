@@ -10,7 +10,15 @@ from sqlalchemy import select
 
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
-from .ledger import CashInput, EntryView, entries_for, fingerprint, read_ledger
+from .ledger import (
+    CashInput,
+    EntryView,
+    HoldingView,
+    WireDecimal,
+    entries_for,
+    fingerprint,
+    ledger_view,
+)
 from .models import LedgerCorrection, LedgerEntry
 from .trades import TradeInput, build_trade
 
@@ -24,6 +32,14 @@ class CorrectionInput(BaseModel):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
     replacement: Replacement | None
     expected_revision: str | None = None
+
+
+class CorrectionPreview(BaseModel):
+    revision: str
+    previous_balance: WireDecimal
+    balance: WireDecimal
+    holdings: list[HoldingView]
+    replacement: EntryView | None
 
 
 @router.post("/{account_id}/entries/{entry_id}/correction")
@@ -56,7 +72,6 @@ def correct(
         raise HTTPException(
             409, "Records changed or were not previewed; preview the correction again"
         )
-    previous_balance = replay(entries)[0]
     replacement = None
     if data.replacement is not None:
         values = data.replacement.model_copy(update={"request_key": data.request_key})
@@ -84,17 +99,18 @@ def correct(
     )
     session.add(correction)
     session.flush()
-    replay(entries_for(session, account_id))
+    active = entries_for(session, account_id)
     if preview:
-        projected = read_ledger(account_id, session, actor)
-        result = {
-            "revision": revision,
-            "previous_balance": format(previous_balance, "f"),
-            "balance": format(projected.balance, "f"),
-            "holdings": projected.holdings,
-            "replacement": EntryView.model_validate(replacement) if replacement else None,
-        }
+        projected = ledger_view(active, account.base_currency)
+        result = CorrectionPreview(
+            revision=revision,
+            previous_balance=replay(entries)[0],
+            balance=projected.balance,
+            holdings=projected.holdings,
+            replacement=EntryView.model_validate(replacement) if replacement else None,
+        )
         session.rollback()
         return result
+    replay(active)
     session.commit()
     return {"id": correction.id}

@@ -1,0 +1,28 @@
+"""Stable API values shared by validation and accounting; storage remains plain text."""
+
+from enum import StrEnum
+
+# Share-price products exceed Decimal's default precision.
+ACCOUNTING_PRECISION = 64
+
+
+class EntryKind(StrEnum):
+    OPENING_CASH = "opening_cash"
+    DEPOSIT = "deposit"
+    WITHDRAWAL = "withdrawal"
+    INCOME = "income"
+    OPENING_POSITION = "opening_position"
+    BUY = "buy"
+    SELL = "sell"
+
+
+class Currency(StrEnum):
+    USD = "USD"
+    EUR = "EUR"
+    GBP = "GBP"
+    CAD = "CAD"
+    AUD = "AUD"
+    JPY = "JPY"
+    CHF = "CHF"
+    HKD = "HKD"
+    SGD = "SGD"

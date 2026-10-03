@@ -9,6 +9,14 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from .domain import Currency
+
+MAX_SECURITIES = 48
+HISTORY_WINDOW = timedelta(days=3660)
+MARKET_TIMEZONE = ZoneInfo("America/New_York")
+SOURCE = "Yahoo Finance daily history"
+BENCHMARKS = ("SPY", "QQQ")
+
 
 @dataclass
 class History:
@@ -48,7 +56,7 @@ def history(symbol: str, start: date, end: date) -> History:
     with urlopen(request, timeout=6) as response:
         payload = json.load(response, parse_float=Decimal)
     result = payload["chart"]["result"][0]
-    if result["meta"]["currency"] != "USD":
+    if result["meta"]["currency"] != Currency.USD:
         raise ValueError("Market currency is not USD")
     if result["meta"]["instrumentType"] not in {"EQUITY", "ETF"}:
         raise ValueError("Only equities and ETFs are supported")
@@ -101,15 +109,21 @@ EXCHANGES = {
     "BATS": {"BTS"},
 }
 
+PROVIDER_EXCHANGES = frozenset().union(*EXCHANGES.values())
 
-def symbol_for(security):
-    if security.currency != "USD" or security.exchange not in EXCHANGES:
+
+def symbol_for(security, *, provisional=False):
+    supported = security.exchange in EXCHANGES or (
+        provisional and security.exchange == "UNVERIFIED"
+    )
+    if security.currency != Currency.USD or not supported:
         raise ValueError(f"{security.ticker}: use a supported US exchange and USD")
     return security.ticker.replace(".", "-")
 
 
-def verify_exchange(security, history):
-    if history.exchange not in EXCHANGES[security.exchange]:
+def verify_exchange(security, history, *, provisional=False):
+    allowed = PROVIDER_EXCHANGES if provisional else EXCHANGES[security.exchange]
+    if history.exchange not in allowed:
         raise ValueError(f"{security.ticker}: provider listing does not match {security.exchange}")
 
 

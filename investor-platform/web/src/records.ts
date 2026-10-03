@@ -6,7 +6,7 @@ export type Security = {
 };
 export type Entry = {
   id: number;
-  kind: string;
+  kind: EntryKind;
   effective_date: string;
   amount: string;
   currency: string;
@@ -48,7 +48,7 @@ export function exact(value: string, minimumDecimals = 2) {
   );
 }
 export const today = () => new Date().toISOString().slice(0, 10);
-export const labels: Record<string, string> = {
+export const labels = {
   opening_cash: "Opening cash",
   deposit: "Deposit",
   income: "Investment income",
@@ -56,4 +56,20 @@ export const labels: Record<string, string> = {
   opening_position: "Opening position",
   buy: "Buy",
   sell: "Sell",
-};
+} as const;
+export type EntryKind = keyof typeof labels;
+export const cashKinds = [
+  "opening_cash",
+  "deposit",
+  "income",
+  "withdrawal",
+] as const satisfies readonly EntryKind[];
+export const positionKinds = [
+  "opening_position",
+  "buy",
+  "sell",
+] as const satisfies readonly EntryKind[];
+export type CashKind = (typeof cashKinds)[number];
+export type PositionKind = (typeof positionKinds)[number];
+export const isPositionKind = (kind: EntryKind): kind is PositionKind =>
+  positionKinds.some((value) => value === kind);

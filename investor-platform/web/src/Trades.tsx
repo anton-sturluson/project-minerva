@@ -1,7 +1,15 @@
 import { useRef, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
 import { number } from "./format";
-import { exact, today, type Entry, type Holding } from "./records";
+import {
+  exact,
+  today,
+  type Entry,
+  type Holding,
+  type PositionKind,
+  positionKinds,
+  labels,
+} from "./records";
 
 export function Trades({
   account,
@@ -12,7 +20,7 @@ export function Trades({
   holdings: Holding[];
   onSaved: () => Promise<void>;
 }) {
-  const [kind, setKind] = useState("buy");
+  const [kind, setKind] = useState<PositionKind>("buy");
   const [ticker, setTicker] = useState("");
   const [exchange, setExchange] = useState("");
   const [date, setDate] = useState(today());
@@ -118,11 +126,13 @@ export function Trades({
               aria-label="Position action"
               value={kind}
               disabled={saving}
-              onChange={(e) => setKind(e.target.value)}
+              onChange={(e) => setKind(e.target.value as PositionKind)}
             >
-              <option value="opening_position">Opening position</option>
-              <option value="buy">Buy</option>
-              <option value="sell">Sell</option>
+              {positionKinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {labels[kind]}
+                </option>
+              ))}
             </select>
           </label>
           <label>

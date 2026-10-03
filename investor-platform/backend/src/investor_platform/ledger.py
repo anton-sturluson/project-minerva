@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from .accounting import replay
-from .accounts import DB, Currency, Identity, owned_account
+from .accounts import DB, Identity, owned_account
+from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
 from .models import LedgerCorrection, LedgerEntry
 
 router = APIRouter(prefix="/api/accounts")
@@ -35,12 +36,12 @@ class EntryInput(BaseModel):
 
 
 class CashInput(EntryInput):
-    kind: Literal["opening_cash", "deposit", "withdrawal", "income"]
+    kind: Literal[EntryKind.OPENING_CASH, EntryKind.DEPOSIT, EntryKind.WITHDRAWAL, EntryKind.INCOME]
     amount: Money
 
     @model_validator(mode="after")
     def positive_amount(self):
-        if self.kind != "opening_cash" and self.amount <= 0:
+        if self.kind != EntryKind.OPENING_CASH and self.amount <= 0:
             raise ValueError("Deposits, withdrawals and income must be positive")
         return self
 
@@ -53,7 +54,7 @@ class SecurityView(BaseModel):
     id: UUID
     ticker: str
     exchange: str
-    currency: str
+    currency: Currency
 
 
 class HoldingView(BaseModel):
@@ -65,10 +66,10 @@ class HoldingView(BaseModel):
 class EntryView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    kind: str
+    kind: EntryKind
     effective_date: date
     amount: WireDecimal
-    currency: str
+    currency: Currency
     note: str
     created_by: UUID
     created_at: datetime
@@ -90,7 +91,7 @@ class CorrectionView(BaseModel):
 
 
 class LedgerView(BaseModel):
-    currency: str
+    currency: Currency
     balance: WireDecimal
     entries: list[EntryView]
     holdings: list[HoldingView] = []
@@ -128,22 +129,20 @@ def fingerprint(data):
     values = data.model_dump(mode="json", exclude={"request_key"})
     # Equivalent decimal spellings have the same retry identity.
     with localcontext() as context:
-        context.prec = 64
+        context.prec = ACCOUNTING_PRECISION
         for key, value in data.model_dump().items():
             if isinstance(value, Decimal):
                 values[key] = format(value.normalize(), "f")
     return json.dumps(values, sort_keys=True, separators=(",", ":"))
 
 
-@router.get("/{account_id}/ledger", response_model=LedgerView)
-def read_ledger(account_id: UUID, session: DB, actor: Identity):
-    account = owned_account(session, actor, account_id)
-    entries, all_entries, audit = ledger_snapshot(session, account_id)
+def ledger_view(entries, currency):
+    """Build the active ledger view once, shared by reads and correction previews."""
     balance, lots, realized = replay(entries)
     securities = {e.security_id: e.security for e in entries if e.security_id}
     holdings = []
     with localcontext() as context:
-        context.prec = 64
+        context.prec = ACCOUNTING_PRECISION
         for security_id, security_lots in lots.items():
             active = [lot for lot in security_lots if lot.quantity > 0]
             if not active:
@@ -165,6 +164,18 @@ def read_ledger(account_id: UUID, session: DB, actor: Identity):
         EntryView.model_validate(e).model_copy(update={"realized_pnl": realized.get(e.id)})
         for e in entries
     ]
+    return LedgerView(
+        currency=currency,
+        balance=balance,
+        entries=views,
+        holdings=sorted(holdings, key=lambda h: (h.security.ticker, h.security.exchange)),
+    )
+
+
+@router.get("/{account_id}/ledger", response_model=LedgerView)
+def read_ledger(account_id: UUID, session: DB, actor: Identity):
+    account = owned_account(session, actor, account_id)
+    entries, all_entries, audit = ledger_snapshot(session, account_id)
     corrections = [
         CorrectionView(
             id=c.id,
@@ -178,12 +189,8 @@ def read_ledger(account_id: UUID, session: DB, actor: Identity):
         )
         for c in audit
     ]
-    return LedgerView(
-        corrections=corrections,
-        currency=account.base_currency,
-        balance=balance,
-        entries=views,
-        holdings=sorted(holdings, key=lambda h: (h.security.ticker, h.security.exchange)),
+    return ledger_view(entries, account.base_currency).model_copy(
+        update={"corrections": corrections}
     )
 
 
@@ -203,7 +210,7 @@ def record_cash(account_id: UUID, data: CashInput, session: DB, actor: Identity)
     if data.currency != account.base_currency:
         raise HTTPException(422, "Entry currency must match the account")
     entries = entries_for(session, account_id)
-    if data.kind == "opening_cash" and entries:
+    if data.kind == EntryKind.OPENING_CASH and entries:
         raise HTTPException(409, "Opening cash must be the first entry; use a deposit instead")
     entry = LedgerEntry(
         account_id=account_id, created_by=actor.owner_id, request_body=body, **data.model_dump()
