@@ -1,18 +1,23 @@
 """Original-source weekly research inside the primary Minerva CLI."""
+
 from __future__ import annotations
 
 import json
+import subprocess
+from functools import wraps
 from pathlib import Path
 from uuid import UUID
-from functools import wraps
 
 import httpx
-import subprocess
 import psycopg
 import typer
-from harness.ideas import store
 
-app = typer.Typer(no_args_is_help=True, help="Research weekly leads from original manager documents.")
+from harness.ideas import store
+from harness.ideas.model import ModelError
+
+app = typer.Typer(
+    no_args_is_help=True, help="Research weekly leads from original manager documents."
+)
 
 
 def guarded(fn):
@@ -20,11 +25,23 @@ def guarded(fn):
     def call(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (ValueError, OSError, psycopg.Error, httpx.HTTPError, subprocess.SubprocessError) as exc:
+        except (
+            ModelError,
+            ValueError,
+            OSError,
+            psycopg.Error,
+            httpx.HTTPError,
+            subprocess.SubprocessError,
+        ) as exc:
             # Connection errors may contain DSNs. Never echo driver details.
-            message = "Postgres operation failed; check MINERVA_DATABASE_URL and database access." if isinstance(exc, psycopg.Error) else str(exc)
+            message = (
+                "Postgres operation failed; check MINERVA_DATABASE_URL and database access."
+                if isinstance(exc, psycopg.Error)
+                else str(exc)
+            )
             typer.echo(message, err=True)
             raise typer.Exit(1) from None
+
     return call
 
 
@@ -37,7 +54,7 @@ def emit(value):
 def initialize():
     """Create only the minerva_ideas schema in the configured Postgres database."""
     store.initialize()
-    emit({"schema":"minerva_ideas","status":"ready"})
+    emit({"schema": "minerva_ideas", "status": "ready"})
 
 
 @app.command("import")
@@ -60,4 +77,16 @@ def status(run_id: UUID):
 def source(run_id: UUID, ordinal: int, url: str):
     """Archive an original document candidate; this does not approve its thesis."""
     from harness.ideas.documents import attach
-    emit(attach(run_id,ordinal,url))
+
+    emit(attach(run_id, ordinal, url))
+
+
+@app.command("research")
+@guarded
+def research(
+    run_id: UUID, ordinal: int, model: str = typer.Option("gemini-2.5-flash-lite")
+):
+    """Find and verify an original manager source: at most 2 searches/6 downloads/3 assessments."""
+    from harness.ideas.research import discover
+
+    emit(discover(run_id, ordinal, model=model))
