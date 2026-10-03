@@ -42,3 +42,20 @@ worktrees/
 .obsidian/
 .venv
 .worktrees/
+
+# Private configuration, key material and database exports
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+id_rsa
+id_ed25519
+credentials.json
+credentials.toml

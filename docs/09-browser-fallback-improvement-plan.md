@@ -123,7 +123,7 @@ The change is in the `_load_raw_source()` calls inside `prepare_evidence()` — 
 The morning brief is triggered by an OpenClaw cron job:
 - Job ID: `6f14f630-49f2-4440-bc3c-1b3464fa6b7f`
 - Name: `Broad market morning brief`
-- Agent: `main` (Charlie)
+- Agent: `main` (analyst)
 - Schedule: `0 4 * * *` (4am ET)
 - Current timeout: `1800s` (30 minutes)
 - Last run duration: ~264s (~4.4 minutes)
@@ -133,7 +133,7 @@ Changes needed:
 - **Timeout**: Currently 1800s, which is plenty of headroom. The browser fallback adds ~60-90s worst case (5-15s per blocked URL × ~6 blocked sources). No timeout change needed unless the number of blocked sources grows significantly.
 - **Chrome requirement**: The `browser` skill requires Chrome to be running with the extension loaded. For a 4am automated job, Chrome must either already be running or the script needs to handle the case where it isn't (skip browser fallback, run in degraded mode as today).
 - **Prompt update**: The cron job's existing prompt already includes a live supplement step (step 5) where the agent checks IR pages when inputs are degraded. Once the browser fallback is built into the shell script, that inline supplement becomes less critical for IR — the shell script handles it before the agent even starts writing. The prompt can be simplified accordingly.
-- **Note**: The cron job currently runs on the `main` agent (Charlie). The `openclaw agent` call in the shell script can target any agent — we should decide whether the browser subagent runs as `main` or a dedicated agent.
+- **Note**: The cron job currently runs on the `main` agent (analyst). The `openclaw agent` call in the shell script can target any agent — we should decide whether the browser subagent runs as `main` or a dedicated agent.
 
 ### 4. What the subagent collects
 

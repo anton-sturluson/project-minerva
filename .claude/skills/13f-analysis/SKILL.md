@@ -15,7 +15,7 @@ Analyze SEC 13-F filings to produce institutional-grade portfolio analysis repor
 - `edgartools` directly for identity setup, company lookup, insider transactions:
   ```python
   from edgar import Company, set_identity
-  set_identity("Minerva Research minerva@research.dev")
+  set_identity("Minerva Research research@example.com")
   ```
 
 ## Workflow

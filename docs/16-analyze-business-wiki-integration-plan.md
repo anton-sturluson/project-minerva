@@ -21,7 +21,7 @@ Rewrite the `analyze-business` skill so the zettel-wiki is the primary evidence 
 
 ## Subagent context model
 
-The three specialist subagents (`think-like-charlie-buffet`, `think-like-mauboussin`, `think-like-taleb`) are registered agents with consolidated AGENTS.md files. When spawned via `agentId`, OpenClaw auto-injects their AGENTS.md — the main agent does not need to read any subagent files.
+The three specialist subagents (`think-like-value-investor`, `think-like-mauboussin`, `think-like-taleb`) are registered agents with consolidated AGENTS.md files. When spawned via `agentId`, OpenClaw auto-injects their AGENTS.md — the main agent does not need to read any subagent files.
 
 They do *not* receive:
 - Skills (zettel-wiki, analyze-business, etc.)
@@ -210,14 +210,14 @@ Every item must be: answered directly, compressed because minor, explicitly mark
 
 ### 3. `brainstorm/SKILL.md` — simplify to triangulate-only
 
-Remove modes (use/compare/debate/triangulate). Always run all three agents. Inline the agent table from registry.md, delete the separate file. Loosen the workflow — describe the flow naturally instead of rigid numbered steps. Charlie stays at opus 4.6.
+Remove modes (use/compare/debate/triangulate). Always run all three agents. Inline the agent table from registry.md, delete the separate file. Loosen the workflow — describe the flow naturally instead of rigid numbered steps. analyst stays at opus 4.6.
 
 Proposed full content:
 
 ```markdown
 ---
 name: brainstorm
-description: Triangulate an investment question through three specialist subagents (`charlie`, `mauboussin`, `taleb`). Use when the goal is to surface angles, disagreements, and blind spots before or during deeper analysis.
+description: Triangulate an investment question through three specialist subagents (`analyst`, `mauboussin`, `taleb`). Use when the goal is to surface angles, disagreements, and blind spots before or during deeper analysis.
 ---
 
 # Brainstorm
@@ -228,7 +228,7 @@ Run all three specialist subagents in parallel on the same question. Each brings
 
 | Agent | agentId | Lens | Default model |
 |---|---|---|---|
-| Charlie | `think-like-charlie-buffet` | Business quality, moat, incentives, capital allocation, margin of safety | `opus` (`anthropic/claude-opus-4-6`) |
+| analyst | `think-like-value-investor` | Business quality, moat, incentives, capital allocation, margin of safety | `opus` (`anthropic/claude-opus-4-6`) |
 | Mauboussin | `think-like-mauboussin` | Expectations, base rates, ROIC, valuation, persistence vs fade | `gemini-pro` (`google/gemini-3.1-pro-preview`) |
 | Taleb | `think-like-taleb` | Fragility, ruin, tail risk, convexity, hidden leverage | `openai/gpt-5.5` |
 
@@ -275,12 +275,12 @@ Structure for each consolidated AGENTS.md:
 
 Also: register the three subagents in openclaw.json so `sessions_spawn` with `agentId` works and AGENTS.md auto-injects. Add them to `subagents.allowAgents` for the main agent.
 
-#### 4a. `think-like-charlie-buffet/AGENTS.md`
+#### 4a. `think-like-value-investor/AGENTS.md`
 
 ```markdown
-# Think Like Charlie Buffet
+# Think Like project-user
 
-- *Name:* Charlie Buffet
+- *Name:* project-user
 - *Role:* AI investing companion — business quality, moat, incentives, capital allocation, margin of safety
 - *Style:* Blunt, concise, businesslike
 
@@ -318,7 +318,7 @@ Use a small latticework of practical mental models. Before concluding, run an an
 
 When the task involves a company, industry, or investment question, query the local wiki before relying on general knowledge.
 
-*Wiki root:* `/Users/charlie-buffet/Documents/project-minerva/hard-disk/wiki/`
+*Wiki root:* `hard-disk/wiki/`
 
 *Navigation:*
 1. Read `wiki/INDEX.md` for the master catalog.
@@ -409,7 +409,7 @@ An investing thinker focused on expectations, base rates, competitive advantage,
 
 When the task involves a company, industry, or investment question, query the local wiki before relying on general knowledge.
 
-*Wiki root:* `/Users/charlie-buffet/Documents/project-minerva/hard-disk/wiki/`
+*Wiki root:* `hard-disk/wiki/`
 
 *Navigation:*
 1. Read `wiki/INDEX.md` for the master catalog.
@@ -473,7 +473,7 @@ Test for anchoring, narrative fallacy, confirmation bias, overconfidence, escala
 
 - *Name:* Nassim Nicholas Taleb
 - *Role:* Risk manager — tail risk, fragility, antifragility, skin in the game
-- *Team position:* The skeptic. Stress-tests what Charlie Buffet and Michael Mauboussin produce.
+- *Team position:* The skeptic. Stress-tests what project-user and Michael Mauboussin produce.
 - *Style:* Blunt, principle-driven, allergic to false precision. Distributions over point estimates. Never forecasts — identifies fragility.
 
 ## Persona
@@ -513,7 +513,7 @@ Point forecasts on fat-tailed variables. VaR as a risk measure. Superforecasting
 
 When the task involves a company, industry, or investment question, query the local wiki before relying on general knowledge.
 
-*Wiki root:* `/Users/charlie-buffet/Documents/project-minerva/hard-disk/wiki/`
+*Wiki root:* `hard-disk/wiki/`
 
 *Navigation:*
 1. Read `wiki/INDEX.md` for the master catalog.
@@ -568,7 +568,7 @@ Conclude with a practical judgment: safe enough, fragile — reduce exposure, un
 ## User context
 
 - *User:* Anton
-- *Notes:* Wants rigorous risk management. Prefers blunt, no-BS assessments. Works with Charlie Buffet and Michael Mauboussin as complementary agents.
+- *Notes:* Wants rigorous risk management. Prefers blunt, no-BS assessments. Works with project-user and Michael Mauboussin as complementary agents.
 ```
 
 #### 4d. Agent registration
@@ -577,12 +577,12 @@ Register the three subagents in openclaw.json and allow the main agent to spawn 
 
 ```json5
 // Add to agents.list[]
-{ "id": "think-like-charlie-buffet", "workspace": "~/.openclaw/workspace/subagents/think-like-charlie-buffet" },
+{ "id": "think-like-value-investor", "workspace": "~/.openclaw/workspace/subagents/think-like-value-investor" },
 { "id": "think-like-mauboussin", "workspace": "~/.openclaw/workspace/subagents/think-like-mauboussin" },
 { "id": "think-like-taleb", "workspace": "~/.openclaw/workspace/subagents/think-like-taleb" }
 
 // Add to main agent’s subagents.allowAgents (or agents.defaults.subagents.allowAgents)
-["think-like-charlie-buffet", "think-like-mauboussin", "think-like-taleb"]
+["think-like-value-investor", "think-like-mauboussin", "think-like-taleb"]
 ```
 
 After registration, update the brainstorm SKILL.md to spawn with `agentId` instead of reading files manually.

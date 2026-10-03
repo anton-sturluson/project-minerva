@@ -27,4 +27,4 @@ Only manual, long-only equities in the account currency. No broker orders, price
 
 - [Trade tests](../backend/tests/test_trades.py): reconciliation, precision, atomicity, concurrency, and validation.
 - [Browser flow](../web/tests/trades.spec.ts): real UI/API integration, failure recovery, and mobile checks.
-- [Accounting rules](../README.md#positions-and-trades): precision and FIFO conventions.
+- [Accounting rules](portfolio.md#positions-and-trades): precision and FIFO conventions.

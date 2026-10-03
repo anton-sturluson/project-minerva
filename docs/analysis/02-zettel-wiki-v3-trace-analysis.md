@@ -2,13 +2,13 @@
 
 **Date:** 2026-04-23
 **Session ID (main):** `5228c9c7-76ab-4ab9-b3b3-125f0dbaabb6`
-**Thread:** Slack `#all-minerva` — ":thread: Test Zettel-Wiki v3 - Charlie"
+**Thread:** Slack `#all-minerva` — ":thread: Test Zettel-Wiki v3 - analyst"
 
 ---
 
 ## 1. Session Overview
 
-- **Agent:** Charlie (agent ID: `main`)
+- **Agent:** analyst (agent ID: `main`)
 - **Start Time:** 2026-04-23 05:26:07 UTC (01:26 EDT)
 - **End Time:** 2026-04-23 05:36:57 UTC (01:36 EDT)
 - **Total Wall Time:** 10 minutes 50 seconds
@@ -167,7 +167,7 @@ The main session read zero raw evidence files for extraction — all extraction 
 > - DO NOT use notes/memos from 00-notes (those are synthesis, not raw evidence per the skill)
 > - Create structure notes from the emergent zettel clusters
 >
-> The raw evidence sources are in `01-data/02-structured/`: 00-filings, 02-transcripts, 03-product-docs, 04-customer-evidence, 05-competitors, 06-news, 08-key-metrics, 10-valuation.
+> Raw evidence folders cover filings, transcripts, product documents, regulation, competitors, news, metrics and valuation.
 >
 > This is a large body of evidence. I should use parallel subagents for extraction, then consolidate. I have up to 10 parallel subagents. Let me batch by source category."
 

@@ -56,7 +56,7 @@ It should not prescribe a full research recipe. The agent can choose the right p
 Create the new canonical skill folder:
 
 ```text
-/Users/charlie-buffet/.openclaw/workspace/skills/research-evidence/
+/path/to/home/.openclaw/workspace/skills/research-evidence/
 ├── SKILL.md
 └── references/
     └── research-dimensions.md
@@ -90,9 +90,9 @@ It should not contain:
 Use this as the implementation spec.
 
 ````bash
-mkdir -p /Users/charlie-buffet/.openclaw/workspace/skills/research-evidence/references
+mkdir -p /path/to/home/.openclaw/workspace/skills/research-evidence/references
 
-cat > /Users/charlie-buffet/.openclaw/workspace/skills/research-evidence/SKILL.md <<'EOF'
+cat > /path/to/home/.openclaw/workspace/skills/research-evidence/SKILL.md <<'EOF'
 ---
 name: research-evidence
 description: Build, plan, collect, and audit durable company evidence bases before business analysis. Use when initializing or reusing a company evidence tree, collecting SEC and external sources, planning evidence work from relevant research dimensions, saving or registering evidence, running brainstorm with subagents to challenge the evidence base, building source-grounded datasets, or filling research gaps before synthesis.
@@ -205,7 +205,7 @@ End with a compact handoff that makes the next analysis pass easier:
 Do not hide uncertainty behind activity. If evidence quality is weak, say so plainly.
 EOF
 
-cat > /Users/charlie-buffet/.openclaw/workspace/skills/research-evidence/references/research-dimensions.md <<'EOF'
+cat > /path/to/home/.openclaw/workspace/skills/research-evidence/references/research-dimensions.md <<'EOF'
 # Research dimensions
 
 A flexible lens for planning and auditing a company evidence base.

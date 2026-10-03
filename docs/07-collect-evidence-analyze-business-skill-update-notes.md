@@ -5,7 +5,7 @@ Status: Draft for review
 
 ## Goal
 
-Update Charlie’s OpenClaw skills so they reflect the Minerva CLI workflow that now exists, instead of the older generic folder-first workflow.
+Update analyst’s OpenClaw skills so they reflect the Minerva CLI workflow that now exists, instead of the older generic folder-first workflow.
 
 The biggest change is simple:
 - `collect-evidence` should use Minerva CLI as the default operating backbone

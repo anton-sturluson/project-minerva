@@ -8,7 +8,7 @@ Status: deterministic evidence pipeline implemented; final note-generation step 
 Implement a v1 morning-brief pipeline where:
 - Minerva CLI manages portfolio state and collects structured daily evidence
 - Minerva CLI prepares an agent-ready evidence pack
-- Charlie (main agent) writes the actual morning brief and Slack distillation
+- analyst (main agent) writes the actual morning brief and Slack distillation
 - the existing scheduled job uses these commands instead of doing the whole job in one prompt
 
 ## V1 scope
@@ -470,14 +470,14 @@ Implementation details:
   - event-type tagging
   - stale/empty suppression
   - candidate section grouping
-- `grouped-events.md` and `source-status.md` should be Charlie’s default entry point; raw source files are for drill-down, not first read
+- `grouped-events.md` and `source-status.md` should be analyst’s default entry point; raw source files are for drill-down, not first read
 - do not try to replace the main agent’s prioritization
 
 ---
 
-## Charlie's Autonomous Planning & Writing
+## analyst's Autonomous Planning & Writing
 
-After the deterministic pipeline finishes at `brief prep`, Charlie takes the driver's seat.
+After the deterministic pipeline finishes at `brief prep`, analyst takes the driver's seat.
 
 Purpose:
 - decide which events require deep dives
@@ -485,7 +485,7 @@ Purpose:
 - write the final reports
 
 Uses LLM:
-- yes (this is Charlie himself, operating autonomously)
+- yes (this is analyst himself, operating autonomously)
 
 Inputs:
 - `grouped-events.md`
@@ -498,13 +498,13 @@ Writes:
 - `reports/03-daily-news/<date>/notes/slack-brief.md`
 
 Exact behavior:
-1. **Audit & Plan**: Charlie reads the collected headlines and the source status, decides whether the evidence is sufficient, and writes an `execution-plan.md` containing targeted questions or angles needed for the specific events that actually matter.
-2. **Targeted Extraction**: Charlie uses `minerva extract` (or `extract-files` for many files) (e.g. `--model openai/gpt-5.4`) against massive raw SEC/IR files to answer his planned questions. This keeps his working context strictly focused on signal instead of noise.
-3. **Synthesis**: Charlie writes the final reports based on the extracted answers.
+1. **Audit & Plan**: analyst reads the collected headlines and the source status, decides whether the evidence is sufficient, and writes an `execution-plan.md` containing targeted questions or angles needed for the specific events that actually matter.
+2. **Targeted Extraction**: analyst uses `minerva extract` (or `extract-files` for many files) (e.g. `--model openai/gpt-5.4`) against massive raw SEC/IR files to answer his planned questions. This keeps his working context strictly focused on signal instead of noise.
+3. **Synthesis**: analyst writes the final reports based on the extracted answers.
 
 Implementation details:
 - this completely replaces the old idea of having `brief audit` or `brief plan` as rigid CLI pipeline commands
-- the pipeline's job ends at `brief prep`, and Charlie's job begins by reading the summary artifacts
+- the pipeline's job ends at `brief prep`, and analyst's job begins by reading the summary artifacts
 
 ---
 
@@ -513,15 +513,15 @@ Implementation details:
 The intended boundary in v1 is:
 - `portfolio ...` commands are deterministic state management
 - `brief filings`, `earnings`, `macro-collect`, `macro`, `ir`, `market`, and `prep` are strictly deterministic evidence collection and preparation
-- the pipeline halts at `brief prep`, handing off to Charlie
-- Charlie takes the driver's seat: he audits the evidence, creates a plan, reads deep sources via targeted extraction, and writes the brief
+- the pipeline halts at `brief prep`, handing off to analyst
+- analyst takes the driver's seat: he audits the evidence, creates a plan, reads deep sources via targeted extraction, and writes the brief
 
 In practice, that means:
 - zero LLM usage happens during the automated collection phase itself
-- `brief prep` compresses and groups the collected evidence before Charlie sees it
-- Charlie wakes up and starts from `grouped-events.md` and `source-status.md`
-- Charlie determines his own audit verdict and reading plan
-- to read the full text of SEC filings or press releases, Charlie uses `minerva extract` or `minerva extract-files` (e.g. `--model openai/gpt-5.4`) to ask targeted questions, rather than pulling the entire document into context. This prevents context bloat and keeps his working session strictly focused on signal instead of noise.
+- `brief prep` compresses and groups the collected evidence before analyst sees it
+- analyst wakes up and starts from `grouped-events.md` and `source-status.md`
+- analyst determines his own audit verdict and reading plan
+- to read the full text of SEC filings or press releases, analyst uses `minerva extract` or `minerva extract-files` (e.g. `--model openai/gpt-5.4`) to ask targeted questions, rather than pulling the entire document into context. This prevents context bloat and keeps his working session strictly focused on signal instead of noise.
 
 ---
 
@@ -537,7 +537,7 @@ The daily run should work like this:
 6. `minerva brief ir`
 7. `minerva brief market`
 8. `minerva brief prep`
-9. Charlie wakes up, reads `grouped-events.md` and `source-status.md`, and takes over as the autonomous intelligence layer:
+9. analyst wakes up, reads `grouped-events.md` and `source-status.md`, and takes over as the autonomous intelligence layer:
    - he decides whether to audit the evidence pack or request more data
    - he builds his own execution plan
    - he uses `minerva extract` / `extract-files` to deep dive on the full sources without blowing up his context window
@@ -547,7 +547,7 @@ The daily run should work like this:
 
 The important boundary is:
 - CLI deterministically collects and prepares the initial evidence pack (steps 1-8)
-- Charlie is in the driver's seat for everything else: auditing, planning, targeted extraction, and writing (step 9)
+- analyst is in the driver's seat for everything else: auditing, planning, targeted extraction, and writing (step 9)
 
 ---
 
@@ -567,10 +567,10 @@ minerva brief ir --date "$RUN_DATE"
 minerva brief market --date "$RUN_DATE"
 minerva brief prep --date "$RUN_DATE"
 # The deterministic pipeline ends here.
-# Charlie wakes up, reads the prepared evidence, and takes the driver's seat.
+# analyst wakes up, reads the prepared evidence, and takes the driver's seat.
 ```
 
-After the wrapper completes, the scheduler should wake Charlie to take over.
+After the wrapper completes, the scheduler should wake analyst to take over.
 
 ---
 
@@ -590,7 +590,7 @@ Recommended implementation order:
 10. `brief prep`
 11. manifest writing + rendered evidence files
 12. scheduler/wrapper update
-13. Charlie autonomous prompt/wake configuration
+13. analyst autonomous prompt/wake configuration
 
 This order gets the evidence pipeline working before the cron integration depends on it.
 

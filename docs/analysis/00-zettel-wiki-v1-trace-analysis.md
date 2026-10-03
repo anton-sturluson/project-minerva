@@ -117,7 +117,7 @@
 > 3. I should only read files within `00-ai-media/`
 > 4. This is a test of the zettel-wiki v1 skill
 > 
-> The zettel-wiki skill has a default wiki root of `/Users/charlie-buffet/Documents/project-minerva/hard-disk/wiki/` but Anton wants it at `00-ai-media/wiki/` instead.
+> The zettel-wiki skill has a default wiki root of `hard-disk/wiki/` but Anton wants it at `00-ai-media/wiki/` instead.
 > 
 > There are ~296 files in this folder. The main content areas are:
 > - `01-data/02-structured/` - raw data: filings, product docs, customer evidence, competitors, news, key metrics, valuation

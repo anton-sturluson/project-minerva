@@ -17,6 +17,17 @@ Declared in `pyproject.toml`:
 ## Data Handling
 - **Always convert downloaded XML files to YAML format** for readability and downstream use.
 
+## Privacy before publishing
+
+This repository is public. These rules apply to every project and to commits, PR descriptions, issues, logs and screenshots:
+
+- **Never commit or push private information**: credentials, tokens, private keys, personal contact details, account identifiers, portfolio records, private sharing links, tailnet addresses or personal filesystem paths. Use synthetic fixtures, reserved example domains and repository-relative paths in code, tests and documentation.
+- Keep account-specific configuration in environment variables and private exports, database backups and screenshots in ignored local storage. Confirm files are ignored before saving sensitive material; never force-add them.
+- Before committing, review the staged diff and filenames, run `python3 scripts/check_repo_privacy.py`, and use a GitHub no-reply email for author and committer metadata. Before pushing, review all outgoing commits for private content, including content deleted in later commits. Automated checks supplement manual review; they cannot guarantee privacy.
+- If private information is found, stop publishing the affected changes and remove it from every outgoing commit. If a credential was already published, revoke or rotate it. Report exposure without repeating the sensitive value; coordinate any published-history rewrite with the user before force-pushing.
+
+See [privacy operations and scan limitations](investor-platform/docs/privacy.md).
+
 ## Citation Standard
 
 Every piece of information in a report must be traceable to a reliable source and easily verifiable by the reader.
