@@ -13,6 +13,6 @@ def test_archive_hashes_bytes_and_preserves_locations(tmp_path):
     assert 'Acme' in load_sections(tmp_path,a)[1]['text']
 
 
-@pytest.mark.parametrize('url',['http://manager.com/letter','https://hfbestideas.com/stock/A','https://hfbestideas.substack.com/p/a','https://user:password@manager.com/a','https://127.0.0.1/a'])
+@pytest.mark.parametrize('url',['http://manager.com/letter','https://hfbestideas.com/stock/A','https://hfbestideas.substack.com/p/a','https://user:password@manager.example.com/a','https://127.0.0.1/a'])
 def test_rejects_aggregator_and_nonpublic_sources(url):
     with pytest.raises(ValueError):public_url(url)
