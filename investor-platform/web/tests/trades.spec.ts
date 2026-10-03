@@ -21,7 +21,7 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
     await request.get(`/api/accounts/${account.id}/ledger`)
   ).json();
   const ticker = `T${Date.now()}${info.project.name === "mobile" ? "M" : "D"}`;
-  await page.goto("/#portfolio");
+  await page.goto("/#activity");
   await page.getByText("Record a position or trade", { exact: true }).click();
   await page
     .getByLabel("Position action", { exact: true })
@@ -81,6 +81,7 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
   await expect(
     holdings.getByRole("row").filter({ hasText: ticker }),
   ).toContainText("10.50");
+  await page.getByText("Account activity", { exact: true }).click();
   const sale = page.getByRole("row").filter({ hasText: `Sell · ${ticker}` });
   await sale.locator("summary").click();
   await expect(sale).toContainText("Unknown: opening basis unavailable");

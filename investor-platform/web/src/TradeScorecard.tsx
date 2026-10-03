@@ -90,14 +90,7 @@ export function TradeScorecard({
             open positions.
           </p>
           <details>
-            <summary>How the scorecard works &amp; closed positions</summary>
-            <p className="form-note">
-              A decision runs from no shares to no shares. Win rate counts
-              profitable closed decisions with known basis; payoff is average
-              dollar gain / average absolute dollar loss. Fees included,
-              dividends excluded. Breakevens count toward win rate. Open and
-              unknown-basis positions are excluded.
-            </p>
+            <summary>Closed positions</summary>
             {stats.episodes.length > 0 && (
               <div
                 className="table-scroll"
