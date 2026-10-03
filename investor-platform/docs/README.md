@@ -4,6 +4,7 @@
 | --- | --- |
 | [Data assumptions](data-assumptions.md) | Living register of data limits, reconstruction assumptions and reconciliation needs. |
 | [ADR 0001](decisions/0001-documentation-and-pages.md) | Documentation policy and separate Portfolio, Activity and Research views. |
+| [ADR 0002](decisions/0002-stock-exclusion-scenarios.md) | Stock exclusions, retained cash and scenario limitations. |
 | [Operations](operations.md) | Configuration, start/stop, migrations, testing and project layout. |
 | [Portfolio guide](portfolio.md) | Accounts, cash, positions, trade entry, corrections and tracker usage. |
 | [Transaction import](transaction-import.md) | Preview and import a testing portfolio; source evidence, exclusions and inferred balances. |

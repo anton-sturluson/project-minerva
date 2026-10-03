@@ -48,7 +48,7 @@ export function App() {
   }
   return (
     <div className="workspace" id="top">
-      <a className="skip-link" href="#main">
+      <a className="skip-link" href={`#${page}`}>
         Skip to content
       </a>
       <div className="edition-line">
@@ -107,7 +107,7 @@ export function App() {
         </div>
       </main>
       <footer className="page-footer">
-        <a href="#top">Back to top ↑</a>
+        <a href={`#${page}`}>Back to top ↑</a>
       </footer>
     </div>
   );
