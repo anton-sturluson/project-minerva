@@ -1,6 +1,6 @@
-import { expect, test } from "./fixtures";
+import { expect, test, performance } from "./fixtures";
 
-test("shows reconstruction assumptions and preserves them after reload without requesting returns", async ({
+test("shows provisional performance, recovers from failure, and preserves import assumptions", async ({
   page,
 }) => {
   await page.route("**/api/account", async (route) => {
@@ -22,10 +22,36 @@ test("shows reconstruction assumptions and preserves them after reload without r
       },
     });
   });
+  await page.route("**/api/accounts/*/ledger", async (route) => {
+    const response = await route.fetch();
+    const ledger = await response.json();
+    await route.fulfill({
+      json: {
+        ...ledger,
+        entries: ledger.entries.map((e: Record<string, unknown>) => ({
+          ...e,
+          effective_date: "2026-01-02",
+        })),
+      },
+    });
+  });
   let requests = 0;
+  let unavailable = true;
   await page.route("**/performance", (route) => {
     requests++;
-    return route.abort();
+    return unavailable
+      ? route.fulfill({
+          status: 503,
+          json: { detail: "Quotes temporarily unavailable" },
+        })
+      : route.fulfill({
+          json: {
+            ...performance,
+            provisional: true,
+            modeled_income: "6",
+            assumptions: ["Opening cash is inferred, not a verified balance."],
+          },
+        });
   });
   await page.goto("/");
   await expect(page.getByLabel("Reconstruction assumptions")).toContainText(
@@ -37,15 +63,21 @@ test("shows reconstruction assumptions and preserves them after reload without r
   await expect(
     page.getByText("Row 5: Unconfirmed currency", { exact: true }),
   ).toBeVisible();
+  await expect(page.getByText(/Quotes temporarily unavailable/)).toBeVisible();
+  unavailable = false;
+  await page.getByRole("button", { name: "Retry comparison" }).click();
+  await expect(page.getByLabel("Estimate assumptions")).toContainText(
+    "Opening cash is inferred",
+  );
   await expect(
-    page.getByText(/Portfolio vs. index returns are unavailable/),
+    page.getByText("Estimated portfolio return", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Compare performance" }),
+    page.getByRole("button", { name: "Calculate hit rate" }),
   ).toBeHidden();
   await page.reload();
-  await expect(page.getByLabel("Reconstruction assumptions")).toBeVisible();
-  expect(requests).toBe(0);
+  await expect(page.getByLabel("Estimate assumptions")).toBeVisible();
+  expect(requests).toBeGreaterThanOrEqual(3);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

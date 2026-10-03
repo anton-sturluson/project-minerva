@@ -78,7 +78,11 @@ export function Portfolio() {
               aria-label="Reconstruction assumptions"
             >
               <strong>Testing copy · incomplete transaction history</strong>
-              <p>{account.reconstruction.warning}</p>
+              <p>
+                Opening shares and cash are inferred minimums, not broker
+                balances. Holdings and performance are provisional until the
+                records are reconciled.
+              </p>
               <p>
                 {account.reconstruction.imported_trades} transactions imported ·{" "}
                 {account.reconstruction.skipped.length} rows excluded ·{" "}

@@ -61,11 +61,6 @@ def test_import_is_atomic_idempotent_and_preserves_existing_account(database, db
     view = db_client.get("/api/account").json()
     assert view["reconstruction"]["imported_trades"] == 3
     assert "source_rows" not in view["reconstruction"]
-    response = db_client.post(
-        f"/api/accounts/{account_id}/performance", json={"start": "2024-07-21", "end": "2024-07-25"}
-    )
-    assert response.status_code == 422
-    assert "not verified" in response.json()["detail"]
     with pytest.raises(ValueError, match="already has an account"):
         changed, changed_report = reconstruct(CSV.replace(b"$80", b"$81"), LISTINGS)
         apply_import(database, "Changed import", changed, changed_report)

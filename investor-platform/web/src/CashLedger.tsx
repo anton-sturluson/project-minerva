@@ -89,13 +89,6 @@ export function CashLedger({ account }: { account: Account }) {
       )}
       {ledger ? (
         <>
-          {account.reconstruction && (
-            <Trades
-              account={account}
-              holdings={ledger.holdings}
-              onSaved={load}
-            />
-          )}
           <Tracker account={account} ledger={ledger} />
           <div className="balance-line">
             <span>
@@ -110,13 +103,7 @@ export function CashLedger({ account }: { account: Account }) {
                 : exact(ledger.balance)}
             </strong>
           </div>
-          {!account.reconstruction && (
-            <Trades
-              account={account}
-              holdings={ledger.holdings}
-              onSaved={load}
-            />
-          )}
+          <Trades account={account} holdings={ledger.holdings} onSaved={load} />
           <h3>Record cash</h3>
           <form className="entry-form" onSubmit={(e) => void save(e)}>
             <label>

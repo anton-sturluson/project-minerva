@@ -99,7 +99,7 @@ The forms record activity only; they never place orders. The development demo us
 
 ## Transaction reconstruction
 
-The [transaction import CLI](docs/transaction-import.md) downloads or reads a source export, previews the reconstruction and writes a separate testing database. It preserves fractional shares, raw evidence, exclusions and inferred balances. Incomplete imports are labeled and cannot report portfolio returns.
+The [transaction import CLI](docs/transaction-import.md) downloads or reads a source export, previews the reconstruction and writes a separate testing database. It preserves fractional shares, raw evidence, exclusions and inferred balances. Incomplete imports show explicitly provisional performance with inferred balances and modeled gross distributions.
 
 ## Portfolio tracker
 
