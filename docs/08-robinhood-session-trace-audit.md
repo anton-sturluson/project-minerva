@@ -6,8 +6,8 @@ This note saves the accessible Robinhood session traces in a readable form so we
 
 ## Transcript artifacts reviewed
 
-- `/Users/charlie-buffet/.openclaw/agents/main/sessions/739e94ca-379d-4602-ad42-1cde54496b1c-topic-1775790310.135199.checkpoint.2e797053-f982-481e-a304-bb152eb7e9e8.jsonl`
-- `/Users/charlie-buffet/.openclaw/agents/main/sessions/739e94ca-379d-4602-ad42-1cde54496b1c-topic-1775790310.135199.checkpoint.e94a4e84-7630-4448-aa87-1f5576e3eff6.jsonl`
+- `/path/to/home/.openclaw/agents/main/sessions/739e94ca-379d-4602-ad42-1cde54496b1c-topic-1775790310.135199.checkpoint.2e797053-f982-481e-a304-bb152eb7e9e8.jsonl`
+- `/path/to/home/.openclaw/agents/main/sessions/739e94ca-379d-4602-ad42-1cde54496b1c-topic-1775790310.135199.checkpoint.e94a4e84-7630-4448-aa87-1f5576e3eff6.jsonl`
 
 Notes:
 - The earlier non-checkpoint session JSONL for this run was not present at audit time.
@@ -46,8 +46,8 @@ Notes:
 
 ### Workflow / context setup
 
-- `2026-04-09 23:06:02 EDT | read | /Users/charlie-buffet/.openclaw/workspace/skills/analyze-business/SKILL.md`
-- `2026-04-09 23:06:11 EDT | read | /Users/charlie-buffet/Documents/project-minerva/AGENTS.md`
+- `2026-04-09 23:06:02 EDT | read | /path/to/home/.openclaw/workspace/skills/analyze-business/SKILL.md`
+- `2026-04-09 23:06:11 EDT | read | AGENTS.md`
 - `2026-04-09 23:06:15 EDT | exec | uv run minerva analysis status --help`
 - `2026-04-09 23:06:59 EDT | exec | uv run minerva research --help`
 
@@ -55,15 +55,15 @@ Notes:
 
 - `2026-04-09 23:06:21 EDT | exec | find hard-disk/knowledge -maxdepth 3 \( -name 'INDEX.md' -o -iname '*robinhood*' -o -iname '*hood*' \) | sort`
 - `2026-04-09 23:06:21 EDT | exec | find hard-disk/reports/00-companies -maxdepth 3 \( -iname '*robinhood*' -o -iname '*hood*' -o -name 'INDEX.md' \) | sort`
-- `2026-04-09 23:06:26 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/INDEX.md`
-- `2026-04-09 23:07:31 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/00-notes/2026-04-03-robinhood-deep-dive-revised.md`
+- `2026-04-09 23:06:26 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/INDEX.md`
+- `2026-04-09 23:07:31 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/00-notes/2026-04-03-robinhood-deep-dive-revised.md`
 
 ### Evidence build
 
 - `2026-04-09 23:09:08 EDT | exec | uv run minerva evidence init --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --name "Robinhood Markets" --slug robinhood`
 - `2026-04-09 23:09:12 EDT | exec | uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [background session: mellow-dune]`
 - `2026-04-09 23:09:16 EDT | process | poll mellow-dune -> uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [What went wrong: SEC evidence collection failed: EDGAR_IDENTITY is required for SEC commands What to do instead: verify the root path, ticker, EDGAR identity, and filing counts,...]`
-- `2026-04-09 23:09:25 EDT | exec | EDGAR_IDENTITY='Charlie Buffet charlie.buffet.42@gmail.com' uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [background session: keen-nudibranch]`
+- `2026-04-09 23:09:25 EDT | exec | EDGAR_IDENTITY='project-user research@example.com' uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [background session: keen-nudibranch]`
 - `2026-04-09 23:10:52 EDT | exec | uv run minerva evidence inventory --root hard-disk/reports/00-companies/09-XXXXXXX`
 - `2026-04-09 23:10:11 EDT | exec | uv run minerva evidence coverage --root hard-disk/reports/00-companies/09-XXXXXXX --profile default`
 
@@ -78,7 +78,7 @@ Notes:
 
 - `2026-04-09 23:12:18 EDT | web_search | Robinhood Markets HOOD stock price April 2026 market cap Q1 2026`
 - `2026-04-09 23:12:27 EDT | web_fetch | https://robinhood.com/us/en/stocks/HOOD/`
-- `2026-04-09 23:16:59 EDT | write | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/notes/2026-04-10-robinhood-deep-dive-v2.md`
+- `2026-04-09 23:16:59 EDT | write | hard-disk/reports/00-companies/09-XXXXXXX/notes/2026-04-10-robinhood-deep-dive-v2.md`
 
 ### Post-memo clean-up / re-org
 
@@ -119,19 +119,19 @@ EOF`
 ## Full chronological tool trace
 
 ```text
-2026-04-09 23:06:02 EDT | read | /Users/charlie-buffet/.openclaw/workspace/skills/analyze-business/SKILL.md
+2026-04-09 23:06:02 EDT | read | /path/to/home/.openclaw/workspace/skills/analyze-business/SKILL.md
 2026-04-09 23:06:07 EDT | update_plan | Starting Robinhood deep dive with the analyze-business workflow.
-2026-04-09 23:06:11 EDT | read | /Users/charlie-buffet/Documents/project-minerva/AGENTS.md
+2026-04-09 23:06:11 EDT | read | AGENTS.md
 2026-04-09 23:06:15 EDT | exec | uv run minerva analysis status --help
 2026-04-09 23:06:21 EDT | exec | find hard-disk/knowledge -maxdepth 3 \( -name 'INDEX.md' -o -iname '*robinhood*' -o -iname '*hood*' \) | sort
 2026-04-09 23:06:21 EDT | exec | find hard-disk/reports/00-companies -maxdepth 3 \( -iname '*robinhood*' -o -iname '*hood*' -o -name 'INDEX.md' \) | sort
-2026-04-09 23:06:26 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/INDEX.md
-2026-04-09 23:06:26 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/03-analysis/INDEX.md
-2026-04-09 23:06:26 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/knowledge/INDEX.md
-2026-04-09 23:06:26 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/knowledge/01-platform-economics/INDEX.md
+2026-04-09 23:06:26 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/INDEX.md
+2026-04-09 23:06:26 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/03-analysis/INDEX.md
+2026-04-09 23:06:26 EDT | read | hard-disk/knowledge/INDEX.md
+2026-04-09 23:06:26 EDT | read | hard-disk/knowledge/01-platform-economics/INDEX.md
 2026-04-09 23:06:30 EDT | exec | uv run minerva analysis status --root hard-disk/reports/00-companies/09-XXXXXXX
 2026-04-09 23:06:30 EDT | exec | uv run minerva analysis context --help
-2026-04-09 23:06:40 EDT | read | /Users/charlie-buffet/.openclaw/workspace/skills/collect-evidence/SKILL.md
+2026-04-09 23:06:40 EDT | read | /path/to/home/.openclaw/workspace/skills/collect-evidence/SKILL.md
 2026-04-09 23:06:59 EDT | exec | uv run minerva evidence init --help
 2026-04-09 23:06:59 EDT | exec | uv run minerva evidence collect sec --help
 2026-04-09 23:06:59 EDT | exec | uv run minerva research --help
@@ -139,33 +139,33 @@ EOF`
 2026-04-09 23:07:21 EDT | exec | uv run minerva evidence coverage --help
 2026-04-09 23:07:21 EDT | exec | uv run minerva evidence extract --help
 2026-04-09 23:07:26 EDT | exec | find hard-disk/reports/00-companies/09-XXXXXXX -maxdepth 3 -type f | sed 's#^#/#' | sort
-2026-04-09 23:07:31 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/status.md
-2026-04-09 23:07:31 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/00-notes/2026-04-03-robinhood-deep-dive-revised.md
-2026-04-09 23:07:31 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/02-research/01-brainstorm/00-summary.md
+2026-04-09 23:07:31 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/status.md
+2026-04-09 23:07:31 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/00-notes/2026-04-03-robinhood-deep-dive-revised.md
+2026-04-09 23:07:31 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/02-research/01-brainstorm/00-summary.md
 2026-04-09 23:07:43 EDT | exec | find hard-disk/reports/00-companies/09-XXXXXXX/01-data -maxdepth 5 -type f | sort | sed -n '1,120p'
 2026-04-09 23:07:55 EDT | exec | rg -n "00-sources|data/sources|01-data|00-notes|02-research|03-analysis" src/minerva -S [exit 1]
 2026-04-09 23:07:59 EDT | exec | rg -n "data/sources|01-data|00-notes|02-research|03-analysis|00-sources" . -S
-2026-04-09 23:08:02 EDT | read | /Users/charlie-buffet/Documents/project-minerva/docs/07-collect-evidence-analyze-business-skill-update-notes.md
-2026-04-09 23:08:02 EDT | read | /Users/charlie-buffet/Documents/project-minerva/tests/test_harness/test_evidence.py
+2026-04-09 23:08:02 EDT | read | docs/07-collect-evidence-analyze-business-skill-update-notes.md
+2026-04-09 23:08:02 EDT | read | tests/test_harness/test_evidence.py
 2026-04-09 23:08:07 EDT | exec | uv run minerva evidence register --help
-2026-04-09 23:08:21 EDT | read | /Users/charlie-buffet/.openclaw/workspace/skills/brainstorm/SKILL.md
+2026-04-09 23:08:21 EDT | read | /path/to/home/.openclaw/workspace/skills/brainstorm/SKILL.md
 2026-04-09 23:08:40 EDT | exec | rg -n "ready_for_analysis|bucket_results|coverage profile|competition|management|valuation" src tests -S
-2026-04-09 23:08:44 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/evidence/profiles.py
-2026-04-09 23:08:44 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/analysis/status.py
-2026-04-09 23:08:44 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/commands/analysis.py
-2026-04-09 23:08:47 EDT | read | /Users/charlie-buffet/Documents/project-minerva/profiles/evidence/coverage/default.yaml
-2026-04-09 23:08:47 EDT | read | /Users/charlie-buffet/Documents/project-minerva/profiles/evidence/extract/default.yaml
-2026-04-09 23:08:47 EDT | read | /Users/charlie-buffet/Documents/project-minerva/profiles/analysis/context/default.yaml
-2026-04-09 23:08:52 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/evidence/paths.py
-2026-04-09 23:08:57 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/evidence/coverage.py
-2026-04-09 23:08:57 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/evidence/registry.py
-2026-04-09 23:08:57 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/evidence/render.py
+2026-04-09 23:08:44 EDT | read | src/harness/workflows/evidence/profiles.py
+2026-04-09 23:08:44 EDT | read | src/harness/workflows/analysis/status.py
+2026-04-09 23:08:44 EDT | read | src/harness/commands/analysis.py
+2026-04-09 23:08:47 EDT | read | profiles/evidence/coverage/default.yaml
+2026-04-09 23:08:47 EDT | read | profiles/evidence/extract/default.yaml
+2026-04-09 23:08:47 EDT | read | profiles/analysis/context/default.yaml
+2026-04-09 23:08:52 EDT | read | src/harness/workflows/evidence/paths.py
+2026-04-09 23:08:57 EDT | read | src/harness/workflows/evidence/coverage.py
+2026-04-09 23:08:57 EDT | read | src/harness/workflows/evidence/registry.py
+2026-04-09 23:08:57 EDT | read | src/harness/workflows/evidence/render.py
 2026-04-09 23:09:08 EDT | exec | uv run minerva evidence init --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --name "Robinhood Markets" --slug robinhood
 2026-04-09 23:09:12 EDT | exec | uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [background session: mellow-dune]
 2026-04-09 23:09:16 EDT | process | poll mellow-dune -> uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [What went wrong: SEC evidence collection failed: EDGAR_IDENTITY is required for SEC commands What to do instead: verify the root path, ticker, EDGAR identity, and filing counts,...]
 2026-04-09 23:09:20 EDT | exec | rg -n "EDGAR_IDENTITY|set_identity\(|edgar identity|SEC identity" src tests docs -S
-2026-04-09 23:09:25 EDT | exec | EDGAR_IDENTITY='Charlie Buffet charlie.buffet.42@gmail.com' uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [background session: keen-nudibranch]
-2026-04-09 23:09:29 EDT | process | poll keen-nudibranch -> EDGAR_IDENTITY='Charlie Buffet charlie.buffet.42@gmail.com' uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20
+2026-04-09 23:09:25 EDT | exec | EDGAR_IDENTITY='project-user research@example.com' uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20 [background session: keen-nudibranch]
+2026-04-09 23:09:29 EDT | process | poll keen-nudibranch -> EDGAR_IDENTITY='project-user research@example.com' uv run minerva evidence collect sec --root hard-disk/reports/00-companies/09-XXXXXXX --ticker HOOD --annual 5 --quarters 4 --earnings 20
 2026-04-09 23:10:11 EDT | exec | uv run minerva evidence coverage --root hard-disk/reports/00-companies/09-XXXXXXX --profile default
 2026-04-09 23:10:11 EDT | exec | uv run minerva analysis status --root hard-disk/reports/00-companies/09-XXXXXXX
 2026-04-09 23:10:11 EDT | exec | python - <<'PY'
@@ -179,9 +179,9 @@ for rel in ['data/meta/sec-collection-summary.json','data/meta/inventory.json','
     else:
         print('MISSING')
 PY [exit 127]
-2026-04-09 23:10:16 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/data/meta/coverage.json
-2026-04-09 23:10:16 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/data/meta/inventory.json
-2026-04-09 23:10:16 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/data/meta/sec-collection-summary.json
+2026-04-09 23:10:16 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/data/meta/coverage.json
+2026-04-09 23:10:16 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/data/meta/inventory.json
+2026-04-09 23:10:16 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/data/meta/sec-collection-summary.json
 2026-04-09 23:10:32 EDT | exec | find hard-disk/reports/00-companies/09-XXXXXXX/01-data/00-sources/03-competitors -type f ! -name 'INDEX.md' | sort
 2026-04-09 23:10:42 EDT | exec | uv run python - <<'PY'
 from pathlib import Path
@@ -215,10 +215,10 @@ PY
 2026-04-09 23:12:21 EDT | web_search | Robinhood Markets HOOD stock price April 2026 market cap Q1 2026
 2026-04-09 23:12:27 EDT | web_fetch | https://robinhood.com/us/en/stocks/HOOD/
 2026-04-09 23:12:32 EDT | process | poll faint-kelp -> uv run minerva evidence extract --root hard-disk/reports/00-companies/09-XXXXXXX --profile default [What went wrong: evidence extraction failed: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'The input token count exceeds the maximum number of tokens allowed 1048576...]
-2026-04-09 23:13:18 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/commands/evidence.py
-2026-04-09 23:13:18 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/evidence/extract.py
+2026-04-09 23:13:18 EDT | read | src/harness/commands/evidence.py
+2026-04-09 23:13:18 EDT | read | src/harness/workflows/evidence/extract.py
 2026-04-09 23:13:23 EDT | exec | rg -n "def run_extraction|class .*Extraction|source_prefix" src/harness -S
-2026-04-09 23:13:26 EDT | read | /Users/charlie-buffet/Documents/project-minerva/src/harness/workflows/evidence/extraction.py
+2026-04-09 23:13:26 EDT | read | src/harness/workflows/evidence/extraction.py
 2026-04-09 23:13:32 EDT | exec | find hard-disk/reports/00-companies/09-XXXXXXX/data/sources -maxdepth 3 -type f | sort | sed -n '1,120p'
 2026-04-09 23:13:46 EDT | exec | find hard-disk/reports/00-companies/09-XXXXXXX/02-research -type f -name '*.md' ! -name 'INDEX.md' | sort
 2026-04-09 23:13:53 EDT | exec | wc -c hard-disk/reports/00-companies/09-XXXXXXX/data/sources/10-K/*.md hard-disk/reports/00-companies/09-XXXXXXX/data/sources/10-Q/*.md | sort -n | tail -n 10
@@ -258,20 +258,20 @@ PY
 2026-04-09 23:14:50 EDT | exec | find hard-disk/reports/00-companies/09-XXXXXXX/data/structured/registered -maxdepth 1 -type f -name '*.md' | wc -l
 2026-04-09 23:15:01 EDT | exec | uv run minerva analysis context --root hard-disk/reports/00-companies/09-XXXXXXX --profile default [background session: plaid-gulf]
 2026-04-09 23:15:07 EDT | process | poll plaid-gulf -> uv run minerva analysis context --root hard-disk/reports/00-companies/09-XXXXXXX --profile default
-2026-04-09 23:15:17 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/context-manifest.md
-2026-04-09 23:15:17 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/business-overview.md
-2026-04-09 23:15:17 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/competition.md
-2026-04-09 23:15:17 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/management.md
-2026-04-09 23:15:17 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/risks.md
-2026-04-09 23:15:17 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/valuation.md
-2026-04-09 23:15:38 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/02-research/03-contexts/2026-04-03-robinhood-product-breadth-and-leakage-note.md
-2026-04-09 23:15:38 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/02-research/03-contexts/2026-04-03-robinhood-shallow-sweep.md
-2026-04-09 23:15:38 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/01-data/01-reference/market/2026-04-03-market-snapshot.md
-2026-04-09 23:15:38 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/02-research/01-brainstorm/round-2/00-summary.md
-2026-04-09 23:16:59 EDT | write | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/notes/2026-04-10-robinhood-deep-dive-v2.md
+2026-04-09 23:15:17 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/context-manifest.md
+2026-04-09 23:15:17 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/business-overview.md
+2026-04-09 23:15:17 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/competition.md
+2026-04-09 23:15:17 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/management.md
+2026-04-09 23:15:17 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/risks.md
+2026-04-09 23:15:17 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/bundles/valuation.md
+2026-04-09 23:15:38 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/02-research/03-contexts/2026-04-03-robinhood-product-breadth-and-leakage-note.md
+2026-04-09 23:15:38 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/02-research/03-contexts/2026-04-03-robinhood-shallow-sweep.md
+2026-04-09 23:15:38 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/01-data/01-reference/market/2026-04-03-market-snapshot.md
+2026-04-09 23:15:38 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/02-research/01-brainstorm/round-2/00-summary.md
+2026-04-09 23:16:59 EDT | write | hard-disk/reports/00-companies/09-XXXXXXX/notes/2026-04-10-robinhood-deep-dive-v2.md
 2026-04-09 23:17:05 EDT | exec | uv run minerva evidence inventory --root hard-disk/reports/00-companies/09-XXXXXXX
 2026-04-09 23:17:05 EDT | exec | uv run minerva analysis status --root hard-disk/reports/00-companies/09-XXXXXXX
-2026-04-09 23:17:05 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/analysis/status.md
+2026-04-09 23:17:05 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/analysis/status.md
 2026-04-09 23:17:11 EDT | update_plan | Robinhood evidence was refreshed, analysis context rebuilt, and a new memo written.
 2026-04-09 23:18:30 EDT | exec | ls -la hard-disk/reports/00-companies/09-XXXXXXX/notes
 2026-04-09 23:18:30 EDT | exec | find hard-disk/reports/00-companies/09-XXXXXXX -maxdepth 2 \( -type d -o -type f \) | sort | sed -n '1,120p'
@@ -288,32 +288,32 @@ PY
 - `2026-04-10-robinhood-deep-dive-v2.md` is the latest memo.
 EOF
 2026-04-09 23:19:12 EDT | exec | ls -la hard-disk/reports/00-companies/09-XXXXXXX/00-notes
-2026-04-09 23:19:12 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-XXXXXXX/00-notes/INDEX.md
+2026-04-09 23:19:12 EDT | read | hard-disk/reports/00-companies/09-XXXXXXX/00-notes/INDEX.md
 2026-04-09 23:20:40 EDT | update_plan | Consolidating Robinhood work out of the redacted indexed folder into an unnumbered folder and fixing references.
 2026-04-09 23:20:52 EDT | exec | mv hard-disk/reports/00-companies/09-XXXXXXX hard-disk/reports/00-companies/robinhood
 2026-04-09 23:20:57 EDT | exec | rg -n "09-XXXXXXX|09-robinhood" hard-disk/reports/00-companies/robinhood -S
-2026-04-09 23:20:57 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/robinhood/INDEX.md
-2026-04-09 23:20:57 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/INDEX.md
+2026-04-09 23:20:57 EDT | read | hard-disk/reports/00-companies/robinhood/INDEX.md
+2026-04-09 23:20:57 EDT | read | hard-disk/reports/00-companies/INDEX.md
 2026-04-09 23:21:06 EDT | exec | uv run minerva evidence init --root hard-disk/reports/00-companies/robinhood --ticker HOOD --name "Robinhood Markets" --slug robinhood
 2026-04-09 23:21:06 EDT | exec | uv run minerva evidence inventory --root hard-disk/reports/00-companies/robinhood
 2026-04-09 23:21:06 EDT | exec | uv run minerva evidence coverage --root hard-disk/reports/00-companies/robinhood --profile default
 2026-04-09 23:21:06 EDT | exec | uv run minerva analysis status --root hard-disk/reports/00-companies/robinhood
-2026-04-09 23:21:13 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/robinhood/INDEX.md
-2026-04-09 23:21:13 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/INDEX.md
+2026-04-09 23:21:13 EDT | read | hard-disk/reports/00-companies/robinhood/INDEX.md
+2026-04-09 23:21:13 EDT | read | hard-disk/reports/00-companies/INDEX.md
 2026-04-09 23:21:13 EDT | exec | rg -n "09-XXXXXXX|09-robinhood" hard-disk/reports/00-companies/robinhood hard-disk/reports/00-companies/INDEX.md -S
-2026-04-09 23:21:20 EDT | edit | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/INDEX.md (2 replacements)
+2026-04-09 23:21:20 EDT | edit | hard-disk/reports/00-companies/INDEX.md (2 replacements)
 2026-04-09 23:21:27 EDT | exec | test -e hard-disk/reports/00-companies/09-XXXXXXX; echo $?
 2026-04-09 23:21:27 EDT | exec | find hard-disk/reports/00-companies/robinhood -maxdepth 2 -type f | sort | sed -n '1,40p'
-2026-04-09 23:21:27 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/INDEX.md
+2026-04-09 23:21:27 EDT | read | hard-disk/reports/00-companies/INDEX.md
 2026-04-09 23:22:15 EDT | exec | mv hard-disk/reports/00-companies/robinhood hard-disk/reports/00-companies/09-robinhood
 2026-04-09 23:22:22 EDT | exec | uv run minerva evidence init --root hard-disk/reports/00-companies/09-robinhood --ticker HOOD --name "Robinhood Markets" --slug robinhood
 2026-04-09 23:22:22 EDT | exec | uv run minerva evidence inventory --root hard-disk/reports/00-companies/09-robinhood
 2026-04-09 23:22:22 EDT | exec | uv run minerva evidence coverage --root hard-disk/reports/00-companies/09-robinhood --profile default
 2026-04-09 23:22:22 EDT | exec | uv run minerva analysis status --root hard-disk/reports/00-companies/09-robinhood
-2026-04-09 23:22:29 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/INDEX.md
-2026-04-09 23:22:29 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-robinhood/INDEX.md
+2026-04-09 23:22:29 EDT | read | hard-disk/reports/00-companies/INDEX.md
+2026-04-09 23:22:29 EDT | read | hard-disk/reports/00-companies/09-robinhood/INDEX.md
 2026-04-09 23:22:29 EDT | exec | test -e hard-disk/reports/00-companies/robinhood; echo $?
-2026-04-09 23:22:34 EDT | edit | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/INDEX.md (2 replacements)
+2026-04-09 23:22:34 EDT | edit | hard-disk/reports/00-companies/INDEX.md (2 replacements)
 2026-04-09 23:23:36 EDT | update_plan | Consolidating the internal numbered subtrees into the non-indexed workflow folders and removing the old indexed copies.
 2026-04-09 23:24:21 EDT | exec | uv run python - <<'PY'
 from pathlib import Path
@@ -418,8 +418,8 @@ PY
 2026-04-09 23:24:30 EDT | exec | uv run minerva analysis status --root hard-disk/reports/00-companies/09-robinhood
 2026-04-09 23:24:37 EDT | exec | find hard-disk/reports/00-companies/09-robinhood -maxdepth 2 -type d | sort
 2026-04-09 23:24:37 EDT | exec | rg -n "00-notes/|01-data/|02-research/|03-analysis/" hard-disk/reports/00-companies/09-robinhood -S [exit 1]
-2026-04-09 23:24:37 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-robinhood/notes/INDEX.md
-2026-04-09 23:24:37 EDT | read | /Users/charlie-buffet/Documents/project-minerva/hard-disk/reports/00-companies/09-robinhood/data/INDEX.md
+2026-04-09 23:24:37 EDT | read | hard-disk/reports/00-companies/09-robinhood/notes/INDEX.md
+2026-04-09 23:24:37 EDT | read | hard-disk/reports/00-companies/09-robinhood/data/INDEX.md
 2026-04-09 23:24:46 EDT | update_plan | Legacy numbered subtrees were merged into the standard folders, references updated, metadata rebuilt, and the old indexed directories removed.
 2026-04-09 23:25:34 EDT | exec | find hard-disk/reports/00-companies/09-robinhood/research -maxdepth 3 -type f | sort
 2026-04-09 23:25:34 EDT | exec | find hard-disk/reports/00-companies/09-robinhood/provenance -maxdepth 2 -type f | sort

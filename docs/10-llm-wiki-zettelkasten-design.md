@@ -51,7 +51,7 @@ The hierarchy uses *folders and nested folders* with `INDEX.md` files — the sa
 
 ### Agents & Workflows
 
-The wiki is operated by three specialized subagents, orchestrated by the main agent (Charlie/Steve).
+The wiki is operated by three specialized subagents, orchestrated by the main agent (orchestrator).
 
 #### Ingest Agent
 
@@ -194,7 +194,7 @@ id: "202604160930"
 title: "Apple services revenue exceeded hardware in Q2 2025"
 tags: ["#apple", "#services-revenue", "#earnings"]
 created: 2026-04-16
-source: "/Users/charlie-buffet/Documents/project-minerva/hard-disk/companies/apple/filings/10q-q2-2025.md"
+source: "hard-disk/companies/apple/filings/10q-q2-2025.md"
 ---
 
 # Apple services revenue exceeded hardware in Q2 2025
@@ -220,7 +220,7 @@ is shifting monetization to services.
 
 ## Evidence
 
-- [Apple 10-Q, Q2 2025](/Users/charlie-buffet/Documents/project-minerva/hard-disk/companies/apple/filings/10q-q2-2025.md) — Revenue breakdown table, p.12
+- [Apple 10-Q, Q2 2025](hard-disk/companies/apple/filings/10q-q2-2025.md) — Revenue breakdown table, p.12
 ```
 
 **Another Zettel example (cross-domain pattern — no special type, just a regular Zettel):**

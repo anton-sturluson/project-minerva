@@ -122,7 +122,7 @@ def filings_command(
             return error_result(
                 identity_error,
                 "set EDGAR_IDENTITY or pass `--source` for a local filings payload",
-                ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`", "`brief filings --date 2026-04-08 --source ./filings.json`"],
+                ["`export EDGAR_IDENTITY='Minerva Research research@example.com'`", "`brief filings --date 2026-04-08 --source ./filings.json`"],
                 start,
             )
     try:

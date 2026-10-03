@@ -74,7 +74,7 @@ uv run minerva evidence init \
   --name "Robinhood Markets" \
   --slug robinhood
 
-EDGAR_IDENTITY='Charlie Buffet charlie.buffet.42@gmail.com' \
+EDGAR_IDENTITY='project-user research@example.com' \
 uv run minerva evidence collect sec \
   --root /private/tmp/minerva-evidence-smoke-hood-20260416 \
   --ticker HOOD \

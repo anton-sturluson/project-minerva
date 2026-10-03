@@ -1,6 +1,6 @@
 # Private access with Tailscale
 
-This runs the existing single-owner workspace on your Mac and makes it reachable from your own Tailscale devices. It is not public hosting or multi-user login. Use synthetic records until corrections and verified backup/restore are implemented.
+This runs the existing single-owner workspace on your Mac and makes it reachable from your own Tailscale devices. It is not public hosting or multi-user login. Use synthetic records until verified backup/restore is implemented.
 
 ## First setup on the host
 
@@ -9,7 +9,7 @@ Install and sign into Tailscale on the host and client devices using the same us
 Follow the README prerequisites for uv, pnpm, and PostgreSQL. From the repository root, explicitly choose the database to serve, then run:
 
 ```sh
-export DATABASE_URL='postgresql+psycopg://minerva:minerva-local-only@127.0.0.1:55432/minerva_tracker_demo'
+export DATABASE_URL='postgresql+psycopg://minerva:minerva-local-only@127.0.0.1:55432/minerva_test'
 ./investor-platform/scripts/run-tailscale.sh
 ```
 

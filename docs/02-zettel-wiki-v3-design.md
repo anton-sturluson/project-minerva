@@ -165,7 +165,7 @@ description: >
 
 Agent-maintained knowledge base. Two content types, seven principles.
 
-Wiki root: `/Users/charlie-buffet/Documents/project-minerva/hard-disk/wiki/`
+Wiki root: `hard-disk/wiki/`
 
 ## Principles
 
@@ -632,7 +632,7 @@ Use this format for structure notes (wiki pages) in `pages/`.
 # Zettel-Wiki Schema
 
 Conventions for the wiki at
-`/Users/charlie-buffet/Documents/project-minerva/hard-disk/wiki/`.
+`hard-disk/wiki/`.
 
 ## Naming
 

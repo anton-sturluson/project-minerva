@@ -19,7 +19,7 @@ These boundaries are implemented in the [backend](../backend/src/investor_platfo
 
 A local owner/workspace is seeded by migrations. Every account route verifies ownership. Default mode accepts loopback access; private Tailscale mode verifies the configured identity, host and origin. Public hosting and multi-user login are not implemented. ([Identity boundary](../backend/src/investor_platform/db.py), [Tailscale setup](tailscale.md))
 
-PostgreSQL owns portfolio state. There is no spreadsheet sync or runtime dependency on legacy Minerva packages. The transaction CLI imports a separate testing copy with retained source evidence; reconciliation remains explicit. Public Yahoo history receives only symbols and dates; financial reports are computed on demand and are not persisted snapshots. Missing or unsupported data stays explicit. ([Ledger rules](../README.md#cash-ledger-rules), [performance methodology](performance.md), [hit-rate methodology](hit-rate.md))
+PostgreSQL owns portfolio state. There is no spreadsheet sync or runtime dependency on legacy Minerva packages. The transaction CLI imports a separate testing copy with retained source evidence; reconciliation remains explicit. Public Yahoo history receives only symbols and dates; financial reports are computed on demand and are not persisted snapshots. Missing or unsupported data stays explicit. ([Ledger rules](portfolio.md#cash-ledger-rules), [performance methodology](performance.md), [hit-rate methodology](hit-rate.md))
 
 ## Domain values and shared calculations
 
@@ -33,7 +33,7 @@ Add boundaries when their feature needs them. Research storage, background jobs,
 
 ### Implementation
 
-- [Setup and domain rules](../README.md): runtime commands, record ownership, supported workflows and limitations.
+- [Operations](operations.md) and [portfolio guide](portfolio.md): runtime commands, ownership, workflows and limitations.
 - [Backend](../backend/src/investor_platform/) and [frontend](../web/src/): implemented modules and request boundaries.
 - [Migrations](../backend/migrations/): schema history and local owner initialization.
 - [CI](../../.github/workflows/investor-platform-ci.yml): automated checks.

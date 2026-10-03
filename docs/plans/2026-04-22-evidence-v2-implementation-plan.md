@@ -948,7 +948,7 @@ def test_evidence_collect_sec_v2_writes_ledger_and_per_section_files(tmp_path: P
     import json as _json
     root = tmp_path / "reports" / "00-companies" / "12-robinhood"
     evidence.init_command(root=str(root), ticker="HOOD", company_name="Robinhood", slug="robinhood")
-    settings = HarnessSettings(workspace_root=tmp_path, edgar_identity="x x@y.com")
+    settings = HarnessSettings(workspace_root=tmp_path, edgar_identity="x research@example.com")
 
     monkeypatch.setattr("harness.commands.sec._configure_edgar", lambda s: None)
 

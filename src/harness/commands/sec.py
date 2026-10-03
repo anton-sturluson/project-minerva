@@ -174,7 +174,7 @@ def get_10k_command(
     start: float = time.perf_counter()
     identity_error = _configure_edgar(settings)
     if identity_error:
-        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
+        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research research@example.com'`"], start)
     try:
         item_map: dict[str, str] = retry_call(
             lambda: get_10k_items(ticker, items or ["1", "1A", "7"]),
@@ -204,7 +204,7 @@ def get_13f_command(
     start: float = time.perf_counter()
     identity_error = _configure_edgar(settings)
     if identity_error:
-        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
+        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research research@example.com'`"], start)
     try:
         comparison = retry_call(lambda: get_13f_comparison(cik), should_retry=should_retry_network_error)
         report = format_13f_report(comparison)
@@ -234,7 +234,7 @@ def get_financials_command(
     start: float = time.perf_counter()
     identity_error = _configure_edgar(settings)
     if identity_error:
-        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
+        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research research@example.com'`"], start)
     try:
         frame = retry_call(
             lambda: _fetch_financials_frame(ticker, periods=periods, statement_type=statement_type.lower()),
@@ -265,7 +265,7 @@ def download_filing_command(
     
     identity_error = _configure_edgar(settings)
     if identity_error:
-        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
+        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research research@example.com'`"], start)
 
     try:
         filing = retry_call(lambda: _latest_filing(Company(ticker), form=form), should_retry=should_retry_network_error)
@@ -308,7 +308,7 @@ def bulk_download_command(
     
     identity_error = _configure_edgar(settings)
     if identity_error:
-        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research name@email.com'`"], start)
+        return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research research@example.com'`"], start)
 
     base_output = resolve_path(output_dir or ".")
     try:
