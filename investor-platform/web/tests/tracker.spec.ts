@@ -367,7 +367,7 @@ test("partial holdings quotes remain visible and retry restores complete totals"
                   value: null,
                   weight: null,
                   unrealized_pnl: null,
-                  price_error: "Close unavailable",
+                  price_error: "Split adjustment required (2026-01-05)",
                 },
               ]
             : []),
@@ -382,7 +382,7 @@ test("partial holdings quotes remain visible and retry restores complete totals"
   ).toContainText("1,000.0");
   await expect(
     holdings.getByRole("row").filter({ hasText: "BBB" }),
-  ).toContainText("Quote unavailable");
+  ).toContainText("Split adjustment required (2026-01-05)");
   await expect(
     page.getByLabel("Portfolio allocation by market value"),
   ).toBeHidden();
@@ -398,7 +398,7 @@ test("partial holdings quotes remain visible and retry restores complete totals"
   ).toContainText("1,000.0");
   await expect(holdings).toContainText("83.3%");
   await expect(
-    page.getByText("Quote unavailable", { exact: true }),
+    page.getByText("Split adjustment required (2026-01-05)", { exact: true }),
   ).toHaveCount(0);
 });
 

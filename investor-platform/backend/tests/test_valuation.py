@@ -1,15 +1,132 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal as D
 from uuid import uuid4
 
 import pytest
 from test_trades import trade
 
-from investor_platform import market
+from investor_platform import market, valuation
 from investor_platform.domain import Currency
 from investor_platform.market import History
 
 pytest_plugins = ["test_performance"]
+
+
+def test_old_held_split_withholds_values_liquidation_and_collection(
+    db_client, database, portfolio, monkeypatch
+):
+    from test_ledger import ledger
+
+    aid, _ = portfolio
+    trade(db_client, aid, "opening_position", "2", ticker="BBB", exchange="NYSE")
+    end, split = date(2026, 1, 30), date(2026, 1, 5)
+    monkeypatch.setattr(valuation, "completed_market_date", lambda: end)
+    before = ledger(db_client, aid)
+
+    def quote(symbol, start, through):
+        if symbol == "AAA":
+            assert start <= date(2026, 1, 2)  # Split is older than the ten-day quote window.
+        return History(
+            {end: D(50)}, {}, splits={split} if symbol == "AAA" else set(), exchange="NYQ"
+        )
+
+    monkeypatch.setattr(market, "history", quote)
+    result = db_client.get(f"/api/accounts/{aid}/valuation").json()
+    a, b = result["holdings"]
+    assert result["value"] is None and not result["complete"]
+    assert a["value"] is None and a["unrealized_pnl"] is None
+    assert a["price_error"] == "Split adjustment required (2026-01-05)"
+    assert D(b["value"]) == 100 and b["price_error"] is None
+    assert a["weight"] is None and b["weight"] is None
+    hypothetical = db_client.get(f"/api/accounts/{aid}/statistics/hypothetical")
+    assert hypothetical.status_code == 503
+    assert "AAA: Split adjustment required" in hypothetical.json()["detail"]
+    assert ledger(db_client, aid) == before
+    from datetime import UTC, datetime
+    from uuid import UUID
+
+    from sqlalchemy.orm import Session
+
+    from investor_platform.models import Account
+    from investor_platform.price_refresh import collect_account
+
+    with Session(database) as session, pytest.raises(ValueError, match="holding prices"):
+        collect_account(session, session.get(Account, UUID(aid)), end, datetime.now(UTC))
+
+
+@pytest.mark.parametrize("split", [date(2026, 1, 5), date(2026, 1, 20)])
+def test_split_before_or_on_reentry_does_not_invalidate_new_share_units(
+    db_client, portfolio, monkeypatch, split
+):
+    aid, _ = portfolio
+    assert (
+        trade(
+            db_client,
+            aid,
+            "sell",
+            "10",
+            "121",
+            ticker="AAA",
+            exchange="NYSE",
+            effective_date="2026-01-06",
+        ).status_code
+        == 201
+    )
+    assert (
+        trade(
+            db_client,
+            aid,
+            "buy",
+            "10",
+            "50",
+            ticker="AAA",
+            exchange="NYSE",
+            effective_date="2026-01-20",
+        ).status_code
+        == 201
+    )
+    end = date(2026, 1, 30)
+    monkeypatch.setattr(valuation, "completed_market_date", lambda: end)
+
+    def quote(symbol, start, through):
+        assert start == date(2026, 1, 20)
+        return History({end: D(50)}, {}, splits={split}, exchange="NYQ")
+
+    monkeypatch.setattr(market, "history", quote)
+    result = db_client.get(f"/api/accounts/{aid}/valuation").json()
+    assert result["complete"]
+    assert D(result["holdings"][0]["value"]) == 500
+    assert D(result["holdings"][0]["unrealized_pnl"]) == 0
+
+
+def test_pre_split_previous_close_cannot_value_a_post_split_purchase(db_client, monkeypatch):
+    from test_ledger import cash
+
+    aid = db_client.post(
+        "/api/accounts", json={"name": "Split-day fixture", "base_currency": "USD"}
+    ).json()["id"]
+    cash(db_client, aid, "opening_cash", "1000", day="2026-01-05")
+    trade(
+        db_client,
+        aid,
+        "buy",
+        "20",
+        "50",
+        ticker="AAA",
+        exchange="NYSE",
+        effective_date="2026-01-05",
+    )
+    monkeypatch.setattr(valuation, "completed_market_date", lambda: date(2026, 1, 4))
+    monkeypatch.setattr(
+        market,
+        "history",
+        lambda *args: History(
+            {date(2026, 1, 2): D(100)}, {}, splits={date(2026, 1, 5)}, exchange="NYQ"
+        ),
+    )
+    result = db_client.get(f"/api/accounts/{aid}/valuation").json()
+    assert not result["complete"]
+    assert "Split adjustment required" in result["holdings"][0]["price_error"]
 
 
 def test_quotes_only_open_positions_even_with_large_closed_history(

@@ -139,7 +139,10 @@ test("toggles hypothetical closes, explains unavailable quotes and recovers", as
     fail
       ? route.fulfill({
           status: 503,
-          json: { detail: "Latest prices unavailable for: SYNTH" },
+          json: {
+            detail:
+              "Latest prices unavailable for: SYNTH: Split adjustment required (2026-01-05)",
+          },
         })
       : route.fulfill({
           json: {
@@ -188,7 +191,7 @@ test("toggles hypothetical closes, explains unavailable quotes and recovers", as
   fail = true;
   await toggle.check();
   await expect(page.getByRole("alert")).toContainText(
-    "Latest prices unavailable",
+    "Split adjustment required",
   );
   await expect(page.getByTestId("win-rate")).toBeHidden();
   fail = false;

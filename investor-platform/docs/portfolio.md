@@ -74,8 +74,11 @@ Current holdings fetch only open securities and remain available if the historic
 
 Choose **Dividend · gross**, **Interest**, or **Other investment income** under Activity → Record cash. Dividends require a security already present in the account records and an ex-dividend date no later than the effective cash payment date. Record taxes as **Fee or tax**. Corrections retain and preview the income classification, security and ex-date. Interest and other income can optionally be linked to a security, for example stock-lending payments. Linked payments for excluded stocks are removed; account-level interest remains. Unclassified or unlinked other income blocks scenarios because its stock attribution is unknown.
 
+Current holdings with an unresolved split during the current position display **Split adjustment required** and withhold value, unrealized gains, weights and hypothetical liquidation. Other holdings retain valid prices; portfolio totals remain unavailable while any holding is unresolved. The guard checks from the current position's acquisition rather than only the latest ten days, and ignores splits before a position was reopened. It also rejects a pre-split previous close for a post-split purchase. This safeguard does not create a split transaction or change recorded shares/basis. ([Current valuation](../backend/src/investor_platform/valuation.py))
+
 ## References
 
+- [Current valuation](../backend/src/investor_platform/valuation.py) — independent pricing and unresolved-split safeguard.
 - [Ledger implementation](../backend/src/investor_platform/ledger.py) — active records and cash writes.
 - [Accounting](../backend/src/investor_platform/accounting.py) — cash validation and FIFO calculations.
 - [Corrections](../backend/src/investor_platform/corrections.py) — preview, replacement, void and audit behavior.

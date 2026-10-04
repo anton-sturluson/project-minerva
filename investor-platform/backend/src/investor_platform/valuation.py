@@ -25,6 +25,24 @@ QUOTE_WINDOW = timedelta(days=10)
 MAX_QUOTE_AGE = timedelta(days=4)
 
 
+def current_position_starts(entries):
+    """Only the current flat-to-flat position can determine today's share units."""
+    quantities, starts = {}, {}
+    with localcontext() as ctx:
+        ctx.prec = ACCOUNTING_PRECISION
+        for entry in entries:
+            if entry.security is None:
+                continue
+            sid = entry.security.id
+            if not quantities.get(sid):
+                starts[sid] = entry.effective_date
+            quantity = entry.quantity * (-1 if entry.kind == EntryKind.SELL else 1)
+            quantities[sid] = quantities.get(sid, Decimal(0)) + quantity
+            if not quantities[sid]:
+                starts.pop(sid)
+    return starts
+
+
 def latest(history, end):
     day = max(d for d in history.close if d <= end)
     if end - day > MAX_QUOTE_AGE:
@@ -33,9 +51,18 @@ def latest(history, end):
 
 
 def quote_holding(
-    holding, end, provisional, fx, engine=None, workspace_id=None, refresh_after=None
+    holding,
+    end,
+    provisional,
+    fx,
+    engine=None,
+    workspace_id=None,
+    refresh_after=None,
+    *,
+    held_since,
 ):
     security = holding.security
+    start = min(held_since, end - QUOTE_WINDOW)
     row = {
         "security_id": security.id,
         "ticker": security.ticker,
@@ -55,7 +82,7 @@ def quote_holding(
             suffix, currency, exchanges = foreign
             history = market.cached_history(
                 security.ticker + suffix,
-                end - QUOTE_WINDOW,
+                start,
                 end,
                 currency=currency,
                 engine=engine,
@@ -78,7 +105,7 @@ def quote_holding(
             symbol = market.symbol_for(security, provisional=provisional)
             history = market.cached_history(
                 symbol,
-                end - QUOTE_WINDOW,
+                start,
                 end,
                 engine=engine,
                 workspace_id=workspace_id,
@@ -86,6 +113,17 @@ def quote_holding(
             )
             market.verify_exchange(security, history, provisional=provisional)
             day, price = latest(history, end)
+        split = next(
+            (
+                split
+                for split in sorted(history.splits)
+                if held_since < split <= end or day < split <= held_since
+            ),
+            None,
+        )
+        if split is not None:
+            row["price_error"] = f"Split adjustment required ({split})"
+            return row
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
             value = holding.quantity * price
@@ -104,6 +142,7 @@ def value_records(
     records, base_currency, provisional, *, engine=None, workspace_id=None, refresh_after=None
 ):
     end = completed_market_date()
+    starts = current_position_starts(records.entries)
     fx = {}
     for currency in {
         market.FOREIGN_LISTINGS[h.security.exchange][1]
@@ -127,7 +166,14 @@ def value_records(
             rows = list(
                 pool.map(
                     lambda h: quote_holding(
-                        h, end, provisional, fx, engine, workspace_id, refresh_after
+                        h,
+                        end,
+                        provisional,
+                        fx,
+                        engine,
+                        workspace_id,
+                        refresh_after,
+                        held_since=starts[h.security.id],
                     ),
                     records.holdings,
                 )
@@ -200,9 +246,11 @@ def hypothetical_statistics(account_id: UUID, session: DB, actor: Identity):
         engine=session.get_bind(),
         workspace_id=actor.workspace_id,
     )
-    missing = [r["ticker"] for r in report["holdings"] if r["value"] is None]
-    if missing:
-        raise HTTPException(503, "Latest prices unavailable for: " + ", ".join(missing))
+    details = [
+        f"{r['ticker']}: {r['price_error']}" for r in report["holdings"] if r["value"] is None
+    ]
+    if details:
+        raise HTTPException(503, "Latest prices unavailable for: " + "; ".join(details))
     securities = {e.security_id: e.security for e in entries if e.security_id}
     next_id = max((e.id for e in entries), default=0) + 1
     # Detached objects are only replayed in memory, never added to the session.
