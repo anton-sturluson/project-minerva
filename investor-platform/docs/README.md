@@ -2,6 +2,7 @@
 
 | Document | Description |
 | --- | --- |
+| [Review handoff — 2026-10-04](review-handoff-2026-10-04.md) | Open PR inventory, dependency order, review priorities and deployment handoff through #162. |
 | [Data assumptions](data-assumptions.md) | Living register of data limits, reconstruction assumptions and reconciliation needs. |
 | [ADR 0001](decisions/0001-documentation-and-pages.md) | Documentation policy and separate Portfolio, Activity and Research views. |
 | [ADR 0002](decisions/0002-stock-exclusion-scenarios.md) | Stock exclusions, retained cash and scenario limitations. |
