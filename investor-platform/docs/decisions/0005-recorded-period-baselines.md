@@ -10,7 +10,7 @@ An old, fully closed security can lose provider coverage after delisting. Fetchi
 
 Offer two explicit baselines. `history` retains the original inception replay and historical reconciliation. `recorded` starts with cash and share quantities from the saved ledger at the selected period boundary and fetches only securities carried into, or traded during, that period. The entire ledger still participates in accounting: past sales remain in cash and FIFO lots retain their original ordering and basis.
 
-Reconstructed accounts default to a labeled last-90-days recorded-balance estimate. Other accounts keep the full-history default. Buttons expose both choices; dates remain editable. No prices are substituted and no requested dates are silently changed after a failure. Full history can still be unavailable until missing prices or corporate actions are supplied. The duplicated generic error suffix is removed.
+All accounts default to full history, including reconstructed accounts. The last-90-days recorded-balance estimate is an explicit optional view. Buttons expose both choices; dates remain editable. No prices are substituted and no requested dates are silently changed after a failure. Full history can still be unavailable until missing prices or corporate actions are supplied. The duplicated generic error suffix is removed.
 
 Only income within the chosen period is reconciled or modeled. Earlier missing distributions are not reconstructed; opening cash/share quantities are trusted as recorded, including their limitations. Splits within the selected period and missing prices/FX still block affected comparisons. This does not certify the opening balance or past split accounting.
 

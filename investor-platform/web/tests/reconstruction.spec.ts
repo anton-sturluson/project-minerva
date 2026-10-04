@@ -57,8 +57,8 @@ test("shows provisional performance, recovers from failure, and keeps provisiona
   });
   await page.goto("/");
   await expect(page.getByText(/Quotes temporarily unavailable/)).toBeVisible();
-  expect(latestPeriod?.baseline).toBe("recorded");
-  expect((latestPeriod?.start ?? "") > "2026-01-02").toBe(true);
+  expect(latestPeriod?.baseline).toBeUndefined();
+  expect(latestPeriod?.start).toBe("2026-01-02");
   unavailable = false;
   await page.getByRole("button", { name: "Retry comparison" }).click();
   await expect(
@@ -82,6 +82,11 @@ test("shows provisional performance, recovers from failure, and keeps provisiona
   ).toBeVisible();
   expect(latestPeriod?.baseline).toBe("recorded");
   await page.reload();
+  await expect(
+    page.getByText("Estimated portfolio return", { exact: true }),
+  ).toBeVisible();
+  expect(latestPeriod?.baseline).toBeUndefined();
+  expect(latestPeriod?.start).toBe("2026-01-02");
   await expect(
     page.getByRole("heading", { name: "Provisional portfolio vs. the market" }),
   ).toBeVisible();

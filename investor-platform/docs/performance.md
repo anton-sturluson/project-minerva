@@ -18,7 +18,7 @@ Shares held across a provider-reported split block the report until split accoun
 
 ## Recent and full-history views
 
-Reconstructed portfolios open to **Last 90 days**, using recorded starting cash and shares. Earlier closed positions require no price lookup, but their sale proceeds and original FIFO lots remain in accounting. Earlier missing income and split adjustments are not reconstructed in this mode, so the opening balance must be treated as provisional. Dates remain editable. **Full history** retains inception reconciliation and can still fail if a delisted price series is unavailable. Neither mode replaces missing prices with zero or trade prices. See [ADR 0005](decisions/0005-recorded-period-baselines.md).
+All portfolios open to **Full history**. **Last 90 days** is optional and uses recorded starting cash and shares. Earlier closed positions require no price lookup, but their sale proceeds and original FIFO lots remain in accounting. Earlier missing income and split adjustments are not reconstructed in this mode, so the opening balance must be treated as provisional. Dates remain editable. **Full history** retains inception reconciliation and can still fail if a delisted price series is unavailable. Neither mode replaces missing prices with zero or trade prices. See [ADR 0005](decisions/0005-recorded-period-baselines.md).
 
 In a recorded-baseline view, exclusions apply within that period: prior trades remain, and excluded opening shares become cash at the first session close. The all-history trade scorecard and current holdings are independent of this choice.
 

@@ -77,13 +77,9 @@ export function Tracker({
   account: Account;
   ledger: Ledger;
 }) {
-  const [baseline, setBaseline] = useState<Baseline>(
-    account.reconstruction ? "recorded" : "history",
-  );
+  const [baseline, setBaseline] = useState<Baseline>("history");
   const [start, setStart] = useState(
-    account.reconstruction
-      ? recentStart(ledger, yesterday())
-      : (ledger.entries[0]?.effective_date ?? yesterday()),
+    ledger.entries[0]?.effective_date ?? yesterday(),
   );
   const [end, setEnd] = useState(yesterday());
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -140,13 +136,10 @@ export function Tracker({
     [account.id],
   );
   useEffect(() => {
-    // Incomplete imports start with a recent, explicitly recorded-balance estimate.
+    // Always open the full recorded history; recent comparisons are explicitly selected.
     const through = yesterday();
-    const basis = account.reconstruction ? "recorded" : "history";
-    const from = account.reconstruction
-      ? recentStart(ledger, through)
-      : (ledger.entries[0]?.effective_date ?? through);
-    setBaseline(basis);
+    const from = ledger.entries[0]?.effective_date ?? through;
+    setBaseline("history");
     setExcluded([]);
     setStart(from);
     setEnd(through);
@@ -158,7 +151,7 @@ export function Tracker({
       from < through &&
       account.base_currency === "USD"
     )
-      void compare(from, through, [], basis);
+      void compare(from, through);
     return () => {
       generation.current += 1;
     };
