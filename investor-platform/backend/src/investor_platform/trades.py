@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import Field, StringConstraints, field_validator, model_validator
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
@@ -83,23 +84,22 @@ def build_trade(account, data, session, actor, body):
     account_id = account.id
     if data.currency != account.base_currency:
         raise HTTPException(422, "Security currency must match the account")
-    security = session.scalar(
-        select(Security).where(
-            Security.workspace_id == actor.workspace_id,
-            Security.ticker == data.ticker,
-            Security.exchange == data.exchange,
-            Security.currency == data.currency,
-        )
-    )
+    identity = {
+        "workspace_id": actor.workspace_id,
+        "ticker": data.ticker,
+        "exchange": data.exchange,
+        "currency": data.currency,
+    }
+    query = select(Security).filter_by(**identity)
+    security = session.scalar(query)
     if security is None:
-        security = Security(
-            workspace_id=actor.workspace_id,
-            ticker=data.ticker,
-            exchange=data.exchange,
-            currency=data.currency,
+        # Different accounts may create the same workspace-wide identity concurrently.
+        session.execute(
+            insert(Security)
+            .values(**identity)
+            .on_conflict_do_nothing(constraint="security_identity")
         )
-        session.add(security)
-        session.flush()
+        security = session.scalar(query)
     with localcontext() as context:
         context.prec = ACCOUNTING_PRECISION
         amount = Decimal(0)
