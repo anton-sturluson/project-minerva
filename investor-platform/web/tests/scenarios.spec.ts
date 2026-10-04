@@ -68,8 +68,20 @@ test("compares exclusions and CAGR, preserves real holdings, clears selections a
   await page.goto("/");
   const summary = page.getByLabel("Performance summary");
   await expect(summary).toContainText("9.54%");
-  await page.getByText("Exclude stocks", { exact: true }).click();
+  await page.getByText("Excluded stocks", { exact: true }).click();
+  await page.getByLabel("Search stocks", { exact: true }).fill("zzz");
+  await expect(
+    page.getByText("No matching stocks.", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Search stocks", { exact: true }).fill("aaa");
   await page.getByRole("checkbox", { name: "AAA · NYSE" }).check();
+  await page.getByLabel("Search stocks", { exact: true }).fill("nasdaq");
+  await expect(page.getByLabel("Excluded stocks selection")).toContainText(
+    "AAA · NYSE",
+  );
+  await page.getByLabel("Search stocks", { exact: true }).press("Escape");
+  await expect(page.getByLabel("Search stocks", { exact: true })).toBeHidden();
+
   await expect(page.getByLabel("Holdings", { exact: true })).toContainText(
     "AAA",
   );
@@ -100,7 +112,9 @@ test("compares exclusions and CAGR, preserves real holdings, clears selections a
   );
   await expect(page.locator(".scenario-line")).toHaveCount(0);
   await expect(summary).toContainText("20.00%");
-  await page.getByRole("button", { name: "Clear exclusions" }).click();
+  await page
+    .getByRole("button", { name: "Remove AAA · NYSE exclusion" })
+    .click();
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toBeHidden();
   expect(received).toEqual([]);

@@ -110,6 +110,7 @@ class Period(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: date
     end: date
+    anchor_date: date | None = None
     scope: PerformanceScope = PerformanceScope.ACCOUNT
     baseline: Baseline = Baseline.HISTORY
     exclude_security_ids: list[UUID] = Field(default_factory=list, max_length=market.MAX_SECURITIES)
@@ -483,6 +484,8 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         if e.effective_date <= period.end
         or (e.income_kind == IncomeKind.DIVIDEND and e.accrual_date <= period.end)
     ]
+    if period.anchor_date is not None and period.anchor_date >= period.end:
+        raise HTTPException(422, "The comparison boundary must precede the ending date")
     recorded = period.baseline == Baseline.RECORDED
     securities = period_securities(entries, period.start if recorded else None)
     fetch_start = period.start if recorded else entries[0].effective_date
@@ -507,12 +510,18 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 entries, securities, fetch_start, period.end, provisional=provisional
             ),
         )
+        calculation_start = period.start
+        if period.anchor_date is not None:
+            sessions = sorted(d for d in fetched["SPY"].close if period.start <= d <= period.end)
+            before = [d for d in sessions if d <= period.anchor_date]
+            if sessions:
+                calculation_start = before[-1] if before else sessions[0]
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
             result = calculate(
                 entries,
                 fetched,
-                period.start,
+                calculation_start,
                 period.end,
                 provisional=provisional,
                 baseline=period.baseline,
@@ -539,13 +548,13 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                             excluded,
                             fetched,
                             provisional=provisional,
-                            start=period.start if recorded else None,
+                            start=calculation_start if recorded else None,
                         )
                     )
                     result["scenario"] = calculate(
                         alternative,
                         fetched,
-                        period.start,
+                        calculation_start,
                         period.end,
                         provisional=provisional,
                         baseline=period.baseline,

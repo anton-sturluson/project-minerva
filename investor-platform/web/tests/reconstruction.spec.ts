@@ -108,7 +108,7 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
   await expect(
     page.getByRole("row", { name: /Nasdaq-100 · QQQ 4.00%/ }),
   ).toBeVisible();
-  // Full history stays explicit; failure does not remove current holdings or the recent option.
+  // Full history stays explicit; failure does not remove current holdings or the YTD option.
   unavailable = true;
   await page.getByRole("button", { name: "Full history", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(
@@ -117,7 +117,7 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
   expect(latestPeriod?.start).toBe("2026-01-02");
   expect(latestPeriod?.baseline).toBeUndefined();
   unavailable = false;
-  await page.getByRole("button", { name: "Last 90 days", exact: true }).click();
+  await page.getByRole("button", { name: "YTD", exact: true }).click();
   await expect(
     page.getByText("Estimated portfolio return", { exact: true }),
   ).toBeVisible();
