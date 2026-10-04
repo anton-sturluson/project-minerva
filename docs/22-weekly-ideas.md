@@ -73,7 +73,7 @@ The existing automation uses a native **command** payload with explicit argv:
 scripts/run_weekly_ideas.sh EXISTING_JOB_UUID
 ```
 
-Keep its owner, Saturday schedule and explicit Slack channel/thread. Configure the three stage environment variables above in the command environment. The former `MINERVA_IDEAS_MODEL` wrapper setting is no longer used. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/OpenAI keys are inherited from the Gateway environment. Native command execution avoids a reporting model rewriting content or generating fallback acknowledgements for a silent repeat.
+Keep its owner, Saturday schedule and explicit `#ideas` Slack channel. Leave `delivery.threadId` unset so each digest appears as a new top-level channel post. Clear an inherited thread with `openclaw cron edit EXISTING_JOB_UUID --clear-thread-id`, then inspect the saved job to confirm the channel is unchanged and the thread is absent. The destination comes from OpenClaw configuration, not from a model. A destination change produces a distinct publication key, so running the job afterward can publish the current digest once to the new destination. Configure the three stage environment variables above in the command environment. The former `MINERVA_IDEAS_MODEL` wrapper setting is no longer used. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/OpenAI keys are inherited from the Gateway environment. Native command execution avoids a reporting model rewriting content or generating fallback acknowledgements for a silent repeat.
 
 `weekly` reconciles earlier delivery, researches incomplete work, and prepares output only when no pending, sourced or failed items remain. Gaps are omitted from the digest and retained in diagnostic status. Multiple fund views are grouped by company.
 
@@ -85,7 +85,7 @@ uv run minerva ideas reconcile EXISTING_JOB_UUID
 
 Reconciliation requires exact equality between the prepared payload and the native run's full stdout summary, a successful execution, a fresh transport receipt and the expected explicit destination. Truncated or ambiguous records do not confirm delivery. Investigate uncertainty before another attempt; do not delete publication rows to force a resend.
 
-The runtime currently uses a reviewed worktree pending merge. Keep that checkout and its ignored environment file until a verified deployment replaces it. Back up the existing job configuration before changing it; do not create a duplicate automation or restart the Gateway for this workflow.
+The runtime uses a dedicated clean worktree detached at a verified merged `main` commit. Keep that checkout and its ignored environment file until a verified deployment replaces it; do not use a development branch as the scheduled runtime. Back up the existing job configuration before changing it; do not create a duplicate automation or restart the Gateway for this workflow.
 
 ## Validation
 
