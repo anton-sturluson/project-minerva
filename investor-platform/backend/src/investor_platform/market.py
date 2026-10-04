@@ -110,7 +110,9 @@ def history(
     return History(prices, returns, dividends, set(splits), result["meta"]["exchangeName"])
 
 
-def cached_history(symbol, start, end, *, engine=None, workspace_id=None, **options):
+def cached_history(
+    symbol, start, end, *, engine=None, workspace_id=None, refresh_after=None, **options
+):
     if engine is None:
         return history(symbol, start, end, **options)
     # Currency and instrument validation must not be bypassed by a cache hit.
@@ -127,7 +129,16 @@ def cached_history(symbol, start, end, *, engine=None, workspace_id=None, **opti
             "source": result.source,
         }
 
-    body = cached_payload(engine, workspace_id, "yahoo-v1", f"{symbol}:{variant}", start, end, load)
+    body = cached_payload(
+        engine,
+        workspace_id,
+        "yahoo-v1",
+        f"{symbol}:{variant}",
+        start,
+        end,
+        load,
+        refresh_after=refresh_after,
+    )
     values = {
         name: {
             date.fromisoformat(day): Decimal(value)
@@ -244,6 +255,7 @@ def security_histories(
     engine=None,
     workspace_id=None,
     windows=None,
+    refresh_after=None,
 ):
     """Fetch each listing once; optionally convert valuation histories to USD."""
     securities = list(securities)
@@ -271,9 +283,17 @@ def security_histories(
             if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol.endswith("USD=X"):
                 from .tiingo import fx_history
 
-                return symbol, fx_history(symbol[:-5], first, last, engine, workspace_id)
+                return symbol, fx_history(
+                    symbol[:-5], first, last, engine, workspace_id, refresh_after=refresh_after
+                )
             return symbol, cached_history(
-                symbol, first, last, engine=engine, workspace_id=workspace_id, **requests[symbol]
+                symbol,
+                first,
+                last,
+                engine=engine,
+                workspace_id=workspace_id,
+                refresh_after=refresh_after,
+                **requests[symbol],
             )
         except (OSError, KeyError, TypeError, IndexError):
             if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol in by_symbol:
@@ -281,7 +301,12 @@ def security_histories(
 
                 try:
                     return symbol, stock_history(
-                        by_symbol[symbol], first + MAX_CLOSE_AGE, last, engine, workspace_id
+                        by_symbol[symbol],
+                        first + MAX_CLOSE_AGE,
+                        last,
+                        engine,
+                        workspace_id,
+                        refresh_after=refresh_after,
                     )
                 except (OSError, KeyError, TypeError, IndexError):
                     pass

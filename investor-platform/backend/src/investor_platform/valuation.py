@@ -9,7 +9,13 @@ from fastapi import APIRouter, HTTPException
 
 from . import market
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
+from .domain import (
+    ACCOUNTING_PRECISION,
+    MARKET_TIMEZONE,
+    Currency,
+    EntryKind,
+    completed_market_date,
+)
 from .ledger import entries_for, ledger_view
 from .models import LedgerEntry
 from .performance import position_episodes, trade_statistics, wire
@@ -26,7 +32,9 @@ def latest(history, end):
     return day, history.close[day]
 
 
-def quote_holding(holding, end, provisional, fx, engine=None, workspace_id=None):
+def quote_holding(
+    holding, end, provisional, fx, engine=None, workspace_id=None, refresh_after=None
+):
     security = holding.security
     row = {
         "security_id": security.id,
@@ -52,6 +60,7 @@ def quote_holding(holding, end, provisional, fx, engine=None, workspace_id=None)
                 currency=currency,
                 engine=engine,
                 workspace_id=workspace_id,
+                refresh_after=refresh_after,
             )
             if history.exchange not in exchanges:
                 raise ValueError("Provider listing does not match the recorded exchange")
@@ -68,7 +77,12 @@ def quote_holding(holding, end, provisional, fx, engine=None, workspace_id=None)
         else:
             symbol = market.symbol_for(security, provisional=provisional)
             history = market.cached_history(
-                symbol, end - QUOTE_WINDOW, end, engine=engine, workspace_id=workspace_id
+                symbol,
+                end - QUOTE_WINDOW,
+                end,
+                engine=engine,
+                workspace_id=workspace_id,
+                refresh_after=refresh_after,
             )
             market.verify_exchange(security, history, provisional=provisional)
             day, price = latest(history, end)
@@ -86,8 +100,10 @@ def quote_holding(holding, end, provisional, fx, engine=None, workspace_id=None)
     return row
 
 
-def value_records(records, base_currency, provisional, *, engine=None, workspace_id=None):
-    end = datetime.now(MARKET_TIMEZONE).date() - timedelta(days=1)
+def value_records(
+    records, base_currency, provisional, *, engine=None, workspace_id=None, refresh_after=None
+):
+    end = completed_market_date()
     fx = {}
     for currency in {
         market.FOREIGN_LISTINGS[h.security.exchange][1]
@@ -102,6 +118,7 @@ def value_records(records, base_currency, provisional, *, engine=None, workspace
                 instruments=("CURRENCY",),
                 engine=engine,
                 workspace_id=workspace_id,
+                refresh_after=refresh_after,
             )
         except (ValueError, OSError, KeyError, TypeError, IndexError, DecimalException):
             fx[currency] = "USD exchange rate unavailable"
@@ -109,7 +126,9 @@ def value_records(records, base_currency, provisional, *, engine=None, workspace
         with ThreadPoolExecutor(max_workers=6) as pool:
             rows = list(
                 pool.map(
-                    lambda h: quote_holding(h, end, provisional, fx, engine, workspace_id),
+                    lambda h: quote_holding(
+                        h, end, provisional, fx, engine, workspace_id, refresh_after
+                    ),
                     records.holdings,
                 )
             )

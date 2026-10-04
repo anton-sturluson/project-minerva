@@ -12,7 +12,7 @@ import { HitRate } from "./HitRate";
 import { Holdings } from "./Holdings";
 import { StockExclusions } from "./StockExclusions";
 import { BenchmarkReturn, YearlyPerformance } from "./YearlyPerformance";
-import { today, type Ledger } from "./records";
+import { completedMarketDate, today, type Ledger } from "./records";
 
 type Scope = "stocks" | "account";
 
@@ -58,12 +58,6 @@ export type Report = {
   warnings: string[];
   series: Point[];
 };
-const yesterday = () => {
-  // Date selection is based on completed US sessions, never an intraday quote.
-  const d = new Date(today() + "T12:00:00Z");
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-};
 
 type Shortcut = "ytd" | "year" | "history";
 
@@ -95,9 +89,9 @@ export function Tracker({
   const [scope, setScope] = useState<Scope>("stocks");
   const [baseline, setBaseline] = useState<Baseline>("history");
   const [start, setStart] = useState(
-    ledger.entries[0]?.effective_date ?? yesterday(),
+    ledger.entries[0]?.effective_date ?? completedMarketDate(),
   );
-  const [end, setEnd] = useState(yesterday());
+  const [end, setEnd] = useState(completedMarketDate());
   const [anchor, setAnchor] = useState<string | undefined>();
   const [excluded, setExcluded] = useState<string[]>([]);
   const securities = [
@@ -161,7 +155,7 @@ export function Tracker({
   );
   useEffect(() => {
     // Always open the full recorded history; recent comparisons are explicitly selected.
-    const through = yesterday();
+    const through = completedMarketDate();
     const from = ledger.entries[0]?.effective_date ?? through;
     setAnchor(undefined);
     setScope("stocks");
@@ -187,7 +181,7 @@ export function Tracker({
     void compare(start, end, excluded, baseline, scope, anchor);
   }
   function choosePeriod(shortcut: Shortcut) {
-    const through = yesterday();
+    const through = completedMarketDate();
     const basis: Baseline = shortcut === "history" ? "history" : "recorded";
     const { from, anchor } = shortcutDates(ledger, through, shortcut);
     setAnchor(anchor);
@@ -300,7 +294,7 @@ export function Tracker({
               required
               value={end}
               min={start}
-              max={yesterday()}
+              max={completedMarketDate()}
               onChange={(e) => {
                 setAnchor(undefined);
                 setEnd(e.target.value);

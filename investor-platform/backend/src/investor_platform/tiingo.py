@@ -41,7 +41,7 @@ def get(path, key):
         ) from exc
 
 
-def payload(engine, workspace_id, symbol, start, end, *, fx=False):
+def payload(engine, workspace_id, symbol, start, end, *, fx=False, refresh_after=None):
     key = os.environ.get("TIINGO_API_KEY")
     if not key:
         raise MarketDataError("Historical fallback requires TIINGO_API_KEY")
@@ -61,7 +61,16 @@ def payload(engine, workspace_id, symbol, start, end, *, fx=False):
             parse_stock(body, symbol)
         return body
 
-    return cached_payload(engine, workspace_id, PROVIDER, cache_symbol, start, end, load)
+    return cached_payload(
+        engine,
+        workspace_id,
+        PROVIDER,
+        cache_symbol,
+        start,
+        end,
+        load,
+        refresh_after=refresh_after,
+    )
 
 
 def parse_stock(body, symbol):
@@ -94,14 +103,14 @@ def parse_stock(body, symbol):
     )
 
 
-def stock_history(security, start, end, engine, workspace_id):
+def stock_history(security, start, end, engine, workspace_id, *, refresh_after=None):
     if security.currency != "USD" or security.exchange not in EXCHANGES:
         raise ValueError("Tiingo fallback requires a confirmed US listing and USD records")
     # Providers describe the current exchange, even when the requested history predates a move.
     # Such exceptions require explicit, dated evidence stored with this security.
     review = (security.market_identity or {}).get(PROVIDER)
     symbol = review["symbol"] if review else security.ticker
-    body = payload(engine, workspace_id, symbol, start, end)
+    body = payload(engine, workspace_id, symbol, start, end, refresh_after=refresh_after)
     result = parse_stock(body, symbol)
     if result.exchange not in EXCHANGES[security.exchange]:
         if not (
@@ -135,10 +144,13 @@ def parse_fx(body, symbol):
     return History(closes, dict(closes), source="Tiingo daily FX")
 
 
-def fx_history(currency, start, end, engine, workspace_id):
+def fx_history(currency, start, end, engine, workspace_id, *, refresh_after=None):
     symbol = (
         currency.lower() + "usd"
         if currency in {"AUD", "EUR", "GBP", "NZD"}
         else "usd" + currency.lower()
     )
-    return parse_fx(payload(engine, workspace_id, symbol, start, end, fx=True), symbol)
+    return parse_fx(
+        payload(engine, workspace_id, symbol, start, end, fx=True, refresh_after=refresh_after),
+        symbol,
+    )
