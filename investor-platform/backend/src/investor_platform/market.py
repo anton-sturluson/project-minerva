@@ -283,9 +283,14 @@ def security_histories(
             if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol.endswith("USD=X"):
                 from .tiingo import fx_history
 
-                return symbol, fx_history(
-                    symbol[:-5], first, last, engine, workspace_id, refresh_after=refresh_after
-                )
+                try:
+                    return symbol, fx_history(
+                        symbol[:-5], first, last, engine, workspace_id, refresh_after=refresh_after
+                    )
+                except OSError:
+                    # An optional provider outage must not disable validated Yahoo FX.
+                    # Identity/price validation failures still propagate unchanged.
+                    pass
             return symbol, cached_history(
                 symbol,
                 first,

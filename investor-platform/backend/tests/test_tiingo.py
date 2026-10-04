@@ -146,3 +146,64 @@ def test_pln_valuation_uses_inverse_usd_pair(monkeypatch):
     result = tiingo.fx_history("PLN", START, END, None, LOCAL_WORKSPACE)
     assert calls == [("usdpln", True)]
     assert result.close[START] == Decimal(".25")
+
+
+@pytest.mark.parametrize("yahoo_available", [True, False])
+def test_fx_transport_failure_tries_yahoo_and_retains_same_date_rates(
+    database, monkeypatch, yahoo_available
+):
+    monkeypatch.setenv("TIINGO_API_KEY", "synthetic-token")
+    calls = []
+
+    def unavailable(*args, **kwargs):
+        raise market.MarketDataError("Synthetic Tiingo outage")
+
+    def yahoo(symbol, first, last, **options):
+        calls.append(symbol)
+        if symbol == "CADUSD=X":
+            assert options == {"instruments": ("CURRENCY",)}
+            if not yahoo_available:
+                raise market.MarketDataError("Synthetic Yahoo outage")
+            return market.History({START: Decimal(".8")}, {})
+        return market.History({START: Decimal(10), END: Decimal(11)}, {}, exchange="TOR")
+
+    monkeypatch.setattr(tiingo, "fx_history", unavailable)
+    monkeypatch.setattr(market, "history", yahoo)
+    security = SimpleNamespace(ticker="AAA", exchange="TSX", currency="USD")
+    if not yahoo_available:
+        with pytest.raises(market.MarketDataError, match="CADUSD=X"):
+            market.security_histories(
+                [security], START, END, engine=database, workspace_id=LOCAL_WORKSPACE
+            )
+    else:
+        histories = market.security_histories(
+            [security], START, END, engine=database, workspace_id=LOCAL_WORKSPACE
+        )
+        assert histories["AAA.TO"].close == {START: Decimal(8)}
+        assert END not in histories["AAA.TO"].close  # Missing FX remains missing.
+        assert histories["AAA.TO"].source == market.SOURCE
+    assert calls.count("CADUSD=X") == 1
+
+
+def test_fx_identity_validation_failure_does_not_fall_back(database, monkeypatch):
+    monkeypatch.setenv("TIINGO_API_KEY", "synthetic-token")
+    calls = []
+
+    def mismatch(*args, **kwargs):
+        raise ValueError("Tiingo FX pair does not match")
+
+    def yahoo(symbol, *args, **kwargs):
+        calls.append(symbol)
+        return market.History({START: Decimal(10)}, {}, exchange="TOR")
+
+    monkeypatch.setattr(tiingo, "fx_history", mismatch)
+    monkeypatch.setattr(market, "cached_history", yahoo)
+    with pytest.raises(ValueError, match="pair does not match"):
+        market.security_histories(
+            [SimpleNamespace(ticker="AAA", exchange="TSX", currency="USD")],
+            START,
+            END,
+            engine=database,
+            workspace_id=LOCAL_WORKSPACE,
+        )
+    assert "CADUSD=X" not in calls
