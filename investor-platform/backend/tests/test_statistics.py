@@ -7,9 +7,9 @@ from test_trades import trade
 
 
 def test_closed_episode_scorecard_partial_exits_fees_unknown_and_breakeven(db_client):
-    aid = db_client.post("/api/account", json={"name": "Scorecard", "base_currency": "USD"}).json()[
-        "id"
-    ]
+    aid = db_client.post(
+        "/api/accounts", json={"name": "Scorecard", "base_currency": "USD"}
+    ).json()["id"]
     cash(db_client, aid, "opening_cash", "10000")
     # One winning episode, split into two exits. Net gain 196 after four dollars of fees.
     trade(db_client, aid, quantity="10", fees="2")

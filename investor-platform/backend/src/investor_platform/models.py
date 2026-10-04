@@ -38,7 +38,7 @@ class Workspace(Base):
 class Account(Base):
     __tablename__ = "accounts"
     __table_args__ = (
-        UniqueConstraint("workspace_id"),
+        UniqueConstraint("workspace_id", "name", name="account_workspace_name"),
         CheckConstraint("length(trim(name)) BETWEEN 1 AND 80", name="account_name"),
         CheckConstraint(
             "base_currency IN ('USD','EUR','GBP','CAD','AUD','JPY','CHF','HKD','SGD')",

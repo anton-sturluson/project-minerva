@@ -15,7 +15,7 @@ DAYS = [date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6)]
 @pytest.fixture
 def portfolio(db_client, monkeypatch):
     aid = db_client.post(
-        "/api/account", json={"name": "Performance fixture", "base_currency": "USD"}
+        "/api/accounts", json={"name": "Performance fixture", "base_currency": "USD"}
     ).json()["id"]
     assert cash(db_client, aid, "opening_cash", "1000", day="2026-01-02").status_code == 201
     assert (

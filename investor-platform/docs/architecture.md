@@ -40,3 +40,7 @@ Add boundaries when their feature needs them. Research storage, background jobs,
 - [Tailscale](tailscale.md): private deployment configuration.
 - [Performance](performance.md) and [hit rate](hit-rate.md): calculations and market-data constraints.
 - [Homepage Club](../design/README.md): approved design.
+
+## Portfolio boundary
+
+`GET /api/accounts` lists only the authenticated owner’s workspace portfolios; `POST /api/accounts` creates or idempotently returns a matching named portfolio. Every ledger, correction and metric route includes an account UUID and checks ownership. Instruments are shared within a workspace, while lots, cash and request keys are scoped to their portfolio. The UI remounts the ledger subtree on selection changes and validates a saved selection against the owner-scoped list. The old singular account endpoint has been removed.

@@ -17,7 +17,7 @@ from investor_platform.models import Security
 @pytest.fixture
 def account_id(db_client):
     account = db_client.post(
-        "/api/account", json={"name": "Trade fixture", "base_currency": "USD"}
+        "/api/accounts", json={"name": "Trade fixture", "base_currency": "USD"}
     ).json()["id"]
     cash(db_client, account, "opening_cash", "10000")
     return account

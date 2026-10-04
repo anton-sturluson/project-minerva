@@ -235,12 +235,17 @@ def apply_import(engine, name, entries, summary):
         )
         if workspace is None:
             raise ValueError("Run migrations before importing")
-        existing = session.scalar(select(Account).where(Account.workspace_id == LOCAL_WORKSPACE))
+        existing = session.scalar(
+            select(Account).where(
+                Account.workspace_id == LOCAL_WORKSPACE, Account.name == data.name
+            )
+        )
         if existing:
             if (existing.reconstruction or {}).get("identity") == summary["identity"]:
                 return str(existing.id), False
             raise ValueError(
-                "Target already has an account. Use a separate empty testing database."
+                "This portfolio name already has an account with a different import. "
+                "Choose a new name."
             )
         account = Account(workspace_id=LOCAL_WORKSPACE, reconstruction=summary, **data.model_dump())
         session.add(account)
@@ -284,7 +289,7 @@ def main():
     )
     parser.add_argument("--name", default="Transaction reconstruction · testing")
     parser.add_argument(
-        "--apply", action="store_true", help="Write to the empty DATABASE_URL database"
+        "--apply", action="store_true", help="Create a new named portfolio in DATABASE_URL"
     )
     args = parser.parse_args()
     try:

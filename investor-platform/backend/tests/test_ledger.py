@@ -17,7 +17,7 @@ from investor_platform.models import LedgerEntry
 @pytest.fixture
 def account_id(db_client):
     return db_client.post(
-        "/api/account", json={"name": "Ledger fixture", "base_currency": "USD"}
+        "/api/accounts", json={"name": "Ledger fixture", "base_currency": "USD"}
     ).json()["id"]
 
 

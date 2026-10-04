@@ -58,12 +58,12 @@ def test_import_is_atomic_idempotent_and_preserves_existing_account(database, db
         assert (
             session.get(Account, account_id).reconstruction["source_rows"] == report["source_rows"]
         )
-    view = db_client.get("/api/account").json()
+    view = db_client.get("/api/accounts").json()[0]
     assert view["reconstruction"]["imported_trades"] == 3
     assert "source_rows" not in view["reconstruction"]
     with pytest.raises(ValueError, match="already has an account"):
         changed, changed_report = reconstruct(CSV.replace(b"$80", b"$81"), LISTINGS)
-        apply_import(database, "Changed import", changed, changed_report)
+        apply_import(database, "Synthetic import", changed, changed_report)
 
 
 def test_bad_rows_are_reported_without_dropping_valid_rows():

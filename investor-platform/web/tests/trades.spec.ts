@@ -4,10 +4,10 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
   page,
   request,
 }, info) => {
-  await request.post("/api/account", {
+  await request.post("/api/accounts", {
     data: { name: "Browser test account", base_currency: "USD" },
   });
-  const account = await (await request.get("/api/account")).json();
+  const account = (await (await request.get("/api/accounts")).json())[0];
   await request.post(`/api/accounts/${account.id}/cash`, {
     data: {
       kind: "deposit",

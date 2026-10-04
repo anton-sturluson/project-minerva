@@ -28,9 +28,9 @@ def remote_client(remote_env, peer="127.0.0.1"):
     [
         ("/", None),
         ("/asset.js", None),
-        ("/api/account", None),
+        ("/api/accounts", None),
         ("/docs", None),
-        ("/api/account", "someone-else@example.com"),
+        ("/api/accounts", "someone-else@example.com"),
     ],
 )
 def test_missing_or_foreign_identity_cannot_read_any_surface(remote_env, path, login):
@@ -47,9 +47,9 @@ def test_allowed_identity_serves_ui_and_api(remote_env):
         assert "Private portfolio" in client.get("/").text
         assert client.get("/asset.js").status_code == 200
         assert client.get("/api/health").json()["status"] == "ok"
-        assert client.post("/api/account", json={}).status_code == 403
+        assert client.post("/api/accounts", json={}).status_code == 403
         # Reaches payload validation, without creating any database record.
-        assert client.post("/api/account", headers={"Origin": ORIGIN}, json={}).status_code == 422
+        assert client.post("/api/accounts", headers={"Origin": ORIGIN}, json={}).status_code == 422
 
 
 def test_non_loopback_peer_cannot_spoof_identity(remote_env):

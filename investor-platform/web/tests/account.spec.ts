@@ -3,21 +3,21 @@ import { expect, test } from "./fixtures";
 test("creates an account and keeps it after reload", async ({ page }) => {
   await page.goto("/#portfolio");
   await expect(page.getByText("Opening your records…")).toBeHidden();
-  if (await page.getByLabel("Account name", { exact: true }).isVisible()) {
+  if (await page.getByLabel("Portfolio name", { exact: true }).isVisible()) {
     await page
-      .getByLabel("Account name", { exact: true })
+      .getByLabel("Portfolio name", { exact: true })
       .fill("Browser test account");
     await page.getByLabel("Base currency", { exact: true }).selectOption("USD");
     await page
-      .getByRole("button", { name: "Create account", exact: true })
+      .getByRole("button", { name: "Create portfolio", exact: true })
       .click();
   }
   await expect(
-    page.getByRole("heading", { name: "Browser test account", exact: true }),
+    page.getByRole("combobox", { name: "Portfolio", exact: true }),
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Browser test account", exact: true }),
+    page.getByRole("combobox", { name: "Portfolio", exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(
@@ -27,7 +27,7 @@ test("creates an account and keeps it after reload", async ({ page }) => {
 });
 
 test("explains a record load failure and recovers", async ({ page }) => {
-  await page.route("**/api/account", (route) =>
+  await page.route("**/api/accounts", (route) =>
     route.fulfill({
       status: 503,
       json: {
@@ -40,20 +40,69 @@ test("explains a record load failure and recovers", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText(
     "Records are unavailable",
   );
-  await page.unroute("**/api/account");
-  await page.getByRole("button", { name: "Reload account" }).click();
+  await page.unroute("**/api/accounts");
+  await page.getByRole("button", { name: "Reload portfolios" }).click();
   await expect(page.getByRole("alert")).toBeHidden();
 });
 
 test("explains a proxy outage and recovers", async ({ page }) => {
-  await page.route("**/api/account", (route) =>
+  await page.route("**/api/accounts", (route) =>
     route.fulfill({ status: 502, body: "Bad Gateway" }),
   );
   await page.goto("/#portfolio");
   await expect(page.getByRole("alert")).toContainText(
     "Could not reach your records",
   );
-  await page.unroute("**/api/account");
-  await page.getByRole("button", { name: "Reload account" }).click();
+  await page.unroute("**/api/accounts");
+  await page.getByRole("button", { name: "Reload portfolios" }).click();
   await expect(page.getByRole("alert")).toBeHidden();
+});
+
+test("creates another portfolio, isolates activity, and remembers selection", async ({
+  page,
+  request,
+}) => {
+  const accounts = await (await request.get("/api/accounts")).json();
+  const original = accounts[0];
+  const originalLedger = await (
+    await request.get(`/api/accounts/${original.id}/ledger`)
+  ).json();
+  const name = `Synthetic index ${crypto.randomUUID().slice(0, 8)}`;
+  await page.goto("/#portfolio");
+  await page
+    .getByRole("button", { name: "New portfolio", exact: true })
+    .click();
+  await page.getByLabel("Portfolio name", { exact: true }).fill(name);
+  await page
+    .getByRole("button", { name: "Create portfolio", exact: true })
+    .click();
+  const select = page.getByRole("combobox", { name: "Portfolio", exact: true });
+  await expect(
+    select.getByRole("option", { name, exact: true }),
+  ).toBeAttached();
+  await expect(select).not.toHaveValue(original.id);
+  const id = await select.inputValue();
+  await page.getByRole("link", { name: "[ Activity ]", exact: true }).click();
+  await page.getByText("Record cash", { exact: true }).click();
+  await page
+    .getByLabel("Entry type", { exact: true })
+    .selectOption("opening_cash");
+  await page.getByLabel("Cash amount", { exact: true }).fill("123");
+  await page
+    .getByRole("button", { name: "Save cash entry", exact: true })
+    .click();
+  await expect(page.getByTestId("cash-balance")).toHaveText("USD 123.00");
+  await page.reload();
+  await expect(select).toHaveValue(id);
+  await expect(page.getByTestId("cash-balance")).toHaveText("USD 123.00");
+  await select.selectOption(original.id);
+  await expect(page.getByTestId("cash-balance")).not.toHaveText("USD 123.00");
+  expect(
+    await (await request.get(`/api/accounts/${original.id}/ledger`)).json(),
+  ).toEqual(originalLedger);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });

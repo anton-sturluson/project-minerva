@@ -3,23 +3,25 @@ import { expect, test, performance } from "./fixtures";
 test("shows provisional performance, recovers from failure, and keeps provisional status without import prose", async ({
   page,
 }) => {
-  await page.route("**/api/account", async (route) => {
+  await page.route("**/api/accounts", async (route) => {
     const response = await route.fetch();
-    const account = await response.json();
+    const [account] = await response.json();
     await route.fulfill({
-      json: {
-        ...account,
-        reconstruction: {
-          warning:
-            "Incomplete transaction reconstruction for testing. Opening shares and cash are inferred minimums, not broker balances.",
-          source_sha256: "synthetic",
-          imported_trades: 3,
-          skipped: [{ row: 5, reason: "Unconfirmed currency" }],
-          opening_cash: "41",
-          opening_positions: { "AAA · NASDAQ": "3" },
-          price_discrepancies: [3],
+      json: [
+        {
+          ...account,
+          reconstruction: {
+            warning:
+              "Incomplete transaction reconstruction for testing. Opening shares and cash are inferred minimums, not broker balances.",
+            source_sha256: "synthetic",
+            imported_trades: 3,
+            skipped: [{ row: 5, reason: "Unconfirmed currency" }],
+            opening_cash: "41",
+            opening_positions: { "AAA · NASDAQ": "3" },
+            price_discrepancies: [3],
+          },
         },
-      },
+      ],
     });
   });
   await page.route("**/api/accounts/*/ledger", async (route) => {

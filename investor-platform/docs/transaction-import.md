@@ -1,6 +1,6 @@
 # Transaction reconstruction for testing
 
-Use `investor-import` in the backend uv project to preview a transaction export and import it into a separate, empty PostgreSQL database. It never replaces an existing account. The app remains SQL-owned; this is an explicit import command, not ongoing sheet sync.
+Use `investor-import` in the backend uv project to preview a transaction export and import it into a new named portfolio in PostgreSQL. It never replaces an existing account. The app remains SQL-owned; this is an explicit import command, not ongoing sheet sync.
 
 ```sh
 uv run --frozen investor-import --source /path/transactions.gviz --listings /path/listings.json
@@ -36,7 +36,7 @@ Only confirmed USD rows are imported. An omitted exchange becomes `UNVERIFIED`; 
 - Sort by date, preserving source order within each date. Duplicate-looking rows remain separate source rows; the importer does not guess that they are duplicates.
 - Infer the minimum opening shares needed to avoid a short position. Their acquisition dates and cost bases remain unknown. Infer the minimum starting cash needed to replay the history, rounded up to cents. Neither is a verified broker balance.
 - Preserve every original source row, the original payload, its SHA-256 fingerprint, listing choices, exclusions and assumptions in the account's PostgreSQL reconstruction field. The account API exposes only the summary, not the raw payload.
-- Create the account and ledger in one transaction and replay its accounting before commit. Identical source/listing inputs are a no-op on retry; different inputs require a new empty testing database. Existing records are never overwritten.
+- Create the account and ledger in one transaction and replay its accounting before commit. Identical source/listing inputs are a no-op on retry; different inputs require a new portfolio name or a separate testing database. Existing records are never overwritten.
 - The interface labels holdings, cash and trade statistics as provisional. Portfolio comparisons are explicitly provisional: they assume no missing flows or trades, use provider USD listings for imported US tickers, and model missing gross distributions on their ex-dates without changing the ledger. Recorded income offsets modeled income only on the same ex-date; payment-date income can double count it. Missing prices and positions spanning splits still block results. Restoring a complete source does not automatically remove the provisional flag; verified reconciliation is separate work.
 
 Keep actual exports, listing maps and import reports outside Git. Automated checks use synthetic fixtures. The original demo database can be retained while the private preview points at the reconstruction database.

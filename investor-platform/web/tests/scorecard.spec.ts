@@ -4,7 +4,7 @@ test("shows a closed synthetic trade and recovers a scorecard load failure", asy
   page,
   request,
 }) => {
-  const account = await (await request.get("/api/account")).json();
+  const account = (await (await request.get("/api/accounts")).json())[0];
   const base = `/api/accounts/${account.id}`;
   const date = new Date().toISOString().slice(0, 10);
   const ticker = `S${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
