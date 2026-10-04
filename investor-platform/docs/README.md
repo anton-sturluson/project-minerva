@@ -14,6 +14,7 @@
 | [Portfolio guide](portfolio.md) | Accounts, cash, positions, trade entry, corrections and tracker usage. |
 | [Cash reconciliation](cash-reconciliation.md) | Reviewed dated cash replacement, checkpoint validation and immutable audit. |
 | [Transaction import](transaction-import.md) | Preview and import a testing portfolio; source evidence, exclusions and inferred balances. |
+| [Post-mortem](post-mortem.md) | Annual and full-history stock contributions, linking formula and interpretation. |
 | [Performance](performance.md) | Portfolio returns, SPY/QQQ benchmarks, valuation conventions and data limits. |
 | [Decision hit rate](hit-rate.md) | Matched-capital comparisons, decision grouping and exclusions. |
 | [Private Tailscale access](tailscale.md) | Private setup, identity boundary, restart and connection troubleshooting. |

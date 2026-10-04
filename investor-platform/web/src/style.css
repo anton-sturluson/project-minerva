@@ -116,6 +116,7 @@ main,
 #portfolio,
 #activity,
 #performance,
+#post-mortem,
 #research {
   scroll-margin-top: calc(var(--header-height) + 16px);
 }
@@ -778,5 +779,69 @@ summary:focus-visible {
 @media (max-width: 650px) {
   .return-chart .chart-dates text {
     font-size: 22px;
+  }
+}
+
+.post-mortem-period {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-block: 20px 8px;
+}
+.post-mortem-period label {
+  min-width: 180px;
+}
+.post-mortem-period strong {
+  font:
+    bold 24px "Courier New",
+    monospace;
+  margin-left: 12px;
+}
+.contribution-leaders {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-block: 24px;
+}
+.contribution-leaders h3 {
+  color: var(--plum);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 6px;
+}
+.contribution-leaders ol {
+  padding: 0;
+  list-style: none;
+  margin: 8px 0;
+}
+.contribution-leaders li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 6px;
+}
+.contribution-leaders small,
+.post-mortem-content table small {
+  font-size: 11px;
+  font-weight: normal;
+}
+.post-mortem-content tbody th {
+  background: var(--paper);
+}
+.post-mortem-content tfoot > tr > * {
+  font-weight: bold;
+  border-top: 2px solid var(--ink);
+}
+@media (max-width: 650px) {
+  :root {
+    --header-height: 170px;
+  }
+  .main-nav {
+    gap: 0 14px;
+  }
+  .contribution-leaders {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 }
