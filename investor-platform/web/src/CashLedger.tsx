@@ -10,6 +10,7 @@ import { Corrections, EntrySummary } from "./Corrections";
 import type { Page } from "./App";
 import { Tracker } from "./Tracker";
 import { number } from "./format";
+import { IncomeFields, emptyIncome, incomePayload } from "./IncomeFields";
 import { Trades } from "./Trades";
 import {
   exact,
@@ -20,6 +21,7 @@ import {
   type Ledger,
   type CashKind,
   cashKinds,
+  incomeSecurities,
 } from "./records";
 
 export function CashLedger({
@@ -38,6 +40,7 @@ export function CashLedger({
   const [kind, setKind] = useState<CashKind>("opening_cash");
   const [date, setDate] = useState(today());
   const [amount, setAmount] = useState("");
+  const [income, setIncome] = useState(emptyIncome);
   const [note, setNote] = useState("");
   const retry = useRef<{ body: string; key: string } | null>(null);
   const load = useCallback(async () => {
@@ -70,6 +73,7 @@ export function CashLedger({
       amount,
       currency: account.base_currency,
       note,
+      ...(kind === "income" ? incomePayload(income) : {}),
     };
     const body = JSON.stringify(payload);
     if (retry.current?.body !== body)
@@ -185,9 +189,14 @@ export function CashLedger({
                   />
                 </label>
                 {kind === "income" && (
-                  <p className="form-note">
-                    Record gross dividends on their ex-date.
-                  </p>
+                  <IncomeFields
+                    value={income}
+                    paymentDate={date}
+                    securities={incomeSecurities(ledger.entries)}
+                    onChange={(field, value) =>
+                      setIncome((current) => ({ ...current, [field]: value }))
+                    }
+                  />
                 )}
                 {kind === "opening_cash" && (
                   <p className="form-note">Cash held when tracking begins.</p>
@@ -204,6 +213,7 @@ export function CashLedger({
                   key={correcting.id}
                   account={account}
                   entry={correcting}
+                  securities={incomeSecurities(ledger.entries)}
                   onSaved={async () => {
                     await load();
                     setMessage(
@@ -258,9 +268,19 @@ export function CashLedger({
                           <td>
                             {labels[e.kind]}
                             {e.security && <> · {e.security.ticker}</>}
+                            {e.income_kind && <> · {e.income_kind}</>}
+                            {e.income_security && (
+                              <>
+                                {" "}
+                                · {e.income_security.ticker} · ex{" "}
+                                {e.accrual_date}
+                              </>
+                            )}
                           </td>
                           <td className="number">
-                            {["withdrawal", "buy"].includes(e.kind) ? "−" : ""}
+                            {["withdrawal", "expense", "buy"].includes(e.kind)
+                              ? "−"
+                              : ""}
                             {exact(e.amount)}
                           </td>
                           <td>

@@ -15,11 +15,12 @@ from .ledger import (
     EntryView,
     HoldingView,
     WireDecimal,
+    build_cash,
     entries_for,
     fingerprint,
     ledger_view,
 )
-from .models import LedgerCorrection, LedgerEntry
+from .models import LedgerCorrection
 from .trades import TradeInput, build_trade
 
 router = APIRouter(prefix="/api/accounts")
@@ -80,12 +81,7 @@ def correct(
         if isinstance(values, TradeInput):
             replacement = build_trade(account, values, session, actor, fingerprint(values))
         else:
-            replacement = LedgerEntry(
-                account_id=account_id,
-                created_by=actor.owner_id,
-                request_body=fingerprint(values),
-                **values.model_dump(),
-            )
+            replacement = build_cash(account, values, session, actor, fingerprint(values))
         session.add(replacement)
         session.flush()
     correction = LedgerCorrection(

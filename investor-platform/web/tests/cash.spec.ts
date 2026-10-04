@@ -25,6 +25,9 @@ test("records cash, rejects overdraft, and keeps the draft", async ({
     page.getByText("Cash entry saved.", { exact: true }),
   ).toBeVisible();
   await page.getByLabel("Entry type", { exact: true }).selectOption("income");
+  await page
+    .getByLabel("Income type", { exact: true })
+    .selectOption("interest");
   await page.getByLabel("Cash amount", { exact: true }).fill("1.50");
   await page
     .getByRole("button", { name: "Save cash entry", exact: true })

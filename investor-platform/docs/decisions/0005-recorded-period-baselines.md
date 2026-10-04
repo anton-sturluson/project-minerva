@@ -12,7 +12,7 @@ Offer two explicit baselines. `history` retains the original inception replay an
 
 All accounts default to full history, including reconstructed accounts. The last-90-days recorded-balance estimate is an explicit optional view. Buttons expose both choices; dates remain editable. No prices are substituted and no requested dates are silently changed after a failure. Full history can still be unavailable until missing prices or corporate actions are supplied. The duplicated generic error suffix is removed.
 
-Only income within the chosen period is reconciled or modeled. Earlier missing distributions are not reconstructed; opening cash/share quantities are trusted as recorded, including their limitations. Splits within the selected period and missing prices/FX still block affected comparisons. This does not certify the opening balance or past split accounting.
+Only distribution entitlements within the chosen period are validated against market events. Recorded earlier unpaid dividends remain receivables until paid. Earlier missing distributions are not reconstructed; opening cash/share quantities are trusted as recorded, including their limitations. Splits within the selected period and missing prices/FX still block affected comparisons. This does not certify the opening balance or past split accounting.
 
 Exclusions in recorded mode apply within the selected period. Prior trades remain unchanged; excluded opening shares are notionally sold at the first comparison close and retained as cash, while subsequent excluded trades disappear. Existing distributions or funding limits can still prevent a scenario. Full-history exclusions keep their original lifetime semantics. Neither mode writes records or changes holdings or the all-history scorecard.
 

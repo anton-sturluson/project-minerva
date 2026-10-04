@@ -21,6 +21,12 @@ class EntryKind(StrEnum):
     SELL = "sell"
 
 
+class IncomeKind(StrEnum):
+    DIVIDEND = "dividend"
+    INTEREST = "interest"
+    OTHER = "other"
+
+
 class FundingStatus(StrEnum):
     RECORDED = "recorded"
     INFERRED = "inferred"

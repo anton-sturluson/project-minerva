@@ -14,6 +14,9 @@ export type Entry = {
   created_at: string;
   created_by: string;
   security: Security | null;
+  income_kind?: "dividend" | "interest" | "other" | null;
+  income_security?: Security | null;
+  accrual_date?: string | null;
   quantity: string | null;
   price: string | null;
   fees: string;
@@ -81,3 +84,14 @@ export const isPositionKind = (kind: EntryKind): kind is PositionKind =>
 
 export const isInKind = (kind: EntryKind) =>
   kind === "opening_position" || kind === "transfer_in";
+
+export function incomeSecurities(entries: Entry[]) {
+  return [
+    ...new Map(
+      entries
+        .flatMap((e) => [e.security, e.income_security])
+        .filter((s): s is Security => !!s)
+        .map((s) => [s.id, s]),
+    ).values(),
+  ];
+}
