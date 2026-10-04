@@ -265,14 +265,14 @@ test("shows one holdings table above returns and retains recorded positions duri
   const holdings = page.getByLabel("Holdings", { exact: true });
   await expect(holdings).toHaveCount(1);
   await expect(holdings).toContainText("83.33%");
-  const allocation = page.getByLabel("Portfolio allocation by market value");
-  await expect(allocation).toContainText("16.67%");
-  await expect(allocation.getByLabel("AAA · NYSE allocation")).toContainText(
-    "80.00%",
-  );
-  await expect(allocation.getByLabel("Cash allocation")).toContainText(
-    "20.00%",
-  );
+  await expect(
+    page.getByLabel("Portfolio allocation by market value"),
+  ).toHaveCount(0);
+  const total = holdings.getByRole("row", { name: /^Stocks total/ });
+  await expect(total).toContainText("1,000.00");
+  await expect(total).toContainText("800.00");
+  await expect(total).toContainText("+200.00");
+  await expect(total).toContainText("+25.00%");
   await expect(
     holdings.getByRole("row").filter({ hasText: "AAA" }),
   ).toContainText("80.00%");
@@ -292,7 +292,7 @@ test("shows one holdings table above returns and retains recorded positions duri
   );
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toContainText("Synthetic quote outage");
-  await expect(allocation).toBeVisible();
+  await expect(total).toContainText("+25.00%");
   await page.route("**/valuation", (route) =>
     route.fulfill({
       status: 503,
@@ -306,7 +306,8 @@ test("shows one holdings table above returns and retains recorded positions duri
   await expect(
     holdings.getByRole("row").filter({ hasText: "AAA" }),
   ).toContainText("44.44%");
-  await expect(allocation).toBeHidden();
+  await expect(total).toContainText("800.00");
+  await expect(total).not.toContainText("+25.00%");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -323,19 +324,17 @@ test("withholds all cost weights when any position has unknown basis", async ({
     "AAA",
   );
   await expect(
-    page.getByText(
-      "Cost weights unavailable · some positions have unknown basis.",
-      { exact: true },
-    ),
+    page.getByText("Unknown basis · cost totals unavailable.", { exact: true }),
   ).toBeVisible();
-  const allocation = page.getByLabel("Portfolio allocation by market value");
-  await expect(allocation.getByLabel("AAA · NYSE allocation")).toContainText(
-    "—",
-  );
-  await expect(allocation.getByLabel("Cash allocation")).toContainText("—");
+  const total = page
+    .getByLabel("Holdings", { exact: true })
+    .getByRole("row", { name: /^Stocks total/ });
+  await expect(total).toContainText("1,000.00");
+  await expect(total.getByRole("cell").nth(5)).toHaveText("—");
+  await expect(total.getByRole("cell").nth(6)).toHaveText("—");
 });
 
-test("partial holdings quotes remain visible and retry restores full allocation", async ({
+test("partial holdings quotes remain visible and retry restores complete totals", async ({
   page,
 }) => {
   let partial = true;
@@ -383,18 +382,15 @@ test("partial holdings quotes remain visible and retry restores full allocation"
     page.getByLabel("Portfolio allocation by market value"),
   ).toBeHidden();
   await expect(
-    page.getByText(
-      "Some closes are unavailable. Portfolio value and market weights are withheld.",
-      { exact: true },
-    ),
+    page.getByText("Missing prices · totals unavailable.", { exact: true }),
   ).toBeVisible();
   partial = false;
   await page
     .getByRole("button", { name: "Refresh prices", exact: true })
     .click();
   await expect(
-    page.getByLabel("Portfolio allocation by market value"),
-  ).toBeVisible();
+    holdings.getByRole("row", { name: /^Stocks total/ }),
+  ).toContainText("1,000.00");
   await expect(holdings).toContainText("83.33%");
   await expect(
     page.getByText("Quote unavailable", { exact: true }),

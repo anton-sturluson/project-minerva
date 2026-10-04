@@ -80,29 +80,30 @@ export function Holdings({
     basis !== null && basisTotal !== null && basisTotal > 0
       ? String(Number(basis) / basisTotal)
       : null;
-  const bars = rows.slice(0, 5).map((h) => ({
-    label: h.ticker,
-    exchange: h.exchange,
-    value: Number(h.value),
-    basis: h.basis === null ? null : Number(h.basis),
-  }));
-  const others = rows.slice(5);
-  if (others.length)
-    bars.push({
-      label: "Other holdings",
-      exchange: "",
-      value: others.reduce((sum, h) => sum + Number(h.value), 0),
-      basis: completeBasis
-        ? others.reduce((sum, h) => sum + Number(h.basis), 0)
-        : null,
-    });
-  if (Number(cash) > 0)
-    bars.push({
-      label: "Cash",
-      exchange: "",
-      value: Number(cash),
-      basis: Number(cash),
-    });
+  const stockBasis = completeBasis
+    ? rows.reduce((sum, h) => sum + Number(h.basis), 0)
+    : null;
+  const stockValue = report?.complete
+    ? rows.reduce((sum, h) => sum + Number(h.value), 0)
+    : null;
+  const stockGain =
+    stockValue !== null && stockBasis !== null ? stockValue - stockBasis : null;
+  const gainPercent = (
+    gain: string | number | null,
+    basis: string | number | null,
+  ) =>
+    gain !== null && basis !== null && Number(basis) > 0
+      ? percent(String(Number(gain) / Number(basis)))
+      : "—";
+  const tone = (value: string | number | null) =>
+    value === null || Number(value) === 0
+      ? ""
+      : Number(value) > 0
+        ? "gain"
+        : "loss";
+  const signed = (value: string | number | null) =>
+    (value !== null && Number(value) > 0 ? "+" : "") +
+    number(value === null ? null : String(value));
   return (
     <section
       aria-label="Portfolio holdings overview"
@@ -110,92 +111,23 @@ export function Holdings({
     >
       <div className="section-heading">
         <h2 id="holdings-heading">Holdings</h2>
-        <p className="report-date">
-          {report
-            ? `${report.provisional ? "Provisional · " : ""}Latest closes · ${report.end}`
-            : busy
-              ? "Updating prices…"
-              : "Market values unavailable"}
-        </p>
+        <button type="button" disabled={busy} onClick={refresh}>
+          {busy ? "Updating…" : "Refresh prices"}
+        </button>
       </div>
-      <button
-        type="button"
-        className="refresh-prices"
-        disabled={busy}
-        onClick={refresh}
-      >
-        Refresh prices
-      </button>
       {error && (
         <p className="error" role="alert">
-          Holdings prices: {error}
+          {error}
         </p>
       )}
       {report && !report.complete && (
         <p className="form-note basis-note">
-          Some closes are unavailable. Portfolio value and market weights are
-          withheld.
+          Missing prices · totals unavailable.
         </p>
-      )}
-      {report && total > 0 && (
-        <figure
-          className="allocation-chart"
-          aria-label="Portfolio allocation by market value"
-        >
-          <figcaption>
-            <span>
-              Top holdings <small>· cash included</small>
-            </span>
-            <span className="allocation-legend">
-              <span className="market-swatch" /> Market{" "}
-              <span className="cost-swatch" /> Cost
-            </span>
-          </figcaption>
-          <div className="allocation-columns" aria-hidden="true">
-            <span />
-            <span />
-            <span>Market</span>
-            <span>Cost</span>
-          </div>
-          {bars.map((bar) => {
-            const market = bar.value / total;
-            const cost = costWeight(bar.basis);
-            return (
-              <div
-                className="allocation-row"
-                key={`${bar.label}-${bar.exchange}`}
-                aria-label={`${bar.label}${bar.exchange ? ` · ${bar.exchange}` : ""} allocation`}
-              >
-                <span className="allocation-name">
-                  {bar.label}
-                  <small>{bar.exchange}</small>
-                </span>
-                <span className="allocation-tracks" aria-hidden="true">
-                  <span className="allocation-track">
-                    <span
-                      style={{
-                        width: `${Math.max(0, Math.min(100, market * 100))}%`,
-                      }}
-                    />
-                  </span>
-                  <span className="allocation-track cost-track">
-                    <span
-                      style={{
-                        width: `${Math.max(0, Math.min(100, Number(cost) * 100))}%`,
-                      }}
-                    />
-                  </span>
-                </span>
-                <strong>{percent(String(market))}</strong>
-                <span className="cost-weight">{percent(cost)}</span>
-              </div>
-            );
-          })}
-        </figure>
       )}
       {!completeBasis && (
         <p className="form-note basis-note">
-          Cost weights unavailable · some positions have unknown basis.
+          Unknown basis · cost totals unavailable.
         </p>
       )}
       <div className="table-scroll" tabIndex={0} aria-label="Holdings">
@@ -228,6 +160,13 @@ export function Holdings({
               <th scope="col" className="number">
                 Unrealized P&amp;L
               </th>
+              <th
+                scope="col"
+                className="number"
+                title="Unrealized gain or loss / remaining cost basis"
+              >
+                Gain %
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -256,13 +195,16 @@ export function Holdings({
                   {percent(costWeight(h.basis))}
                 </td>
                 <td className="number">{number(h.basis)}</td>
-                <td
-                  className={`number ${h.unrealized_pnl === null || Number(h.unrealized_pnl) === 0 ? "" : Number(h.unrealized_pnl) > 0 ? "gain" : "loss"}`}
-                >
-                  {h.unrealized_pnl !== null && Number(h.unrealized_pnl) > 0
+                <td className={`number ${tone(h.unrealized_pnl)}`}>
+                  {signed(h.unrealized_pnl)}
+                </td>
+                <td className={`number ${tone(h.unrealized_pnl)}`}>
+                  {h.unrealized_pnl !== null &&
+                  Number(h.unrealized_pnl) > 0 &&
+                  Number(h.basis) > 0
                     ? "+"
                     : ""}
-                  {number(h.unrealized_pnl)}
+                  {gainPercent(h.unrealized_pnl, h.basis)}
                 </td>
               </tr>
             ))}
@@ -281,8 +223,39 @@ export function Holdings({
               </td>
               <td>—</td>
               <td>—</td>
+              <td>—</td>
             </tr>
           </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row">Stocks total</th>
+              <td>—</td>
+              <td>—</td>
+              <td className="number">
+                {number(stockValue === null ? null : String(stockValue))}
+              </td>
+              <td className="number">
+                {stockValue !== null && total > 0
+                  ? percent(String(stockValue / total))
+                  : "—"}
+              </td>
+              <td className="number cost-weight">
+                {percent(costWeight(stockBasis))}
+              </td>
+              <td className="number">
+                {number(stockBasis === null ? null : String(stockBasis))}
+              </td>
+              <td className={`number ${tone(stockGain)}`}>
+                {signed(stockGain)}
+              </td>
+              <td className={`number ${tone(stockGain)}`}>
+                {stockGain !== null && stockGain > 0 && Number(stockBasis) > 0
+                  ? "+"
+                  : ""}
+                {gainPercent(stockGain, stockBasis)}
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </section>

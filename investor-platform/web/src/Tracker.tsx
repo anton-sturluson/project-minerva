@@ -383,13 +383,9 @@ export function Tracker({
           <>
             {report.scope === "stocks" && (
               <p className="form-note">
-                Estimated stock return · excludes idle cash · includes estimated
-                gross dividends.
+                Estimated · stocks only · gross dividends included.
               </p>
             )}
-            <p className="report-date">
-              {report.start} — {report.end} · {report.source}
-            </p>
             {report.warnings.slice(0, 1).map((w) => (
               <p key={w} role="alert" className="error">
                 {w} Portfolio return is withheld.

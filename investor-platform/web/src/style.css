@@ -1,5 +1,6 @@
 :root {
   color-scheme: light dark;
+  --header-height: 84px;
   --paper: light-dark(#fffef9, #222421);
   --ink: light-dark(#191b20, #eeeeda);
   --blue: light-dark(#00009b, #b1bfff);
@@ -63,7 +64,7 @@ button:disabled {
 .workspace {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 28px 24px 24px;
+  padding: 0 24px 24px;
 }
 .skip-link {
   position: absolute;
@@ -71,54 +72,37 @@ button:disabled {
   top: -100px;
   padding: 8px;
   background: var(--paper);
-  z-index: 1;
+  z-index: 30;
 }
 .skip-link:focus {
   top: 8px;
 }
-.edition-line {
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
-  font:
-    11px/1.4 "Courier New",
-    monospace;
-  padding-bottom: 12px;
-}
-.masthead {
-  position: relative;
-  text-align: center;
-  padding: 19px 0 20px;
-  border-top: 3px double var(--ink);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--header-height);
+  padding: 12px 0;
+  background: var(--paper);
   border-bottom: 3px double var(--ink);
 }
-.masthead::before,
-.masthead::after {
-  content: "✳";
-  position: absolute;
-  top: 35px;
-  color: var(--plum);
-  font:
-    38px/1 Georgia,
-    serif;
-}
-.masthead::before {
-  left: 12%;
-}
-.masthead::after {
-  right: 12%;
-}
 .wordmark {
-  display: inline-block;
-  margin: 7px 0;
   color: var(--blue);
   text-decoration: none;
   font:
-    bold italic 64px/1 "Times New Roman",
+    bold italic 38px/1 "Times New Roman",
     serif;
-  letter-spacing: -3px;
-  text-shadow: 3px 2px var(--yellow);
+  letter-spacing: -2px;
+  text-shadow: 2px 2px var(--yellow);
+}
+.site-header .theme-picker {
+  font:
+    11px Arial,
+    sans-serif;
 }
 .main-nav {
   display: flex;
@@ -133,7 +117,7 @@ main,
 #activity,
 #performance,
 #research {
-  scroll-margin-top: 16px;
+  scroll-margin-top: calc(var(--header-height) + 16px);
 }
 h1 {
   font-size: 25px;
@@ -184,22 +168,20 @@ h1 {
     monospace;
 }
 @media (max-width: 650px) {
-  .workspace {
-    padding: 18px 18px 24px;
+  :root {
+    --header-height: 126px;
   }
-  .masthead::before {
-    left: 2%;
+  .site-header {
+    flex-wrap: wrap;
+    gap: 4px 12px;
   }
-  .masthead::after {
-    right: 2%;
+  .site-header .theme-picker {
+    margin-left: auto;
   }
-  .masthead::before,
-  .masthead::after {
-    font-size: 25px;
-    top: 58px;
-  }
-  .wordmark {
-    font-size: 53px;
+  .site-header .main-nav {
+    order: 3;
+    width: 100%;
+    padding: 0;
   }
   .main-nav {
     gap: 4px 17px;
@@ -579,89 +561,9 @@ summary:focus-visible {
   padding: 0;
   background: transparent;
 }
-.allocation-chart {
-  margin: 20px 0 24px;
-  font:
-    13px/1.5 Arial,
-    sans-serif;
-}
-.allocation-chart figcaption {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-.allocation-chart small {
-  font-size: 11px;
-}
-.allocation-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.market-swatch,
-.cost-swatch {
-  display: inline-block;
-  width: 16px;
-  height: 6px;
-  background: var(--plum);
-}
-.cost-swatch {
-  height: 3px;
-  background: var(--ink);
-  opacity: 0.55;
-  margin-left: 10px;
-}
-.allocation-row,
-.allocation-columns {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 3fr) 65px 65px;
-  align-items: center;
-  gap: 14px;
-}
-.allocation-columns {
-  text-align: right;
-  font:
-    11px/1.5 "Courier New",
-    monospace;
-  padding-bottom: 4px;
-}
-.allocation-row {
-  padding-block: 6px;
-}
-.allocation-name {
-  font-weight: bold;
-}
-.allocation-name small {
-  font-weight: normal;
-  display: block;
-}
-.allocation-row strong,
 .cost-weight {
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-.allocation-tracks {
-  display: grid;
-  gap: 4px;
-}
-.allocation-track {
-  display: block;
-  height: 9px;
-  background: var(--neutral);
-}
-.allocation-track > span {
-  display: block;
-  height: 100%;
-  background: var(--plum);
-}
-.cost-track {
-  height: 3px;
-}
-.cost-track > span {
-  background: var(--ink);
-  opacity: 0.55;
 }
 .basis-note {
   margin-bottom: 12px;
@@ -734,17 +636,6 @@ summary:focus-visible {
   .workspace {
     padding-inline: 14px;
   }
-  .allocation-row,
-  .allocation-columns {
-    grid-template-columns: minmax(75px, 1fr) minmax(55px, 2fr) 55px 55px;
-    gap: 7px;
-  }
-  .allocation-row {
-    font-size: 12px;
-  }
-  .allocation-name small {
-    font-size: 11px;
-  }
   .holdings-table th:first-child {
     position: sticky;
     left: 0;
@@ -804,8 +695,10 @@ summary:focus-visible {
   color: var(--error);
 }
 
-.refresh-prices {
-  margin-block: 12px;
+.holdings-table tfoot > tr > * {
+  border-top: 2px solid var(--ink);
+  font-weight: bold;
+  background: var(--neutral);
 }
 
 .portfolio-picker {

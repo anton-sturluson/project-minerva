@@ -31,6 +31,20 @@ test("separates pages, folds activity and preserves an entry draft on back navig
   await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   await expect(page.getByTestId("payoff-ratio")).toBeVisible();
   await expect(page.getByText("Coming soon", { exact: true })).toBeHidden();
+  await page.locator(".page-footer").scrollIntoViewIfNeeded();
+  const header = await page.getByRole("banner").boundingBox();
+  expect(header!.y).toBe(0);
+  await page
+    .getByRole("link", { name: "[ Performance ]", exact: true })
+    .click();
+  const heading = await page
+    .getByRole("heading", { name: "Stocks vs. the market" })
+    .boundingBox();
+  expect(heading!.y).toBeGreaterThanOrEqual(header!.height);
+  await page.getByRole("link", { name: "[ Research ]", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Research", exact: true }),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
