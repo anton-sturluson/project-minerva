@@ -63,7 +63,11 @@ def test_partial_quote_failure_retains_other_values_without_partial_weights(
 
 @pytest.mark.parametrize(
     "exchange,suffix,currency,provider",
-    [("ASX", ".AX", Currency.AUD, "ASX"), ("TSXV", ".V", Currency.CAD, "VAN")],
+    [
+        ("ASX", ".AX", Currency.AUD, "ASX"),
+        ("TSXV", ".V", Currency.CAD, "VAN"),
+        ("WSE", ".WA", "PLN", "WSE"),
+    ],
 )
 def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
     db_client, portfolio, monkeypatch, exchange, suffix, currency, provider
