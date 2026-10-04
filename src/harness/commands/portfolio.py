@@ -29,9 +29,7 @@ from harness.portfolio_state import (
 )
 
 PORTFOLIO_HELP = (
-    "Main-only portfolio state commands for the morning brief pipeline.\n\n"
-    "Google Sheets sources must select a tab with gid or sheet=Main Portfolio; "
-    "unformatted GViz values are read automatically.\n\n"
+    "Portfolio state commands for the morning brief pipeline.\n\n"
     "Examples:\n"
     "  minerva portfolio sync --holdings-source ./holdings.csv --transactions-source ./transactions.csv --date 2026-04-08\n"
     "  minerva portfolio adjacency add NVDA TSM --type supply-chain --priority high\n"
@@ -408,24 +406,12 @@ def sync_cli(
     ctx: typer.Context,
     date_arg: str | None = typer.Option(None, "--date", help="ISO date for the sync run."),
     as_of: str | None = typer.Option(None, "--as-of", help="Alias for --date."),
-    holdings_source: str | None = typer.Option(
-        None,
-        "--holdings-source",
-        help="CSV/JSON/YAML or explicitly selected Google Sheets holdings source.",
-    ),
-    transactions_source: str | None = typer.Option(
-        None,
-        "--transactions-source",
-        help="CSV/JSON/YAML or explicitly selected Google Sheets transaction source.",
-    ),
+    holdings_source: str | None = typer.Option(None, "--holdings-source", help="CSV/JSON/YAML holdings source."),
+    transactions_source: str | None = typer.Option(None, "--transactions-source", help="CSV/JSON/YAML transactions source."),
     watchlist_source: str | None = typer.Option(None, "--watchlist-source", help="Optional local watchlist source."),
     sheet_id: str | None = typer.Option(None, "--sheet-id", help="Google Sheet identifier."),
-    holdings_gid: str | None = typer.Option(
-        None, "--holdings-gid", help="Required stable Google Sheet gid for holdings."
-    ),
-    transactions_gid: str | None = typer.Option(
-        None, "--transactions-gid", help="Required stable Google Sheet gid for transactions."
-    ),
+    holdings_gid: str | None = typer.Option(None, "--holdings-gid", help="Google Sheet gid for holdings."),
+    transactions_gid: str | None = typer.Option(None, "--transactions-gid", help="Google Sheet gid for transactions."),
 ) -> None:
     settings = get_settings()
     if not holdings_source and not sheet_id and not portfolio_paths(settings.ensure_workspace_root()).holdings.exists():
