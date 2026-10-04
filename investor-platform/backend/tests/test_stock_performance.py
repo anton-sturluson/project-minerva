@@ -143,7 +143,9 @@ def test_exclusions_remove_stock_capital_and_income_without_writing(db_client, p
     assert "at least one stock" in empty["scenario_error"]
 
 
-def test_cash_reconciliation_and_market_quality_stay_separate(db_client, portfolio, database):
+def test_cash_reconciliation_and_market_quality_stay_separate(
+    db_client, portfolio, database, expire_prices
+):
     aid, data = portfolio
     with Session(database) as session:
         account = session.get(Account, UUID(aid))
@@ -152,6 +154,7 @@ def test_cash_reconciliation_and_market_quality_stay_separate(db_client, portfol
     assert stock_report(db_client, aid).json()["return"] is not None
     account_report = stock_report(db_client, aid, scope="account").json()
     assert account_report["return"] is None
+    expire_prices()
     del data["AAA"].close[DAYS[1]]
     assert stock_report(db_client, aid).status_code == 422
 

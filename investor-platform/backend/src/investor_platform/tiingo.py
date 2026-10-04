@@ -1,19 +1,15 @@
 """Authenticated Tiingo history, cached privately in PostgreSQL; never cache credentials."""
 
-import hashlib
 import json
 import os
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 from decimal import Decimal, localcontext
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-from sqlalchemy import text
-from sqlalchemy.orm import Session
-
 from .domain import ACCOUNTING_PRECISION
 from .market import EXCHANGES, History, MarketDataError, positive
-from .models import MarketCache
+from .market_cache import cached_payload
 
 PROVIDER = "tiingo"
 EXCHANGE_CODES = {
@@ -50,34 +46,22 @@ def payload(engine, workspace_id, symbol, start, end, *, fx=False):
     if not key:
         raise MarketDataError("Historical fallback requires TIINGO_API_KEY")
     cache_symbol = ("fx:" if fx else "stock:") + symbol
-    identity = (workspace_id, PROVIDER, cache_symbol)
-    with Session(engine) as session, session.begin():
-        # Serialize the same cache miss across requests to protect the free provider quota.
-        lock = int.from_bytes(hashlib.sha256(str(identity).encode()).digest()[:8], signed=True)
-        session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock})
-        cached = session.get(MarketCache, identity)
-        now = datetime.now(UTC)
-        if cached and cached.start <= start and cached.end >= end:
-            if now - cached.fetched_at < timedelta(days=1):
-                return cached.payload
-        first = min(start, cached.start) if cached else start
-        last = max(end, cached.end) if cached else end
+
+    def load(first, last):
         query = urlencode({"startDate": first, "endDate": last})
         safe = quote(symbol, safe="")
         if fx:
             body = {"rows": get(f"fx/{safe}/prices?{query}&resampleFreq=1day", key)}
-            parse_fx(body, symbol)  # Validate before replacing a good cache.
+            parse_fx(body, symbol)
         else:
             body = {
                 "meta": get(f"daily/{safe}", key),
                 "rows": get(f"daily/{safe}/prices?{query}", key),
             }
             parse_stock(body, symbol)
-        if cached is None:
-            cached = MarketCache(workspace_id=workspace_id, provider=PROVIDER, symbol=cache_symbol)
-            session.add(cached)
-        cached.start, cached.end, cached.payload, cached.fetched_at = first, last, body, now
         return body
+
+    return cached_payload(engine, workspace_id, PROVIDER, cache_symbol, start, end, load)
 
 
 def parse_stock(body, symbol):

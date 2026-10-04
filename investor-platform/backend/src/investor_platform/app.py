@@ -109,7 +109,15 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
             return deny("Writes require the Tailscale app origin")
         request.state.authenticated = True
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
+        # Only content-hashed public build assets may persist in the browser cache.
+        asset = re.fullmatch(
+            r"/assets/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8,}\.(js|css)", request.url.path
+        )
+        response.headers["Cache-Control"] = (
+            "private, max-age=31536000, immutable"
+            if asset and response.status_code == 200 and request.method in {"GET", "HEAD"}
+            else "no-store"
+        )
         return response
 
     @app.get("/api/health", response_model=Health)

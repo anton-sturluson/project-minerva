@@ -26,7 +26,7 @@ def latest(history, end):
     return day, history.close[day]
 
 
-def quote_holding(holding, end, provisional, fx):
+def quote_holding(holding, end, provisional, fx, engine=None, workspace_id=None):
     security = holding.security
     row = {
         "security_id": security.id,
@@ -45,8 +45,13 @@ def quote_holding(holding, end, provisional, fx):
         foreign = market.FOREIGN_LISTINGS.get(security.exchange)
         if foreign:
             suffix, currency, exchanges = foreign
-            history = market.history(
-                security.ticker + suffix, end - QUOTE_WINDOW, end, currency=currency
+            history = market.cached_history(
+                security.ticker + suffix,
+                end - QUOTE_WINDOW,
+                end,
+                currency=currency,
+                engine=engine,
+                workspace_id=workspace_id,
             )
             if history.exchange not in exchanges:
                 raise ValueError("Provider listing does not match the recorded exchange")
@@ -62,7 +67,9 @@ def quote_holding(holding, end, provisional, fx):
                 price *= rate.close[day]
         else:
             symbol = market.symbol_for(security, provisional=provisional)
-            history = market.history(symbol, end - QUOTE_WINDOW, end)
+            history = market.cached_history(
+                symbol, end - QUOTE_WINDOW, end, engine=engine, workspace_id=workspace_id
+            )
             market.verify_exchange(security, history, provisional=provisional)
             day, price = latest(history, end)
         with localcontext() as ctx:
@@ -79,7 +86,7 @@ def quote_holding(holding, end, provisional, fx):
     return row
 
 
-def value_records(records, base_currency, provisional):
+def value_records(records, base_currency, provisional, *, engine=None, workspace_id=None):
     end = datetime.now(MARKET_TIMEZONE).date() - timedelta(days=1)
     fx = {}
     for currency in {
@@ -88,8 +95,13 @@ def value_records(records, base_currency, provisional):
         if h.security.exchange in market.FOREIGN_LISTINGS
     }:
         try:
-            fx[currency] = market.history(
-                f"{currency}USD=X", end - QUOTE_WINDOW, end, instruments=("CURRENCY",)
+            fx[currency] = market.cached_history(
+                f"{currency}USD=X",
+                end - QUOTE_WINDOW,
+                end,
+                instruments=("CURRENCY",),
+                engine=engine,
+                workspace_id=workspace_id,
             )
         except (ValueError, OSError, KeyError, TypeError, IndexError, DecimalException):
             fx[currency] = "USD exchange rate unavailable"
@@ -97,7 +109,7 @@ def value_records(records, base_currency, provisional):
         with ThreadPoolExecutor(max_workers=6) as pool:
             rows = list(
                 pool.map(
-                    lambda h: quote_holding(h, end, provisional, fx),
+                    lambda h: quote_holding(h, end, provisional, fx, engine, workspace_id),
                     records.holdings,
                 )
             )
@@ -143,7 +155,15 @@ def value_records(records, base_currency, provisional):
 def valuation(account_id: UUID, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
     records = ledger_view(entries_for(session, account_id), account.base_currency)
-    return wire(value_records(records, account.base_currency, bool(account.reconstruction)))
+    return wire(
+        value_records(
+            records,
+            account.base_currency,
+            bool(account.reconstruction),
+            engine=session.get_bind(),
+            workspace_id=actor.workspace_id,
+        )
+    )
 
 
 @router.get("/{account_id}/statistics/hypothetical")
@@ -154,7 +174,13 @@ def hypothetical_statistics(account_id: UUID, session: DB, actor: Identity):
     if entries and entries[-1].effective_date > today:
         raise HTTPException(422, "Wait until all recorded trade dates have arrived in New York")
     records = ledger_view(entries, account.base_currency)
-    report = value_records(records, account.base_currency, bool(account.reconstruction))
+    report = value_records(
+        records,
+        account.base_currency,
+        bool(account.reconstruction),
+        engine=session.get_bind(),
+        workspace_id=actor.workspace_id,
+    )
     missing = [r["ticker"] for r in report["holdings"] if r["value"] is None]
     if missing:
         raise HTTPException(503, "Latest prices unavailable for: " + ", ".join(missing))

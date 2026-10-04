@@ -113,7 +113,9 @@ def test_distribution_on_purchase_date_is_not_earned_and_cent_ties_are_not_hits(
     assert r["benchmarks"]["SPY"] == {"hit_rate": 0, "hits": 0, "evaluated": 1, "ties": 1}
 
 
-def test_route_empty_closed_decisions_ownership_and_provider_failure(db_client, monkeypatch):
+def test_route_empty_closed_decisions_ownership_and_provider_failure(
+    db_client, monkeypatch, expire_prices
+):
     aid = db_client.post(
         "/api/accounts", json={"name": "Hit rate fixture", "base_currency": "USD"}
     ).json()["id"]
@@ -140,6 +142,7 @@ def test_route_empty_closed_decisions_ownership_and_provider_failure(db_client, 
     def unavailable(*args):
         raise OSError("synthetic outage")
 
+    expire_prices()
     monkeypatch.setattr(market, "history", unavailable)
     assert db_client.post(f"/api/accounts/{aid}/hit-rate").status_code == 503
     assert db_client.get(f"/api/accounts/{aid}/statistics").status_code == 200
