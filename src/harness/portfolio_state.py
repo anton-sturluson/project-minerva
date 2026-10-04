@@ -9,11 +9,12 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from io import StringIO
 from pathlib import Path
 from typing import Any, Mapping, NotRequired, Sequence, TypedDict
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 import yaml
@@ -36,6 +37,10 @@ FISCAL_PERIOD_PATTERN = re.compile(r"^(FY\d{4}|H[12] FY\d{4}|Q[1-4] FY\d{4})$")
 FISCAL_PERIOD_EXAMPLES = "FY2026, H1 FY2026, H2 FY2026, Q1 FY2026, Q2 FY2026, Q3 FY2026, Q4 FY2026"
 MAX_THESIS_LIST_ITEMS = 5
 MAX_THESIS_METRICS = 5
+MAIN_PORTFOLIO = "Main"
+_GVIZ_RESPONSE_LIMIT = 10 * 1024 * 1024
+_GVIZ_PERCENTAGE_POINT_FIELDS = frozenset({"weight", "cost_weight", "target_weight"})
+_GVIZ_DATE_PATTERN = re.compile(r"^Date\((\d{4}),(\d{1,2}),(\d{1,2})\)$")
 
 
 class EnrichmentField(StrEnum):
@@ -253,6 +258,8 @@ def sync_portfolio(
     resolved_holdings_source = holdings_source or _google_sheet_csv_url(sheet_id, holdings_gid)
     resolved_transactions_source = transactions_source or _google_sheet_csv_url(sheet_id, transactions_gid)
 
+    # Fetch and normalize every source before replacing any current state. A
+    # lookup, schema, or validation failure therefore leaves the prior state intact.
     holdings_rows = load_tabular_rows(resolved_holdings_source) if resolved_holdings_source else load_json(paths.holdings, default=[])
     transactions_rows = (
         load_tabular_rows(resolved_transactions_source) if resolved_transactions_source else load_json(paths.transactions, default=[])
@@ -263,7 +270,10 @@ def sync_portfolio(
     watchlist_rows = load_tabular_rows(watchlist_source) if watchlist_source else load_json(paths.watchlist, default=[])
 
     holdings = _dedupe_records(normalize_holdings(holdings_rows))
+    if not holdings:
+        raise ValueError("holdings source contained zero valid Main portfolio securities")
     watchlist = _dedupe_records(normalize_watchlist(watchlist_rows))
+    transactions = normalize_transactions(transactions_rows)
 
     # Carry forward enrichment fields from previous holdings so a re-sync
     # from the Google Sheet does not lose country/sec_registered/finnhub_symbol.
@@ -271,13 +281,10 @@ def sync_portfolio(
     _carry_forward_enrichment(holdings, previous_holdings)
 
     universe = build_universe(holdings, watchlist)
-    transactions = normalize_transactions(transactions_rows)
-
-    write_json(paths.holdings, holdings)
-    write_json(paths.watchlist, watchlist)
-    write_json(paths.universe, universe)
-    write_json(paths.transactions, transactions)
-
+    adjacency = load_json(paths.adjacency_map, default=[])
+    thesis_cards = load_json(paths.thesis_cards, default=[])
+    if not isinstance(adjacency, list) or not isinstance(thesis_cards, list):
+        raise ValueError("adjacency and thesis metadata must be JSON arrays")
     change_summary = _universe_delta(previous_universe, universe)
     rendered = render_portfolio_summary(
         as_of=as_of,
@@ -285,49 +292,50 @@ def sync_portfolio(
         watchlist=watchlist,
         universe=universe,
         transactions=transactions,
-        adjacency=load_json(paths.adjacency_map, default=[]),
-        thesis_cards=load_json(paths.thesis_cards, default=[]),
+        adjacency=adjacency,
+        thesis_cards=thesis_cards,
     )
-    paths.rendered.write_text(rendered, encoding="utf-8")
-
-    append_jsonl(
-        paths.sync_log,
-        {
-            "timestamp": now_utc_iso(),
-            "as_of": as_of.isoformat(),
-            "sources": {
-                "holdings": resolved_holdings_source or str(paths.holdings),
-                "transactions": resolved_transactions_source or str(paths.transactions),
-                "watchlist": watchlist_source or str(paths.watchlist),
-            },
-            "counts": {
-                "holdings": len(holdings),
-                "watchlist": len(watchlist),
-                "universe": len(universe),
-                "transactions": len(transactions),
-            },
-            "changes": change_summary,
+    timestamp = now_utc_iso()
+    sync_entry = {
+        "timestamp": timestamp,
+        "as_of": as_of.isoformat(),
+        "sources": {
+            "holdings": resolved_holdings_source or str(paths.holdings),
+            "transactions": resolved_transactions_source or str(paths.transactions),
+            "watchlist": watchlist_source or str(paths.watchlist),
         },
+        "counts": {
+            "holdings": len(holdings),
+            "watchlist": len(watchlist),
+            "universe": len(universe),
+            "transactions": len(transactions),
+        },
+        "changes": change_summary,
+    }
+    metadata_entry = {
+        "timestamp": timestamp,
+        "event": "portfolio-sync",
+        "rendered_path": str(paths.rendered),
+        "counts": {"adjacency": len(adjacency), "thesis_cards": len(thesis_cards)},
+    }
+    history_rendered = _render_history_markdown(
+        [*read_jsonl(paths.sync_log), sync_entry],
+        [*read_jsonl(paths.metadata_history), metadata_entry],
     )
+
+    write_json(paths.holdings, holdings)
+    write_json(paths.watchlist, watchlist)
+    write_json(paths.universe, universe)
+    write_json(paths.transactions, transactions)
+    paths.rendered.write_text(rendered, encoding="utf-8")
+    append_jsonl(paths.sync_log, sync_entry)
     if change_summary["added"] or change_summary["removed"]:
         append_jsonl(
             paths.universe_history,
-            {
-                "timestamp": now_utc_iso(),
-                "as_of": as_of.isoformat(),
-                **change_summary,
-            },
+            {"timestamp": timestamp, "as_of": as_of.isoformat(), **change_summary},
         )
-    append_jsonl(
-        paths.metadata_history,
-        {
-            "timestamp": now_utc_iso(),
-            "event": "portfolio-sync",
-            "rendered_path": str(paths.rendered),
-            "counts": {"adjacency": len(load_json(paths.adjacency_map, default=[])), "thesis_cards": len(load_json(paths.thesis_cards, default=[]))},
-        },
-    )
-    update_history_render(paths)
+    append_jsonl(paths.metadata_history, metadata_entry)
+    paths.rendered_history.write_text(history_rendered, encoding="utf-8")
     return {
         "as_of": as_of.isoformat(),
         "holdings_count": len(holdings),
@@ -945,23 +953,63 @@ def build_universe(holdings: list[dict[str, Any]], watchlist: list[dict[str, Any
     return [merged[key] for key in sorted(merged)]
 
 
+def _main_portfolio_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return Main rows, defaulting only a wholly absent portfolio column."""
+    has_portfolio_column = any("portfolio" in row for row in rows)
+    if not has_portfolio_column:
+        return rows
+    return [
+        row
+        for row in rows
+        if str(row.get("portfolio") or "").strip().casefold() == MAIN_PORTFOLIO.casefold()
+    ]
+
+
+def _row_is_blank(row: Mapping[str, Any]) -> bool:
+    return all(value is None or str(value).strip() == "" for value in row.values())
+
+
+def _first_present(row: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row and row[key] is not None and str(row[key]).strip() != "":
+            return row[key]
+    return None
+
+
 def normalize_holdings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize holdings rows into canonical portfolio records."""
+    """Normalize only Main holdings into canonical portfolio records.
+
+    A legacy source with no ``portfolio`` column is treated as Main. Once the
+    column exists, only explicitly Main-labeled rows are eligible; blanks and
+    every other label are excluded.
+    """
     normalized: list[dict[str, Any]] = []
-    for row in rows:
+    for row_number, row in enumerate(_main_portfolio_rows(rows), start=2):
         record = _normalize_security_row(row, source_kind="holding")
-        if not record["security_id"]:
+        if not record["security_id"] or record["security_id"] in NON_SECURITY_TICKERS:
             continue
-        if record["security_id"] in NON_SECURITY_TICKERS:
+        raw_shares = _first_present(row, "shares", "quantity")
+        raw_weight = _first_present(row, "weight", "portfolio_weight")
+        if raw_shares is not None and record["shares"] is None:
+            raise ValueError(
+                f"holding row {row_number} ({record['security_id']}): shares must be numeric"
+            )
+        if raw_weight is not None and record["weight"] is None:
+            raise ValueError(
+                f"holding row {row_number} ({record['security_id']}): weight must be numeric"
+            )
+        shares = record.get("shares")
+        if isinstance(shares, (int, float)) and shares <= 0:
             continue
+        record["portfolio"] = MAIN_PORTFOLIO
         normalized.append(record)
     return normalized
 
 
 def normalize_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize watchlist rows into canonical portfolio records."""
+    """Normalize Main-only watchlist rows into canonical portfolio records."""
     normalized: list[dict[str, Any]] = []
-    for row in rows:
+    for row in _main_portfolio_rows(rows):
         record = _normalize_security_row(row, source_kind="watchlist")
         if record["security_id"]:
             normalized.append(record)
@@ -969,28 +1017,98 @@ def normalize_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def normalize_transactions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize transaction rows."""
+    """Normalize Main transactions, validating the modern USD ledger shape."""
     normalized: list[dict[str, Any]] = []
-    for row in rows:
-        ticker = _clean_ticker(row.get("ticker") or row.get("symbol") or row.get("security_id") or row.get("security"))
-        company_name = _clean_name(row.get("company") or row.get("name") or row.get("security"))
-        security_id = canonical_security_id(ticker or company_name)
-        trade_date = _stringify_date(row.get("date") or row.get("trade_date") or row.get("timestamp"))
-        if not security_id:
-            continue
-        normalized.append(
-            {
-                "security_id": security_id,
-                "ticker": ticker,
-                "company_name": company_name,
-                "trade_date": trade_date,
-                "action": str(row.get("action") or row.get("side") or row.get("transaction") or "").strip().lower(),
-                "quantity": _maybe_number(row.get("quantity") or row.get("shares")),
-                "price": _maybe_number(row.get("price")),
-                "notes": str(row.get("notes") or row.get("memo") or "").strip(),
-            }
+    for input_index, row in enumerate(_main_portfolio_rows(rows)):
+        modern_usd = "price_usd" in row or "total_usd" in row
+        if modern_usd and "portfolio" not in row:
+            raise ValueError(f"transaction row {input_index + 2}: portfolio is required")
+        canonical_modern = modern_usd and all(
+            key in row for key in ("security_id", "trade_date", "action", "quantity", "price")
         )
-    normalized.sort(key=lambda item: (item.get("trade_date", ""), item["security_id"]), reverse=True)
+        ticker_source = _first_present(row, "ticker", "symbol")
+        if ticker_source is None and not ("ticker" in row and "security_id" in row):
+            ticker_source = _first_present(row, "security_id", "security")
+        ticker = _clean_ticker(ticker_source)
+        company_name = _clean_name(_first_present(row, "company_name", "company", "name", "security"))
+        security_id = canonical_security_id(_first_present(row, "security_id") or ticker or company_name)
+        if (
+            modern_usd
+            and not canonical_modern
+            and not _row_is_blank(row)
+            and _first_present(row, "symbol", "ticker") is None
+        ):
+            raise ValueError(f"transaction row {input_index + 2}: symbol is required")
+        if not security_id or security_id in NON_SECURITY_TICKERS:
+            if modern_usd and not _row_is_blank(row) and security_id not in NON_SECURITY_TICKERS:
+                raise ValueError(f"transaction row {input_index + 2}: symbol is required")
+            continue
+
+        trade_date = _stringify_date(_first_present(row, "date", "trade_date", "timestamp"))
+        action_keys = (
+            ("action", "side", "transaction", "type")
+            if modern_usd
+            else ("action", "side", "transaction")
+        )
+        action = str(_first_present(row, *action_keys) or "").strip().lower()
+
+        if modern_usd:
+            if not trade_date:
+                raise ValueError(f"transaction row {input_index + 2} ({security_id}): date is required")
+            try:
+                date.fromisoformat(trade_date)
+            except ValueError as exc:
+                raise ValueError(
+                    f"transaction row {input_index + 2} ({security_id}): invalid date"
+                ) from exc
+            if action not in {"buy", "sell"}:
+                raise ValueError(
+                    f"transaction row {input_index + 2} ({security_id}): action must be buy or sell"
+                )
+            quantity = _required_positive_number(
+                _first_present(row, "quantity", "shares"),
+                row_number=input_index + 2,
+                security_id=security_id,
+                field="shares",
+            )
+            price = _required_positive_number(
+                _first_present(row, "price") if canonical_modern else _first_present(row, "price_usd"),
+                row_number=input_index + 2,
+                security_id=security_id,
+                field="price",
+            )
+            total_usd = _required_positive_number(
+                _first_present(row, "total_usd"),
+                row_number=input_index + 2,
+                security_id=security_id,
+                field="total",
+            )
+            currency = str(row.get("currency") or "").strip().upper()
+            if currency and currency != "USD":
+                raise ValueError(
+                    f"transaction row {input_index + 2} ({security_id}): "
+                    "reported USD total conflicts with currency"
+                )
+        else:
+            quantity = _maybe_number(_first_present(row, "quantity", "shares"))
+            price = _maybe_number(_first_present(row, "price"))
+
+        record: dict[str, Any] = {
+            "security_id": security_id,
+            "ticker": ticker,
+            "company_name": company_name,
+            "trade_date": trade_date,
+            "action": action,
+            "quantity": quantity,
+            "price": price,
+            "portfolio": MAIN_PORTFOLIO,
+            "notes": str(row.get("notes") or row.get("memo") or "").strip(),
+        }
+        if modern_usd:
+            record["total_usd"] = total_usd
+        normalized.append(record)
+
+    normalized.sort(key=lambda item: item["trade_date"], reverse=True)
     return normalized
 
 
@@ -1008,10 +1126,137 @@ def _normalize_csv_headers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{_normalize_csv_key(k): v for k, v in row.items()} for row in rows]
 
 
+def _is_google_sheets_url(source: str) -> bool:
+    parsed = urlparse(source)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "docs.google.com"
+        and re.match(r"^/spreadsheets/d/[^/]+/", parsed.path) is not None
+    )
+
+
+def _google_sheets_gviz_url(source: str) -> str:
+    """Build an unformatted GViz URL from an explicit numeric query gid."""
+    parsed = urlparse(source)
+    if not _is_google_sheets_url(source):
+        raise ValueError("not a recognized Google Sheets URL")
+    match = re.match(r"^(/spreadsheets/d/[^/]+)(?:/.*)?$", parsed.path)
+    if not match:
+        raise ValueError("invalid Google Sheets URL")
+
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    gids = [value.strip() for key, value in query_pairs if key == "gid"]
+    has_named_selection = any(key == "sheet" for key, _ in query_pairs)
+    if len(gids) != 1 or not gids[0].isdigit() or has_named_selection:
+        raise ValueError("Google Sheets source requires one explicit numeric query gid")
+
+    allowed = {"gid", "range", "tq", "headers"}
+    preserved = [(key, value) for key, value in query_pairs if key in allowed]
+    preserved.append(("tqx", "out:json"))
+    return urlunparse(
+        (
+            "https",
+            parsed.netloc,
+            f"{match.group(1)}/gviz/tq",
+            "",
+            urlencode(preserved),
+            "",
+        )
+    )
+
+
+def _rows_from_gviz_response(raw_text: str) -> list[dict[str, Any]]:
+    """Parse a bounded Google Visualization JSON/JSONP table without eval."""
+    if len(raw_text.encode("utf-8")) > _GVIZ_RESPONSE_LIMIT:
+        raise ValueError("Google Visualization response exceeds the size limit")
+    stripped = raw_text.strip()
+    wrapper = re.fullmatch(
+        r"(?:/\*O_o\*/\s*)?google\.visualization\.Query\.setResponse\((\{.*\})\);?",
+        stripped,
+        flags=re.DOTALL,
+    )
+    json_text = wrapper.group(1) if wrapper else stripped
+    try:
+        payload = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid Google Visualization response wrapper") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Google Visualization response must be an object")
+    if payload.get("status") != "ok":
+        errors = payload.get("errors")
+        detail = ""
+        if isinstance(errors, list):
+            messages = [
+                str(item.get("detailed_message") or item.get("message") or item.get("reason") or "").strip()
+                for item in errors
+                if isinstance(item, dict)
+            ]
+            detail = ": " + "; ".join(message for message in messages if message) if any(messages) else ""
+        raise ValueError(f"Google Visualization query failed{detail}")
+
+    table = payload.get("table")
+    if not isinstance(table, dict):
+        raise ValueError("Google Visualization response has no table")
+    cols = table.get("cols")
+    source_rows = table.get("rows")
+    if not isinstance(cols, list) or not isinstance(source_rows, list):
+        raise ValueError("Google Visualization table must contain cols and rows arrays")
+
+    headers: list[str] = []
+    for index, col in enumerate(cols):
+        if not isinstance(col, dict):
+            raise ValueError("Google Visualization column is malformed")
+        label = str(col.get("label") or col.get("id") or f"column_{index + 1}")
+        header = _normalize_csv_key(label)
+        if not header or header in headers:
+            raise ValueError("Google Visualization table has blank or duplicate headers")
+        headers.append(header)
+
+    rows: list[dict[str, Any]] = []
+    for source_row in source_rows:
+        if not isinstance(source_row, dict) or not isinstance(source_row.get("c"), list):
+            raise ValueError("Google Visualization row is malformed")
+        cells = source_row["c"]
+        if len(cells) > len(headers):
+            raise ValueError("Google Visualization row has more cells than columns")
+        row: dict[str, Any] = {}
+        for index, header in enumerate(headers):
+            cell = cells[index] if index < len(cells) else None
+            if cell is None:
+                value = None
+            elif not isinstance(cell, dict):
+                raise ValueError("Google Visualization cell is malformed")
+            else:
+                # Use the underlying value (v), never the rounded display (f).
+                value = _decode_gviz_value(cell.get("v"))
+            if header in _GVIZ_PERCENTAGE_POINT_FIELDS and isinstance(value, (int, float)):
+                value = _decimal_to_number(Decimal(str(value)) * Decimal(100))
+            row[header] = value
+        rows.append(row)
+    return rows
+
+
+def _decode_gviz_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    match = _GVIZ_DATE_PATTERN.fullmatch(value)
+    if not match:
+        return value
+    year, zero_based_month, day = (int(part) for part in match.groups())
+    try:
+        return date(year, zero_based_month + 1, day).isoformat()
+    except ValueError as exc:
+        raise ValueError("Google Visualization table contains an invalid Date value") from exc
+
+
 def load_tabular_rows(source: str | None) -> list[dict[str, Any]]:
-    """Load list-like data from JSON, YAML, or CSV."""
+    """Load list-like data from JSON, YAML, CSV, or a Google Sheets URL."""
     if not source:
         return []
+    if _is_google_sheets_url(source):
+        gviz_url = _google_sheets_gviz_url(source)
+        raw_text, _ = read_text_source(gviz_url, accept="application/json")
+        return _rows_from_gviz_response(raw_text)
     payload, suffix = load_payload(source)
     if isinstance(payload, list):
         rows = [dict(item) for item in payload if isinstance(item, dict)]
@@ -1114,11 +1359,13 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def update_history_render(paths: PortfolioPaths) -> None:
-    """Render a compact markdown history summary."""
-    sync_entries = read_jsonl(paths.sync_log)[-10:]
-    metadata_entries = read_jsonl(paths.metadata_history)[-10:]
+def _render_history_markdown(
+    sync_entries: list[dict[str, Any]],
+    metadata_entries: list[dict[str, Any]],
+) -> str:
     lines = ["# Portfolio History", "", "## Recent Syncs"]
+    sync_entries = sync_entries[-10:]
+    metadata_entries = metadata_entries[-10:]
     if not sync_entries:
         lines.append("- None")
     else:
@@ -1133,7 +1380,16 @@ def update_history_render(paths: PortfolioPaths) -> None:
     else:
         for entry in reversed(metadata_entries):
             lines.append(f"- {entry.get('timestamp', '')} | {entry.get('event', '')}")
-    paths.rendered_history.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def update_history_render(paths: PortfolioPaths) -> None:
+    """Render a compact markdown history summary."""
+    body = _render_history_markdown(
+        read_jsonl(paths.sync_log),
+        read_jsonl(paths.metadata_history),
+    )
+    paths.rendered_history.write_text(body, encoding="utf-8")
 
 
 def canonical_security_id(value: Any) -> str:
@@ -1199,8 +1455,8 @@ def _normalize_security_row(row: dict[str, Any], *, source_kind: str) -> dict[st
         "ticker": ticker,
         "company_name": company_name,
         "cusip": str(row.get("cusip") or "").strip(),
-        "weight": _maybe_number(row.get("weight") or row.get("portfolio_weight")),
-        "shares": _maybe_number(row.get("shares") or row.get("quantity")),
+        "weight": _maybe_number(_first_present(row, "weight", "portfolio_weight")),
+        "shares": _maybe_number(_first_present(row, "shares", "quantity")),
         "notes": str(row.get("notes") or "").strip(),
         "source_kind": source_kind,
     }
@@ -1238,31 +1494,73 @@ def _universe_delta(previous: list[dict[str, Any]], current: list[dict[str, Any]
 
 
 def _maybe_number(value: Any) -> float | int | None:
-    if value in {None, "", "null"}:
+    """Parse finite plain, currency, accounting, and percentage numbers."""
+    if value is None or isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int):
         return value
-    raw = str(value).strip().replace(",", "").replace("%", "")
-    if not raw:
+    raw = str(value).strip()
+    if not raw or raw.lower() in {"null", "none", "nan", "inf", "infinity", "-inf", "-infinity"}:
         return None
+    negative = raw.startswith("(") and raw.endswith(")")
+    if negative:
+        raw = raw[1:-1].strip()
+    raw = re.sub(r"^(?:USD\s*|US\$\s*|\$\s*)", "", raw, flags=re.IGNORECASE)
+    raw = raw.replace(",", "").replace("%", "").strip()
     try:
-        if raw.isdigit():
-            return int(raw)
-        return float(raw)
-    except ValueError:
+        parsed = Decimal(raw)
+    except (InvalidOperation, ValueError):
         return None
+    if not parsed.is_finite():
+        return None
+    if negative:
+        parsed = -parsed
+    return _decimal_to_number(parsed)
+
+
+def _decimal_to_number(value: Decimal) -> float | int:
+    if value == value.to_integral_value():
+        return int(value)
+    # Public state has historically exposed JSON numbers. Decimal is used while
+    # parsing/manipulating values, then intentionally converted at this boundary.
+    return float(value)
+
+
+def _required_positive_number(
+    value: Any,
+    *,
+    row_number: int,
+    security_id: str,
+    field: str,
+) -> float | int:
+    parsed = _maybe_number(value)
+    if parsed is None:
+        raise ValueError(f"transaction row {row_number} ({security_id}): {field} must be numeric")
+    if parsed <= 0:
+        raise ValueError(f"transaction row {row_number} ({security_id}): {field} must be greater than zero")
+    return parsed
 
 
 def _stringify_date(value: Any) -> str:
-    if value in {None, ""}:
+    if value is None or value == "":
         return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
     if isinstance(value, date):
         return value.isoformat()
     raw = str(value).strip()
+    if not raw:
+        return ""
     try:
         return datetime.fromisoformat(raw).date().isoformat()
     except ValueError:
-        return raw
+        pass
+    for date_format in ("%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(raw, date_format).date().isoformat()
+        except ValueError:
+            continue
+    return raw
 
 
 def _clean_ticker(value: Any) -> str:

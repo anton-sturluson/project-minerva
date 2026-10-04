@@ -1,0 +1,7 @@
+Date,Type,Symbol,Shares,Price (USD),Total (USD),Portfolio
+04/08/2026,Buy,ALFA,0.123456789,"$100.1234","$12.345678",Main
+04/08/26,Sell,BETA,2,"$25.50","$51.00",Main
+03/31/2026,Buy,GONE,3,10,30,Main
+04/09/2026,Buy,SATL,4,20,80,Satellite
+04/10/2026,Buy,BLNK,1,30,30,
+,,,,,,

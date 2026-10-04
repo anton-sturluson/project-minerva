@@ -21,6 +21,7 @@
 | [19-bare-invocation-help-plan.md](./19-bare-invocation-help-plan.md) | file | TDD plan: bare `minerva <command>` shows clean help (no error), exit 0. |
 | [21-news-cli-plan.md](./21-news-cli-plan.md) | file | Implementation plan for `minerva news ingest`, deterministic read-only `news exist`, and morning-brief integration. |
 | [22-weekly-ideas.md](./22-weekly-ideas.md) | guide | Original-source weekly research, minimal shared Postgres state, and native OpenClaw delivery. |
+| [23-main-portfolio-sync-runbook.md](./23-main-portfolio-sync-runbook.md) | runbook | Main-only portfolio source selection, exact Google Sheets values, validation, and post-merge deployment checks. |
 | [Investor Platform: Homepage Club](../investor-platform/design/README.md) | design | Approved visual direction, interactive reference, and project design skill. |
 | [Investor Platform documentation](../investor-platform/docs/README.md) | index | Setup, operations, portfolio workflows, methodology and privacy. |
 | [Investor Platform architecture](../investor-platform/docs/architecture.md) | architecture | Local-first portfolio and research product: stack, repository boundaries, performance data requirements, and CI/CD. |

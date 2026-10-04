@@ -401,7 +401,7 @@ def render_thesis_command(*, settings: HarnessSettings) -> CommandResult:
     paths.thesis_rendered.write_text(body, encoding="utf-8")
     return CommandResult.from_text(f"rendered_to: {paths.thesis_rendered}", duration_ms=elapsed_ms(start))
 
-@app.command("sync", help="Sync holdings, transactions, and watchlist state.")
+@app.command("sync", help="Sync Main holdings, transactions, and watchlist state.")
 def sync_cli(
     ctx: typer.Context,
     date_arg: str | None = typer.Option(None, "--date", help="ISO date for the sync run."),
