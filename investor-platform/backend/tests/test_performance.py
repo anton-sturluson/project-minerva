@@ -69,7 +69,7 @@ def test_cash_flow_adjusted_returns_and_adjusted_benchmarks(db_client, portfolio
     assert r.status_code == 200, r.text
     result = r.json()
     assert D(result["value"]) == 2010
-    assert float(result["return"]) == pytest.approx(1.1 * 2210 / 2100 - 1)
+    assert float(result["return"]) == pytest.approx(1.05 * 2210 / 2100 - 1)
     assert D(result["SPY"]) == D(".02")  # Adjusted, not raw close.
     assert D(result["QQQ"]) == D(".04")
     assert D(result["holdings"][0]["unrealized_pnl"]) == 210
@@ -644,3 +644,22 @@ def test_interest_does_not_mask_an_unrecorded_dividend(db_client, portfolio):
     result = report(db_client, aid).json()
     assert result["return"] is None
     assert "recorded 0.00" in result["warnings"][0]
+
+
+def test_deposit_day_gains_use_all_capital_available_that_day(db_client, portfolio):
+    aid, data = portfolio
+    cash(db_client, aid, amount="9000", day="2026-01-05")
+    trade(
+        db_client,
+        aid,
+        quantity="90",
+        price="100",
+        ticker="AAA",
+        exchange="NYSE",
+        effective_date="2026-01-05",
+    )
+    # Both the original capital and new deposit earn 10% on the purchase day.
+    data["AAA"].close[DAYS[2]] = D("110")
+    result = report(db_client, aid).json()
+    assert D(result["return"]) == D(".1")
+    assert D(result["value"]) == 11000

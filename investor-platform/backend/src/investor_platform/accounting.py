@@ -31,7 +31,7 @@ def replay(entries):
             raise HTTPException(409, "Only one opening cash entry is allowed")
         if any(e.kind == EntryKind.OPENING_CASH for e in entries[1:]):
             raise HTTPException(409, "Opening cash must be the first entry")
-        for e in entries:
+        for index, e in enumerate(entries):
             if opening_date and e.effective_date < opening_date:
                 raise HTTPException(409, "Entries cannot precede the opening balance date")
             if e.kind in {EntryKind.OPENING_CASH, EntryKind.DEPOSIT, EntryKind.INCOME}:
@@ -40,7 +40,12 @@ def replay(entries):
                 cash -= e.amount
             elif e.kind == EntryKind.SELL:
                 cash += e.amount
-            if cash < 0:
+            # Source records have dates, not reliable intraday ordering. Funding entered later
+            # may precede a same-day trade; never borrow from a subsequent day's cash.
+            day_end = (
+                index + 1 == len(entries) or entries[index + 1].effective_date != e.effective_date
+            )
+            if day_end and cash < 0:
                 raise HTTPException(
                     409, "This entry would make cash negative in the account history"
                 )

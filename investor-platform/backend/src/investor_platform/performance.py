@@ -1,4 +1,4 @@
-"""Daily closing-flow returns and fully closed position statistics."""
+"""Daily cash-flow-adjusted returns and fully closed position statistics."""
 
 from datetime import UTC, date, datetime
 from decimal import Decimal, DecimalException, localcontext
@@ -224,6 +224,7 @@ def calculate(
     provisional=False,
     baseline=Baseline.HISTORY,
     funding_status=FundingStatus.RECORDED,
+    closing_cash_ids=frozenset(),
 ):
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
     spy, qqq = histories["SPY"], histories["QQQ"]
@@ -305,26 +306,31 @@ def calculate(
         value = cash + receivables[d] + sum((h["value"] for h in holdings), ZERO)
         if previous is not None:
             interval = [e for e in entries if previous_day < e.effective_date <= d]
-            flow = ZERO
+            incoming = outgoing = in_kind = ZERO
             for e in interval:
                 if e.kind in {EntryKind.DEPOSIT, EntryKind.OPENING_CASH}:
-                    flow += e.amount
+                    if e.id in closing_cash_ids:
+                        in_kind += e.amount
+                    else:
+                        incoming += e.amount
                 elif e.kind == EntryKind.WITHDRAWAL:
-                    flow -= e.amount
+                    outgoing += e.amount
                 elif e.kind in IN_KIND_ENTRIES:
                     price = prices[e.security_id].close.get(d)
                     if price is None:
                         raise ValueError("Missing price for an in-kind contribution")
-                    flow += e.quantity * price
+                    in_kind += e.quantity * price
             if previous <= 0:
                 raise ValueError(
                     "Return is undefined across a zero-value balance; "
                     "select a continuously funded period"
                 )
-            factor = (value - flow) / previous
+            # Dated cash deposits are available to invest at the start of the session.
+            # Withdrawals and close-valued in-kind receipts occur at its end.
+            factor = (value + outgoing - in_kind) / (previous + incoming)
             if factor < 0:
                 raise ValueError(
-                    "Closing-flow convention is invalid for this cash movement; "
+                    "Daily flow convention is invalid for this cash movement; "
                     "intraday valuations are needed"
                 )
             growth *= factor
@@ -472,6 +478,11 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                         provisional=provisional,
                         baseline=period.baseline,
                         funding_status=funding_status,
+                        closing_cash_ids={
+                            e.id
+                            for e in entries
+                            if e.kind in IN_KIND_ENTRIES and e.security_id in excluded
+                        },
                     )
                     result["scenario"]["excluded"] = [
                         {"id": sid, "ticker": s.ticker, "exchange": s.exchange}
