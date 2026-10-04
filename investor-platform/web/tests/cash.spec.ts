@@ -95,3 +95,18 @@ test("retry after a lost response does not duplicate cash", async ({
   const after = await (await request.get(url)).json();
   expect(after.entries.length).toBe(before.entries.length + 1);
 });
+
+test("entry dates use New York before midnight, including daylight saving time", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-07-10T02:00:00Z"));
+  await page.goto("/#activity");
+  await page.getByText("Record cash", { exact: true }).click();
+  await expect(
+    page.getByLabel("Cash effective date", { exact: true }),
+  ).toHaveValue("2026-07-09");
+  await page.getByText("Record a position or trade", { exact: true }).click();
+  await expect(
+    page.getByLabel("Position effective date", { exact: true }),
+  ).toHaveValue("2026-07-09");
+});

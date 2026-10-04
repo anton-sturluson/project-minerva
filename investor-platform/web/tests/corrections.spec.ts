@@ -1,3 +1,4 @@
+import { today } from "../src/records";
 import { expect, test } from "./fixtures";
 
 test("reviews a correction, retries a lost response once, preserves audit, and voids it", async ({
@@ -11,7 +12,7 @@ test("reviews a correction, retries a lost response once, preserves audit, and v
       kind: "deposit",
       amount: "100",
       currency: "USD",
-      effective_date: new Date().toISOString().slice(0, 10),
+      effective_date: today(),
       note: "Synthetic correction fixture",
     },
   });
@@ -114,7 +115,7 @@ test("rejects an overdraft correction and requires a fresh review after another 
     kind: "deposit",
     amount: "100",
     currency: "USD",
-    effective_date: new Date().toISOString().slice(0, 10),
+    effective_date: today(),
     note: "Stale preview fixture",
   };
   const entry = await (

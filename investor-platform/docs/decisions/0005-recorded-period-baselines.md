@@ -21,3 +21,5 @@ Exclusions in recorded mode apply within the selected period. Prior trades remai
 - [Performance implementation](../../backend/src/investor_platform/performance.py) — security selection, full ledger replay and period scenarios.
 - [Performance conventions](../performance.md) — cash flows, income, unknown prices and CAGR.
 - [ADR 0002](0002-stock-exclusion-scenarios.md) — full-history exclusion semantics.
+
+A manually selected start after inception also uses recorded balances at that date, with the same visible disclosure. Returning to Full history restores inception validation. Posting dates and report boundaries use New York calendar dates, including before UTC midnight and across daylight-saving changes.

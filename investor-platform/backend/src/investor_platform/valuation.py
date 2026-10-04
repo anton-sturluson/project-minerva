@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from . import market
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
 from .ledger import entries_for, ledger_view
 from .models import LedgerEntry
 from .performance import position_episodes, trade_statistics, wire
@@ -80,7 +80,7 @@ def quote_holding(holding, end, provisional, fx):
 
 
 def value_records(records, base_currency, provisional):
-    end = datetime.now(market.MARKET_TIMEZONE).date() - timedelta(days=1)
+    end = datetime.now(MARKET_TIMEZONE).date() - timedelta(days=1)
     fx = {}
     for currency in {
         market.FOREIGN_LISTINGS[h.security.exchange][1]
@@ -150,7 +150,7 @@ def valuation(account_id: UUID, session: DB, actor: Identity):
 def hypothetical_statistics(account_id: UUID, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
     entries = entries_for(session, account_id)
-    today = datetime.now(market.MARKET_TIMEZONE).date()
+    today = datetime.now(MARKET_TIMEZONE).date()
     if entries and entries[-1].effective_date > today:
         raise HTTPException(422, "Wait until all recorded trade dates have arrived in New York")
     records = ledger_view(entries, account.base_currency)

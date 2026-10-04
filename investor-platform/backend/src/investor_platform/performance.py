@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import market
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
 from .ledger import entries_for
 from .models import LedgerEntry
 
@@ -370,7 +370,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
             422,
             "Market comparisons currently require a USD account; FX conversion is not supported",
         )
-    today = datetime.now(market.MARKET_TIMEZONE).date()
+    today = datetime.now(MARKET_TIMEZONE).date()
     if (
         period.start >= period.end
         or period.end >= today

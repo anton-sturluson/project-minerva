@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from . import market
 from .accounting import UNIT
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
 from .ledger import entries_for
 from .performance import position_episodes, wire
 
@@ -141,7 +141,7 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
     if account.base_currency != Currency.USD:
         raise HTTPException(422, "Hit rate currently requires a USD account")
     episodes, open_count = position_episodes(entries_for(session, account_id))
-    today = datetime.now(market.MARKET_TIMEZONE).date()
+    today = datetime.now(MARKET_TIMEZONE).date()
     candidates = [e for e in episodes if not exclusion(e, today)]
     try:
         histories = {}

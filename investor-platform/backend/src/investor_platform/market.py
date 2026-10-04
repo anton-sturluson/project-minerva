@@ -13,7 +13,6 @@ from .domain import ACCOUNTING_PRECISION, Currency
 
 MAX_SECURITIES = 128
 HISTORY_WINDOW = timedelta(days=3660)
-MARKET_TIMEZONE = ZoneInfo("America/New_York")
 SOURCE = "Yahoo Finance daily history"
 BENCHMARKS = ("SPY", "QQQ")
 
@@ -208,14 +207,17 @@ def security_histories(securities, start, end, *, provisional=False, convert_fx=
     def fetch(symbol):
         try:
             return symbol, history(symbol, start - MAX_CLOSE_AGE, end, **requests[symbol])
-        except (OSError, KeyError, TypeError, IndexError) as exc:
-            raise MarketDataError(
-                f"Price history unavailable for {symbol}. "
-                "A complete comparison needs these historical prices."
-            ) from exc
+        except (OSError, KeyError, TypeError, IndexError):
+            return symbol, None
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         fetched = dict(pool.map(fetch, sorted(requests)))
+    missing = [symbol for symbol, result in fetched.items() if result is None]
+    if missing:
+        raise MarketDataError(
+            f"Missing historical prices: {', '.join(missing)}. "
+            "Daily returns need closing prices between trades; transaction records are intact."
+        )
     for symbol, currency in foreign.items():
         fetched[symbol] = usd_history(fetched[symbol], fetched[f"{currency}USD=X"])
     return fetched
