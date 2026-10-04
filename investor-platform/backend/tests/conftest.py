@@ -1,14 +1,18 @@
 import os
+from decimal import Decimal as D
 from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from helpers import DAYS, cash, trade
 from sqlalchemy import create_engine, text
 
+from investor_platform import market
 from investor_platform.app import app
 from investor_platform.db import DEFAULT_URL
+from investor_platform.market import History
 
 
 @pytest.fixture
@@ -59,3 +63,34 @@ def expire_prices(database):
             )
 
     return expire
+
+
+@pytest.fixture
+def portfolio(db_client, monkeypatch):
+    aid = db_client.post(
+        "/api/accounts", json={"name": "Performance fixture", "base_currency": "USD"}
+    ).json()["id"]
+    assert cash(db_client, aid, "opening_cash", "1000", day="2026-01-02").status_code == 201
+    assert (
+        trade(db_client, aid, quantity="10", price="100", ticker="AAA", exchange="NYSE").status_code
+        == 201
+    )
+    data = {
+        "AAA": History(
+            dict(zip(DAYS, map(D, ["100", "110", "121"]))),
+            dict(zip(DAYS, map(D, ["100", "110", "121"]))),
+        ),
+        "SPY": History(
+            dict(zip(DAYS, map(D, ["100", "100", "101"]))),
+            dict(zip(DAYS, map(D, ["100", "101", "102"]))),
+        ),
+        "QQQ": History(
+            dict(zip(DAYS, map(D, ["100", "102", "104"]))),
+            dict(zip(DAYS, map(D, ["100", "102", "104"]))),
+        ),
+    }
+    data["AAA"].exchange = "NYQ"
+    data["SPY"].exchange = "PCX"
+    data["QQQ"].exchange = "NGM"
+    monkeypatch.setattr(market, "history", lambda symbol, start, end: data[symbol])
+    return aid, data

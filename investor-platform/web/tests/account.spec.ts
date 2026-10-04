@@ -1,24 +1,33 @@
 import { expect, test } from "./fixtures";
 
 test("creates an account and keeps it after reload", async ({ page }) => {
+  // Exercise the empty-workspace UI even when other synthetic workflows ran first.
+  let created = false;
+  await page.route("**/api/accounts", (route) => {
+    if (route.request().method() === "POST") created = true;
+    return created ? route.fallback() : route.fulfill({ json: [] });
+  });
   await page.goto("/#portfolio");
-  await expect(page.getByText("Opening your records…")).toBeHidden();
-  if (await page.getByLabel("Portfolio name", { exact: true }).isVisible()) {
-    await page
-      .getByLabel("Portfolio name", { exact: true })
-      .fill("Browser test account");
-    await page.getByLabel("Base currency", { exact: true }).selectOption("USD");
-    await page
-      .getByRole("button", { name: "Create portfolio", exact: true })
-      .click();
-  }
+  await page
+    .getByLabel("Portfolio name", { exact: true })
+    .fill(`Synthetic persistence ${crypto.randomUUID().slice(0, 8)}`);
+  await page.getByLabel("Base currency", { exact: true }).selectOption("USD");
+  await page
+    .getByRole("button", { name: "Create portfolio", exact: true })
+    .click();
   await expect(
     page.getByRole("combobox", { name: "Portfolio", exact: true }),
   ).toBeVisible();
+  const selected = await page
+    .getByLabel("Portfolio", { exact: true })
+    .inputValue();
   await page.reload();
   await expect(
     page.getByRole("combobox", { name: "Portfolio", exact: true }),
   ).toBeVisible();
+  await expect(page.getByLabel("Portfolio", { exact: true })).toHaveValue(
+    selected,
+  );
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -61,9 +70,9 @@ test("explains a proxy outage and recovers", async ({ page }) => {
 test("creates another portfolio, isolates activity, and remembers selection", async ({
   page,
   request,
+  account,
 }) => {
-  const accounts = await (await request.get("/api/accounts")).json();
-  const original = accounts[0];
+  const original = account;
   const originalLedger = await (
     await request.get(`/api/accounts/${original.id}/ledger`)
   ).json();

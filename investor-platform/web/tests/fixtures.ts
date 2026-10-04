@@ -1,4 +1,5 @@
 import { test as base, expect } from "@playwright/test";
+import type { Account } from "../src/api";
 
 // Public market data is synthetic in CI. Live-provider verification uses the demo database.
 export const performance = {
@@ -46,8 +47,23 @@ export const performance = {
   ],
 };
 
-export const test = base.extend({
-  page: async ({ page }, use) => {
+export const test = base.extend<{ account: Account }>({
+  account: async ({ request }, use) => {
+    const response = await request.post("/api/accounts", {
+      data: { name: "Browser test account", base_currency: "USD" },
+    });
+    expect(response.ok()).toBe(true);
+    await use((await response.json()) as Account);
+  },
+  page: async ({ page, account }, use) => {
+    await page.addInitScript((id) => {
+      try {
+        if (!localStorage.getItem("minerva-portfolio"))
+          localStorage.setItem("minerva-portfolio", id);
+      } catch {
+        // Storage-denied workflows still exercise the app's fallback.
+      }
+    }, account.id);
     await page.route("**/api/accounts/*/performance", (route) =>
       route.fulfill({ json: performance }),
     );

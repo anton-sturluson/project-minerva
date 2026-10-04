@@ -4,8 +4,8 @@ import { expect, test } from "./fixtures";
 test("reviews a correction, retries a lost response once, preserves audit, and voids it", async ({
   page,
   request,
+  account,
 }) => {
-  const account = (await (await request.get("/api/accounts")).json())[0];
   const created = await request.post(`/api/accounts/${account.id}/cash`, {
     data: {
       request_key: crypto.randomUUID(),
@@ -108,8 +108,8 @@ test("reviews a correction, retries a lost response once, preserves audit, and v
 test("rejects an overdraft correction and requires a fresh review after another write", async ({
   page,
   request,
+  account,
 }) => {
-  const account = (await (await request.get("/api/accounts")).json())[0];
   const payload = {
     request_key: crypto.randomUUID(),
     kind: "deposit",

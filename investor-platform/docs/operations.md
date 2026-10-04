@@ -54,12 +54,6 @@ Browser tests start both servers if needed, or reuse local servers on the docume
 
 Keep exports, PostgreSQL dumps, screenshots, credentials and account-specific configuration outside Git. Use synthetic fixtures for testing. See [privacy guidance](privacy.md).
 
-## References
-
-- [Quick start](../README.md) — local launch commands.
-- [Application boundary](../backend/src/investor_platform/app.py) — local and Tailscale behavior.
-- [CI workflow](../../.github/workflows/investor-platform-ci.yml) — required checks.
-
 ## Historical data fallback
 
 Set `TIINGO_API_KEY` in the ignored backend `.env` to enable Tiingo for unavailable US stock histories and dated FX. The key is sent only in an authorization header. Migration 0008 adds a workspace-scoped PostgreSQL provider cache; successful validated responses are reused for 24 hours, with per-symbol locks preventing duplicate concurrent downloads. Yahoo now uses the same private persistent cache, including holdings and hypothetical scorecards. Requested ranges expand a cached history as needed; narrower requests are sliced without including later prices. Provider validation options and workspace identity are part of the cache key. Failed refreshes preserve the previous cache but return the error rather than silently serve expired data. Ledger values and reports are recalculated from current records, so trade and cash edits require no cache invalidation. No credentials enter the cache. Foreign stock prices and benchmark total returns continue to use Yahoo. Stock queries end when the recorded position closes.
@@ -69,3 +63,9 @@ Provider listing metadata can describe a later exchange move. Such mismatches re
 Only hashed JS/CSS build assets receive private immutable browser caching. HTML, errors and portfolio API responses remain `no-store` behind the existing access boundary.
 
 Tiingo's `close` is already in as-traded share units; unlike Yahoo's split-adjusted close, it must not be multiplied by subsequent split factors. FX uses the provider's date label and same-date daily close; inverse pairs are reciprocated, and missing FX dates remain missing. [Tiingo EOD fields](https://www.tiingo.com/documentation/end-of-day), [FX fields](https://www.tiingo.com/documentation/forex).
+
+## References
+
+- [Quick start](../README.md) — local launch commands.
+- [Application boundary](../backend/src/investor_platform/app.py) — local and Tailscale behavior.
+- [CI workflow](../../.github/workflows/investor-platform-ci.yml) — required checks.

@@ -5,9 +5,9 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from helpers import cash, ledger, trade
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from test_ledger import cash, ledger
 
 from investor_platform.app import app
 from investor_platform.db import Actor, get_actor
@@ -21,24 +21,6 @@ def account_id(db_client):
     ).json()["id"]
     cash(db_client, account, "opening_cash", "10000")
     return account
-
-
-def trade(client, account, kind="buy", quantity="10", price="100", **extra):
-    data = {
-        "kind": kind,
-        "quantity": quantity,
-        "price": price,
-        "fees": "0",
-        "ticker": "DEMO",
-        "exchange": "TEST",
-        "currency": "USD",
-        "effective_date": "2026-01-02",
-        "request_key": str(uuid4()),
-        **extra,
-    }
-    if kind in {"opening_position", "transfer_in"}:
-        data["price"] = None
-    return client.post(f"/api/accounts/{account}/trades", json=data)
 
 
 def test_fifo_open_buy_partial_sell_full_close(db_client, account_id, database):

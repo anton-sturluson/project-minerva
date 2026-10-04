@@ -117,7 +117,8 @@ main,
 #activity,
 #performance,
 #post-mortem,
-#research {
+#research,
+.corrections {
   scroll-margin-top: calc(var(--header-height) + 16px);
 }
 h1 {
@@ -149,10 +150,6 @@ h1 {
     11px/1.4 Arial,
     sans-serif;
 }
-.directory p {
-  margin-top: 7px;
-  font-size: 15px;
-}
 .page-footer {
   display: flex;
   justify-content: center;
@@ -162,11 +159,6 @@ h1 {
   border-top: 1px solid var(--rule);
   padding-top: 10px;
   font-size: 12px;
-}
-.page-footer > span:first-child {
-  font:
-    11px/1.4 "Courier New",
-    monospace;
 }
 @media (max-width: 650px) {
   :root {
@@ -269,19 +261,6 @@ textarea:focus-visible {
 .error button {
   margin-top: 8px;
 }
-.account-line {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.account-line span {
-  font:
-    12px/1.5 "Courier New",
-    monospace;
-}
 @media (max-width: 650px) {
   .entry-form label {
     flex-basis: 100%;
@@ -309,9 +288,6 @@ textarea:focus-visible {
 .save-message {
   color: var(--success);
   margin: 12px 0;
-}
-.activity-heading {
-  margin: 25px 0 10px;
 }
 .table-scroll {
   max-width: 100%;
@@ -557,11 +533,6 @@ summary:focus-visible {
   color: var(--plum);
   font-size: 23px;
 }
-.section-heading .report-date {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-}
 .cost-weight {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -586,6 +557,8 @@ summary:focus-visible {
 }
 .security-name small {
   font-size: 11px;
+  max-width: 180px;
+  white-space: normal;
 }
 .holdings-table .cost-weight {
   background: color-mix(in srgb, var(--lilac) 30%, var(--paper));

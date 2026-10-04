@@ -1,6 +1,6 @@
 # Investor Platform architecture
 
-Updated: 2026-10-03. This describes the implemented application.
+Updated: 2026-10-04. This describes the implemented application.
 
 ## Runtime
 
@@ -25,13 +25,23 @@ PostgreSQL owns portfolio state. There is no spreadsheet sync or runtime depende
 
 [Domain definitions](../backend/src/investor_platform/domain.py) define the stable `EntryKind` and `Currency` string enums and exact-arithmetic precision. API values and existing VARCHAR storage remain unchanged; historical SQL migrations retain their original literals. Provider limits and supported listings live in the market adapter. Imports and HTTP writes share trade construction, and correction previews reuse the active ledger view without rebuilding audit history. Frontend entry types and form choices derive from the same local [label and kind definitions](../web/src/records.ts). See the [ledger view](../backend/src/investor_platform/ledger.py) and [trade builder](../backend/src/investor_platform/trades.py).
 
+## Market data and daily collection
+
+Validated Yahoo and optional Tiingo inputs are cached privately by workspace; ledger values are recalculated for every report. The opt-in Tailscale worker collects daily at 17:00 America/New_York, with durable run status and bounded retries. ([Cache](../backend/src/investor_platform/market_cache.py), [collector](../backend/src/investor_platform/price_refresh.py), [daily prices](daily-prices.md))
+
 ## Future work
 
-Add boundaries when their feature needs them. Research storage, background jobs, hosted login, generated API clients and cloud infrastructure are not scaffolded. The [implementation plan](implementation-plan.md) tracks the small remaining increments.
+Add boundaries when their feature needs them. Research storage, hosted login, generated API clients and cloud infrastructure are not scaffolded. The [implementation plan](implementation-plan.md) tracks the small remaining increments.
+
+## Portfolio boundary
+
+`GET /api/accounts` lists only the authenticated owner’s workspace portfolios; `POST /api/accounts` creates or idempotently returns a matching named portfolio. Every ledger, correction and metric route includes an account UUID and checks ownership. Instruments are shared within a workspace, while lots, cash and request keys are scoped to their portfolio. The UI remounts the ledger subtree on selection changes and validates a saved selection against the owner-scoped list. The old singular account endpoint has been removed.
 
 ## References
 
 ### Implementation
+
+- [Cache](../backend/src/investor_platform/market_cache.py), [collector](../backend/src/investor_platform/price_refresh.py) and [daily prices](daily-prices.md): implemented market-data lifecycle.
 
 - [Operations](operations.md) and [portfolio guide](portfolio.md): runtime commands, ownership, workflows and limitations.
 - [Backend](../backend/src/investor_platform/) and [frontend](../web/src/): implemented modules and request boundaries.
@@ -40,7 +50,3 @@ Add boundaries when their feature needs them. Research storage, background jobs,
 - [Tailscale](tailscale.md): private deployment configuration.
 - [Performance](performance.md) and [hit rate](hit-rate.md): calculations and market-data constraints.
 - [Homepage Club](../design/README.md): approved design.
-
-## Portfolio boundary
-
-`GET /api/accounts` lists only the authenticated owner’s workspace portfolios; `POST /api/accounts` creates or idempotently returns a matching named portfolio. Every ledger, correction and metric route includes an account UUID and checks ownership. Instruments are shared within a workspace, while lots, cash and request keys are scoped to their portfolio. The UI remounts the ledger subtree on selection changes and validates a saved selection against the owner-scoped list. The old singular account endpoint has been removed.

@@ -11,18 +11,17 @@ This is the living register of reconstruction assumptions. Change it with the im
 | Dividends need both the ex-date and actual cash payment date, linked to the security. | Recorded receivables enter value on the ex-date and leave receivables when cash arrives. Missing or mismatched gross distributions withhold whole-account returns. Stock-only estimates use provider gross distributions; neither mode adds synthetic ledger income. |
 | Unrecorded fees and taxes are absent. | Estimates are not after-tax returns. |
 | Recent comparisons use recorded opening cash and share quantities. | Missing pre-period income and corporate actions are not reconstructed; verify opening balances. Full history retains its stricter data requirements. |
-| Market prices come from one provider. | Values are not independently verified and may be revised. |
+| Prices and FX may come from different providers. | Values are not independently verified and may be revised. |
 
 See [transaction import](transaction-import.md) for ingestion rules, [performance](performance.md) for calculation conventions and [hit rate](hit-rate.md) for exclusions. The UI retains provisional status and errors that prevent a valid calculation; import details are available from the private account metadata/API.
-
-## References
-
-- [Importer](../backend/src/investor_platform/import_transactions.py) — reconstruction and provenance.
-- [Performance calculation](../backend/src/investor_platform/performance.py) — provisional distribution model and validation.
-
 
 ## Missing historical prices
 
 Transaction prices and amounts establish trade cash flows and realized profit, but do not establish daily market value between trades. A complete chart requires closing-price coverage for every held security on each valuation date, plus distribution and split information. The app lists every symbol whose provider history is unavailable in one response; it never silently removes those positions or fills missing prices with transaction prices.
 
 Closed positions can therefore block a full-history chart while current holdings and trade statistics still work. Delisted-price recovery needs a verified source with the correct listing, currency, share units and corporate actions. Sparse monthly charts or successor-company prices cannot substitute for daily history. A manually selected later period or a YTD/1-year shortcut uses recorded starting balances explicitly; it is not a repaired full-history result. Keep account-specific gaps and downloaded evidence in ignored local storage, not in this public document.
+
+## References
+
+- [Importer](../backend/src/investor_platform/import_transactions.py) — reconstruction and provenance.
+- [Performance calculation](../backend/src/investor_platform/performance.py) — recorded dividend validation, estimated stock distributions and measurement boundaries.

@@ -3,19 +3,17 @@ from decimal import Decimal as D
 from uuid import uuid4
 
 import pytest
-from test_trades import trade
+from helpers import trade
 
 from investor_platform import market, valuation
 from investor_platform.domain import Currency
 from investor_platform.market import History
 
-pytest_plugins = ["test_performance"]
-
 
 def test_old_held_split_withholds_values_liquidation_and_collection(
     db_client, database, portfolio, monkeypatch
 ):
-    from test_ledger import ledger
+    from helpers import ledger
 
     aid, _ = portfolio
     trade(db_client, aid, "opening_position", "2", ticker="BBB", exchange="NYSE")
@@ -100,7 +98,7 @@ def test_split_before_or_on_reentry_does_not_invalidate_new_share_units(
 
 
 def test_pre_split_previous_close_cannot_value_a_post_split_purchase(db_client, monkeypatch):
-    from test_ledger import cash
+    from helpers import cash
 
     aid = db_client.post(
         "/api/accounts", json={"name": "Split-day fixture", "base_currency": "USD"}
@@ -189,7 +187,7 @@ def test_partial_quote_failure_retains_other_values_without_partial_weights(
 def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
     db_client, portfolio, monkeypatch, exchange, suffix, currency, provider, expire_prices
 ):
-    from test_ledger import ledger
+    from helpers import ledger
 
     aid, _ = portfolio
     trade(
@@ -228,7 +226,7 @@ def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
 def test_hypothetical_closes_finish_whole_episodes_and_leave_records_unchanged(
     db_client, portfolio, monkeypatch, expire_prices
 ):
-    from test_ledger import ledger
+    from helpers import ledger
 
     aid, _ = portfolio
     trade(db_client, aid, "sell", "5", "90", ticker="AAA", exchange="NYSE")

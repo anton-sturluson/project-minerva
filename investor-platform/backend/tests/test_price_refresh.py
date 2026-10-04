@@ -4,8 +4,8 @@ from threading import Event
 from uuid import UUID
 
 import pytest
+from helpers import cash
 from sqlalchemy.orm import Session
-from test_ledger import cash
 
 from investor_platform import market, price_refresh
 from investor_platform.db import LOCAL_WORKSPACE
@@ -103,7 +103,7 @@ def test_late_provider_or_holiday_is_retried_only_three_times(db_client, databas
 def test_collection_warms_history_and_holdings_without_changing_transactions(
     db_client, database, monkeypatch
 ):
-    from test_trades import trade
+    from helpers import trade
 
     aid = db_client.post(
         "/api/accounts", json={"name": "Collector fixture", "base_currency": "USD"}
@@ -134,7 +134,7 @@ def test_delayed_same_date_fx_triggers_retry_even_when_yahoo_holdings_can_price(
 ):
     from decimal import Decimal
 
-    from test_trades import trade
+    from helpers import trade
 
     aid = db_client.post(
         "/api/accounts", json={"name": "Late FX fixture", "base_currency": "USD"}

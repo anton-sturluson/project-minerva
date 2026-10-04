@@ -2,11 +2,7 @@ from datetime import date
 from decimal import Decimal as D
 
 import pytest
-from test_ledger import cash, ledger
-from test_stock_performance import stock_report
-from test_trades import trade
-
-pytest_plugins = ["test_performance"]
+from helpers import cash, ledger, stock_report, trade
 
 
 def test_first_day_execution_gain_is_in_dollars_but_not_time_weighted_return(db_client, portfolio):

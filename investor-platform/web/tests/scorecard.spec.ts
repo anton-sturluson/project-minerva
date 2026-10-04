@@ -4,8 +4,8 @@ import { expect, test } from "./fixtures";
 test("shows a closed synthetic trade and recovers a scorecard load failure", async ({
   page,
   request,
+  account,
 }) => {
-  const account = (await (await request.get("/api/accounts")).json())[0];
   const base = `/api/accounts/${account.id}`;
   const date = today();
   const ticker = `S${crypto.randomUUID().slice(0, 8).toUpperCase()}`;

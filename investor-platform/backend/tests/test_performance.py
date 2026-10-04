@@ -3,62 +3,10 @@ from decimal import Decimal as D
 from uuid import uuid4
 
 import pytest
-from test_ledger import cash, ledger
-from test_trades import trade
+from helpers import DAYS, cash, dividend, ledger, report, trade
 
 from investor_platform import market
 from investor_platform.market import History
-
-DAYS = [date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6)]
-
-
-@pytest.fixture
-def portfolio(db_client, monkeypatch):
-    aid = db_client.post(
-        "/api/accounts", json={"name": "Performance fixture", "base_currency": "USD"}
-    ).json()["id"]
-    assert cash(db_client, aid, "opening_cash", "1000", day="2026-01-02").status_code == 201
-    assert (
-        trade(db_client, aid, quantity="10", price="100", ticker="AAA", exchange="NYSE").status_code
-        == 201
-    )
-    data = {
-        "AAA": History(
-            dict(zip(DAYS, map(D, ["100", "110", "121"]))),
-            dict(zip(DAYS, map(D, ["100", "110", "121"]))),
-        ),
-        "SPY": History(
-            dict(zip(DAYS, map(D, ["100", "100", "101"]))),
-            dict(zip(DAYS, map(D, ["100", "101", "102"]))),
-        ),
-        "QQQ": History(
-            dict(zip(DAYS, map(D, ["100", "102", "104"]))),
-            dict(zip(DAYS, map(D, ["100", "102", "104"]))),
-        ),
-    }
-    data["AAA"].exchange = "NYQ"
-    data["SPY"].exchange = "PCX"
-    data["QQQ"].exchange = "NGM"
-    monkeypatch.setattr(market, "history", lambda symbol, start, end: data[symbol])
-    return aid, data
-
-
-def dividend(client, aid, amount="10", pay="2026-01-06", ex="2026-01-05"):
-    sid = ledger(client, aid)["holdings"][0]["security"]["id"]
-    return cash(
-        client,
-        aid,
-        "income",
-        amount,
-        day=pay,
-        income_kind="dividend",
-        income_security_id=sid,
-        accrual_date=ex,
-    )
-
-
-def report(client, aid, start="2026-01-02", end="2026-01-06"):
-    return client.post(f"/api/accounts/{aid}/performance", json={"start": start, "end": end})
 
 
 def test_cash_flow_adjusted_returns_and_adjusted_benchmarks(db_client, portfolio):

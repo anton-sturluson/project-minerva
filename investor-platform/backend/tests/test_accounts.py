@@ -57,8 +57,7 @@ def test_cross_workspace_reads_and_writes(db_client, database):
 def test_portfolios_share_instruments_but_isolate_cash_trades_and_corrections(db_client):
     from decimal import Decimal
 
-    from test_ledger import cash, ledger
-    from test_trades import trade
+    from helpers import cash, ledger, trade
 
     first = db_client.post("/api/accounts", json=DATA).json()["id"]
     second = db_client.post("/api/accounts", json={**DATA, "name": "Index account"}).json()["id"]
