@@ -261,6 +261,9 @@ def calculate(
     scope=PerformanceScope.ACCOUNT,
 ):
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
+    include_opening_gain = (
+        baseline == Baseline.HISTORY and bool(entries) and start <= entries[0].effective_date
+    )
     stock_only = scope == PerformanceScope.STOCKS
     if stock_only:
         entries = funded_stock_entries(entries)
@@ -354,7 +357,9 @@ def calculate(
             )
         value = cash + receivables[d] + sum((h["value"] for h in holdings), ZERO)
         growth_before = growth
-        interval = []
+        # Full-history dollars include recorded executions before the first close.
+        # The time-weighted index still begins at that close with no first-day return.
+        interval = prefix if previous is None and include_opening_gain else []
         denominator = ZERO
         if previous is not None:
             interval = [e for e in entries if previous_day < e.effective_date <= d]

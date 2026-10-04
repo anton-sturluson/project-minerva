@@ -20,6 +20,8 @@ The project uses an explicit forward-linking convention: multiply each daily con
 
 Daily investment gains also sum into a USD gain column. This includes marked-to-market changes and distributions; it is not the FIFO realized P&L of closed trade episodes. Percentage-point contribution reflects both exposure and timing, not the security's own return or its percentage share of total profit. Dollar gain and linked contribution can have opposite signs when gains and losses occur at different portfolio capital levels. Positive/negative rankings use the selected measure; all participating securities remain in the table, including flat results. Display rounding can produce small differences between rounded rows and the unrounded total. Attribution is withheld if unrounded contributions fail to reconcile.
 
+Full-history dollars include recorded purchase costs and net sale proceeds through the first closing valuation, including positions opened and closed that day. For example, ten shares bought at $100 and worth $110 at the first close contribute $100 of dollar gain even if later prices remain unchanged. Received shares are neutralized at that first close; their value or tax basis is not profit. The time-weighted index and linked contributions still start at the first close, so this initial dollar gain contributes zero percentage points. Later-period comparisons do not recount gains from their opening positions. ([Attribution calculation](../backend/src/investor_platform/attribution.py), [Period calculation](../backend/src/investor_platform/performance.py))
+
 ## Interpretation and limits
 
 Transactions-based attribution uses both holdings and trades to explain the evaluation period. Multiperiod attribution needs an explicit linking convention because simple sums of daily effects do not equal compounded returns. Different linking conventions can allocate compounding effects differently. The formula above is this project's convention, not a claim of a unique standardized decomposition. ([CFA Institute performance evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation), [CFA Institute attribution review](https://rpc.cfainstitute.org/research/foundation/2019/performance-attribution))
@@ -28,6 +30,7 @@ This is attribution of the portfolio's absolute stock return. It is not benchmar
 
 ## References
 
+- [Attribution calculation](../backend/src/investor_platform/attribution.py) and [period calculation](../backend/src/investor_platform/performance.py) — distinct opening dollar gains and time-weighted baseline.
 - [CFA Institute: Portfolio Performance Evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation) — transactions-based attribution and performance evaluation.
 - [CFA Institute: Performance Attribution, History and Progress](https://rpc.cfainstitute.org/research/foundation/2019/performance-attribution) — attribution objectives and multiperiod linking conventions.
 - [Project performance methodology](performance.md) — stock measurement boundary, daily timing, estimates and market-data checks.
