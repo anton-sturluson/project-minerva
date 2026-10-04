@@ -153,7 +153,6 @@ export function YearlyPerformance({
           </tbody>
         </table>
       </div>
-      <p className="form-note">Δ = portfolio − index, in percentage points.</p>
     </section>
   );
 }

@@ -89,4 +89,6 @@ Cash **Fee or tax** entries reduce both cash and investment return. Use **Withdr
 
 ## Holdings summary
 
-Gain % is unrealized P&L divided by the remaining cost basis of each holding; zero or unknown basis displays unavailable. The **Stocks total** row excludes cash and sums stock market value, remaining basis and net unrealized P&L. Its gain percentage uses total P&L / total basis, not an average of individual percentages. Cash remains a separate row, and market/cost allocation weights include cash in their denominators. Missing prices or basis withhold affected aggregate figures instead of adding only known positions.
+The percentage in **Unrealized return** is unrealized P&L divided by the remaining cost basis of each holding; zero or unknown basis displays unavailable. The **Stocks total** row excludes cash and sums stock market value, remaining basis and net unrealized P&L. Its gain percentage uses total P&L / total basis, not an average of individual percentages. Cash remains a separate row, and market/cost allocation weights include cash in their denominators. Missing prices or basis withhold affected aggregate figures instead of adding only known positions.
+
+Holdings figures display one decimal place, including shares, prices, dollar values and percentages. Calculations and stored transactions retain full precision; the shares tooltip retains the recorded quantity. Unrealized dollar returns and percentages share one column, including in the totals row.

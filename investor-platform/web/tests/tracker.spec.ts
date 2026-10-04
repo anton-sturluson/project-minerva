@@ -65,10 +65,7 @@ test("compares dated returns, explains outage, and invalidates old results", asy
   await expect(
     page.getByText("Closing value (USD)", { exact: true }),
   ).toBeVisible();
-  await page.getByText("Daily values", { exact: true }).click();
-  await expect(
-    page.getByLabel("Daily performance", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("Daily values", { exact: true })).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -264,18 +261,26 @@ test("shows one holdings table above returns and retains recorded positions duri
   await page.goto("/");
   const holdings = page.getByLabel("Holdings", { exact: true });
   await expect(holdings).toHaveCount(1);
-  await expect(holdings).toContainText("83.33%");
+  await expect(holdings).toContainText("83.3%");
   await expect(
     page.getByLabel("Portfolio allocation by market value"),
   ).toHaveCount(0);
   const total = holdings.getByRole("row", { name: /^Stocks total/ });
-  await expect(total).toContainText("1,000.00");
-  await expect(total).toContainText("800.00");
-  await expect(total).toContainText("+200.00");
-  await expect(total).toContainText("+25.00%");
+  await expect(total).toContainText("1,000.0");
+  await expect(total).toContainText("800.0");
+  await expect(total).toContainText("+200.0 (25.0%)");
+  await expect(
+    holdings.getByRole("columnheader", { name: "Gain %", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    holdings.getByRole("columnheader", { name: "Basis (USD)", exact: true }),
+  ).toBeVisible();
+  await expect(
+    holdings.getByRole("row", { name: /^AAA/ }).getByRole("cell").first(),
+  ).toHaveText("10.0");
   await expect(
     holdings.getByRole("row").filter({ hasText: "AAA" }),
-  ).toContainText("80.00%");
+  ).toContainText("80.0%");
   await page.getByLabel("Theme", { exact: true }).selectOption("dark");
   await expect(
     holdings.getByRole("columnheader", { name: "Cost %", exact: true }),
@@ -292,7 +297,7 @@ test("shows one holdings table above returns and retains recorded positions duri
   );
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toContainText("Synthetic quote outage");
-  await expect(total).toContainText("+25.00%");
+  await expect(total).toContainText("25.0%");
   await page.route("**/valuation", (route) =>
     route.fulfill({
       status: 503,
@@ -302,12 +307,12 @@ test("shows one holdings table above returns and retains recorded positions duri
   await page
     .getByRole("button", { name: "Refresh prices", exact: true })
     .click();
-  await expect(holdings).toContainText("800.00");
+  await expect(holdings).toContainText("800.0");
   await expect(
     holdings.getByRole("row").filter({ hasText: "AAA" }),
-  ).toContainText("44.44%");
-  await expect(total).toContainText("800.00");
-  await expect(total).not.toContainText("+25.00%");
+  ).toContainText("44.4%");
+  await expect(total).toContainText("800.0");
+  await expect(total).not.toContainText("25.0%");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -329,7 +334,7 @@ test("withholds all cost weights when any position has unknown basis", async ({
   const total = page
     .getByLabel("Holdings", { exact: true })
     .getByRole("row", { name: /^Stocks total/ });
-  await expect(total).toContainText("1,000.00");
+  await expect(total).toContainText("1,000.0");
   await expect(total.getByRole("cell").nth(5)).toHaveText("—");
   await expect(total.getByRole("cell").nth(6)).toHaveText("—");
 });
@@ -374,7 +379,7 @@ test("partial holdings quotes remain visible and retry restores complete totals"
   const holdings = page.getByLabel("Holdings", { exact: true });
   await expect(
     holdings.getByRole("row").filter({ hasText: "AAA" }),
-  ).toContainText("1,000.00");
+  ).toContainText("1,000.0");
   await expect(
     holdings.getByRole("row").filter({ hasText: "BBB" }),
   ).toContainText("Quote unavailable");
@@ -390,8 +395,8 @@ test("partial holdings quotes remain visible and retry restores complete totals"
     .click();
   await expect(
     holdings.getByRole("row", { name: /^Stocks total/ }),
-  ).toContainText("1,000.00");
-  await expect(holdings).toContainText("83.33%");
+  ).toContainText("1,000.0");
+  await expect(holdings).toContainText("83.3%");
   await expect(
     page.getByText("Quote unavailable", { exact: true }),
   ).toHaveCount(0);
@@ -439,4 +444,53 @@ test("YTD and one-year request prior-close boundaries and preserve the measureme
   await expect(page.getByLabel("Performance start")).toHaveValue("2025-10-03");
   await page.getByRole("button", { name: "Full history", exact: true }).click();
   await expect(page.getByLabel("Performance start")).toHaveValue("2020-04-02");
+});
+
+test("chart dates label every year and adapt to shorter periods", async ({
+  page,
+}) => {
+  await page.route("**/ledger", (route) => route.fulfill({ json: ledger }));
+  let dates = [
+    "2020-04-02",
+    "2021-01-04",
+    "2022-01-03",
+    "2023-01-03",
+    "2024-01-02",
+    "2025-01-02",
+    "2026-01-02",
+    "2026-10-02",
+  ];
+  await page.route("**/performance", (route) =>
+    route.fulfill({
+      json: {
+        ...performance,
+        start: dates[0],
+        end: dates.at(-1),
+        series: dates.map((date, index) => ({
+          ...performance.series[0],
+          date,
+          portfolio: String(index / 100),
+        })),
+      },
+    }),
+  );
+  await page.goto("/#performance");
+  const chart = page.getByRole("img", { name: /Cumulative portfolio/ });
+  await expect(chart.getByText("2020-04-02", { exact: true })).toBeVisible();
+  for (const year of ["2021", "2022", "2023", "2024", "2025", "2026"]) {
+    await expect(chart.getByText(year, { exact: true })).toBeVisible();
+  }
+  await expect(chart.getByText("2026-10-02", { exact: true })).toBeVisible();
+  dates = ["2026-01-02", "2026-04-01", "2026-07-01", "2026-10-02"];
+  await page
+    .getByRole("button", { name: "Compare performance", exact: true })
+    .click();
+  await expect(chart.getByText("Apr 26", { exact: true })).toBeVisible();
+  await expect(chart.getByText("Jul 26", { exact: true })).toBeVisible();
+  await expect(page.getByText("Daily values", { exact: true })).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });

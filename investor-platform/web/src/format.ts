@@ -5,5 +5,5 @@ export const number = (n: string | null, digits = 2) =>
         minimumFractionDigits: digits,
         maximumFractionDigits: digits,
       });
-export const percent = (n: string | null) =>
-  n === null ? "—" : `${number(String(Number(n) * 100))}%`;
+export const percent = (n: string | null, digits = 2) =>
+  n === null ? "—" : `${number(String(Number(n) * 100), digits)}%`;

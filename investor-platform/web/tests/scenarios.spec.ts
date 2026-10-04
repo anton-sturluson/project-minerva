@@ -101,10 +101,6 @@ test("compares exclusions and CAGR, preserves real holdings, clears selections a
   await expect(page.getByLabel("Holdings", { exact: true })).toContainText(
     "AAA",
   );
-  await page.getByText("Daily values", { exact: true }).click();
-  await expect(page.getByLabel("Daily performance")).toContainText(
-    "Without excluded stocks",
-  );
   blocked = true;
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toContainText(

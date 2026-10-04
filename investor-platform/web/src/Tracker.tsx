@@ -503,45 +503,6 @@ export function Tracker({
             </div>
             <ReturnChart series={report.series} scenario={report.scenario} />
             <YearlyPerformance report={report} requestedEnd={end} />
-            <details>
-              <summary>Daily values</summary>
-              <div
-                className="table-scroll"
-                tabIndex={0}
-                aria-label="Daily performance"
-              >
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Value (USD)</th>
-                      <th>Portfolio</th>
-                      {report.scenario && <th>Without excluded stocks</th>}
-                      <th>SPY</th>
-                      <th>QQQ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.series.map((p, i) => (
-                      <tr key={p.date}>
-                        <td>{p.date}</td>
-                        <td>{number(p.value)}</td>
-                        <td>{percent(p.portfolio)}</td>
-                        {report.scenario && (
-                          <td>
-                            {percent(
-                              report.scenario.series[i]?.portfolio ?? null,
-                            )}
-                          </td>
-                        )}
-                        <td>{percent(p.SPY)}</td>
-                        <td>{percent(p.QQQ)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
           </>
         )}
       </section>
@@ -566,6 +527,44 @@ function ReturnChart({
   const low = Math.min(0, ...values),
     high = Math.max(0.01, ...values),
     span = high - low;
+  const elapsed =
+    (Date.parse(actual.at(-1)!.date) - Date.parse(actual[0].date)) / 86400000;
+  const bucket = (date: string) =>
+    elapsed > 730
+      ? date.slice(0, 4)
+      : elapsed > 180
+        ? `${date.slice(0, 4)}-${Math.floor((Number(date.slice(5, 7)) - 1) / 3)}`
+        : date.slice(0, 7);
+  const ticks = actual.flatMap((point, index) =>
+    index > 0 &&
+    index < actual.length - 1 &&
+    bucket(point.date) !== bucket(actual[index - 1].date)
+      ? [
+          {
+            index,
+            date: point.date,
+            label:
+              elapsed > 730
+                ? point.date.slice(0, 4)
+                : new Date(point.date + "T12:00:00Z").toLocaleDateString(
+                    "en-US",
+                    { month: "short", year: "2-digit", timeZone: "UTC" },
+                  ),
+          },
+        ]
+      : [],
+  );
+  if (!ticks.length && actual.length > 3) {
+    for (const fraction of [1 / 3, 2 / 3]) {
+      const index = Math.floor((actual.length - 1) * fraction);
+      if (!ticks.some((tick) => tick.index === index))
+        ticks.push({
+          index,
+          date: actual[index].date,
+          label: actual[index].date.slice(5),
+        });
+    }
+  }
   return (
     <figure className="return-chart">
       <figcaption>
@@ -580,9 +579,9 @@ function ReturnChart({
         )}
       </figcaption>
       <svg
-        viewBox="0 0 800 240"
+        viewBox="0 0 800 265"
         role="img"
-        aria-label="Cumulative portfolio and benchmark returns; exact values in Daily values"
+        aria-label={`Cumulative portfolio and benchmark returns from ${actual[0]?.date} to ${actual.at(-1)?.date}`}
       >
         <text x="0" y="16">
           {high.toFixed(1)}%
@@ -598,12 +597,37 @@ function ReturnChart({
           stroke="currentColor"
           opacity="0.3"
         />
-        <text x="58" y="229">
-          {actual[0]?.date}
-        </text>
-        <text x="795" y="229" textAnchor="end">
-          {actual.at(-1)?.date}
-        </text>
+        <g className="chart-dates" aria-label="Chart dates">
+          {ticks.map((tick) => {
+            const x = 58 + (tick.index / (actual.length - 1)) * 737;
+            return (
+              <g key={tick.date}>
+                <title>{tick.date}</title>
+                <line
+                  x1={x}
+                  x2={x}
+                  y1="200"
+                  y2="208"
+                  stroke="currentColor"
+                  opacity="0.4"
+                />
+                <text
+                  x={x}
+                  y="226"
+                  textAnchor={x < 100 ? "start" : x > 750 ? "end" : "middle"}
+                >
+                  {tick.label}
+                </text>
+              </g>
+            );
+          })}
+          <text x="58" y="256">
+            {actual[0]?.date}
+          </text>
+          <text x="795" y="256" textAnchor="end">
+            {actual.at(-1)?.date}
+          </text>
+        </g>
         {keys.map(
           (k, index) =>
             series.every((p) => p[k] !== null) && (
