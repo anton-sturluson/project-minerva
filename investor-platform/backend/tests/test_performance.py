@@ -663,3 +663,27 @@ def test_deposit_day_gains_use_all_capital_available_that_day(db_client, portfol
     result = report(db_client, aid).json()
     assert D(result["return"]) == D(".1")
     assert D(result["value"]) == 11000
+
+
+def test_stock_lending_income_follows_its_security_in_exclusion_scenarios(db_client, portfolio):
+    aid, _ = portfolio
+    sid = ledger(db_client, aid)["holdings"][0]["security"]["id"]
+    assert (
+        cash(
+            db_client,
+            aid,
+            "income",
+            "10",
+            day="2026-01-05",
+            income_kind="other",
+            income_security_id=sid,
+        ).status_code
+        == 201
+    )
+    before = ledger(db_client, aid)
+    result = scenario(db_client, aid, [sid]).json()
+    assert result["warnings"] == []
+    assert D(result["return"]) == D(".22")
+    assert D(result["scenario"]["return"]) == 0
+    assert D(result["scenario"]["cash"]) == 1000
+    assert ledger(db_client, aid) == before

@@ -148,11 +148,15 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
     current = entries if start is None else [e for e in entries if e.effective_date >= start]
     if any(
         e.kind == EntryKind.INCOME
-        and e.income_kind not in {IncomeKind.DIVIDEND, IncomeKind.INTEREST}
+        and (
+            e.income_kind is None
+            or (e.income_kind == IncomeKind.OTHER and e.income_security_id is None)
+        )
         for e in current
     ):
         raise ValueError(
-            "Scenario unavailable: classify recorded income as dividends or interest first"
+            "Scenario unavailable: classify income and link stock-specific payments "
+            "to their security"
         )
     result = list(prefix)
     sessions = sorted(histories["SPY"].close)
@@ -181,10 +185,8 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
                 )
             )
     for entry in current:
-        if (
-            entry.income_kind == IncomeKind.DIVIDEND
-            and entry.income_security_id in excluded
-            and (start is None or entry.accrual_date > start)
+        if entry.income_security_id in excluded and (
+            entry.income_kind != IncomeKind.DIVIDEND or start is None or entry.accrual_date > start
         ):
             continue
         if entry.security_id not in excluded:

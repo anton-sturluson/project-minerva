@@ -4,9 +4,9 @@ Status: accepted.
 
 ## Decision
 
-Keep dividend recognition separate from cash payment. Income records may identify a dividend security and ex-date; their effective date remains the cash payment date. Recognize the recorded gross amount as a receivable from ex-date until payment. Payment exchanges that receivable for cash without creating another investment gain. Distinguish dividends from interest and other income with a string enum. The API, correction workflow and database all validate attribution and dates; security ownership is checked within the authenticated workspace.
+Keep dividend recognition separate from cash payment. Income records may identify a dividend security and ex-date; their effective date remains the cash payment date. Recognize the recorded gross amount as a receivable from ex-date until payment. Payment exchanges that receivable for cash without creating another investment gain. Distinguish dividends from interest and other income with a string enum. Interest and other investment income may also identify their security, without an ex-dividend date; this supports stock-lending payments without treating them as dividends. The API, correction workflow and database all validate attribution and dates; security ownership is checked within the authenticated workspace.
 
-Compare each security/ex-date amount against market distribution evidence. Withhold returns for missing, mismatched or unclassified income rather than filling missing cash with an estimate. Provider events alone do not establish a cash payment. For historical reports, retain later recorded payments when their receivable arose within the report. Exclusion scenarios remove attributable dividends while preserving interest; a recorded-period exclusion keeps income earned at or before the period's opening close.
+Compare each security/ex-date amount against market distribution evidence. Withhold returns for missing, mismatched or unclassified income rather than filling missing cash with an estimate. Provider events alone do not establish a cash payment. For historical reports, retain later recorded payments when their receivable arose within the report. Exclusion scenarios remove security-linked income while preserving account-level interest; a recorded-period exclusion keeps income earned at or before the period's opening close.
 
 ## Why
 

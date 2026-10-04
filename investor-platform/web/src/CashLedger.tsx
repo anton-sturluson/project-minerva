@@ -273,8 +273,8 @@ export function CashLedger({
                             {e.income_security && (
                               <>
                                 {" "}
-                                · {e.income_security.ticker} · ex{" "}
-                                {e.accrual_date}
+                                · {e.income_security.ticker}{" "}
+                                {e.accrual_date && <>· ex {e.accrual_date}</>}
                               </>
                             )}
                           </td>

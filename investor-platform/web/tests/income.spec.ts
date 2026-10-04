@@ -94,6 +94,25 @@ test("records a dividend payment and preserves attribution through correction", 
   await expect(page.getByTestId("cash-balance")).toHaveText("USD 12.00");
   await page.reload();
   await expect(page.getByTestId("cash-balance")).toHaveText("USD 12.00");
+  await page.getByText("Record cash", { exact: true }).click();
+  await page.getByLabel("Entry type", { exact: true }).selectOption("income");
+  await page.getByLabel("Income type", { exact: true }).selectOption("other");
+  await page
+    .getByLabel("Income security", { exact: true })
+    .selectOption(buy.security.id);
+  await page
+    .getByLabel("Cash effective date", { exact: true })
+    .fill("2026-01-09");
+  await page.getByLabel("Cash amount", { exact: true }).fill("1.32");
+  await page
+    .getByRole("button", { name: "Save cash entry", exact: true })
+    .click();
+  await expect(page.getByTestId("cash-balance")).toHaveText("USD 13.32");
+  const linked = (
+    await (await request.get(base + "/ledger")).json()
+  ).entries.find((e: { income_kind: string }) => e.income_kind === "other");
+  expect(linked.income_security.id).toBe(buy.security.id);
+  expect(linked.accrual_date).toBeNull();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

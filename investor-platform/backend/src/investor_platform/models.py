@@ -83,7 +83,7 @@ class LedgerEntry(Base):
             """
             (income_kind IS NULL AND income_security_id IS NULL AND accrual_date IS NULL)
             OR (kind = 'income' AND income_kind IS NOT NULL AND income_kind IN ('interest','other')
-                AND income_security_id IS NULL AND accrual_date IS NULL)
+                AND accrual_date IS NULL)
             OR (kind = 'income' AND income_kind IS NOT NULL AND income_kind = 'dividend'
                 AND income_security_id IS NOT NULL
                 AND accrual_date IS NOT NULL AND accrual_date <= effective_date)
