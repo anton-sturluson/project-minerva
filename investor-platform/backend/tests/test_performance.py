@@ -523,3 +523,20 @@ def test_dated_receipt_does_not_cross_earlier_split_or_inflate_return(db_client,
         },
     ).json()
     assert D(scenario["scenario"]["return"]) == 0
+
+
+def test_cash_expenses_reduce_return_while_withdrawals_do_not(db_client, portfolio):
+    aid, data = portfolio
+    # Flat prices isolate the treatment of funding, fees and account income.
+    data["AAA"].close = dict.fromkeys(DAYS, D("100"))
+    assert cash(db_client, aid, "deposit", "200", day="2026-01-05").status_code == 201
+    assert cash(db_client, aid, "income", "20", day="2026-01-06").status_code == 201
+    expense = cash(db_client, aid, "expense", "10", day="2026-01-06")
+    assert expense.status_code == 201
+    assert cash(db_client, aid, "withdrawal", "100", day="2026-01-06").status_code == 201
+    result = report(db_client, aid).json()
+    assert D(result["cash"]) == 110
+    assert float(result["return"]) == pytest.approx(10 / 1200)
+    before = ledger(db_client, aid)
+    assert cash(db_client, aid, "expense", "111", day="2026-01-06").status_code == 409
+    assert ledger(db_client, aid) == before

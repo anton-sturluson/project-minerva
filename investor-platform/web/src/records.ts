@@ -53,6 +53,7 @@ export const labels = {
   opening_cash: "Opening cash",
   deposit: "Deposit",
   income: "Investment income",
+  expense: "Fee or tax",
   withdrawal: "Withdrawal",
   opening_position: "Opening position",
   transfer_in: "Receive shares",
@@ -64,6 +65,7 @@ export const cashKinds = [
   "opening_cash",
   "deposit",
   "income",
+  "expense",
   "withdrawal",
 ] as const satisfies readonly EntryKind[];
 export const positionKinds = [

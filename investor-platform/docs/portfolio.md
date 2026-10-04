@@ -80,3 +80,5 @@ Current holdings fetch only open securities and remain available if the historic
 ## Overview and pages
 
 Portfolio shows the trade scorecard, one holdings table with allocation bars, then performance. Allocation uses recent completed closes and current recorded shares and cash, independently of the selected performance period. Cash is included in the denominator. The five largest securities are shown separately, with smaller positions grouped as Other holdings. Without quotes, recorded shares and basis remain available; market values and allocation stay unavailable. Activity contains collapsible cash/trade forms and transaction history. Research is a separate placeholder view.
+
+Cash **Fee or tax** entries reduce both cash and investment return. Use **Withdrawal** only for money leaving the investment portfolio, not brokerage fees, debit interest or withholding tax. Do not record a fee separately if a trade already includes it.

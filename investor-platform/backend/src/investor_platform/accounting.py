@@ -36,7 +36,7 @@ def replay(entries):
                 raise HTTPException(409, "Entries cannot precede the opening balance date")
             if e.kind in {EntryKind.OPENING_CASH, EntryKind.DEPOSIT, EntryKind.INCOME}:
                 cash += e.amount
-            elif e.kind in {EntryKind.WITHDRAWAL, EntryKind.BUY}:
+            elif e.kind in {EntryKind.WITHDRAWAL, EntryKind.EXPENSE, EntryKind.BUY}:
                 cash -= e.amount
             elif e.kind == EntryKind.SELL:
                 cash += e.amount
