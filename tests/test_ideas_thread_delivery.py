@@ -182,3 +182,44 @@ def test_postgres_thread_receipts_and_ambiguous_retry(tmp_path, monkeypatch):
             )
             conn.execute("DELETE FROM minerva_ideas.items WHERE run_id=%s", (run_id,))
             conn.execute("DELETE FROM minerva_ideas.runs WHERE id=%s", (run_id,))
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "wrong-channel", "partial", "split", "dry-run"]
+)
+def test_core_slack_receipt(tmp_path, monkeypatch, failure):
+    import json
+
+    output = {
+        "dryRun": failure == "dry-run",
+        "payload": {
+            "deliveryStatus": "sent",
+            "payloadOutcomes": [{"status": "sent"}],
+            "result": {
+                "messageId": "12.34",
+                "channel": "slack",
+                "target": {"kind": "channel", "id": "C1"},
+                "receipt": {"platformMessageIds": ["12.34"]},
+            },
+        },
+    }
+    result = output["payload"]["result"]
+    if failure == "wrong-channel":
+        result["target"]["id"] = "C2"
+    elif failure == "partial":
+        output["payload"]["payloadOutcomes"].append({"status": "failed"})
+    elif failure == "split":
+        result["receipt"]["platformMessageIds"].append("12.35")
+    monkeypatch.setattr(
+        p.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout=json.dumps(output))
+    )
+    if failure:
+        with pytest.raises(ValueError, match="confirm"):
+            p.slack_send({"to": "channel:C1"}, "Title", tmp_path, "receipt.json")
+    else:
+        assert (
+            p.slack_send({"to": "channel:C1"}, "Title", tmp_path, "receipt.json")[
+                "message_id"
+            ]
+            == "12.34"
+        )

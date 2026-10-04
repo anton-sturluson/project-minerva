@@ -274,10 +274,18 @@ def slack_send(route: dict, text: str, folder, artifact: str, *, parent=None) ->
     receipt = payload.get("result", {})
     message_id = receipt.get("messageId", "")
     channel_id = route["to"].removeprefix("channel:")
+    plugin_ack = payload.get("ok") is True and receipt.get("channelId") == channel_id
+    core_ack = (
+        payload.get("deliveryStatus") == "sent"
+        and receipt.get("target") == {"kind": "channel", "id": channel_id}
+        and receipt.get("channel") == "slack"
+        and receipt.get("receipt", {}).get("platformMessageIds") == [message_id]
+        and bool(payload.get("payloadOutcomes"))
+        and all(part.get("status") == "sent" for part in payload["payloadOutcomes"])
+    )
     if (
         response.get("dryRun") is True
-        or payload.get("ok") is not True
-        or receipt.get("channelId") != channel_id
+        or not (plugin_ack or core_ack)
         or not re.fullmatch(r"\d+\.\d+", str(message_id))
     ):
         raise ValueError(
