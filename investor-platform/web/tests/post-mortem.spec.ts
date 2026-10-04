@@ -13,16 +13,23 @@ const rows = [
     ticker: "BBB",
     exchange: "NASDAQ",
     contribution: "-.05",
-    gain: "-50",
+    gain: "1000",
+  },
+  {
+    security_id: "c",
+    ticker: "CCC",
+    exchange: "NYSE",
+    contribution: ".02",
+    gain: "-500",
   },
 ];
 const period = {
   period: "2025",
   start: "2024-12-31",
   end: "2025-12-31",
-  return: ".10",
-  contribution_total: ".10",
-  gain: "100",
+  return: ".12",
+  contribution_total: ".12",
+  gain: "650",
   stocks: rows,
 };
 
@@ -69,10 +76,10 @@ test("post-mortem ranks contributions, switches years, recovers and isolates acc
                 period: "2024",
                 start: "2024-01-02",
                 end: "2024-12-31",
-                return: "0",
-                contribution_total: "0",
-                gain: "0",
-                stocks: [],
+                return: null,
+                contribution_total: null,
+                gain: "150",
+                stocks: [{ ...rows[0], contribution: null }],
               },
               period,
             ],
@@ -95,16 +102,48 @@ test("post-mortem ranks contributions, switches years, recovers and isolates acc
   ).toContainText("BBB");
   const table = page.getByLabel("Stock contributions", { exact: true });
   await expect(table.getByRole("row", { name: /^Total/ })).toContainText(
-    "+10.00 pp",
+    "+12.00 pp",
   );
   await expect(table.getByRole("row", { name: /^BBB/ })).toContainText(
     "-5.00 pp",
   );
   await expect(page.getByLabel("Holdings", { exact: true })).toBeHidden();
   await page.getByLabel("Post-mortem year").selectOption("2024");
-  await expect(analysis).toContainText("None this period.");
+  await expect(analysis).toContainText("Unavailable for this period.");
+  const measure = page.getByLabel("Post-mortem measure");
+  await measure.selectOption("gain");
+  await expect(table).toContainText("+$150.0");
+  await expect(analysis).not.toContainText("Unavailable for this period.");
   await page.getByLabel("Post-mortem year").selectOption("all");
-  await expect(table).toContainText("AAA");
+  await expect(measure).toHaveValue("gain");
+  await expect(table.locator("tbody tr").first()).toContainText("BBB");
+  await expect(table.getByRole("row", { name: /^Total/ })).toContainText(
+    "+$650.0",
+  );
+  await expect(
+    page
+      .getByRole("region", { name: "Main contributors", exact: true })
+      .locator("li")
+      .first(),
+  ).toContainText("BBB");
+  await expect(
+    page.getByRole("region", { name: "Main detractors", exact: true }),
+  ).toContainText("CCC");
+  await expect(table).not.toContainText("pp");
+  await measure.selectOption("contribution");
+  await expect(table.locator("tbody tr").first()).toContainText("AAA");
+  await expect(table.getByRole("row", { name: /^Total/ })).toContainText(
+    "+12.00 pp",
+  );
+  await page.getByLabel("Post-mortem year").selectOption("2025");
+  await expect(measure).toHaveValue("contribution");
+  await page.getByLabel("Post-mortem year").selectOption("all");
+  await expect(measure).toHaveValue("gain");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
   await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   fail = true;
   await page

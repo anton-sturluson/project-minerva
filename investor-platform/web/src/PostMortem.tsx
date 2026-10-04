@@ -30,6 +30,12 @@ const points = (value: string | null) =>
     ? "—"
     : `${Number(value) > 0 ? "+" : ""}${number(String(Number(value) * 100))} pp`;
 
+type Measure = "gain" | "contribution";
+const dollars = (value: string | null) =>
+  value === null
+    ? "—"
+    : `${Number(value) > 0 ? "+" : Number(value) < 0 ? "−" : ""}$${number(String(Math.abs(Number(value))), 1)}`;
+
 export function PostMortem({
   account,
   ledger,
@@ -39,6 +45,7 @@ export function PostMortem({
 }) {
   const [reports, setReports] = useState<Attribution[]>([]);
   const [selected, setSelected] = useState("");
+  const [measureOverride, setMeasureOverride] = useState<Measure | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -89,13 +96,20 @@ export function PostMortem({
     p.period === "all"
       ? "Full history"
       : `${p.period}${p.start.slice(0, 4) === p.period ? " · partial" : p.period === today().slice(0, 4) ? " · YTD" : ""}`;
-  const leaders =
-    report?.stocks.filter((s) => Number(s.contribution) > 0).slice(0, 3) ?? [];
-  const detractors =
-    report?.stocks
-      .filter((s) => s.contribution !== null && Number(s.contribution) < 0)
-      .slice(-3)
-      .reverse() ?? [];
+  const measure =
+    measureOverride ?? (selected === "all" ? "gain" : "contribution");
+  const format = measure === "gain" ? dollars : points;
+  const total = measure === "gain" ? report?.gain : report?.contribution_total;
+  const stocks = [...(report?.stocks ?? [])].sort((a, b) => {
+    if (a[measure] === null) return b[measure] === null ? 0 : 1;
+    if (b[measure] === null) return -1;
+    return Number(b[measure]) - Number(a[measure]);
+  });
+  const leaders = stocks.filter((s) => Number(s[measure]) > 0).slice(0, 3);
+  const detractors = stocks
+    .filter((s) => Number(s[measure]) < 0)
+    .slice(-3)
+    .reverse();
   return (
     <section
       className="post-mortem-content"
@@ -122,7 +136,10 @@ export function PostMortem({
               <select
                 aria-label="Post-mortem year"
                 value={selected}
-                onChange={(e) => setSelected(e.target.value)}
+                onChange={(e) => {
+                  setSelected(e.target.value);
+                  setMeasureOverride(null);
+                }}
               >
                 {[...reports].reverse().map((p) => (
                   <option key={p.period} value={p.period}>
@@ -131,15 +148,33 @@ export function PostMortem({
                 ))}
               </select>
             </label>
+            <label>
+              Measure
+              <select
+                aria-label="Post-mortem measure"
+                value={measure}
+                onChange={(e) => setMeasureOverride(e.target.value as Measure)}
+              >
+                <option value="gain">Dollar gains / losses</option>
+                <option value="contribution">Time-weighted contribution</option>
+              </select>
+            </label>
             <p>
-              Stock portfolio return{" "}
-              <strong className={tone(report.return)}>
-                {percent(report.return)}
+              {measure === "gain"
+                ? "Net investment gain"
+                : "Stock portfolio return"}{" "}
+              <strong className={tone(total ?? null)}>
+                {measure === "gain"
+                  ? dollars(report.gain)
+                  : percent(report.return)}
               </strong>
             </p>
           </div>
           <p className="form-note">
-            Contribution to return · estimated · {report.start} — {report.end}
+            {measure === "gain"
+              ? "Realized + unrealized gains, including dividends"
+              : "Contribution to time-weighted return"}{" "}
+            · estimated
           </p>
           <div className="contribution-leaders">
             {[
@@ -155,15 +190,15 @@ export function PostMortem({
                         <span>
                           {stock.ticker} <small>{stock.exchange}</small>
                         </span>
-                        <strong className={tone(stock.contribution)}>
-                          {points(stock.contribution)}
+                        <strong className={tone(stock[measure])}>
+                          {format(stock[measure])}
                         </strong>
                       </li>
                     ))}
                   </ol>
                 ) : (
                   <p className="form-note">
-                    {report.return === null
+                    {total === null
                       ? "Unavailable for this period."
                       : "None this period."}
                   </p>
@@ -180,52 +215,30 @@ export function PostMortem({
               <thead>
                 <tr>
                   <th scope="col">Stock</th>
-                  <th
-                    scope="col"
-                    className="number"
-                    title="Linked percentage-point contribution to portfolio return"
-                  >
-                    Contribution (pp)
-                  </th>
-                  <th
-                    scope="col"
-                    className="number"
-                    title="Realized and unrealized price changes plus estimated gross dividends, after recorded trading costs"
-                  >
-                    Investment gain (USD)
+                  <th scope="col" className="number">
+                    {measure === "gain"
+                      ? "Investment gain (USD)"
+                      : "Time-weighted contribution (pp)"}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {report.stocks.map((stock) => (
+                {stocks.map((stock) => (
                   <tr key={stock.security_id}>
                     <th scope="row">
                       {stock.ticker} <small>{stock.exchange}</small>
                     </th>
-                    <td className={`number ${tone(stock.contribution)}`}>
-                      {points(stock.contribution)}
-                    </td>
-                    <td className={`number ${tone(stock.gain)}`}>
-                      {Number(stock.gain) > 0 ? "+" : ""}
-                      {number(stock.gain, 1)}
+                    <td className={`number ${tone(stock[measure])}`}>
+                      {format(stock[measure])}
                     </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
-                  <th
-                    scope="row"
-                    title="Unrounded contributions sum to the displayed portfolio return"
-                  >
-                    Total
-                  </th>
-                  <td className={`number ${tone(report.contribution_total)}`}>
-                    {points(report.contribution_total)}
-                  </td>
-                  <td className={`number ${tone(report.gain)}`}>
-                    {Number(report.gain) > 0 ? "+" : ""}
-                    {number(report.gain, 1)}
+                  <th scope="row">Total</th>
+                  <td className={`number ${tone(total ?? null)}`}>
+                    {format(total ?? null)}
                   </td>
                 </tr>
               </tfoot>
