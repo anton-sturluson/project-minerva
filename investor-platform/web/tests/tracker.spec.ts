@@ -425,6 +425,8 @@ test("YTD and one-year request prior-close boundaries and preserve the measureme
     });
   });
   await page.goto("/");
+  // Finish the initial full-history report before observing a shortcut request.
+  await expect(page.getByLabel("Performance summary")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "YTD", exact: true }),
   ).toBeEnabled();
