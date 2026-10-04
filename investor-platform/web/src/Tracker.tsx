@@ -365,12 +365,16 @@ export function Tracker({
               </p>
             ))}
             <p>
-              <span>Closing value (USD)</span>{" "}
+              <span>
+                {report.provisional
+                  ? "Estimated closing value (USD)"
+                  : "Closing value (USD)"}
+              </span>{" "}
               <strong>{number(report.value)}</strong>
             </p>
             {report.scenario_error && (
               <p role="alert" className="error">
-                {report.scenario_error}. Original performance is shown.
+                {report.scenario_error}.
               </p>
             )}
             {report.scenario && (

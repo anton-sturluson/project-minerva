@@ -4,7 +4,7 @@ This is the living register of reconstruction assumptions. Change it with the im
 
 | Assumption | Consequence / resolution |
 | --- | --- |
-| Transaction history is incomplete. Opening shares and minimum balancing cash are inferred. | Results remain provisional until broker balances and external flows are reconciled. |
+| Transaction history is incomplete. Opening shares and minimum balancing cash are inferred. | Portfolio return, CAGR, excess returns and exclusion scenarios are withheld until dated funding and broker balances are reconciled. Current holdings and benchmark series remain available. |
 | Unrecorded trades and deposits/withdrawals are absent from the model. | Missing records can materially change returns. Add dated records and regenerate the comparison. |
 | Explicit USD totals establish settlement currency, not listing identity. | Imported exchanges may remain unconfirmed until issuer and listing evidence are reconciled. Keep native quote currency separate from USD cash. |
 | Original rows and discrepancies are retained privately. | Use import provenance and correction history for reconciliation. |

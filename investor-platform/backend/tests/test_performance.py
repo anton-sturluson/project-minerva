@@ -163,7 +163,10 @@ def test_provisional_comparison_models_only_missing_income_without_writing(
 
     aid, data = portfolio
     with Session(database) as session:
-        session.get(Account, UUID(aid)).reconstruction = {"testing": True}
+        session.get(Account, UUID(aid)).reconstruction = {
+            "testing": True,
+            "funding_status": "reconciled",
+        }
         session.scalar(select(Security).where(Security.ticker == "AAA")).exchange = "UNVERIFIED"
         session.commit()
     data["AAA"].dividends[DAYS[1]] = D("1")
@@ -260,7 +263,10 @@ def test_excluded_stock_does_not_contribute_modeled_dividends(db_client, portfol
 
     aid, data = portfolio
     with Session(database) as session:
-        session.get(Account, UUID(aid)).reconstruction = {"testing": True}
+        session.get(Account, UUID(aid)).reconstruction = {
+            "testing": True,
+            "funding_status": "reconciled",
+        }
         session.commit()
     data["AAA"].dividends[DAYS[1]] = D("1")
     before = ledger(db_client, aid)
@@ -540,3 +546,42 @@ def test_cash_expenses_reduce_return_while_withdrawals_do_not(db_client, portfol
     before = ledger(db_client, aid)
     assert cash(db_client, aid, "expense", "111", day="2026-01-06").status_code == 409
     assert ledger(db_client, aid) == before
+
+
+@pytest.mark.parametrize("baseline", ["history", "recorded"])
+def test_inferred_funding_withholds_returns_and_scenarios_until_reconciled(
+    db_client, portfolio, database, baseline
+):
+    from uuid import UUID
+
+    from sqlalchemy.orm import Session
+
+    from investor_platform.domain import FundingStatus
+    from investor_platform.models import Account
+
+    aid, _ = portfolio
+    # Legacy imports have no status field, so they must fail closed too.
+    with Session(database) as session:
+        session.get(Account, UUID(aid)).reconstruction = {"opening_cash": "1000"}
+        session.commit()
+    before = ledger(db_client, aid)
+    sid = before["holdings"][0]["security"]["id"]
+    result = scenario(db_client, aid, [sid], baseline=baseline).json()
+    assert result["funding_status"] == FundingStatus.INFERRED
+    assert result["return"] is None
+    assert result["cagr"]["portfolio"] is None
+    assert result["excess_spy"] is None and result["excess_qqq"] is None
+    assert all(p["portfolio"] is None for p in result["series"])
+    assert result["scenario"] is None
+    assert "cash history" in result["scenario_error"]
+    assert result["SPY"] == "0.02" and result["QQQ"] == "0.04"
+    assert ledger(db_client, aid) == before
+    with Session(database) as session:
+        session.get(Account, UUID(aid)).reconstruction = {
+            "funding_status": FundingStatus.RECONCILED,
+        }
+        session.commit()
+    result = scenario(db_client, aid, [sid], baseline=baseline).json()
+    assert result["warnings"] == []
+    assert D(result["return"]) == D(".21")
+    assert D(result["scenario"]["return"]) == 0

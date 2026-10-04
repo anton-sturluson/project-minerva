@@ -1,6 +1,6 @@
 import { expect, test, performance } from "./fixtures";
 
-test("shows provisional performance, recovers from failure, and keeps provisional status without import prose", async ({
+test("withholds unfunded returns, preserves benchmarks, and recovers from a quote failure", async ({
   page,
 }) => {
   await page.route("**/api/accounts", async (route) => {
@@ -52,6 +52,18 @@ test("shows provisional performance, recovers from failure, and keeps provisiona
           json: {
             ...performance,
             provisional: true,
+            funding_status: "inferred",
+            return: null,
+            cagr: { portfolio: null, SPY: null, QQQ: null },
+            excess_spy: null,
+            excess_qqq: null,
+            warnings: [
+              "Cash history needs reconciliation; starting funding was inferred.",
+            ],
+            series: performance.series.map((point) => ({
+              ...point,
+              portfolio: null,
+            })),
             modeled_income: "6",
             assumptions: ["Opening cash is inferred, not a verified balance."],
           },
@@ -69,6 +81,21 @@ test("shows provisional performance, recovers from failure, and keeps provisiona
   await expect(
     page.getByRole("button", { name: "Calculate hit rate" }),
   ).toBeHidden();
+  await expect(page.getByRole("alert")).toContainText(
+    "Cash history needs reconciliation",
+  );
+  await expect(
+    page.getByRole("row", {
+      name: "Estimated portfolio return — —",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: /S&P 500 · SPY 2.00%/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: /Nasdaq-100 · QQQ 4.00%/ }),
+  ).toBeVisible();
   // Full history stays explicit; failure does not remove current holdings or the recent option.
   unavailable = true;
   await page.getByRole("button", { name: "Full history", exact: true }).click();
