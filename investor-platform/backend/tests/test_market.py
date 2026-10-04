@@ -46,3 +46,35 @@ def test_provider_dates_adjustments_and_future_split(monkeypatch):
     payload["chart"]["result"][0]["meta"]["currency"] = "CAD"
     with pytest.raises(ValueError, match="currency"):
         market.history("AAA", date(2026, 1, 2), date(2026, 1, 5))
+
+
+def test_foreign_holiday_keeps_local_close_but_updates_fx_without_lookahead():
+    from decimal import Decimal as D
+
+    from investor_platform.market import History, usd_history
+
+    days = [date(2026, 1, d) for d in [2, 5, 6, 7, 12]]
+    local = History(
+        {days[0]: D(10), days[2]: D(20)},
+        {days[0]: D(9), days[2]: D(19)},
+        dividends={days[2]: D(1)},
+        exchange="TOR",
+    )
+    fx = History(dict(zip(days, map(D, [".7", ".8", ".9", ".95", "1"]))), {})
+    usd = usd_history(local, fx)
+    assert usd.close == dict(zip(days[:4], map(D, ["7", "8", "18", "19"])))
+    assert usd.dividends == {days[2]: D(".9")}
+    assert usd.adjusted[days[1]] == D("7.2")
+    local.splits.add(days[1])
+    assert days[1] not in usd_history(local, fx).close
+    del fx.close[days[2]]
+    with pytest.raises(ValueError, match="exchange rate"):
+        usd_history(local, fx)
+
+
+def test_provisional_import_still_checks_a_confirmed_exchange():
+    from types import SimpleNamespace
+
+    security = SimpleNamespace(ticker="AAA", exchange="NYSE", currency="USD")
+    with pytest.raises(ValueError, match="listing does not match"):
+        market.verify_exchange(security, market.History({}, {}, exchange="NMS"), provisional=True)
