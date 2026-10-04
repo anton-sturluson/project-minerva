@@ -7,6 +7,7 @@
 | [ADR 0002](decisions/0002-stock-exclusion-scenarios.md) | Stock exclusions, retained cash and scenario limitations. |
 | [ADR 0003](decisions/0003-independent-holdings.md) | Independent current holdings valuation and same-date USD FX. |
 | [ADR 0004](decisions/0004-international-market-data.md) | International listing identity, dated USD conversion and exchange holidays. |
+| [ADR 0005](decisions/0005-recorded-period-baselines.md) | Recent comparisons from recorded balances when old market history is unavailable. |
 | [Operations](operations.md) | Configuration, start/stop, migrations, testing and project layout. |
 | [Portfolio guide](portfolio.md) | Accounts, cash, positions, trade entry, corrections and tracker usage. |
 | [Transaction import](transaction-import.md) | Preview and import a testing portfolio; source evidence, exclusions and inferred balances. |

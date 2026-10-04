@@ -410,3 +410,70 @@ def test_foreign_hit_rate_requires_actual_trade_sessions_not_holiday_carries(
     result = db_client.post(f"/api/accounts/{aid}/hit-rate").json()
     assert result["excluded"] == 1
     assert "Missing matching closing prices" in result["episodes"][0]["excluded"]
+
+
+def test_recorded_baseline_needs_no_closed_history_but_keeps_cash_and_current_safeguards(
+    db_client, portfolio, monkeypatch
+):
+    aid, data = portfolio
+    trade(db_client, aid, "opening_position", "1", ticker="OLD", exchange="NYSE", cost_basis="10")
+    trade(db_client, aid, "sell", "1", "50", ticker="OLD", exchange="NYSE")
+    cash(db_client, aid, amount="100", day="2026-01-05")
+    before = ledger(db_client, aid)
+    calls = []
+
+    def quote(symbol, start, end):
+        calls.append(symbol)
+        if symbol == "OLD":
+            raise OSError("delisted")
+        return data[symbol]
+
+    monkeypatch.setattr(market, "history", quote)
+    assert report(db_client, aid).status_code == 503
+    calls.clear()
+    url = f"/api/accounts/{aid}/performance"
+    period = {"start": "2026-01-05", "end": "2026-01-06", "baseline": "recorded"}
+    result = db_client.post(url, json=period)
+    assert result.status_code == 200, result.text
+    r = result.json()
+    assert "OLD" not in calls
+    assert r["baseline"] == "recorded"
+    assert D(r["cash"]) == 150  # Keeps past sale proceeds and the new deposit.
+    assert D(r["value"]) == 1360
+    assert float(r["return"]) == pytest.approx(1360 / 1250 - 1)
+    sid = before["holdings"][0]["security"]["id"]
+    scenario_result = db_client.post(url, json={**period, "exclude_security_ids": [sid]}).json()
+    assert D(scenario_result["scenario"]["value"]) == 1250
+    assert D(scenario_result["scenario"]["return"]) == 0
+    assert ledger(db_client, aid) == before
+    data["AAA"].splits.add(DAYS[2])
+    assert db_client.post(url, json=period).status_code == 422
+    data["AAA"].splits.clear()
+    del data["AAA"].close[DAYS[2]]
+    assert db_client.post(url, json=period).status_code == 422
+    assert ledger(db_client, aid) == before
+
+
+def test_recorded_baseline_preserves_fifo_lots_across_partial_sales(db_client, portfolio):
+    aid, _ = portfolio
+    cash(db_client, aid, amount="1000", day="2026-01-02")
+    trade(db_client, aid, quantity="5", price="200", ticker="AAA", exchange="NYSE")
+    trade(
+        db_client,
+        aid,
+        "sell",
+        "5",
+        "110",
+        ticker="AAA",
+        exchange="NYSE",
+        effective_date="2026-01-05",
+    )
+    before = ledger(db_client, aid)
+    result = db_client.post(
+        f"/api/accounts/{aid}/performance",
+        json={"start": "2026-01-05", "end": "2026-01-06", "baseline": "recorded"},
+    ).json()
+    # Five shares from the original $100 lot remain, along with all five $200 shares.
+    assert D(result["holdings"][0]["basis"]) == 1500
+    assert D(result["holdings"][0]["unrealized_pnl"]) == -290
+    assert ledger(db_client, aid) == before

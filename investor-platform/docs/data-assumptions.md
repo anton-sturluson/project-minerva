@@ -10,6 +10,7 @@ This is the living register of reconstruction assumptions. Change it with the im
 | Original rows and discrepancies are retained privately. | Use import provenance and correction history for reconciliation. |
 | Missing gross distributions are estimated on ex-dates and held in cash. | Same-date recorded income offsets the model; payment-date income can double count distributions. |
 | Unrecorded fees and taxes are absent. | Estimates are not after-tax returns. |
+| Recent comparisons use recorded opening cash and share quantities. | Missing pre-period income and corporate actions are not reconstructed; verify opening balances. Full history retains its stricter data requirements. |
 | Market prices come from one provider. | Values are not independently verified and may be revised. |
 
 See [transaction import](transaction-import.md) for ingestion rules, [performance](performance.md) for calculation conventions and [hit rate](hit-rate.md) for exclusions. The UI retains provisional status and errors that prevent a valid calculation; import details are available from the private account metadata/API.

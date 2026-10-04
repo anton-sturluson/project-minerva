@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime
 from decimal import Decimal, DecimalException, localcontext
+from enum import StrEnum
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -86,11 +87,28 @@ def statistics(account_id: UUID, session: DB, actor: Identity):
         return wire(trade_statistics(entries_for(session, account_id)))
 
 
+class Baseline(StrEnum):
+    HISTORY = "history"
+    RECORDED = "recorded"
+
+
 class Period(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: date
     end: date
+    baseline: Baseline = Baseline.HISTORY
     exclude_security_ids: list[UUID] = Field(default_factory=list, max_length=market.MAX_SECURITIES)
+
+
+def period_securities(entries, start=None):
+    """Keep every ledger lot; only skip price history for positions already closed."""
+    securities = {e.security_id: e.security for e in entries if e.security_id}
+    if start is None:
+        return securities
+    _, lots, _ = replay([e for e in entries if e.effective_date < start])
+    needed = {sid for sid, position in lots.items() if any(lot.quantity for lot in position)}
+    needed.update(e.security_id for e in entries if e.effective_date >= start and e.security_id)
+    return {sid: security for sid, security in securities.items() if sid in needed}
 
 
 def annualized_return(cumulative, start, end):
@@ -103,15 +121,41 @@ def annualized_return(cumulative, start, end):
     return (ONE + cumulative) ** (DAYS_PER_YEAR / Decimal(days)) - ONE
 
 
-def scenario_entries(entries, excluded, histories, *, provisional):
+def scenario_entries(entries, excluded, histories, *, provisional, start=None):
     """Build a read-only cash alternative; never mutate or attach ledger objects."""
-    if any(e.kind == EntryKind.INCOME for e in entries):
+    prefix = [] if start is None else [e for e in entries if e.effective_date < start]
+    current = entries if start is None else [e for e in entries if e.effective_date >= start]
+    if any(e.kind == EntryKind.INCOME for e in current):
         raise ValueError(
             "Scenario unavailable: recorded income is not linked to individual stocks yet"
         )
-    result = []
+    result = list(prefix)
     sessions = sorted(histories["SPY"].close)
-    for entry in entries:
+    if prefix:
+        _, lots, _ = replay(prefix)
+        securities = {e.security_id: e.security for e in prefix if e.security_id}
+        day = next((d for d in sessions if d >= start), None)
+        for index, sid in enumerate(sorted(excluded)):
+            quantity = sum((lot.quantity for lot in lots.get(sid, [])), ZERO)
+            if not quantity:
+                continue
+            symbol = market.symbol_for(securities[sid], provisional=provisional)
+            price = histories[symbol].close.get(day)
+            if price is None:
+                raise ValueError("Scenario unavailable: missing opening-position valuation")
+            # Release opening capital at the first session close; preserve all earlier trades.
+            result.append(
+                LedgerEntry(
+                    id=-index - 1,
+                    kind=EntryKind.SELL,
+                    effective_date=start,
+                    security_id=sid,
+                    security=securities[sid],
+                    quantity=quantity,
+                    amount=quantity * price,
+                )
+            )
+    for entry in current:
         if entry.security_id not in excluded:
             result.append(entry)
         elif entry.kind == EntryKind.OPENING_POSITION:
@@ -140,7 +184,7 @@ def scenario_entries(entries, excluded, histories, *, provisional):
     return result
 
 
-def calculate(entries, histories, start, end, *, provisional=False):
+def calculate(entries, histories, start, end, *, provisional=False, baseline=Baseline.HISTORY):
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
     spy, qqq = histories["SPY"], histories["QQQ"]
     days = sorted(d for d in spy.close if start <= d <= end)
@@ -148,7 +192,7 @@ def calculate(entries, histories, start, end, *, provisional=False):
         raise ValueError("Need at least two matching SPY and QQQ closing sessions")
     if (end - days[-1]).days > 4:
         raise ValueError("Benchmark history is stale at the requested end date")
-    securities = {e.security_id: e.security for e in entries if e.security_id}
+    securities = period_securities(entries, start if baseline == Baseline.RECORDED else None)
     prices = {
         sid: histories[market.symbol_for(s, provisional=provisional)]
         for sid, s in securities.items()
@@ -158,7 +202,7 @@ def calculate(entries, histories, start, end, *, provisional=False):
     # If shares span a split, the ledger needs a corporate-action record (not supported yet).
     for sid, h in prices.items():
         for d in sorted(h.splits):
-            if d > days[-1]:
+            if d > days[-1] or (baseline == Baseline.RECORDED and d < start):
                 continue
             quantity = sum(
                 (
@@ -181,7 +225,7 @@ def calculate(entries, histories, start, end, *, provisional=False):
     distributions = {}
     for sid, h in prices.items():
         for exdate, dividend in h.dividends.items():
-            if exdate > days[-1]:
+            if exdate > days[-1] or (baseline == Baseline.RECORDED and exdate < start):
                 continue
             shares = sum(
                 (
@@ -340,37 +384,52 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     if not entries or period.start < entries[0].effective_date:
         raise HTTPException(422, "Start on or after your first ledger entry")
     entries = [e for e in entries if e.effective_date <= period.end]
-    securities = {e.security_id: e.security for e in entries if e.security_id}
+    recorded = period.baseline == Baseline.RECORDED
+    securities = period_securities(entries, period.start if recorded else None)
+    fetch_start = period.start if recorded else entries[0].effective_date
     excluded = set(period.exclude_security_ids)
     if not excluded.issubset(securities):
-        raise HTTPException(
-            422, "Choose excluded stocks from this account's history through the end date"
-        )
+        raise HTTPException(422, "Choose excluded stocks held during this comparison period")
     try:
-        if (
-            len(securities) > market.MAX_SECURITIES
-            or entries[0].effective_date < today - market.HISTORY_WINDOW
-        ):
+        if len(securities) > market.MAX_SECURITIES or fetch_start < today - market.HISTORY_WINDOW:
             raise ValueError(
                 f"This tracker supports up to {market.MAX_SECURITIES} securities "
                 "and ten years of ledger history"
             )
-        # Fetch from inception to detect unrecorded historical splits, even for a recent report.
+        # Full-history mode validates from inception; recorded mode trusts opening share units.
         fetched = market.security_histories(
-            securities.values(), entries[0].effective_date, period.end, provisional=provisional
+            securities.values(), fetch_start, period.end, provisional=provisional
         )
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
-            result = calculate(entries, fetched, period.start, period.end, provisional=provisional)
+            result = calculate(
+                entries,
+                fetched,
+                period.start,
+                period.end,
+                provisional=provisional,
+                baseline=period.baseline,
+            )
+            result["baseline"] = period.baseline
+            result["security_ids"] = list(securities)
             result["scenario"] = None
             result["scenario_error"] = None
             if excluded:
                 try:
                     alternative = scenario_entries(
-                        entries, excluded, fetched, provisional=provisional
+                        entries,
+                        excluded,
+                        fetched,
+                        provisional=provisional,
+                        start=period.start if recorded else None,
                     )
                     result["scenario"] = calculate(
-                        alternative, fetched, period.start, period.end, provisional=provisional
+                        alternative,
+                        fetched,
+                        period.start,
+                        period.end,
+                        provisional=provisional,
+                        baseline=period.baseline,
                     )
                     result["scenario"]["excluded"] = [
                         {"id": sid, "ticker": s.ticker, "exchange": s.exchange}

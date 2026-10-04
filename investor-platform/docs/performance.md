@@ -16,6 +16,12 @@ Gross dividends/capital-gain distributions must be entered as investment income 
 
 Shares held across a provider-reported split block the report until split accounting exists. Provider identity, currency and instrument type are validated. Histories are fetched on request, not cached or saved; source and report dates are displayed; fetch time is retained in the API response. **Single-provider data is unverified against an independent source and may be revised.** Ledger changes and date changes clear old reports. No future session or intraday quote is presented as a completed close.
 
+## Recent and full-history views
+
+Reconstructed portfolios open to **Last 90 days**, using recorded starting cash and shares. Earlier closed positions require no price lookup, but their sale proceeds and original FIFO lots remain in accounting. Earlier missing income and split adjustments are not reconstructed in this mode, so the opening balance must be treated as provisional. Dates remain editable. **Full history** retains inception reconciliation and can still fail if a delisted price series is unavailable. Neither mode replaces missing prices with zero or trade prices. See [ADR 0005](decisions/0005-recorded-period-baselines.md).
+
+In a recorded-baseline view, exclusions apply within that period: prior trades remain, and excluded opening shares become cash at the first session close. The all-history trade scorecard and current holdings are independent of this choice.
+
 ## International listings
 
 ASX, TSX/TSXV and Stockholm main/First North quotes are converted to USD using dated AUD, CAD or SEK exchange rates. USD OTC listings are also supported. The recorded USD purchase/sale amounts are never converted again. Foreign holidays use the last available local close (at most four calendar days old) with current-session FX; missing FX or stale prices block valuation. This is a daily-date convention, not synchronized intraday pricing across time zones. See [ADR 0004](decisions/0004-international-market-data.md) for identity and calendar rules.

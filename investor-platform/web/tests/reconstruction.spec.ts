@@ -36,9 +36,11 @@ test("shows provisional performance, recovers from failure, and keeps provisiona
     });
   });
   let requests = 0;
+  let latestPeriod: { start: string; baseline?: string } | undefined;
   let unavailable = true;
   await page.route("**/performance", (route) => {
     requests++;
+    latestPeriod = route.request().postDataJSON();
     return unavailable
       ? route.fulfill({
           status: 503,
@@ -55,6 +57,8 @@ test("shows provisional performance, recovers from failure, and keeps provisiona
   });
   await page.goto("/");
   await expect(page.getByText(/Quotes temporarily unavailable/)).toBeVisible();
+  expect(latestPeriod?.baseline).toBe("recorded");
+  expect((latestPeriod?.start ?? "") > "2026-01-02").toBe(true);
   unavailable = false;
   await page.getByRole("button", { name: "Retry comparison" }).click();
   await expect(
@@ -63,6 +67,20 @@ test("shows provisional performance, recovers from failure, and keeps provisiona
   await expect(
     page.getByRole("button", { name: "Calculate hit rate" }),
   ).toBeHidden();
+  // Full history stays explicit; failure does not remove current holdings or the recent option.
+  unavailable = true;
+  await page.getByRole("button", { name: "Full history", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Quotes temporarily unavailable",
+  );
+  expect(latestPeriod?.start).toBe("2026-01-02");
+  expect(latestPeriod?.baseline).toBeUndefined();
+  unavailable = false;
+  await page.getByRole("button", { name: "Last 90 days", exact: true }).click();
+  await expect(
+    page.getByText("Estimated portfolio return", { exact: true }),
+  ).toBeVisible();
+  expect(latestPeriod?.baseline).toBe("recorded");
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Provisional portfolio vs. the market" }),
