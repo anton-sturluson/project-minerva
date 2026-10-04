@@ -103,10 +103,14 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
     }),
   ).toBeVisible();
   await expect(
-    page.getByRole("row", { name: /S&P 500 · SPY 2.00%/ }),
+    page
+      .getByLabel("Performance summary")
+      .getByRole("row", { name: /S&P 500 · SPY 2.00%/ }),
   ).toBeVisible();
   await expect(
-    page.getByRole("row", { name: /Nasdaq-100 · QQQ 4.00%/ }),
+    page
+      .getByLabel("Performance summary")
+      .getByRole("row", { name: /Nasdaq-100 · QQQ 4.00%/ }),
   ).toBeVisible();
   // Full history stays explicit; failure does not remove current holdings or the YTD option.
   unavailable = true;

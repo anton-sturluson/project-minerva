@@ -11,6 +11,7 @@ import { number, percent } from "./format";
 import { HitRate } from "./HitRate";
 import { Holdings } from "./Holdings";
 import { StockExclusions } from "./StockExclusions";
+import { BenchmarkReturn, YearlyPerformance } from "./YearlyPerformance";
 import { today, type Ledger } from "./records";
 
 type Scope = "stocks" | "account";
@@ -249,12 +250,6 @@ export function Tracker({
             Full history
           </button>
         </p>
-        {scope === "account" && baseline === "recorded" && (
-          <p className="form-note">
-            Uses recorded starting cash and shares; earlier income is not
-            reconstructed.
-          </p>
-        )}
         <form className="entry-form performance-controls" onSubmit={submit}>
           <label>
             Measure
@@ -436,7 +431,12 @@ export function Tracker({
                   <tr>
                     <th>Return</th>
                     <th className="number">Cumulative</th>
-                    <th className="number">CAGR</th>
+                    <th
+                      className="number"
+                      title="Annualized return; requires at least one year"
+                    >
+                      CAGR
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -466,34 +466,43 @@ export function Tracker({
                   )}
                   <tr>
                     <td>S&amp;P 500 · SPY</td>
-                    <td className="number">{percent(report.SPY)}</td>
                     <td className="number">
-                      {percent(report.cagr?.SPY ?? null)}
+                      <BenchmarkReturn
+                        value={report.SPY}
+                        portfolio={report.return}
+                        name="S&P 500"
+                      />
+                    </td>
+                    <td className="number">
+                      <BenchmarkReturn
+                        value={report.cagr?.SPY ?? null}
+                        portfolio={report.cagr?.portfolio ?? null}
+                        name="S&P 500 CAGR"
+                      />
                     </td>
                   </tr>
                   <tr>
                     <td>Nasdaq-100 · QQQ</td>
-                    <td className="number">{percent(report.QQQ)}</td>
                     <td className="number">
-                      {percent(report.cagr?.QQQ ?? null)}
+                      <BenchmarkReturn
+                        value={report.QQQ}
+                        portfolio={report.return}
+                        name="Nasdaq-100"
+                      />
+                    </td>
+                    <td className="number">
+                      <BenchmarkReturn
+                        value={report.cagr?.QQQ ?? null}
+                        portfolio={report.cagr?.portfolio ?? null}
+                        name="Nasdaq-100 CAGR"
+                      />
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            {(Date.parse(report.end) - Date.parse(report.start)) / 86400000 <
-              365 && <p className="form-note">CAGR needs at least one year.</p>}
-            <p className="form-note">
-              Portfolio excess · SPY{" "}
-              {report.excess_spy === null
-                ? "—"
-                : `${number(String(Number(report.excess_spy) * 100))} pp`}{" "}
-              · QQQ{" "}
-              {report.excess_qqq === null
-                ? "—"
-                : `${number(String(Number(report.excess_qqq) * 100))} pp`}
-            </p>
             <ReturnChart series={report.series} scenario={report.scenario} />
+            <YearlyPerformance report={report} requestedEnd={end} />
             <details>
               <summary>Daily values</summary>
               <div

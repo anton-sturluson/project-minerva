@@ -86,3 +86,7 @@ Choose **Dividend · gross**, **Interest**, or **Other investment income** under
 Portfolio shows the trade scorecard, one holdings table with allocation bars, then performance. Allocation uses recent completed closes and current recorded shares and cash, independently of the selected performance period. Cash is included in the denominator. The five largest securities are shown separately, with smaller positions grouped as Other holdings. Without quotes, recorded shares and basis remain available; market values and allocation stay unavailable. Activity contains collapsible cash/trade forms and transaction history. Research is a separate placeholder view.
 
 Cash **Fee or tax** entries reduce both cash and investment return. Use **Withdrawal** only for money leaving the investment portfolio, not brokerage fees, debit interest or withholding tax. Do not record a fee separately if a trade already includes it.
+
+## Holdings summary
+
+Gain % is unrealized P&L divided by the remaining cost basis of each holding; zero or unknown basis displays unavailable. The **Stocks total** row excludes cash and sums stock market value, remaining basis and net unrealized P&L. Its gain percentage uses total P&L / total basis, not an average of individual percentages. Cash remains a separate row, and market/cost allocation weights include cash in their denominators. Missing prices or basis withhold affected aggregate figures instead of adding only known positions.

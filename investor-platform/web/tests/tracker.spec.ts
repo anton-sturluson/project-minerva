@@ -101,7 +101,7 @@ test("compares dated returns, explains outage, and invalidates old results", asy
     end: "2026-01-06",
     baseline: "recorded",
   });
-  await expect(page.getByText(/Uses recorded starting cash/)).toBeVisible();
+
   const full = page.waitForRequest("**/performance");
   await page.getByRole("button", { name: "Full history", exact: true }).click();
   expect((await full).postDataJSON().baseline).toBeUndefined();
