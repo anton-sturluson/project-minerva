@@ -12,6 +12,8 @@ import { HitRate } from "./HitRate";
 import { Holdings } from "./Holdings";
 import { today, type Ledger } from "./records";
 
+type Scope = "stocks" | "account";
+
 type Baseline = "history" | "recorded";
 
 type Point = {
@@ -28,6 +30,7 @@ type CAGR = {
   QQQ: string | null;
 };
 export type Report = {
+  scope?: Scope;
   baseline?: Baseline;
   security_ids?: string[];
   cagr: CAGR;
@@ -75,6 +78,7 @@ export function Tracker({
   account: Account;
   ledger: Ledger;
 }) {
+  const [scope, setScope] = useState<Scope>("stocks");
   const [baseline, setBaseline] = useState<Baseline>("history");
   const [start, setStart] = useState(
     ledger.entries[0]?.effective_date ?? yesterday(),
@@ -98,6 +102,7 @@ export function Tracker({
       through: string,
       exclusions: string[] = [],
       basis: Baseline = "history",
+      measurement: Scope = "stocks",
     ) => {
       const version = ++generation.current;
       setBusy(true);
@@ -111,6 +116,7 @@ export function Tracker({
           {
             method: "POST",
             body: JSON.stringify({
+              scope: measurement,
               start: from,
               end: through,
               ...(basis === "recorded" ? { baseline: basis } : {}),
@@ -137,6 +143,7 @@ export function Tracker({
     // Always open the full recorded history; recent comparisons are explicitly selected.
     const through = yesterday();
     const from = ledger.entries[0]?.effective_date ?? through;
+    setScope("stocks");
     setBaseline("history");
     setExcluded([]);
     setStart(from);
@@ -156,7 +163,7 @@ export function Tracker({
   }, [account.base_currency, account.reconstruction, ledger, compare]);
   function submit(e: FormEvent) {
     e.preventDefault();
-    void compare(start, end, excluded, baseline);
+    void compare(start, end, excluded, baseline, scope);
   }
   function choosePeriod(basis: Baseline) {
     const through = yesterday();
@@ -169,7 +176,7 @@ export function Tracker({
     setEnd(through);
     setExcluded([]);
     setReport(null);
-    void compare(from, through, [], basis);
+    void compare(from, through, [], basis, scope);
   }
   return (
     <>
@@ -190,9 +197,9 @@ export function Tracker({
         aria-labelledby="performance-heading"
       >
         <h2 id="performance-heading">
-          {account.reconstruction
-            ? "Provisional portfolio vs. the market"
-            : "Portfolio vs. the market"}
+          {scope === "stocks"
+            ? "Stocks vs. the market"
+            : "Account vs. the market"}
         </h2>
         <p className="period-shortcuts">
           <button
@@ -214,13 +221,30 @@ export function Tracker({
             Full history
           </button>
         </p>
-        {baseline === "recorded" && (
+        {scope === "account" && baseline === "recorded" && (
           <p className="form-note">
             Uses recorded starting cash and shares; earlier income is not
             reconstructed.
           </p>
         )}
         <form className="entry-form performance-controls" onSubmit={submit}>
+          <label>
+            Measure
+            <select
+              aria-label="Performance measure"
+              value={scope}
+              disabled={busy}
+              onChange={(e) => {
+                const next = e.target.value as Scope;
+                setScope(next);
+                setReport(null);
+                void compare(start, end, excluded, baseline, next);
+              }}
+            >
+              <option value="stocks">Stocks only</option>
+              <option value="account">Whole account</option>
+            </select>
+          </label>
           <label>
             From
             <input
@@ -357,6 +381,12 @@ export function Tracker({
         )}
         {report && (
           <>
+            {report.scope === "stocks" && (
+              <p className="form-note">
+                Estimated stock return · excludes idle cash · includes estimated
+                gross dividends.
+              </p>
+            )}
             <p className="report-date">
               {report.start} — {report.end} · {report.source}
             </p>
@@ -379,9 +409,11 @@ export function Tracker({
             )}
             <p>
               <span>
-                {report.provisional
-                  ? "Estimated closing value (USD)"
-                  : "Closing value (USD)"}
+                {report.scope === "stocks"
+                  ? "Stock value (USD)"
+                  : report.provisional
+                    ? "Estimated closing value (USD)"
+                    : "Closing value (USD)"}
               </span>{" "}
               <strong>{number(report.value)}</strong>
               {Number(report.receivables ?? 0) > 0 && (
@@ -402,7 +434,10 @@ export function Tracker({
                 {report.scenario.excluded
                   .map((s) => `${s.ticker} · ${s.exchange}`)
                   .join(", ")}{" "}
-                · unused cash retained
+                ·{" "}
+                {report.scope === "stocks"
+                  ? "remaining stocks only"
+                  : "unused cash retained"}
               </p>
             )}
             <div
@@ -421,9 +456,11 @@ export function Tracker({
                 <tbody>
                   <tr>
                     <td>
-                      {report.provisional
-                        ? "Estimated portfolio return"
-                        : "Portfolio return"}
+                      {report.scope === "stocks"
+                        ? "Stock portfolio return"
+                        : report.provisional
+                          ? "Estimated portfolio return"
+                          : "Portfolio return"}
                     </td>
                     <td className="number">{percent(report.return)}</td>
                     <td className="number">

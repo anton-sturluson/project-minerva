@@ -8,15 +8,11 @@ ZERO = Decimal(0)
 CENT = Decimal("0.01")
 
 
-def dividend_receivables(entries, prices, securities, days, *, validation_start=None):
-    dividends = [e for e in entries if e.income_kind == IncomeKind.DIVIDEND]
-    warnings = []
-    if any(e.kind == EntryKind.INCOME and e.income_kind is None for e in entries):
-        warnings.append("Classify recorded income as dividends, interest or other income.")
+def market_dividends(entries, prices, through, *, validation_start=None):
     expected = {}
     for sid, history in prices.items():
         for exdate, per_share in history.dividends.items():
-            if exdate > days[-1] or (validation_start and exdate < validation_start):
+            if exdate > through or (validation_start and exdate < validation_start):
                 continue
             shares = sum(
                 (
@@ -28,6 +24,15 @@ def dividend_receivables(entries, prices, securities, days, *, validation_start=
             )
             if shares:
                 expected[sid, exdate] = shares * per_share
+    return expected
+
+
+def dividend_receivables(entries, prices, securities, days, *, validation_start=None):
+    dividends = [e for e in entries if e.income_kind == IncomeKind.DIVIDEND]
+    warnings = []
+    if any(e.kind == EntryKind.INCOME and e.income_kind is None for e in entries):
+        warnings.append("Classify recorded income as dividends, interest or other income.")
+    expected = market_dividends(entries, prices, days[-1], validation_start=validation_start)
     recorded = {}
     for entry in dividends:
         if entry.accrual_date > days[-1] or (

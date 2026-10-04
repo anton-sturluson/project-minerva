@@ -38,11 +38,17 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
     });
   });
   let requests = 0;
-  let latestPeriod: { start: string; baseline?: string } | undefined;
+  let latestPeriod:
+    { start: string; baseline?: string; scope?: string } | undefined;
   let unavailable = true;
   await page.route("**/performance", (route) => {
     requests++;
     latestPeriod = route.request().postDataJSON();
+    if (!unavailable && latestPeriod?.scope === "stocks") {
+      return route.fulfill({
+        json: { ...performance, scope: "stocks", provisional: true },
+      });
+    }
     return unavailable
       ? route.fulfill({
           status: 503,
@@ -75,6 +81,12 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
   expect(latestPeriod?.start).toBe("2026-01-02");
   unavailable = false;
   await page.getByRole("button", { name: "Retry comparison" }).click();
+  await expect(
+    page.getByText("Stock portfolio return", { exact: true }),
+  ).toBeVisible();
+  expect(latestPeriod?.scope).toBe("stocks");
+  await expect(page.getByRole("alert")).toBeHidden();
+  await page.getByLabel("Performance measure").selectOption("account");
   await expect(
     page.getByText("Estimated portfolio return", { exact: true }),
   ).toBeVisible();
@@ -112,12 +124,12 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
   expect(latestPeriod?.baseline).toBe("recorded");
   await page.reload();
   await expect(
-    page.getByText("Estimated portfolio return", { exact: true }),
+    page.getByText("Stock portfolio return", { exact: true }),
   ).toBeVisible();
   expect(latestPeriod?.baseline).toBeUndefined();
   expect(latestPeriod?.start).toBe("2026-01-02");
   await expect(
-    page.getByRole("heading", { name: "Provisional portfolio vs. the market" }),
+    page.getByRole("heading", { name: "Stocks vs. the market" }),
   ).toBeVisible();
   await expect(
     page.getByText("Import assumptions & excluded rows", { exact: true }),
