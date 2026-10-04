@@ -1,6 +1,7 @@
 """Small replaceable Yahoo adapter. Only public symbols/dates leave the app."""
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
@@ -28,6 +29,7 @@ class History:
     dividends: dict[date, Decimal] = field(default_factory=dict)
     splits: set[date] = field(default_factory=set)
     exchange: str = ""
+    source: str = SOURCE
 
 
 def positive(value):
@@ -185,11 +187,30 @@ def usd_history(local, fx):
             if day not in fx.close:
                 raise ValueError(f"Missing USD exchange rate for distribution on {day}")
             dividends[day] = amount * fx.close[day]
-    return History(closes, adjusted, dividends, local.splits, local.exchange)
+    return History(
+        closes,
+        adjusted,
+        dividends,
+        local.splits,
+        local.exchange,
+        source=" + ".join(sorted({local.source, fx.source})),
+    )
 
 
-def security_histories(securities, start, end, *, provisional=False, convert_fx=True):
+def security_histories(
+    securities,
+    start,
+    end,
+    *,
+    provisional=False,
+    convert_fx=True,
+    engine=None,
+    workspace_id=None,
+    windows=None,
+):
     """Fetch each listing once; optionally convert valuation histories to USD."""
+    securities = list(securities)
+    by_symbol = {symbol_for(s, provisional=provisional): s for s in securities}
     requests = {b: {} for b in BENCHMARKS}
     foreign = {}
     for security in securities:
@@ -205,9 +226,26 @@ def security_histories(securities, start, end, *, provisional=False, convert_fx=
             requests[symbol] = {}
 
     def fetch(symbol):
+        first, last = (
+            (start, end) if symbol in BENCHMARKS else (windows or {}).get(symbol, (start, end))
+        )
+        first -= MAX_CLOSE_AGE
         try:
-            return symbol, history(symbol, start - MAX_CLOSE_AGE, end, **requests[symbol])
+            if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol.endswith("USD=X"):
+                from .tiingo import fx_history
+
+                return symbol, fx_history(symbol[:-5], first, last, engine, workspace_id)
+            return symbol, history(symbol, first, last, **requests[symbol])
         except (OSError, KeyError, TypeError, IndexError):
+            if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol in by_symbol:
+                from .tiingo import stock_history
+
+                try:
+                    return symbol, stock_history(
+                        by_symbol[symbol], first + MAX_CLOSE_AGE, last, engine, workspace_id
+                    )
+                except (OSError, KeyError, TypeError, IndexError):
+                    pass
             return symbol, None
 
     with ThreadPoolExecutor(max_workers=6) as pool:

@@ -159,6 +159,8 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
                 start,
                 end,
                 convert_fx=False,
+                engine=session.get_bind(),
+                workspace_id=actor.workspace_id,
             )
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
@@ -167,7 +169,9 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
             {
                 **result,
                 "fetched_at": datetime.now(UTC),
-                "source": market.SOURCE if candidates else "Saved records",
+                "source": " + ".join(sorted({h.source for h in histories.values()}))
+                if candidates
+                else "Saved records",
             }
         )
     except ValueError as exc:

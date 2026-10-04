@@ -111,6 +111,18 @@ def period_securities(entries, start=None):
     return {sid: security for sid, security in securities.items() if sid in needed}
 
 
+def holding_windows(entries, securities, start, end, *, provisional):
+    """Daily valuation only needs prices while a position is held, never after its final sale."""
+    windows = {}
+    for sid, security in securities.items():
+        rows = [e for e in entries if e.security_id == sid]
+        quantity = sum((e.quantity * (-1 if e.kind == EntryKind.SELL else 1) for e in rows), ZERO)
+        first = max(start, rows[0].effective_date)
+        last = end if quantity else min(end, rows[-1].effective_date)
+        windows[market.symbol_for(security, provisional=provisional)] = (first, last)
+    return windows
+
+
 def annualized_return(cumulative, start, end):
     """Annualize the linked return, never the raw balance change."""
     days = (end - start).days
@@ -398,7 +410,15 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
             )
         # Full-history mode validates from inception; recorded mode trusts opening share units.
         fetched = market.security_histories(
-            securities.values(), fetch_start, period.end, provisional=provisional
+            securities.values(),
+            fetch_start,
+            period.end,
+            provisional=provisional,
+            engine=session.get_bind(),
+            workspace_id=actor.workspace_id,
+            windows=holding_windows(
+                entries, securities, fetch_start, period.end, provisional=provisional
+            ),
         )
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
@@ -438,7 +458,15 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                     ]
                 except ValueError as exc:
                     result["scenario_error"] = str(exc)
-        return wire({**result, "fetched_at": datetime.now(UTC), "source": market.SOURCE})
+        return wire(
+            {
+                **result,
+                "fetched_at": datetime.now(UTC),
+                "source": " + ".join(
+                    sorted({source for h in fetched.values() for source in h.source.split(" + ")})
+                ),
+            }
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except market.MarketDataError as exc:

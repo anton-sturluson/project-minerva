@@ -125,5 +125,9 @@ app = create_app()
 
 
 def main() -> None:
+    from dotenv import load_dotenv
+
+    # Explicit working-directory configuration; shell variables retain precedence.
+    load_dotenv(".env", override=False)
     remote = os.environ.get("INVESTOR_MODE", "local") == "tailscale"
-    uvicorn.run(app, host="127.0.0.1", port=8011 if remote else 8010, proxy_headers=False)
+    uvicorn.run(create_app(), host="127.0.0.1", port=8011 if remote else 8010, proxy_headers=False)
