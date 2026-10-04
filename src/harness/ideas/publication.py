@@ -89,19 +89,34 @@ def route_fields(route: dict) -> dict:
 
 
 def prepare(run_id: UUID, job_id: UUID) -> str:
+    prepared = prepare_publication(run_id, job_id)
+    return prepared["text"] if prepared else "NO_REPLY"
+
+
+def prepare_publication(run_id: UUID, job_id: UUID, *, threaded=False) -> dict | None:
     text = render(run_id)
     if not text:
-        return "NO_REPLY"
+        return None
     job = gateway_json("get", str(job_id))
     route = route_fields(job.get("delivery", {}))
+    if threaded:
+        route["format"] = "manager-thread-v1"
+        if job.get("delivery", {}).get("accountId"):
+            route["accountId"] = job["delivery"]["accountId"]
+        if route.get("threadId"):
+            raise ValueError("Thread publication requires no fixed delivery.threadId")
+        title = f"🧵 Manager Ideas - {store.get_run(run_id)['issue_date']}"
+        # Validate all parts before creating a publication or sending its parent.
+        thread_parts(text)
+        text = title + "\n\n" + text
     if (
         job.get("payload", {}).get("kind") != "command"
-        or job.get("delivery", {}).get("mode") != "announce"
+        or job.get("delivery", {}).get("mode") != ("none" if threaded else "announce")
         or route["channel"] != "slack"
         or not route["to"]
     ):
         raise ValueError(
-            "Publication requires a native command job with the existing explicit Slack announce route"
+            "Publication requires a native command job with an explicit Slack destination; threaded delivery requires mode=none, legacy prepare requires mode=announce"
         )
     digest = hashlib.sha256(
         (str(job_id) + json.dumps(route, sort_keys=True) + "\n" + text).encode()
@@ -111,7 +126,7 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
             "SELECT state FROM minerva_ideas.publications WHERE digest=%s", (digest,)
         ).fetchone()
         if existing and existing["state"] == "delivered":
-            return "NO_REPLY"
+            return None
         pending = conn.execute(
             "SELECT 1 FROM minerva_ideas.publications WHERE run_id=%s AND job_id=%s AND state!='delivered'",
             (run_id, job_id),
@@ -130,12 +145,12 @@ def prepare(run_id: UUID, job_id: UUID) -> str:
             (digest, run_id, job_id, Jsonb(route)),
         ).fetchone()
         if row:
-            return text
+            return {"digest": digest, "text": text, "route": route}
         previous = conn.execute(
             "SELECT state FROM minerva_ideas.publications WHERE digest=%s", (digest,)
         ).fetchone()
         if previous["state"] == "delivered":
-            return "NO_REPLY"
+            return None
     raise ValueError(
         "Publication may already have been sent; reconcile delivery before another attempt"
     )
@@ -213,3 +228,116 @@ def reconcile(job_id: UUID) -> dict:
                     (publication["digest"],),
                 )
     return {"confirmed_deliveries": matched}
+
+
+def thread_parts(text: str, limit: int = 3000) -> list[str]:
+    """Bound each send below Slack chunking limits without splitting links or lines."""
+    parts, current = [], ""
+    for line in text.splitlines(keepends=True):
+        if len(line.encode()) > limit:
+            raise ValueError("A digest line exceeds the Slack message size budget")
+        if current and len((current + line).encode()) > limit:
+            parts.append(current)
+            current = ""
+        current += line
+    if current:
+        parts.append(current)
+    return parts
+
+
+def slack_send(route: dict, text: str, folder, artifact: str, *, parent=None) -> dict:
+    """No automatic send retry: a timeout may follow a successful Slack write."""
+    import re
+
+    argv = [
+        "openclaw",
+        "message",
+        "send",
+        "--channel",
+        "slack",
+        "--target",
+        route["to"],
+        "--message",
+        text,
+        "--json",
+    ]
+    if route.get("accountId"):
+        argv.extend(["--account", route["accountId"]])
+    if parent:
+        argv.extend(["--reply-to", parent])
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=90, check=True
+    )
+    response = json.loads(result.stdout)
+    store.json_artifact(folder, artifact, response)
+    payload = response.get("payload", {})
+    receipt = payload.get("result", {})
+    message_id = receipt.get("messageId", "")
+    channel_id = route["to"].removeprefix("channel:")
+    if (
+        response.get("dryRun") is True
+        or payload.get("ok") is not True
+        or receipt.get("channelId") != channel_id
+        or not re.fullmatch(r"\d+\.\d+", str(message_id))
+    ):
+        raise ValueError(
+            "Slack did not confirm the intended message; inspect its saved receipt"
+        )
+    return {"message_id": message_id, "channel_id": channel_id, "thread_id": parent}
+
+
+def save_thread_receipt(digest: str, receipt: dict, state: str) -> None:
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE minerva_ideas.publications SET receipt=%s,state=%s WHERE digest=%s",
+            (Jsonb(receipt), state, digest),
+        )
+
+
+def publish_thread(run_id: UUID, job_id: UUID) -> dict | None:
+    """Caller holds the run lock. Confirmed duplicates are silent; ambiguity blocks retry."""
+    from datetime import datetime, timezone
+
+    prepared = prepare_publication(run_id, job_id, threaded=True)
+    if prepared is None:
+        return None
+    title, _, body = prepared["text"].partition("\n\n")
+    parts = thread_parts(body)
+    folder = store.run_folder(store.get_run(run_id))
+    digest, route = prepared["digest"], prepared["route"]
+    receipt = {
+        "format": "manager-thread-v1",
+        "route": route,
+        "parent": None,
+        "replies": [],
+    }
+    try:
+        receipt["inflight"] = "parent"
+        save_thread_receipt(digest, receipt, "sending")
+        receipt["parent"] = slack_send(
+            route, title, folder, f"publications/{digest}.parent.json"
+        )
+        receipt["inflight"] = None
+        save_thread_receipt(digest, receipt, "sending")
+        for index, part in enumerate(parts):
+            receipt["inflight"] = f"reply-{index}"
+            save_thread_receipt(digest, receipt, "sending")
+            receipt["replies"].append(
+                slack_send(
+                    route,
+                    part,
+                    folder,
+                    f"publications/{digest}.reply-{index}.json",
+                    parent=receipt["parent"]["message_id"],
+                )
+            )
+            receipt["inflight"] = None
+            save_thread_receipt(digest, receipt, "sending")
+        receipt["delivered_at"] = datetime.now(timezone.utc).isoformat()
+        save_thread_receipt(digest, receipt, "delivered")
+        return receipt
+    except Exception:
+        save_thread_receipt(digest, receipt, "unknown")
+        raise ValueError(
+            "Slack thread publication is incomplete or uncertain; inspect saved receipts and the thread before retrying. No automatic resend."
+        ) from None
