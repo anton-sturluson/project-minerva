@@ -73,23 +73,27 @@ The existing automation uses a native **command** payload with explicit argv:
 scripts/run_weekly_ideas.sh EXISTING_JOB_UUID
 ```
 
-Keep its owner, Saturday schedule and explicit `#ideas` Slack channel. Leave `delivery.threadId` unset so each digest appears as a new top-level channel post. Clear an inherited thread with `openclaw cron edit EXISTING_JOB_UUID --clear-thread-id`, then inspect the saved job to confirm the channel is unchanged and the thread is absent. The destination comes from OpenClaw configuration, not from a model. A destination change produces a distinct publication key, so running the job afterward can publish the current digest once to the new destination. Configure the three stage environment variables above in the command environment. The former `MINERVA_IDEAS_MODEL` wrapper setting is no longer used. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/OpenAI keys are inherited from the Gateway environment. Native command execution avoids a reporting model rewriting content or generating fallback acknowledgements for a silent repeat.
-
-`weekly` reconciles earlier delivery, researches incomplete work, and prepares output only when no pending, sourced or failed items remain. Gaps are omitted from the digest and retained in diagnostic status. Multiple fund views are grouped by company.
-
-`prepare RUN_UUID JOB_UUID` claims a delivery attempt; it is not a preview command. Confirmed duplicates return `NO_REPLY`, which the native command scheduler suppresses. An uncertain attempt cannot be blindly repeated.
+Keep its owner, Saturday schedule and explicit `#ideas` Slack channel. Set OpenClaw delivery to `mode=none` and leave `delivery.threadId` unset. Minerva sends the parent and replies explicitly through `openclaw message send`; scheduler announcement must stay disabled to prevent an extra channel post. Configure this once with:
 
 ```sh
-uv run minerva ideas reconcile EXISTING_JOB_UUID
+openclaw cron edit EXISTING_JOB_UUID --no-deliver --clear-thread-id
 ```
 
-Reconciliation requires exact equality between the prepared payload and the native run's full stdout summary, a successful execution, a fresh transport receipt and the expected explicit destination. Truncated or ambiguous records do not confirm delivery. Investigate uncertainty before another attempt; do not delete publication rows to force a resend.
+Each new publication starts with `🧵 Manager Ideas - YYYY-MM-DD`, using the newsletter issue date. The complete verified summary follows in replies to that new message. Long summaries are split on line boundaries into bounded replies in the same thread. Neither the parent title nor the destination is selected by a model.
+
+Configure the three stage environment variables above in the command environment. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/OpenAI keys are inherited from the Gateway environment.
+
+`weekly` reconciles legacy announcements, researches incomplete work, then publishes only when no pending, sourced or failed items remain. Gaps stay in diagnostic status. It returns `NO_REPLY` after publication or a confirmed duplicate; the publication receipt in `minerva ideas status` records actual Slack delivery. With announcements disabled, the cron's own announcement status is not the publication receipt.
+
+Publication identity includes the format, destination, parent title and full digest. The existing publications table stores the parent ID and acknowledged reply IDs as progress; raw transport acknowledgements stay beside the archived payload. A timeout or partial send marks the publication uncertain and blocks automatic resending, preserving any confirmed parent/replies for investigation. Read the saved receipts and Slack thread before resolving an uncertain send. Do not delete publication rows to force a retry.
+
+`render` remains a side-effect-free preview. `prepare` and `reconcile` retain the legacy announce-mode contract for earlier receipts; `prepare` does not send the new threaded format. Legacy reconciliation requires exact payload equality, successful execution and the explicit destination in the Gateway receipt.
 
 The runtime uses a dedicated clean worktree detached at a verified merged `main` commit. Keep that checkout and its ignored environment file until a verified deployment replaces it; do not use a development branch as the scheduled runtime. Back up the existing job configuration before changing it; do not create a duplicate automation or restart the Gateway for this workflow.
 
 ## Validation
 
-The PR series includes live Postgres import/source tests, bounded public-source discovery and extraction with Flash-Lite, full-issue processing, explicit gap retries, no-op resume, concurrency rejection, publication-state integration tests, and actual OpenClaw delivery tests. Full native stdout and transport receipts are used for verification; a process exit code alone is insufficient. The separate Slack connector may not have access to the Gateway's Slack workspace, so direct channel readback is a distinct capability.
+The PR series includes live Postgres import/source tests, bounded public-source discovery and extraction with Flash-Lite, full-issue processing, explicit gap retries, no-op resume, concurrency rejection, publication-state integration tests, and actual OpenClaw delivery tests. Threaded publication is verified with per-message Slack acknowledgements and direct parent/thread readback; a process exit code alone is insufficient. The separate Slack connector may not have access to the Gateway's Slack workspace, so direct channel readback is a distinct capability.
 
 ## References
 

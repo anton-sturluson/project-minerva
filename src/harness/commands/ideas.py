@@ -185,9 +185,9 @@ def weekly(
     ),
     limit: int = typer.Option(50, min=1, max=50),
 ):
-    """Scheduled entry point: resume research and print only a prepared digest."""
+    """Scheduled entry point: research and publish one parent with summary replies."""
     from harness.ideas.publication import (
-        prepare as prepare_digest,
+        publish_thread,
     )
     from harness.ideas.publication import (
         reconcile as reconcile_delivery,
@@ -206,4 +206,5 @@ def weekly(
             f"Research incomplete; resume run {run_id}. No publication prepared."
         )
     with store.run_lock(run_id):
-        typer.echo(prepare_digest(run_id, job_id))
+        publish_thread(run_id, job_id)
+        typer.echo("NO_REPLY")
