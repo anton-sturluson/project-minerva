@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from . import market
 from .accounting import UNIT
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, MARKET_TIMEZONE, Currency, EntryKind
 from .ledger import entries_for
 from .performance import position_episodes, wire
 
@@ -19,8 +19,8 @@ CENT = Decimal("0.01")
 
 
 def exclusion(episode, today):
-    if any(e.kind == EntryKind.OPENING_POSITION for e in episode):
-        return "Opening position: original purchase dates are unknown"
+    if any(e.kind in IN_KIND_ENTRIES for e in episode):
+        return "Received shares: original purchase dates are unknown"
     if episode[-1].effective_date >= today:
         return "Wait for completed closing prices after today's trades"
     if episode[0].effective_date < today - market.HISTORY_WINDOW:

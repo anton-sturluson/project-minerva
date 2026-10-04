@@ -3,6 +3,7 @@ import { api, errorMessage, type Account } from "./api";
 import {
   exact,
   labels,
+  isInKind,
   today,
   type Entry,
   type Holding,
@@ -33,7 +34,7 @@ export function EntrySummary({ entry }: { entry: Entry }) {
               · price {exact(entry.price)} · fees {exact(entry.fees)}
             </>
           )}
-          {entry.kind === "opening_position" && (
+          {isInKind(entry.kind) && (
             <>
               {" "}
               · basis{" "}
@@ -102,10 +103,10 @@ export function Corrections({
           ticker: draft.ticker,
           exchange: draft.exchange,
           quantity: draft.quantity,
-          price: draft.kind === "opening_position" ? null : draft.price,
-          fees: draft.kind === "opening_position" ? "0" : draft.fees,
+          price: isInKind(draft.kind) ? null : draft.price,
+          fees: isInKind(draft.kind) ? "0" : draft.fees,
           cost_basis:
-            draft.kind === "opening_position" && draft.cost_basis !== ""
+            isInKind(draft.kind) && draft.cost_basis !== ""
               ? draft.cost_basis
               : null,
         }
@@ -217,7 +218,7 @@ export function Corrections({
                   {field("ticker", "Replacement ticker")}
                   {field("exchange", "Replacement exchange")}
                   {field("quantity", "Replacement shares", "number")}
-                  {draft.kind === "opening_position" ? (
+                  {isInKind(draft.kind) ? (
                     field(
                       "cost_basis",
                       "Replacement total basis (optional)",

@@ -5,7 +5,7 @@ from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 
 from fastapi import HTTPException
 
-from .domain import ACCOUNTING_PRECISION, EntryKind
+from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, EntryKind
 
 UNIT = Decimal("0.0000000000000001")
 
@@ -44,7 +44,7 @@ def replay(entries):
                 raise HTTPException(
                     409, "This entry would make cash negative in the account history"
                 )
-            if e.kind in {EntryKind.OPENING_POSITION, EntryKind.BUY}:
+            if e.kind in IN_KIND_ENTRIES or e.kind == EntryKind.BUY:
                 if e.kind == EntryKind.OPENING_POSITION and e.security_id in seen:
                     raise HTTPException(
                         409, "An opening position must precede all trades in that security"
@@ -52,7 +52,7 @@ def replay(entries):
                 lots.setdefault(e.security_id, []).append(
                     Lot(
                         e.quantity,
-                        e.cost_basis if e.kind == EntryKind.OPENING_POSITION else e.amount,
+                        e.cost_basis if e.kind in IN_KIND_ENTRIES else e.amount,
                     )
                 )
             elif e.kind == EntryKind.SELL:

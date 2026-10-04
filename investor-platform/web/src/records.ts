@@ -55,6 +55,7 @@ export const labels = {
   income: "Investment income",
   withdrawal: "Withdrawal",
   opening_position: "Opening position",
+  transfer_in: "Receive shares",
   buy: "Buy",
   sell: "Sell",
 } as const;
@@ -67,6 +68,7 @@ export const cashKinds = [
 ] as const satisfies readonly EntryKind[];
 export const positionKinds = [
   "opening_position",
+  "transfer_in",
   "buy",
   "sell",
 ] as const satisfies readonly EntryKind[];
@@ -74,3 +76,6 @@ export type CashKind = (typeof cashKinds)[number];
 export type PositionKind = (typeof positionKinds)[number];
 export const isPositionKind = (kind: EntryKind): kind is PositionKind =>
   positionKinds.some((value) => value === kind);
+
+export const isInKind = (kind: EntryKind) =>
+  kind === "opening_position" || kind === "transfer_in";

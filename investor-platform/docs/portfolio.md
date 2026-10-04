@@ -26,6 +26,14 @@ Open **Record a position or trade** below Holdings. Enter an exchange-qualified 
 
 The forms record activity only; they never place orders. The development demo uses a separate synthetic database. Imported testing copies remain provisional until reconciled.
 
+## Received shares
+
+Choose **Receive shares** to record an in-kind contribution on its actual receipt date, including after earlier trades in that security. Enter shares and optional original total cost basis; unknown basis stays unknown. A receipt does not move cash or invent a purchase. Corrections can replace an inferred opening holding with a dated receipt while retaining the original audit entry.
+
+Performance treats the receipt's market value as an external contribution, so the receipt itself is not investment profit. Exclusion scenarios retain its contributed value as cash. Decision hit rate excludes episodes with received shares because original purchase dates are not established. A split before a receipt does not apply to those later-received shares; genuine positions spanning an unrecorded split still block a report.
+
+Imported minimum opening holdings remain provisional. When receipt evidence becomes available, reconcile their date and basis through the correction workflow; do not disable corporate-action checks or silently adjust quantities to force a result.
+
 ## Transaction reconstruction
 
 The [transaction import CLI](transaction-import.md) downloads or reads a source export, previews the reconstruction and writes a separate testing database. It preserves fractional shares, raw evidence, exclusions and inferred balances. Incomplete imports show explicitly provisional performance with inferred balances and modeled gross distributions.

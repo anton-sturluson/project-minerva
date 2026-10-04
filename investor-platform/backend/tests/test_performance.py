@@ -477,3 +477,49 @@ def test_recorded_baseline_preserves_fifo_lots_across_partial_sales(db_client, p
     assert D(result["holdings"][0]["basis"]) == 1500
     assert D(result["holdings"][0]["unrealized_pnl"]) == -290
     assert ledger(db_client, aid) == before
+
+
+def test_dated_receipt_does_not_cross_earlier_split_or_inflate_return(db_client, portfolio):
+    aid, data = portfolio
+    # Finish the old episode, then receive new shares after a corporate action.
+    assert (
+        trade(
+            db_client,
+            aid,
+            "sell",
+            "10",
+            "100",
+            effective_date="2026-01-02",
+            ticker="AAA",
+            exchange="NYSE",
+        ).status_code
+        == 201
+    )
+    data["AAA"].splits = {DAYS[1]}
+    response = trade(
+        db_client,
+        aid,
+        "transfer_in",
+        "2",
+        effective_date="2026-01-06",
+        cost_basis="50",
+        ticker="AAA",
+        exchange="NYSE",
+    )
+    assert response.status_code == 201, response.text
+    state = ledger(db_client, aid)
+    assert D(state["balance"]) == 1000
+    assert D(state["holdings"][0]["cost_basis"]) == 50
+    result = report(db_client, aid)
+    assert result.status_code == 200, result.text
+    assert D(result.json()["value"]) == 1242
+    assert D(result.json()["return"]) == 0  # Received market value is an external flow.
+    scenario = db_client.post(
+        f"/api/accounts/{aid}/performance",
+        json={
+            "start": "2026-01-02",
+            "end": "2026-01-06",
+            "exclude_security_ids": [state["holdings"][0]["security"]["id"]],
+        },
+    ).json()
+    assert D(scenario["scenario"]["return"]) == 0
