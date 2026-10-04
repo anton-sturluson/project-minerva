@@ -115,3 +115,87 @@ test("distinguishes unconfirmed exchanges from unknown cost basis", async ({
     ),
   ).toBe(true);
 });
+
+test("toggles hypothetical closes, explains unavailable quotes and recovers", async ({
+  page,
+}) => {
+  const actual = {
+    closed: 1,
+    open: 1,
+    unknown: 0,
+    wins: 1,
+    losses: 0,
+    breakeven: 0,
+    win_rate: "1",
+    payoff_ratio: null,
+    average_win: "10",
+    average_loss: null,
+    episodes: [],
+  };
+  let fail = false;
+  await page.route("**/statistics", (route) => route.fulfill({ json: actual }));
+  await page.route("**/statistics/hypothetical", (route) =>
+    fail
+      ? route.fulfill({
+          status: 503,
+          json: { detail: "Latest prices unavailable for: SYNTH" },
+        })
+      : route.fulfill({
+          json: {
+            ...actual,
+            closed: 2,
+            open: 0,
+            losses: 1,
+            win_rate: "0.5",
+            payoff_ratio: "2",
+            average_loss: "5",
+            simulated_positions: 1,
+            quote_start: "2026-01-06",
+            quote_end: "2026-01-06",
+            episodes: [
+              {
+                ticker: "SYNTH",
+                exchange: "NYSE",
+                pnl: "-5",
+                closed_on: "2026-01-07",
+                hypothetical: true,
+              },
+            ],
+          },
+        }),
+  );
+  await page.goto("/");
+  await expect(page.getByTestId("win-rate")).toHaveText("100.00%");
+  const toggle = page.getByRole("checkbox", {
+    name: "Hypothetical: close all open positions",
+  });
+  await toggle.check();
+  await expect(page.getByTestId("win-rate")).toHaveText("50.00%");
+  await expect(page.getByTestId("payoff-ratio")).toHaveText("2.00×");
+  await expect(page.getByText(/before selling fees and taxes/)).toBeVisible();
+  await page
+    .getByText("Closed + hypothetical positions", { exact: true })
+    .click();
+  await expect(
+    page
+      .getByLabel("Closed positions", { exact: true })
+      .getByRole("row")
+      .filter({ hasText: "SYNTH" }),
+  ).toContainText("Hypothetical");
+  await toggle.uncheck();
+  await expect(page.getByTestId("win-rate")).toHaveText("100.00%");
+  fail = true;
+  await toggle.check();
+  await expect(page.getByRole("alert")).toContainText(
+    "Latest prices unavailable",
+  );
+  await expect(page.getByTestId("win-rate")).toBeHidden();
+  fail = false;
+  await page.getByRole("button", { name: "Retry scorecard" }).click();
+  await expect(page.getByTestId("win-rate")).toHaveText("50.00%");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

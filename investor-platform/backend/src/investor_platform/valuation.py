@@ -5,13 +5,14 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from . import market
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, Currency
+from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
 from .ledger import entries_for, ledger_view
-from .performance import wire
+from .models import LedgerEntry
+from .performance import position_episodes, trade_statistics, wire
 
 router = APIRouter(prefix="/api/accounts")
 QUOTE_WINDOW = timedelta(days=10)
@@ -28,6 +29,7 @@ def latest(history, end):
 def quote_holding(holding, end, provisional, fx):
     security = holding.security
     row = {
+        "security_id": security.id,
         "ticker": security.ticker,
         "exchange": security.exchange,
         "quantity": holding.quantity,
@@ -77,10 +79,7 @@ def quote_holding(holding, end, provisional, fx):
     return row
 
 
-@router.get("/{account_id}/valuation")
-def valuation(account_id: UUID, session: DB, actor: Identity):
-    account = owned_account(session, actor, account_id)
-    records = ledger_view(entries_for(session, account_id), account.base_currency)
+def value_records(records, base_currency, provisional):
     end = datetime.now(market.MARKET_TIMEZONE).date() - timedelta(days=1)
     fx = {}
     for currency in {
@@ -94,17 +93,18 @@ def valuation(account_id: UUID, session: DB, actor: Identity):
             )
         except (ValueError, OSError, KeyError, TypeError, IndexError, DecimalException):
             fx[currency] = "USD exchange rate unavailable"
-    if account.base_currency == Currency.USD:
+    if base_currency == Currency.USD:
         with ThreadPoolExecutor(max_workers=6) as pool:
             rows = list(
                 pool.map(
-                    lambda h: quote_holding(h, end, bool(account.reconstruction), fx),
+                    lambda h: quote_holding(h, end, provisional, fx),
                     records.holdings,
                 )
             )
     else:
         rows = [
             {
+                "security_id": h.security.id,
                 "ticker": h.security.ticker,
                 "exchange": h.security.exchange,
                 "quantity": h.quantity,
@@ -127,15 +127,66 @@ def valuation(account_id: UUID, session: DB, actor: Identity):
         if value and value > 0:
             for row in rows:
                 row["weight"] = row["value"] / value
+    return {
+        "holdings": rows,
+        "value": value,
+        "cash": records.balance,
+        "end": end,
+        "provisional": provisional,
+        "complete": complete,
+        "source": market.SOURCE,
+        "fetched_at": datetime.now(UTC),
+    }
+
+
+@router.get("/{account_id}/valuation")
+def valuation(account_id: UUID, session: DB, actor: Identity):
+    account = owned_account(session, actor, account_id)
+    records = ledger_view(entries_for(session, account_id), account.base_currency)
+    return wire(value_records(records, account.base_currency, bool(account.reconstruction)))
+
+
+@router.get("/{account_id}/statistics/hypothetical")
+def hypothetical_statistics(account_id: UUID, session: DB, actor: Identity):
+    account = owned_account(session, actor, account_id)
+    entries = entries_for(session, account_id)
+    today = datetime.now(market.MARKET_TIMEZONE).date()
+    if entries and entries[-1].effective_date > today:
+        raise HTTPException(422, "Wait until all recorded trade dates have arrived in New York")
+    records = ledger_view(entries, account.base_currency)
+    report = value_records(records, account.base_currency, bool(account.reconstruction))
+    missing = [r["ticker"] for r in report["holdings"] if r["value"] is None]
+    if missing:
+        raise HTTPException(503, "Latest prices unavailable for: " + ", ".join(missing))
+    securities = {e.security_id: e.security for e in entries if e.security_id}
+    next_id = max((e.id for e in entries), default=0) + 1
+    # Detached objects are only replayed in memory, never added to the session.
+    sales = [
+        LedgerEntry(
+            id=next_id + index,
+            kind=EntryKind.SELL,
+            effective_date=today,
+            security_id=row["security_id"],
+            security=securities[row["security_id"]],
+            quantity=row["quantity"],
+            amount=row["value"],
+        )
+        for index, row in enumerate(report["holdings"])
+    ]
+    with localcontext() as ctx:
+        ctx.prec = ACCOUNTING_PRECISION
+        combined = [*entries, *sales]
+        result = trade_statistics(combined)
+        for row, episode in zip(result["episodes"], position_episodes(combined)[0], strict=True):
+            row["hypothetical"] = episode[-1].id >= next_id
+    dates = [r["quote_date"] for r in report["holdings"]]
     return wire(
         {
-            "holdings": rows,
-            "value": value,
-            "cash": records.balance,
-            "end": end,
-            "provisional": bool(account.reconstruction),
-            "complete": complete,
-            "source": market.SOURCE,
-            "fetched_at": datetime.now(UTC),
+            **result,
+            "simulated_positions": len(sales),
+            "quote_start": min(dates) if dates else None,
+            "quote_end": max(dates) if dates else None,
+            "source": report["source"],
+            "fetched_at": report["fetched_at"],
         }
     )
