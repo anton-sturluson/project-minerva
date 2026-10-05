@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from helpers import cash, ledger, trade
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from investor_platform.app import app
@@ -199,6 +199,37 @@ def test_concurrent_trade_retries_do_not_duplicate_shares(db_client, account_id)
     state = ledger(db_client, account_id)
     assert Decimal(state["holdings"][0]["quantity"]) == 10
     assert Decimal(state["balance"]) == 9000
+
+
+def test_concurrent_first_receipts_share_security_across_accounts(db_client, database):
+    accounts = [
+        db_client.post("/api/accounts", json={"name": name, "base_currency": "USD"}).json()["id"]
+        for name in ("First receipt", "Second receipt")
+    ]
+    barrier = Barrier(2)
+
+    def synchronize_creation(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("INSERT INTO securities"):
+            # Both transactions observed the workspace-wide identity as absent.
+            barrier.wait(timeout=5)
+
+    def receive(item):
+        account, quantity = item
+        with TestClient(app, base_url="http://127.0.0.1:8010") as client:
+            return trade(client, account, "transfer_in", quantity)
+
+    event.listen(database, "before_cursor_execute", synchronize_creation)
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            responses = list(pool.map(receive, zip(accounts, ("2", "3"))))
+    finally:
+        event.remove(database, "before_cursor_execute", synchronize_creation)
+    assert [response.status_code for response in responses] == [201, 201]
+    holdings = [ledger(db_client, account)["holdings"][0] for account in accounts]
+    assert [Decimal(holding["quantity"]) for holding in holdings] == [2, 3]
+    assert holdings[0]["security"]["id"] == holdings[1]["security"]["id"]
+    with Session(database) as session:
+        assert session.scalar(select(func.count()).select_from(Security)) == 1
 
 
 def test_receipts_preserve_unknown_basis_and_do_not_move_cash(db_client, account_id):
