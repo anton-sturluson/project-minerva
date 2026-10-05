@@ -61,7 +61,7 @@ button:disabled {
   opacity: 0.65;
 }
 .workspace {
-  max-width: 908px;
+  max-width: 1080px;
   margin: 0 auto;
   padding: 28px 24px 24px;
 }
@@ -130,6 +130,8 @@ button:disabled {
 }
 main,
 #portfolio,
+#activity,
+#performance,
 #research {
   scroll-margin-top: 16px;
 }
@@ -226,9 +228,8 @@ h1 {
 }
 
 .portfolio {
-  margin-top: 28px;
-  border-top: 3px double var(--ink);
-  padding-top: 16px;
+  margin-top: 20px;
+  padding-top: 8px;
 }
 .portfolio > h1 {
   color: var(--plum);
@@ -497,19 +498,7 @@ summary:focus-visible {
 }
 
 .decisions {
-  margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 3px double var(--rule);
-}
-
-.reconstruction {
-  border-block: 3px double var(--rule);
-  background: var(--lilac);
-  padding: 12px;
-  margin-bottom: 20px;
-}
-.reconstruction p {
-  margin-block: 8px;
+  margin-top: 1.25rem;
 }
 
 .correction-fields {
@@ -572,35 +561,215 @@ summary:focus-visible {
 .holdings-overview {
   margin-block: 1.5rem;
 }
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  border-bottom: 2px solid var(--plum);
+  padding-bottom: 8px;
+}
+.section-heading h2 {
+  color: var(--plum);
+  font-size: 23px;
+}
+.section-heading .report-date {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
 .allocation-chart {
-  margin: 1rem 0;
-  max-width: 680px;
+  margin: 20px 0 24px;
   font:
     13px/1.5 Arial,
     sans-serif;
 }
 .allocation-chart figcaption {
-  margin-bottom: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.allocation-chart small {
+  font-size: 11px;
+}
+.allocation-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.market-swatch,
+.cost-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 6px;
+  background: var(--plum);
+}
+.cost-swatch {
+  height: 3px;
+  background: var(--ink);
+  opacity: 0.55;
+  margin-left: 10px;
+}
+.allocation-row,
+.allocation-columns {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 3fr) 65px 65px;
+  align-items: center;
+  gap: 14px;
+}
+.allocation-columns {
+  text-align: right;
+  font:
+    11px/1.5 "Courier New",
+    monospace;
+  padding-bottom: 4px;
 }
 .allocation-row {
-  display: grid;
-  grid-template-columns: minmax(100px, 1fr) minmax(70px, 2fr) 65px;
-  align-items: center;
-  gap: 10px;
-  margin-block: 8px;
+  padding-block: 6px;
 }
-.allocation-row strong {
+.allocation-name {
+  font-weight: bold;
+}
+.allocation-name small {
+  font-weight: normal;
+  display: block;
+}
+.allocation-row strong,
+.cost-weight {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.allocation-tracks {
+  display: grid;
+  gap: 4px;
+}
 .allocation-track {
+  display: block;
+  height: 9px;
   background: var(--neutral);
-  height: 12px;
 }
 .allocation-track > span {
   display: block;
-  background: var(--plum);
   height: 100%;
+  background: var(--plum);
+}
+.cost-track {
+  height: 3px;
+}
+.cost-track > span {
+  background: var(--ink);
+  opacity: 0.55;
+}
+.basis-note {
+  margin-bottom: 12px;
+}
+.holdings-table th[scope="row"] {
+  background: var(--paper);
+  white-space: nowrap;
+  font-weight: normal;
+}
+.security-name strong,
+.security-name small {
+  display: block;
+}
+.security-name strong {
+  color: var(--blue);
+}
+.security-name small {
+  font-size: 11px;
+}
+.holdings-table .cost-weight {
+  background: color-mix(in srgb, var(--lilac) 30%, var(--paper));
+}
+.holdings-table .cash-row > * {
+  border-top: 2px solid var(--rule);
+}
+.holdings-table tbody tr:hover > * {
+  background: var(--neutral);
+}
+.gain {
+  color: var(--success);
+}
+.loss {
+  color: var(--error);
+}
+.decisions small {
+  font:
+    12px/1.5 "Courier New",
+    monospace;
+  font-weight: normal;
+}
+.scorecard > div {
+  padding-left: 12px;
+  border-left: 2px solid var(--lilac);
+}
+.return-chart {
+  padding: 16px 0 4px;
+  border-block: 1px solid var(--rule);
+}
+.return-chart figcaption {
+  margin-bottom: 12px;
+}
+.performance-controls label {
+  flex: 0 1 200px;
+}
+.performance-controls .scenario-picker {
+  flex-basis: 100%;
+  margin: 0;
+}
+.performance-controls > button {
+  margin-left: auto;
+  min-height: 36px;
+}
+.entry-panel summary {
+  font-weight: bold;
+}
+.entry-panel[open] > summary {
+  margin-bottom: 16px;
+}
+@media (max-width: 650px) {
+  .workspace {
+    padding-inline: 14px;
+  }
+  .allocation-row,
+  .allocation-columns {
+    grid-template-columns: minmax(75px, 1fr) minmax(55px, 2fr) 55px 55px;
+    gap: 7px;
+  }
+  .allocation-row {
+    font-size: 12px;
+  }
+  .allocation-name small {
+    font-size: 11px;
+  }
+  .holdings-table th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+  }
+  .holdings-table th:first-child::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    border-right: 1px solid var(--rule);
+  }
+  .performance-controls label {
+    flex: 1 1 120px;
+  }
+  .performance-controls > button {
+    margin-left: 0;
+  }
+  summary {
+    padding-block: 6px;
+  }
+  .scenario-picker label {
+    min-height: 44px;
+  }
 }
 
 .scenario-picker {
@@ -615,11 +784,15 @@ summary:focus-visible {
 }
 .scenario-picker label {
   display: flex;
+  flex-direction: row;
+  flex: 0 1 auto;
   align-items: center;
   gap: 6px;
 }
 .scenario-picker input[type="checkbox"] {
-  width: auto;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
 }
 .scenario-line {
   stroke: var(--error);

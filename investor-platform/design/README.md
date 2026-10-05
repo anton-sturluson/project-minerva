@@ -65,6 +65,10 @@ The fragment is the exact visual reference. These are the main tokens it uses:
 
 The user requested a top theme control and removal of nonessential text. The app keeps the wordmark, star ornaments, serif type and bracket navigation, while removing slogans, welcome copy and motto badges. A System / Light / Dark selector remembers the local choice. Provisional status, metric labels, dates and actionable errors stay visible; methodology and import explanations live in docs. Activity and Research have separate views, and entry forms and activity history fold independently. The standalone study remains the original visual reference.
 
+## Allocation refinement · 3 October 2026
+
+Pair plum market-value bars with thin neutral cost-basis bars, and show both percentages in aligned columns. Preserve the paper palette, serif headings and bracket links. Compact section headers, a wider desktop ledger and quiet gain/loss colors improve scanning. On narrow screens, the security column stays visible while the table scrolls. Performance controls keep keyboard order aligned with visual order; changing an exclusion preserves original holdings while the comparison refreshes.
+
 ## Verification
 
 The saved standalone export was exercised in a browser at desktop and 320px widths. Checks covered portfolio, notebook, and source-index navigation; topic changes; marking a note for follow-up; and restoring the selected note and mark after reload. The narrow source-index view had no page-level horizontal overflow, and no browser console errors were observed. The original selected concept also had its narrow holdings layout checked. Skill validation and reference-link checks passed.

@@ -50,6 +50,10 @@ Corrections append a record and optional replacement; they do not delete or rewr
 
 Migration `0006` adds the audit table and replaces opening-entry database indexes with validation under the account lock. It does not alter existing ledger values. Downgrading after corrections would revive superseded entries, so this migration refuses downgrade; restore a pre-correction database backup instead. Corrections do not automatically mark a reconstructed portfolio verified.
 
+## Allocation comparison
+
+Market % is each position’s closing market value divided by portfolio value, including cash. Cost % is remaining position basis divided by total remaining basis plus the same cash balance. Cash participates in both denominators. These are allocation measures, not a gain/loss percentage or original lifetime capital allocation. The chart compares the five largest positions by market value and groups smaller holdings as Other. All cost weights are unavailable when any open position has unknown basis or the cost denominator is zero; known subsets are never normalized as a complete portfolio. Recorded quantities and basis remain available during quote outages.
+
 ## References
 
 - [Ledger implementation](../backend/src/investor_platform/ledger.py) — active records and cash writes.
