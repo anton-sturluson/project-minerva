@@ -2,10 +2,9 @@ import { expect, test, performance } from "./fixtures";
 
 test("withholds unfunded returns, preserves benchmarks, and recovers from a quote failure", async ({
   page,
+  account,
 }) => {
   await page.route("**/api/accounts", async (route) => {
-    const response = await route.fetch();
-    const [account] = await response.json();
     await route.fulfill({
       json: [
         {
@@ -30,10 +29,17 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
     await route.fulfill({
       json: {
         ...ledger,
-        entries: ledger.entries.map((e: Record<string, unknown>) => ({
-          ...e,
-          effective_date: "2026-01-02",
-        })),
+        entries: [
+          {
+            id: 1,
+            kind: "opening_cash",
+            effective_date: "2026-01-02",
+            amount: "41",
+            currency: "USD",
+            note: "Synthetic opening balance",
+            security: null,
+          },
+        ],
       },
     });
   });
