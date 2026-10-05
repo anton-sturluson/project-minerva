@@ -32,7 +32,7 @@ Mark a reconstruction `reconciled` only after reviewing dated deposits/withdrawa
 
 ## International listings
 
-ASX, TSX/TSXV and Stockholm main/First North quotes are converted to USD using dated AUD, CAD or SEK exchange rates. USD OTC listings are also supported. The recorded USD purchase/sale amounts are never converted again. Foreign holidays use the last available local close (at most four calendar days old) with current-session FX; missing FX or stale prices block valuation. This is a daily-date convention, not synchronized intraday pricing across time zones. See [ADR 0004](decisions/0004-international-market-data.md) for identity and calendar rules.
+ASX, TSX/TSXV, Stockholm main/First North and Warsaw (WSE) quotes are converted to USD using dated AUD, CAD, SEK or PLN exchange rates. USD OTC listings are also supported. The recorded USD purchase/sale amounts are never converted again. Foreign holidays use the last available local close (at most four calendar days old) with current-session FX; missing FX or stale prices block valuation. This is a daily-date convention, not synchronized intraday pricing across time zones. See [ADR 0004](decisions/0004-international-market-data.md) for identity and calendar rules.
 
 Up to 128 securities are fetched with bounded concurrency. Histories unavailable from both providers and unrecorded splits still block comparisons; FX support cannot reconstruct missing market data.
 

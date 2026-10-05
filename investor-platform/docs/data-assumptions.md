@@ -6,7 +6,7 @@ This is the living register of reconstruction assumptions. Change it with the im
 | --- | --- |
 | Transaction history is incomplete. Opening shares and minimum balancing cash are inferred. | Portfolio return, CAGR, excess returns and exclusion scenarios are withheld until dated funding and broker balances are reconciled. Current holdings and benchmark series remain available. |
 | Unrecorded trades and deposits/withdrawals are absent from the model. | Missing records can materially change returns. Add dated records and regenerate the comparison. |
-| Explicit USD totals establish settlement currency, not listing identity. | Imported exchanges may remain unconfirmed until issuer and listing evidence are reconciled. Keep native quote currency separate from USD cash. |
+| USD totals may be reporting equivalents; they establish neither settlement currency nor listing identity. | Imported exchanges may remain unconfirmed until issuer and listing evidence are reconciled. Keep native quote currency and actual cash currency separate from reporting equivalents. Verify broker instrument name and native currency before choosing a listing; a shared ticker does not establish issuer identity. |
 | Original rows and discrepancies are retained privately. | Use import provenance and correction history for reconciliation. |
 | Dividends need both the ex-date and actual cash payment date, linked to the security. | Recorded receivables enter value on the ex-date and leave receivables when cash arrives. Missing or mismatched gross distributions withhold returns; no synthetic income is added. |
 | Unrecorded fees and taxes are absent. | Estimates are not after-tax returns. |

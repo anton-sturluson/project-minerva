@@ -365,6 +365,7 @@ def test_cagr_annualizes_linked_returns_instead_of_cash_growth(db_client, portfo
         ("TSX", ".TO", "CAD", "TOR"),
         ("XSTO", ".ST", "SEK", "STO"),
         ("FNSE", ".ST", "SEK", "STO"),
+        ("WSE", ".WA", "PLN", "WSE"),
     ],
 )
 def test_foreign_performance_and_scenario_use_dated_fx(

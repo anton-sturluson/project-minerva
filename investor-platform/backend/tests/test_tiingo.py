@@ -133,3 +133,16 @@ def test_yahoo_failure_falls_back_only_for_the_required_holding_window(monkeypat
     )
     assert calls == [(START, START)]
     assert result["AAA"].source == "Tiingo daily history"
+
+
+def test_pln_valuation_uses_inverse_usd_pair(monkeypatch):
+    calls = []
+
+    def payload(engine, workspace, symbol, start, end, *, fx):
+        calls.append((symbol, fx))
+        return {"rows": [{"date": "2020-01-02", "ticker": "usdpln", "close": "4"}]}
+
+    monkeypatch.setattr(tiingo, "payload", payload)
+    result = tiingo.fx_history("PLN", START, END, None, LOCAL_WORKSPACE)
+    assert calls == [("usdpln", True)]
+    assert result.close[START] == Decimal(".25")

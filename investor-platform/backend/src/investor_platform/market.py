@@ -130,6 +130,7 @@ FOREIGN_LISTINGS = {
     "TSX": (".TO", "CAD", {"TOR"}),
     "XSTO": (".ST", "SEK", {"STO"}),
     "FNSE": (".ST", "SEK", {"STO"}),
+    "WSE": (".WA", "PLN", {"WSE"}),
 }
 MAX_CLOSE_AGE = timedelta(days=4)
 
