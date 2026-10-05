@@ -112,6 +112,18 @@ class Security(Base):
     ticker: Mapped[str] = mapped_column(String(20))
     exchange: Mapped[str] = mapped_column(String(12))
     currency: Mapped[str] = mapped_column(String(3))
+    market_identity: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class MarketCache(Base):
+    __tablename__ = "market_cache"
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(20), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(40), primary_key=True)
+    start: Mapped[date] = mapped_column(Date)
+    end: Mapped[date] = mapped_column(Date)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class LedgerCorrection(Base):

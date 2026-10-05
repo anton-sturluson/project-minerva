@@ -2,7 +2,7 @@
 
 ## Configuration and lifecycle
 
-The API reads `DATABASE_URL` from the shell; `backend/.env.example` documents it but is not loaded automatically. Run Alembic migrations after pulling changes. The default database is local PostgreSQL on port 55432; backend and frontend development ports are 8010 and 5173. Both bind to loopback, and port collisions fail rather than selecting another port. Optional frontend proxy configuration lives in `web/.env.example`.
+The `investor-api` entry point loads `backend/.env` when started from the backend directory; existing shell variables take precedence. Alembic and other commands still read `DATABASE_URL` from the shell. Run Alembic migrations after pulling changes. The default database is local PostgreSQL on port 55432; backend and frontend development ports are 8010 and 5173. Both bind to loopback, and port collisions fail rather than selecting another port. Optional frontend proxy configuration lives in `web/.env.example`.
 
 The Compose volume persists records. Stop the database without deleting the volume:
 
@@ -55,3 +55,11 @@ Keep exports, PostgreSQL dumps, screenshots, credentials and account-specific co
 - [Quick start](../README.md) — local launch commands.
 - [Application boundary](../backend/src/investor_platform/app.py) — local and Tailscale behavior.
 - [CI workflow](../../.github/workflows/investor-platform-ci.yml) — required checks.
+
+## Historical data fallback
+
+Set `TIINGO_API_KEY` in the ignored backend `.env` to enable Tiingo for unavailable US stock histories and dated FX. The key is sent only in an authorization header. Migration 0008 adds a workspace-scoped PostgreSQL provider cache; successful validated responses are reused for 24 hours, with per-symbol locks preventing duplicate concurrent downloads. No credentials enter the cache. Foreign stock prices and benchmark total returns continue to use Yahoo. Stock queries end when the recorded position closes.
+
+Provider listing metadata can describe a later exchange move. Such mismatches require an explicit `Security.market_identity["tiingo"]` review containing `symbol`, `exchange`, `from`, `through` and a source URL; it only applies within that date range. There are no ticker-specific exceptions in code. Cache payloads retain the original provider metadata and raw/adjusted closes, dividends and split factors. Source names are shown on the performance report.
+
+Tiingo's `close` is already in as-traded share units; unlike Yahoo's split-adjusted close, it must not be multiplied by subsequent split factors. FX uses the provider's date label and same-date daily close; inverse pairs are reciprocated, and missing FX dates remain missing. [Tiingo EOD fields](https://www.tiingo.com/documentation/end-of-day), [FX fields](https://www.tiingo.com/documentation/forex).
