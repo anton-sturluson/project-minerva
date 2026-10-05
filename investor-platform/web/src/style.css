@@ -568,6 +568,9 @@ summary:focus-visible {
 .basis-note {
   margin-bottom: 12px;
 }
+.holdings-table {
+  min-width: 980px;
+}
 .holdings-table th[scope="row"] {
   background: var(--paper);
   white-space: nowrap;
@@ -751,4 +754,26 @@ summary:focus-visible {
 }
 .portfolio-picker select {
   margin-top: 4px;
+}
+
+.benchmark-difference {
+  display: block;
+  margin-top: 3px;
+}
+.yearly-performance {
+  margin-block: 20px;
+}
+.yearly-performance h3 {
+  margin-bottom: 10px;
+}
+.yearly-performance th small {
+  display: block;
+  font-size: 11px;
+}
+.yearly-performance tbody th {
+  background: var(--paper);
+  white-space: nowrap;
+}
+.yearly-performance .form-note {
+  margin-top: 8px;
 }

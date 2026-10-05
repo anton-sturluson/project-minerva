@@ -52,6 +52,12 @@ CAGR annualizes the geometrically linked, flow-adjusted cumulative return: `(1 +
 
 Search by ticker or exchange in **Excluded stocks**, select multiple stocks, then compare. Selected stocks remain visible as removable selections when the search changes. Escape closes the selector; Clear exclusions removes all selections. The original portfolio stays visible; a fourth chart line and summary row show the hypothetical alternative. Whole-account exclusions retain cash; stock-only exclusions measure only the remaining stocks. Clearing exclusions and comparing restores the ordinary view. See [ADR 0002](decisions/0002-stock-exclusion-scenarios.md) for opening-position valuation, income attribution and funding rules. Hypotheticals never write ledger records, change real holdings or recalculate the trade scorecard.
 
+## Yearly comparison
+
+The table below the chart derives each year's return from the same daily cumulative series: `(1 + year-end cumulative return) / (1 + prior year-end cumulative return) - 1`. It does not subtract cumulative percentages or average daily returns. The first available session is used for an incomplete first year; a lone year-end baseline does not create a zero-return year. Current-year results with a prior year-end baseline are labelled YTD, and other incomplete periods are labelled partial. Exact closing dates are available on the year label.
+
+SPY and QQQ remain total-return fund proxies for the S&P 500 and Nasdaq-100. The adjacent signed difference is always **portfolio minus benchmark**, in percentage points; positive is green, negative red. The same convention appears beside cumulative and annualized benchmark results. A scenario has its own yearly column; benchmark differences continue to refer to the original portfolio. Unknown portfolio returns leave differences unavailable while retaining known benchmark returns. An index starting at zero after a total loss has no defined subsequent percentage return.
+
 ## Trade scorecard
 
 A trade episode begins with no shares and ends with no shares in the same security. Multiple purchases and partial exits remain one episode. The scorecard uses all recorded history, independently of the chart period.
