@@ -4,7 +4,7 @@ Updated: 2026-10-02. One ticket per PR; stack dependent PRs and live-test every 
 
 ## Implemented
 
-The app has a local/private shell, one account, immutable cash and equity records, FIFO positions, investment income, a win/payoff scorecard, benchmark-relative decision hit rate, and dated SPY/QQQ comparisons. Tailscale provides private access for the local owner. The transaction import CLI creates a separate testing copy; provisional comparisons and reviewed ledger corrections are available. Research remains a placeholder. ([Current capabilities and limits](portfolio.md))
+The app has a local/private shell, multiple independently named portfolios, immutable cash and equity records, FIFO positions, investment income, a win/payoff scorecard, benchmark-relative decision hit rate, and dated SPY/QQQ comparisons. Tailscale provides private access for the local owner. The transaction import CLI creates a separate testing copy; provisional comparisons and reviewed ledger corrections are available. Research remains a placeholder. ([Current capabilities and limits](portfolio.md))
 
 ## Next small increments
 

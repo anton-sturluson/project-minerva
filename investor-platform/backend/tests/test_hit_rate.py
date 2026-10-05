@@ -115,7 +115,7 @@ def test_distribution_on_purchase_date_is_not_earned_and_cent_ties_are_not_hits(
 
 def test_route_empty_closed_decisions_ownership_and_provider_failure(db_client, monkeypatch):
     aid = db_client.post(
-        "/api/account", json={"name": "Hit rate fixture", "base_currency": "USD"}
+        "/api/accounts", json={"name": "Hit rate fixture", "base_currency": "USD"}
     ).json()["id"]
     cash(db_client, aid, "opening_cash", "10000")
     calls = []
@@ -147,7 +147,7 @@ def test_route_empty_closed_decisions_ownership_and_provider_failure(db_client, 
 
 def test_non_usd_account_does_not_fetch_a_usd_benchmark(db_client, monkeypatch):
     aid = db_client.post(
-        "/api/account", json={"name": "EUR fixture", "base_currency": "EUR"}
+        "/api/accounts", json={"name": "EUR fixture", "base_currency": "EUR"}
     ).json()["id"]
 
     def unexpected_fetch(*args):

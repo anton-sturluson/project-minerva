@@ -58,16 +58,17 @@ def owned_account(session, actor, account_id, *, lock=False):
     return account
 
 
-@router.get("/account", response_model=AccountView | None)
-def current_account(session: DB, actor: Identity):
-    return session.scalar(
+@router.get("/accounts", response_model=list[AccountView])
+def list_accounts(session: DB, actor: Identity):
+    return session.scalars(
         select(Account)
         .join(Workspace)
         .where(Workspace.id == actor.workspace_id, Workspace.owner_id == actor.owner_id)
-    )
+        .order_by(Account.created_at, Account.id)
+    ).all()
 
 
-@router.post("/account", response_model=AccountView, status_code=201)
+@router.post("/accounts", response_model=AccountView, status_code=201)
 def create_account(data: AccountInput, session: DB, actor: Identity):
     workspace = session.scalar(
         select(Workspace).where(
@@ -82,9 +83,11 @@ def create_account(data: AccountInput, session: DB, actor: Identity):
         session.commit()
     except IntegrityError:
         session.rollback()
-        existing = current_account(session, actor)
+        existing = next((a for a in list_accounts(session, actor) if a.name == data.name), None)
         if existing and existing.name == data.name and existing.base_currency == data.base_currency:
             return existing
-        raise HTTPException(409, "This workspace already has an account") from None
+        raise HTTPException(
+            409, "A portfolio with this name already exists in this workspace"
+        ) from None
     session.refresh(account)
     return account

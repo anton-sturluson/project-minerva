@@ -144,13 +144,15 @@ for (const currency of ["USD", "EUR"]) {
   test(`explains unavailable comparison for ${currency === "USD" ? "empty history" : "unsupported currency"}`, async ({
     page,
   }) => {
-    await page.route("**/api/account", (route) =>
+    await page.route("**/api/accounts", (route) =>
       route.fulfill({
-        json: {
-          id: "synthetic-account",
-          name: "Synthetic comparison",
-          base_currency: currency,
-        },
+        json: [
+          {
+            id: "synthetic-account",
+            name: "Synthetic comparison",
+            base_currency: currency,
+          },
+        ],
       }),
     );
     await page.route("**/ledger", (route) =>

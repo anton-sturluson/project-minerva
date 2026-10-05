@@ -1,5 +1,9 @@
 # Portfolio guide
 
+## Multiple portfolios
+
+Use the Portfolio selector to switch among your portfolios, or New portfolio to create another. Each has independent cash, trades, corrections, holdings and performance. The selected portfolio is remembered on this browser when local storage is available. Switching unmounts the previous portfolio view and clears unsaved drafts so data cannot leak into another portfolio. Names are unique within your workspace; currencies remain fixed.
+
 ## Cash ledger rules
 
 - Entered cash amounts are decimal strings, with at most 16 integer and 8 fractional digits. Browser displays retain exact stored values; no floating-point arithmetic is used for balances.

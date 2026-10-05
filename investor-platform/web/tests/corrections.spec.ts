@@ -4,7 +4,7 @@ test("reviews a correction, retries a lost response once, preserves audit, and v
   page,
   request,
 }) => {
-  const account = await (await request.get("/api/account")).json();
+  const account = (await (await request.get("/api/accounts")).json())[0];
   const created = await request.post(`/api/accounts/${account.id}/cash`, {
     data: {
       request_key: crypto.randomUUID(),
@@ -108,7 +108,7 @@ test("rejects an overdraft correction and requires a fresh review after another 
   page,
   request,
 }) => {
-  const account = await (await request.get("/api/account")).json();
+  const account = (await (await request.get("/api/accounts")).json())[0];
   const payload = {
     request_key: crypto.randomUUID(),
     kind: "deposit",

@@ -11,7 +11,7 @@ from investor_platform.models import LedgerCorrection, LedgerEntry, Security
 
 def setup(client):
     aid = client.post(
-        "/api/account", json={"name": "Correction fixture", "base_currency": "USD"}
+        "/api/accounts", json={"name": "Correction fixture", "base_currency": "USD"}
     ).json()["id"]
     opening = cash(client, aid, "opening_cash", "1000", day="2026-01-02").json()
     buy = trade(client, aid, quantity="10", price="100", ticker="AAA", exchange="NYSE").json()
@@ -118,7 +118,7 @@ def test_void_invalid_history_and_stale_preview(db_client, database):
 
 def test_opening_basis_correction_updates_fifo_without_changing_shares(db_client):
     aid = db_client.post(
-        "/api/account", json={"name": "Basis fixture", "base_currency": "USD"}
+        "/api/accounts", json={"name": "Basis fixture", "base_currency": "USD"}
     ).json()["id"]
     cash(db_client, aid, "opening_cash", "0", day="2026-01-02")
     opening = trade(db_client, aid, "opening_position", "10", ticker="AAA", exchange="NYSE").json()

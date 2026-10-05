@@ -807,3 +807,18 @@ summary:focus-visible {
 .refresh-prices {
   margin-block: 12px;
 }
+
+.portfolio-picker {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.portfolio-picker label {
+  flex: 1;
+  min-width: 180px;
+}
+.portfolio-picker select {
+  margin-top: 4px;
+}
