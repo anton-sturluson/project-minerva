@@ -154,3 +154,61 @@ def test_usd_totals_normalize_export_noise_and_require_explicit_cash():
     assert report["raw_source"] == payload.decode()
     assert report["imported_trades"] == 1
     assert [r["row"] for r in report["skipped"]] == [3, 4, 5, 6]
+
+
+GROUPED = b"""Date,Type,Symbol,Shares,Price (USD),Total (USD),Portfolio
+2024-01-02,Buy,AAA,2,10,20,Active
+2024-01-02,Buy,AAA,3,10,30,Index
+2024-01-03,Sell,AAA,1,12,12,Active
+,,,,,,
+"""
+
+
+def test_grouped_import_requires_ownership_and_isolates_shared_tickers(database):
+    from investor_platform.accounting import replay
+
+    with pytest.raises(ValueError, match="Choose --portfolio"):
+        reconstruct(GROUPED, LISTINGS)
+    reports = []
+    ids = []
+    for name, expected_cash, expected_shares in [("Active", "12", "1"), ("Index", "0", "3")]:
+        entries, report = reconstruct(GROUPED, LISTINGS, portfolio=name)
+        aid, created = apply_import(database, name, entries, report)
+        assert created and not report["skipped"]
+        assert report["raw_source"] == GROUPED.decode()
+        assert report["selected_portfolio"] == name
+        assert apply_import(database, name, entries, report) == (aid, False)
+        with Session(database) as session:
+            cash, lots, _ = replay(entries_for(session, aid))
+            assert cash == Decimal(expected_cash)
+            assert sum(lot.quantity for sl in lots.values() for lot in sl) == Decimal(
+                expected_shares
+            )
+        reports.append(report)
+        ids.append(aid)
+    assert ids[0] != ids[1]
+    assert reports[0]["identity"] != reports[1]["identity"]
+    assert reports[0]["other_portfolio_rows"] == [3]
+    assert reports[1]["other_portfolio_rows"] == [2, 4]
+
+
+@pytest.mark.parametrize(
+    "payload,selection,message",
+    [
+        (GROUPED.replace(b",Index", b","), "Active", "Every populated row"),
+        (GROUPED, "Missing", "absent"),
+        (CSV, "Active", "no Portfolio column"),
+    ],
+)
+def test_grouped_import_rejects_ambiguous_or_missing_ownership(payload, selection, message):
+    with pytest.raises(ValueError, match=message):
+        reconstruct(payload, LISTINGS, portfolio=selection)
+
+
+def test_explicit_listing_alias_retains_source_and_changes_retry_identity():
+    alias = {**LISTINGS, "AAA": {**LISTINGS["AAA"], "ticker": "NEW"}}
+    entries, report = reconstruct(GROUPED, alias, portfolio="Active")
+    _, original = reconstruct(GROUPED, LISTINGS, portfolio="Active")
+    assert entries[-1].ticker == "NEW"
+    assert report["source_rows"][0]["Symbol"] == "AAA"
+    assert report["identity"] != original["identity"]

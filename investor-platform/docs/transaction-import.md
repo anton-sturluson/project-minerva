@@ -29,6 +29,19 @@ The listing map makes identity and the **recorded amounts' currency** explicit:
 
 Only confirmed USD rows are imported. An omitted exchange becomes `UNVERIFIED`; it cannot be used for market quotes. Do not map an ambiguous foreign ticker to a similarly named US listing. There is no external ticker lookup in this command.
 
+## Multiple portfolios
+
+When an export has a `Portfolio` column, every populated row must have an assignment. Select an exact group with `--portfolio`; exports with several groups cannot be imported as one account by accident. Rows belonging to other groups are counted separately from invalid rows, and original row numbers and the complete source remain in private import evidence. Blank rows are ignored.
+
+```sh
+uv run --frozen investor-import --source /path/transactions.csv --listings /path/listings.json --portfolio Active --name 'Active portfolio'
+# Review the preview, then add --apply. Repeat for each source group with a distinct name.
+```
+
+Each group independently reconstructs cash and opening shares. Identical source, group and listing choices are idempotent for the same target name. A shared ticker does not join portfolios or imply ownership. Confirm any cash adjustment separately; inferred cash is not a broker balance.
+
+A listing map may include an explicit `ticker` alias when a verified symbol change refers to the same security, for example `"OLD": {"ticker": "NEW", "exchange": "NASDAQ", "currency": "USD"}`. This does not infer merger ratios or corporate actions. Preserve the source symbol and supporting evidence; changed mappings produce a different import identity.
+
 ## Reconstruction rules
 
 - USD-total exports normalize cash to eight decimal places (removing spreadsheet floating-point noise), while preserving the untouched source payload. Reported cash can differ from shares × rounded unit price. A subsequent correction uses the standard quantity/price/fees model; inspect its cash delta before confirming.

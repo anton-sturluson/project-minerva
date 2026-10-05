@@ -81,7 +81,7 @@ def source_rows(payload):
     return rows, "google-unformatted"
 
 
-def reconstruct(payload: bytes, listings: dict):
+def reconstruct(payload: bytes, listings: dict, *, portfolio: str | None = None):
     """Keep raw evidence, reject ambiguous rows and infer only minimum opening balances."""
     rows, source_format = source_rows(payload)
     columns = set(rows[0]) if rows else set()
@@ -93,13 +93,34 @@ def reconstruct(payload: bytes, listings: dict):
         layout = TransactionLayout.LEGACY
     else:
         raise ValueError("CSV needs Price (USD) and Total (USD), or legacy Cost and Price columns")
+    # Portfolio ownership is explicit source data, never inferred from a ticker.
+    populated = [r for r in rows if any(str(v or "").strip() for v in r.values())]
+    groups = {r.get("Portfolio", "").strip() for r in populated}
+    if "Portfolio" in columns:
+        if "" in groups:
+            raise ValueError("Every populated row needs a Portfolio assignment")
+        if portfolio is None and len(groups) > 1:
+            raise ValueError("Choose --portfolio from: " + ", ".join(sorted(groups)))
+        portfolio = portfolio or next(iter(groups), None)
+        if portfolio not in groups:
+            raise ValueError("Selected portfolio is absent from the source")
+    elif portfolio is not None:
+        raise ValueError("Source has no Portfolio column")
     digest = hashlib.sha256(payload).hexdigest()
     # Include the explicit listing/currency choices in retry identity.
     identity = hashlib.sha256(payload + json.dumps(listings, sort_keys=True).encode()).hexdigest()
+    if portfolio is not None:
+        identity = hashlib.sha256(f"{identity}:portfolio:{portfolio}".encode()).hexdigest()
     trades, skipped, differences = [], [], []
+    excluded_rows = []
     with localcontext() as ctx:
         ctx.prec = ACCOUNTING_PRECISION
         for row_number, row in enumerate(rows, 2):
+            if not any(str(v or "").strip() for v in row.values()):
+                continue
+            if portfolio is not None and row["Portfolio"].strip() != portfolio:
+                excluded_rows.append(row_number)
+                continue
             try:
                 ticker = row["Symbol"].strip().upper()
                 listing = listings.get(ticker, {})
@@ -140,7 +161,7 @@ def reconstruct(payload: bytes, listings: dict):
                 trade = trade_type(
                     kind=kind,
                     effective_date=trade_date(row["Date"]),
-                    ticker=ticker,
+                    ticker=listing.get("ticker", ticker),
                     exchange=listing.get("exchange", "UNVERIFIED"),
                     currency=Currency.USD,
                     quantity=quantity,
@@ -204,6 +225,8 @@ def reconstruct(payload: bytes, listings: dict):
     summary = {
         "warning": WARNING,
         "source_sha256": digest,
+        "selected_portfolio": portfolio,
+        "other_portfolio_rows": excluded_rows,
         "identity": identity,
         "source_rows": rows,
         "source_format": source_format,
@@ -287,6 +310,7 @@ def main():
         type=Path,
         help='JSON: {"TICKER": {"exchange": "NASDAQ", "currency": "USD"}}',
     )
+    parser.add_argument("--portfolio", help="Exact value in the source Portfolio column")
     parser.add_argument("--name", default="Transaction reconstruction · testing")
     parser.add_argument(
         "--apply", action="store_true", help="Create a new named portfolio in DATABASE_URL"
@@ -300,7 +324,9 @@ def main():
             payload = Path(args.source).read_bytes()
         if len(payload) > MAX_EXPORT_BYTES:
             raise ValueError("Transaction export exceeds 5 MB")
-        entries, summary = reconstruct(payload, json.loads(args.listings.read_text()))
+        entries, summary = reconstruct(
+            payload, json.loads(args.listings.read_text()), portfolio=args.portfolio
+        )
         output = {
             k: v
             for k, v in summary.items()
