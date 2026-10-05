@@ -77,13 +77,17 @@ export function Portfolio({ page }: { page: Page }) {
   }
   return (
     <section
-      id={page === "activity" ? "activity" : "portfolio"}
+      id={page === "activity" || page === "post-mortem" ? page : "portfolio"}
       className="portfolio"
       aria-labelledby="portfolio-heading"
     >
       <h1 id="portfolio-heading">
         <span aria-hidden="true">✳ </span>
-        {page === "activity" ? "Activity" : "My portfolio"}
+        {page === "activity"
+          ? "Activity"
+          : page === "post-mortem"
+            ? "Post-mortem"
+            : "My portfolio"}
       </h1>
       {error && (
         <div className="error" role="alert">

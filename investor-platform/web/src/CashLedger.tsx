@@ -9,6 +9,7 @@ import { api, errorMessage, type Account } from "./api";
 import { Corrections, EntrySummary } from "./Corrections";
 import type { Page } from "./App";
 import { Tracker } from "./Tracker";
+import { PostMortem } from "./PostMortem";
 import { number } from "./format";
 import { IncomeFields, emptyIncome, incomePayload } from "./IncomeFields";
 import { Trades } from "./Trades";
@@ -31,6 +32,10 @@ export function CashLedger({
   account: Account;
   page: Page;
 }) {
+  const [trackerOpened, setTrackerOpened] = useState(page === "portfolio");
+  useEffect(() => {
+    if (page === "portfolio") setTrackerOpened(true);
+  }, [page]);
   const [correcting, setCorrecting] = useState<Entry | null>(null);
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [error, setError] = useState("");
@@ -112,8 +117,11 @@ export function CashLedger({
       {ledger ? (
         <>
           <div hidden={page !== "portfolio"}>
-            <Tracker account={account} ledger={ledger} />
+            {trackerOpened && <Tracker account={account} ledger={ledger} />}
           </div>
+          {page === "post-mortem" && (
+            <PostMortem account={account} ledger={ledger} />
+          )}
           <div hidden={page !== "activity"}>
             <div className="balance-line">
               <span>

@@ -20,13 +20,15 @@ const initialTheme = savedTheme();
 // Apply before React renders to avoid flashing the wrong stored theme on reload.
 applyTheme(initialTheme);
 
-export type Page = "portfolio" | "activity" | "research";
+export type Page = "portfolio" | "activity" | "research" | "post-mortem";
 function currentPage(): Page {
   return location.hash === "#activity"
     ? "activity"
-    : location.hash === "#research"
-      ? "research"
-      : "portfolio";
+    : location.hash === "#post-mortem"
+      ? "post-mortem"
+      : location.hash === "#research"
+        ? "research"
+        : "portfolio";
 }
 
 export function App() {
@@ -63,6 +65,12 @@ export function App() {
             [ Portfolio ]
           </a>
           <a href="#performance">[ Performance ]</a>
+          <a
+            href="#post-mortem"
+            aria-current={page === "post-mortem" ? "page" : undefined}
+          >
+            [ Post-mortem ]
+          </a>
           <a
             href="#activity"
             aria-current={page === "activity" ? "page" : undefined}

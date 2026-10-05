@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import market
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
+from .attribution import StockAttribution
 from .domain import (
     ACCOUNTING_PRECISION,
     IN_KIND_ENTRIES,
@@ -318,10 +319,12 @@ def calculate(
         )
         warnings.extend(income_warnings)
     latest_holdings = []
+    attribution = StockAttribution(securities) if stock_only else None
     for d in days:
         prefix = [e for e in entries if e.effective_date <= d]
         cash, lots, _ = replay(prefix)
         holdings = []
+        holding_values = {}
         for sid, sl in lots.items():
             quantity = sum((lot.quantity for lot in sl), ZERO)
             if not quantity:
@@ -336,6 +339,7 @@ def calculate(
                 if any(lot.quantity and lot.basis is None for lot in sl)
                 else sum((lot.basis or ZERO for lot in sl), ZERO)
             )
+            holding_values[sid] = quantity * price
             holdings.append(
                 {
                     "ticker": securities[sid].ticker,
@@ -348,6 +352,9 @@ def calculate(
                 }
             )
         value = cash + receivables[d] + sum((h["value"] for h in holdings), ZERO)
+        growth_before = growth
+        interval = []
+        denominator = ZERO
         if previous is not None:
             interval = [e for e in entries if previous_day < e.effective_date <= d]
             incoming = outgoing = in_kind = ZERO
@@ -388,6 +395,18 @@ def calculate(
                     "intraday valuations are needed"
                 )
             growth *= factor
+        if attribution is not None:
+            attribution.record(
+                d,
+                previous_day,
+                holding_values,
+                interval,
+                prices,
+                distributions,
+                denominator,
+                growth_before,
+                growth,
+            )
         for h in holdings:
             h["weight"] = h["value"] / value if value else None
         values.append(
@@ -407,6 +426,7 @@ def calculate(
             row["portfolio"] = None
     last = values[-1]
     return {
+        "attribution": attribution.report() if attribution is not None else None,
         "scope": scope,
         "provisional": provisional or stock_only,
         "funding_status": funding_status,

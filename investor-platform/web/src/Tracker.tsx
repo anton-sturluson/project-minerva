@@ -108,7 +108,7 @@ export function Tracker({
     ).values(),
   ];
   const [report, setReport] = useState<Report | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
   const compare = useCallback(
