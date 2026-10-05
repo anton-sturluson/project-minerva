@@ -51,7 +51,31 @@ export function App() {
       <a className="skip-link" href={`#${page}`}>
         Skip to content
       </a>
-      <div className="edition-line">
+      <header className="site-header">
+        <a className="wordmark" href="#portfolio" aria-label="Minerva home">
+          minerva!
+        </a>
+        <nav className="main-nav" aria-label="Main navigation">
+          <a
+            href="#portfolio"
+            aria-current={page === "portfolio" ? "page" : undefined}
+          >
+            [ Portfolio ]
+          </a>
+          <a href="#performance">[ Performance ]</a>
+          <a
+            href="#activity"
+            aria-current={page === "activity" ? "page" : undefined}
+          >
+            [ Activity ]
+          </a>
+          <a
+            href="#research"
+            aria-current={page === "research" ? "page" : undefined}
+          >
+            [ Research ]
+          </a>
+        </nav>
         <label className="theme-picker">
           Theme{" "}
           <select
@@ -64,33 +88,7 @@ export function App() {
             <option value="dark">Dark</option>
           </select>
         </label>
-      </div>
-      <header className="masthead">
-        <a className="wordmark" href="/" aria-label="Minerva home">
-          minerva!
-        </a>
       </header>
-      <nav className="main-nav" aria-label="Main navigation">
-        <a
-          href="#portfolio"
-          aria-current={page === "portfolio" ? "page" : undefined}
-        >
-          [ Portfolio ]
-        </a>
-        <a href="#performance">[ Performance ]</a>
-        <a
-          href="#activity"
-          aria-current={page === "activity" ? "page" : undefined}
-        >
-          [ Activity ]
-        </a>
-        <a
-          href="#research"
-          aria-current={page === "research" ? "page" : undefined}
-        >
-          [ Research ]
-        </a>
-      </nav>
       <main id="main">
         <div hidden={page === "research"}>
           <Portfolio page={page} />
