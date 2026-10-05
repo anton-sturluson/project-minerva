@@ -62,9 +62,13 @@ Provider listing metadata can describe a later exchange move. Such mismatches re
 
 Only hashed JS/CSS build assets receive private immutable browser caching. HTML, errors and portfolio API responses remain `no-store` behind the existing access boundary.
 
+When configured Tiingo FX is unavailable because of a transport/provider error, the same-date Yahoo FX path is tried. Provider identity and invalid-price errors still block the request; missing FX dates remain missing after fallback. Successful reports retain the provider actually used. ([Provider selection](../backend/src/investor_platform/market.py))
+
 Tiingo's `close` is already in as-traded share units; unlike Yahoo's split-adjusted close, it must not be multiplied by subsequent split factors. FX uses the provider's date label and same-date daily close; inverse pairs are reciprocated, and missing FX dates remain missing. [Tiingo EOD fields](https://www.tiingo.com/documentation/end-of-day), [FX fields](https://www.tiingo.com/documentation/forex).
 
 ## References
+
+- [Provider selection](../backend/src/investor_platform/market.py) — preferred FX and transport-failure fallback validation.
 
 - [Quick start](../README.md) — local launch commands.
 - [Application boundary](../backend/src/investor_platform/app.py) — local and Tailscale behavior.
