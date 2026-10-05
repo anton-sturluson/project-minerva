@@ -146,16 +146,20 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
     try:
         histories = {}
         if candidates:
-            symbols = {market.symbol_for(e[0].security) for e in candidates} | set(
-                market.BENCHMARKS
-            )
             if len({e[0].security_id for e in candidates}) > market.MAX_SECURITIES:
                 raise ValueError(
                     f"Hit rate supports up to {market.MAX_SECURITIES} securities plus SPY and QQQ"
                 )
             start = min(e[0].effective_date for e in candidates)
             end = max(e[-1].effective_date for e in candidates)
-            histories = market.histories(symbols, start, end)
+            # P&L is already recorded in USD. Use actual local sessions to validate
+            # trade dates; holiday-carried valuation prices are not trade sessions.
+            histories = market.security_histories(
+                {e[0].security_id: e[0].security for e in candidates}.values(),
+                start,
+                end,
+                convert_fx=False,
+            )
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
             result = calculate_hit_rate(episodes, open_count, histories, today)
@@ -168,6 +172,8 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except market.MarketDataError as exc:
+        raise HTTPException(503, str(exc)) from exc
     except (OSError, KeyError, TypeError, IndexError, DecimalException) as exc:
         raise HTTPException(
             503, "Hit rate data is unavailable. Retry; saved records are unchanged."

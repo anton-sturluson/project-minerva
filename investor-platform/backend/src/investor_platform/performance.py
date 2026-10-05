@@ -141,7 +141,7 @@ def scenario_entries(entries, excluded, histories, *, provisional):
 
 
 def calculate(entries, histories, start, end, *, provisional=False):
-    """No forward filling, shortened comparison window, or zero-valued missing positions."""
+    """Link USD valuations on benchmark sessions; never zero-value missing positions."""
     spy, qqq = histories["SPY"], histories["QQQ"]
     days = sorted(d for d in spy.close if start <= d <= end)
     if len(days) < 2 or any(d not in qqq.adjusted for d in days):
@@ -290,7 +290,7 @@ def calculate(entries, histories, start, end, *, provisional=False):
         "assumptions": [
             "Testing estimate: opening shares and cash are inferred, not verified broker balances.",
             "Assumes no missing trades or external flows; excluded import rows are not included.",
-            "Uses provider USD listings for imported US tickers; confirm security identity.",
+            "Uses exchange-specific listings and dated USD FX; confirm security identity.",
             "Missing gross distributions are modeled on ex-dates and held as cash. Recorded income "
             "offsets the model only on the same ex-date; payment-date income may double count it.",
             "No unrecorded fees or taxes. Benchmarks reinvest distributions.",
@@ -347,9 +347,6 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
             422, "Choose excluded stocks from this account's history through the end date"
         )
     try:
-        symbols = {
-            market.symbol_for(s, provisional=provisional) for s in securities.values()
-        } | set(market.BENCHMARKS)
         if (
             len(securities) > market.MAX_SECURITIES
             or entries[0].effective_date < today - market.HISTORY_WINDOW
@@ -359,7 +356,9 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 "and ten years of ledger history"
             )
         # Fetch from inception to detect unrecorded historical splits, even for a recent report.
-        fetched = market.histories(symbols, entries[0].effective_date, period.end)
+        fetched = market.security_histories(
+            securities.values(), entries[0].effective_date, period.end, provisional=provisional
+        )
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
             result = calculate(entries, fetched, period.start, period.end, provisional=provisional)
@@ -383,6 +382,8 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         return wire({**result, "fetched_at": datetime.now(UTC), "source": market.SOURCE})
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except market.MarketDataError as exc:
+        raise HTTPException(503, str(exc)) from exc
     except (OSError, KeyError, TypeError, IndexError, DecimalException) as exc:
         raise HTTPException(
             503,

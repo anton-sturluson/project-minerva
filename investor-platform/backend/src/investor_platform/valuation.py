@@ -16,10 +16,6 @@ from .performance import wire
 router = APIRouter(prefix="/api/accounts")
 QUOTE_WINDOW = timedelta(days=10)
 MAX_QUOTE_AGE = timedelta(days=4)
-FOREIGN_LISTINGS = {
-    "ASX": (".AX", Currency.AUD, {"ASX"}),
-    "TSXV": (".V", Currency.CAD, {"VAN"}),
-}
 
 
 def latest(history, end):
@@ -44,7 +40,7 @@ def quote_holding(holding, end, provisional, fx):
         "price_error": None,
     }
     try:
-        foreign = FOREIGN_LISTINGS.get(security.exchange)
+        foreign = market.FOREIGN_LISTINGS.get(security.exchange)
         if foreign:
             suffix, currency, exchanges = foreign
             history = market.history(
@@ -88,9 +84,9 @@ def valuation(account_id: UUID, session: DB, actor: Identity):
     end = datetime.now(market.MARKET_TIMEZONE).date() - timedelta(days=1)
     fx = {}
     for currency in {
-        FOREIGN_LISTINGS[h.security.exchange][1]
+        market.FOREIGN_LISTINGS[h.security.exchange][1]
         for h in records.holdings
-        if h.security.exchange in FOREIGN_LISTINGS
+        if h.security.exchange in market.FOREIGN_LISTINGS
     }:
         try:
             fx[currency] = market.history(

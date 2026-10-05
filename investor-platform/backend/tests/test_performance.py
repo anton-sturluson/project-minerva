@@ -98,7 +98,7 @@ def test_incomplete_market_inputs_fail_closed(db_client, portfolio, monkeypatch,
 
         monkeypatch.setattr(market, "history", unavailable)
     else:
-        trade(db_client, aid, "opening_position", "1", ticker="FOREIGN", exchange="TSX")
+        trade(db_client, aid, "opening_position", "1", ticker="FOREIGN", exchange="UNSUPPORTED")
     before = ledger(db_client, aid)
     r = report(db_client, aid)
     assert r.status_code == (503 if problem == "outage" else 422)
@@ -335,3 +335,78 @@ def test_cagr_annualizes_linked_returns_instead_of_cash_growth(db_client, portfo
     # Reconciliation suppression propagates into the public CAGR field too.
     data["AAA"].dividends[DAYS[1]] = D(1)
     assert report(db_client, aid).json()["cagr"]["portfolio"] is None
+
+
+@pytest.mark.parametrize(
+    "exchange,suffix,currency,provider",
+    [
+        ("ASX", ".AX", "AUD", "ASX"),
+        ("TSXV", ".V", "CAD", "VAN"),
+        ("TSX", ".TO", "CAD", "TOR"),
+        ("XSTO", ".ST", "SEK", "STO"),
+        ("FNSE", ".ST", "SEK", "STO"),
+    ],
+)
+def test_foreign_performance_and_scenario_use_dated_fx(
+    db_client, portfolio, monkeypatch, exchange, suffix, currency, provider
+):
+    aid, data = portfolio
+    cash(db_client, aid, amount="100", day="2026-01-02")
+    trade(db_client, aid, quantity="10", price="7", ticker="FOREIGN", exchange=exchange)
+    local = History({DAYS[0]: D(10), DAYS[2]: D(12)}, {}, exchange=provider)
+    fx = History(dict(zip(DAYS, map(D, [".7", ".8", ".9"]))), {})
+
+    def quote(symbol, start, end, **kwargs):
+        if symbol == "FOREIGN" + suffix:
+            assert kwargs == {"currency": currency}
+            return local
+        if symbol == currency + "USD=X":
+            assert kwargs == {"instruments": ("CURRENCY",)}
+            return fx
+        return data[symbol]
+
+    monkeypatch.setattr(market, "history", quote)
+    before = ledger(db_client, aid)
+    sid = next(
+        h["security"]["id"] for h in before["holdings"] if h["security"]["ticker"] == "FOREIGN"
+    )
+    result = scenario(db_client, aid, [sid]).json()
+    assert D(result["series"][1]["value"]) == 1210  # 1100 domestic + 80 foreign + 30 cash.
+    assert D(result["value"]) == 1348
+    assert float(result["return"]) == pytest.approx(1348 / 1100 - 1)
+    assert D(result["scenario"]["value"]) == 1310
+    assert ledger(db_client, aid) == before
+    del fx.close[DAYS[1]]
+    missing = report(db_client, aid)
+    assert missing.status_code == 422 and "Missing close" in missing.json()["detail"]
+    assert ledger(db_client, aid) == before
+
+
+def test_foreign_hit_rate_requires_actual_trade_sessions_not_holiday_carries(
+    db_client, portfolio, monkeypatch
+):
+    aid, data = portfolio
+    cash(db_client, aid, amount="100", day="2026-01-02")
+    trade(db_client, aid, quantity="1", price="10", ticker="FOREIGN", exchange="TSX")
+    trade(
+        db_client,
+        aid,
+        "sell",
+        "1",
+        "12",
+        ticker="FOREIGN",
+        exchange="TSX",
+        effective_date="2026-01-05",
+    )
+
+    def quote(symbol, start, end, **kwargs):
+        if symbol == "FOREIGN.TO":
+            assert kwargs == {"currency": "CAD"}
+            return History({DAYS[0]: D(15), DAYS[2]: D(16)}, {}, exchange="TOR")
+        assert not symbol.endswith("=X")  # Recorded USD cash needs no FX conversion.
+        return data[symbol]
+
+    monkeypatch.setattr(market, "history", quote)
+    result = db_client.post(f"/api/accounts/{aid}/hit-rate").json()
+    assert result["excluded"] == 1
+    assert "Missing matching closing prices" in result["episodes"][0]["excluded"]

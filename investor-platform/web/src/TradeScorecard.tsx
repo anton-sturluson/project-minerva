@@ -111,10 +111,15 @@ export function TradeScorecard({
                     {stats.episodes.map((s, i) => (
                       <tr key={i}>
                         <td>
-                          {s.ticker} · {s.exchange}
+                          {s.ticker} ·{" "}
+                          {s.exchange === "UNVERIFIED"
+                            ? "Exchange unconfirmed"
+                            : s.exchange}
                         </td>
                         <td>{s.closed_on}</td>
-                        <td className="number">{number(s.pnl)}</td>
+                        <td className="number">
+                          {s.pnl === null ? "Unknown basis" : number(s.pnl)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

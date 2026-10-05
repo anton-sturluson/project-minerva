@@ -63,3 +63,55 @@ test("shows a closed synthetic trade and recovers a scorecard load failure", asy
     ),
   ).toBe(true);
 });
+
+test("distinguishes unconfirmed exchanges from unknown cost basis", async ({
+  page,
+}) => {
+  await page.route("**/statistics", (route) =>
+    route.fulfill({
+      json: {
+        closed: 2,
+        open: 0,
+        unknown: 1,
+        wins: 1,
+        losses: 0,
+        breakeven: 0,
+        win_rate: "1",
+        payoff_ratio: null,
+        average_win: "10",
+        average_loss: null,
+        episodes: [
+          {
+            ticker: "SYNTH",
+            exchange: "UNVERIFIED",
+            closed_on: "2026-01-06",
+            pnl: "10",
+          },
+          {
+            ticker: "OPENING",
+            exchange: "NYSE",
+            closed_on: "2026-01-06",
+            pnl: null,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByText("Closed positions", { exact: true }).click();
+  const table = page.getByLabel("Closed positions", { exact: true });
+  await expect(
+    table.getByRole("row").filter({ hasText: "SYNTH" }),
+  ).toContainText("Exchange unconfirmed");
+  await expect(
+    table.getByRole("row").filter({ hasText: "SYNTH" }),
+  ).toContainText("10.00");
+  await expect(
+    table.getByRole("row").filter({ hasText: "OPENING" }),
+  ).toContainText("Unknown basis");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

@@ -4,18 +4,22 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-from .domain import Currency
+from .domain import ACCOUNTING_PRECISION, Currency
 
-MAX_SECURITIES = 48
+MAX_SECURITIES = 128
 HISTORY_WINDOW = timedelta(days=3660)
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 SOURCE = "Yahoo Finance daily history"
 BENCHMARKS = ("SPY", "QQQ")
+
+
+class MarketDataError(OSError):
+    """A public symbol could not be priced; carries no provider payload."""
 
 
 @dataclass
@@ -91,6 +95,8 @@ def history(
     for kind in ("dividends", "capitalGains"):
         for e in events.get(kind, {}).values():
             d = day(e["date"])
+            if not start <= d <= end:
+                continue
             amount = positive(e["amount"])
             for split_date, ratio in splits.items():
                 if split_date > d:
@@ -111,27 +117,104 @@ EXCHANGES = {
     "ARCX": {"PCX"},
     "AMEX": {"ASE"},
     "BATS": {"BTS"},
+    "OTC": {"PNK", "OQB", "OQX"},
 }
 
 PROVIDER_EXCHANGES = frozenset().union(*EXCHANGES.values())
 
+# Quote currency is independent of the ledger's USD settlement currency.
+FOREIGN_LISTINGS = {
+    "ASX": (".AX", "AUD", {"ASX"}),
+    "TSXV": (".V", "CAD", {"VAN"}),
+    "TSX": (".TO", "CAD", {"TOR"}),
+    "XSTO": (".ST", "SEK", {"STO"}),
+    "FNSE": (".ST", "SEK", {"STO"}),
+}
+MAX_CLOSE_AGE = timedelta(days=4)
+
 
 def symbol_for(security, *, provisional=False):
+    if security.currency != Currency.USD:
+        raise ValueError(f"{security.ticker}: recorded cash amounts must be in USD")
+    if security.exchange in FOREIGN_LISTINGS:
+        return security.ticker + FOREIGN_LISTINGS[security.exchange][0]
     supported = security.exchange in EXCHANGES or (
         provisional and security.exchange == "UNVERIFIED"
     )
-    if security.currency != Currency.USD or not supported:
-        raise ValueError(f"{security.ticker}: use a supported US exchange and USD")
+    if not supported:
+        raise ValueError(f"{security.ticker}: confirm a supported listing exchange")
     return security.ticker.replace(".", "-")
 
 
 def verify_exchange(security, history, *, provisional=False):
-    allowed = PROVIDER_EXCHANGES if provisional else EXCHANGES[security.exchange]
+    if security.exchange in FOREIGN_LISTINGS:
+        allowed = FOREIGN_LISTINGS[security.exchange][2]
+    elif provisional and security.exchange == "UNVERIFIED":
+        allowed = PROVIDER_EXCHANGES
+    else:
+        allowed = EXCHANGES[security.exchange]
     if history.exchange not in allowed:
         raise ValueError(f"{security.ticker}: provider listing does not match {security.exchange}")
 
 
-def histories(symbols, start, end):
-    """Fetch each public symbol once, with bounded network concurrency."""
+def usd_history(local, fx):
+    """Value a foreign listing on FX dates, using only already available local closes.
+
+    A bounded previous close bridges different exchange holidays. The current day's
+    FX still moves its USD value. Missing FX is never filled or replaced with today's rate.
+    """
+    closes, adjusted, dividends = {}, {}, {}
+    local_days = sorted(local.close)
+    if not local_days:
+        raise ValueError("No foreign closing prices")
+    index = 0
+    with localcontext() as ctx:
+        ctx.prec = ACCOUNTING_PRECISION
+        for day, rate in sorted(fx.close.items()):
+            while index + 1 < len(local_days) and local_days[index + 1] <= day:
+                index += 1
+            previous = local_days[index]
+            if previous > day or day - previous > MAX_CLOSE_AGE:
+                continue
+            # Carrying a pre-split share price across a missing split-day quote is unsafe.
+            if any(previous < split <= day for split in local.splits):
+                continue
+            closes[day] = local.close[previous] * rate
+            if previous in local.adjusted:
+                adjusted[day] = local.adjusted[previous] * rate
+        for day, amount in local.dividends.items():
+            if day not in fx.close:
+                raise ValueError(f"Missing USD exchange rate for distribution on {day}")
+            dividends[day] = amount * fx.close[day]
+    return History(closes, adjusted, dividends, local.splits, local.exchange)
+
+
+def security_histories(securities, start, end, *, provisional=False, convert_fx=True):
+    """Fetch each listing once; optionally convert valuation histories to USD."""
+    requests = {b: {} for b in BENCHMARKS}
+    foreign = {}
+    for security in securities:
+        symbol = symbol_for(security, provisional=provisional)
+        listing = FOREIGN_LISTINGS.get(security.exchange)
+        if listing:
+            currency = listing[1]
+            requests[symbol] = {"currency": currency}
+            if convert_fx:
+                requests[f"{currency}USD=X"] = {"instruments": ("CURRENCY",)}
+                foreign[symbol] = currency
+        else:
+            requests[symbol] = {}
+
+    def fetch(symbol):
+        try:
+            return symbol, history(symbol, start - MAX_CLOSE_AGE, end, **requests[symbol])
+        except (OSError, KeyError, TypeError, IndexError) as exc:
+            raise MarketDataError(
+                f"{symbol}: market history unavailable; saved records are unchanged"
+            ) from exc
+
     with ThreadPoolExecutor(max_workers=6) as pool:
-        return dict(pool.map(lambda symbol: (symbol, history(symbol, start, end)), sorted(symbols)))
+        fetched = dict(pool.map(fetch, sorted(requests)))
+    for symbol, currency in foreign.items():
+        fetched[symbol] = usd_history(fetched[symbol], fetched[f"{currency}USD=X"])
+    return fetched

@@ -2,7 +2,7 @@
 
 ## Scope
 
-USD long-only equities/ETFs, immutable recorded cash/trades, and daily closing observations. SPY and QQQ are investable S&P 500 and Nasdaq-100 proxies, not the index series themselves. Their fund costs and tracking differences remain in their returns. ([SPY](https://www.ssga.com/us/en/institutional/etfs/state-street-spdr-sp-500-etf-trust-spy), [QQQ](https://www.invesco.com/qqq-etf/en/home.html))
+USD-settled long-only equities/ETFs, immutable recorded cash/trades, and daily closing observations. SPY and QQQ are investable S&P 500 and Nasdaq-100 proxies, not the index series themselves. Their fund costs and tracking differences remain in their returns. ([SPY](https://www.ssga.com/us/en/institutional/etfs/state-street-spdr-sp-500-etf-trust-spy), [QQQ](https://www.invesco.com/qqq-etf/en/home.html))
 
 ## Valuations and comparison
 
@@ -15,6 +15,12 @@ The first available session establishes the baseline (its trading gain is exclud
 Gross dividends/capital-gain distributions must be entered as investment income on their ex-dates. The tracker compares recorded daily income to provider distributions on prior-day shares, including dates before the selected period. Differences above one cent withhold portfolio return. No income is automatically invented or posted. This is a deliberately limited reconciliation: withholding taxes, payment-date receivables, interest mixed with dividends, special entitlement rules and missing provider events require further accounting. It is not evidence that every corporate action was captured. Benchmark distributions are reinvested; portfolio distributions remain recorded cash.
 
 Shares held across a provider-reported split block the report until split accounting exists. Provider identity, currency and instrument type are validated. Histories are fetched on request, not cached or saved; source and report dates are displayed; fetch time is retained in the API response. **Single-provider data is unverified against an independent source and may be revised.** Ledger changes and date changes clear old reports. No future session or intraday quote is presented as a completed close.
+
+## International listings
+
+ASX, TSX/TSXV and Stockholm main/First North quotes are converted to USD using dated AUD, CAD or SEK exchange rates. USD OTC listings are also supported. The recorded USD purchase/sale amounts are never converted again. Foreign holidays use the last available local close (at most four calendar days old) with current-session FX; missing FX or stale prices block valuation. This is a daily-date convention, not synchronized intraday pricing across time zones. See [ADR 0004](decisions/0004-international-market-data.md) for identity and calendar rules.
+
+Up to 128 securities are fetched with bounded concurrency. Delisted histories and unrecorded splits still block comparisons; FX support cannot reconstruct missing market data.
 
 ## CAGR and stock exclusions
 
