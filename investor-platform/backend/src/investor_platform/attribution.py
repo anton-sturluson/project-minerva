@@ -27,7 +27,7 @@ class StockAttribution:
         growth_before,
         growth_after,
     ):
-        if previous_day is None:
+        if previous_day is None and not entries:
             self.previous = values
             return
         gains = {
@@ -46,13 +46,13 @@ class StockAttribution:
             elif entry.kind in IN_KIND_ENTRIES:
                 gains[sid] -= entry.quantity * prices[sid].close[day]
         for (sid, exdate), amount in distributions.items():
-            if previous_day < exdate <= day:
+            if exdate <= day and (previous_day is None or previous_day < exdate):
                 gains[sid] = gains.get(sid, ZERO) + amount
         for key in ("all", str(day.year)):
             period = self.periods.setdefault(
                 key,
                 {
-                    "start": previous_day,
+                    "start": previous_day or day,
                     "base": growth_before,
                     "linked": defaultdict(Decimal),
                     "gains": defaultdict(Decimal),
@@ -68,7 +68,8 @@ class StockAttribution:
     def report(self):
         reports = []
         for key, period in self.periods.items():
-            base = period["base"]
+            # A lone year-end close can have execution gains but no return interval.
+            base = period["base"] if period["start"] < period["end"] else ZERO
             result = period["growth"] / base - ONE if base else None
             rows = [
                 {
