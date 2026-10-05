@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import Actor, get_actor, get_session
-from .domain import Currency
+from .domain import Currency, FundingStatus
 from .models import Account, Workspace
 
 router = APIRouter(prefix="/api")
@@ -24,6 +24,7 @@ class AccountInput(BaseModel):
 
 
 class ReconstructionView(BaseModel):
+    funding_status: FundingStatus = FundingStatus.INFERRED
     warning: str
     source_sha256: str
     imported_trades: int

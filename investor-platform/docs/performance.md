@@ -22,6 +22,12 @@ All portfolios open to **Full history**. **Last 90 days** is optional and uses r
 
 In a recorded-baseline view, exclusions apply within that period: prior trades remain, and excluded opening shares become cash at the first session close. The all-history trade scorecard and current holdings are independent of this choice.
 
+## Funding reconciliation
+
+An inferred minimum opening cash balance is a bookkeeping placeholder, not evidence that all future capital was present at inception. Imported accounts default to `funding_status: inferred`, including legacy imports without a status field. Portfolio return, CAGR, excess returns and stock-exclusion scenarios are withheld in both full-history and recorded-period views. Benchmark curves remain available; any reconstructed closing value is explicitly estimated.
+
+Mark a reconstruction `reconciled` only after reviewing dated deposits/withdrawals, transfers within the portfolio boundary, income, fees, opening balances and closing cash. A current cash override cannot establish historical funding dates. Keep source rows, transfer matches and unresolved allocations in ignored private storage. Accounts entered directly use `recorded` funding status; that is not independent broker certification.
+
 ## International listings
 
 ASX, TSX/TSXV and Stockholm main/First North quotes are converted to USD using dated AUD, CAD or SEK exchange rates. USD OTC listings are also supported. The recorded USD purchase/sale amounts are never converted again. Foreign holidays use the last available local close (at most four calendar days old) with current-session FX; missing FX or stale prices block valuation. This is a daily-date convention, not synchronized intraday pricing across time zones. See [ADR 0004](decisions/0004-international-market-data.md) for identity and calendar rules.

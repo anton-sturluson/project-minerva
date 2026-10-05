@@ -96,7 +96,7 @@ test("compares exclusions and CAGR, preserves real holdings, clears selections a
   blocked = true;
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toContainText(
-    "Original performance is shown",
+    "Scenario unavailable: synthetic funding gap",
   );
   await expect(page.locator(".scenario-line")).toHaveCount(0);
   await expect(summary).toContainText("20.00%");

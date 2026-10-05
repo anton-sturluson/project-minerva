@@ -21,6 +21,12 @@ class EntryKind(StrEnum):
     SELL = "sell"
 
 
+class FundingStatus(StrEnum):
+    RECORDED = "recorded"
+    INFERRED = "inferred"
+    RECONCILED = "reconciled"
+
+
 class Currency(StrEnum):
     USD = "USD"
     EUR = "EUR"

@@ -13,7 +13,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import market
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, MARKET_TIMEZONE, Currency, EntryKind
+from .domain import (
+    ACCOUNTING_PRECISION,
+    IN_KIND_ENTRIES,
+    MARKET_TIMEZONE,
+    Currency,
+    EntryKind,
+    FundingStatus,
+)
 from .ledger import entries_for
 from .models import LedgerEntry
 
@@ -196,7 +203,16 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
     return result
 
 
-def calculate(entries, histories, start, end, *, provisional=False, baseline=Baseline.HISTORY):
+def calculate(
+    entries,
+    histories,
+    start,
+    end,
+    *,
+    provisional=False,
+    baseline=Baseline.HISTORY,
+    funding_status=FundingStatus.RECORDED,
+):
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
     spy, qqq = histories["SPY"], histories["QQQ"]
     days = sorted(d for d in spy.close if start <= d <= end)
@@ -234,6 +250,8 @@ def calculate(entries, histories, start, end, *, provisional=False, baseline=Bas
     previous = None
     previous_day = None
     warnings = []
+    if funding_status == FundingStatus.INFERRED:
+        warnings.append("Cash history needs reconciliation; starting funding was inferred.")
     distributions = {}
     for sid, h in prices.items():
         for exdate, dividend in h.dividends.items():
@@ -342,6 +360,7 @@ def calculate(entries, histories, start, end, *, provisional=False, baseline=Bas
     last = values[-1]
     return {
         "provisional": provisional,
+        "funding_status": funding_status,
         "modeled_income": sum(modeled_income.values(), ZERO),
         "assumptions": [
             "Testing estimate: opening shares and cash are inferred, not verified broker balances.",
@@ -376,6 +395,11 @@ def calculate(entries, histories, start, end, *, provisional=False, baseline=Bas
 def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     account = owned_account(session, actor, account_id)
     provisional = bool(account.reconstruction)
+    funding_status = FundingStatus.RECORDED
+    if provisional:
+        funding_status = FundingStatus(
+            account.reconstruction.get("funding_status", FundingStatus.INFERRED)
+        )
     entries = entries_for(session, account_id)
     if account.base_currency != Currency.USD:
         raise HTTPException(
@@ -429,12 +453,15 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 period.end,
                 provisional=provisional,
                 baseline=period.baseline,
+                funding_status=funding_status,
             )
             result["baseline"] = period.baseline
             result["security_ids"] = list(securities)
             result["scenario"] = None
             result["scenario_error"] = None
-            if excluded:
+            if excluded and funding_status == FundingStatus.INFERRED:
+                result["scenario_error"] = "Reconcile cash history before comparing exclusions"
+            elif excluded:
                 try:
                     alternative = scenario_entries(
                         entries,
@@ -450,6 +477,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                         period.end,
                         provisional=provisional,
                         baseline=period.baseline,
+                        funding_status=funding_status,
                     )
                     result["scenario"]["excluded"] = [
                         {"id": sid, "ticker": s.ticker, "exchange": s.exchange}
