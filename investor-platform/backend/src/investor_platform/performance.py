@@ -7,17 +7,19 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import market
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
 from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
 from .ledger import entries_for
+from .models import LedgerEntry
 
 router = APIRouter(prefix="/api/accounts")
 ZERO = Decimal(0)
 ONE = Decimal(1)
+DAYS_PER_YEAR = Decimal("365.25")
 
 
 def wire(value):
@@ -88,6 +90,54 @@ class Period(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: date
     end: date
+    exclude_security_ids: list[UUID] = Field(default_factory=list, max_length=market.MAX_SECURITIES)
+
+
+def annualized_return(cumulative, start, end):
+    """Annualize the linked return, never the raw balance change."""
+    days = (end - start).days
+    if cumulative is None or days < 365:
+        return None
+    if cumulative == -ONE:
+        return -ONE
+    return (ONE + cumulative) ** (DAYS_PER_YEAR / Decimal(days)) - ONE
+
+
+def scenario_entries(entries, excluded, histories, *, provisional):
+    """Build a read-only cash alternative; never mutate or attach ledger objects."""
+    if any(e.kind == EntryKind.INCOME for e in entries):
+        raise ValueError(
+            "Scenario unavailable: recorded income is not linked to individual stocks yet"
+        )
+    result = []
+    sessions = sorted(histories["SPY"].close)
+    for entry in entries:
+        if entry.security_id not in excluded:
+            result.append(entry)
+        elif entry.kind == EntryKind.OPENING_POSITION:
+            # Preserve contributed capital: replace opening shares with their first session value.
+            day = next((d for d in sessions if d >= entry.effective_date), None)
+            symbol = market.symbol_for(entry.security, provisional=provisional)
+            price = histories[symbol].close.get(day)
+            if price is None:
+                raise ValueError("Scenario unavailable: missing opening-position valuation")
+            result.append(
+                LedgerEntry(
+                    id=entry.id,
+                    kind=EntryKind.DEPOSIT,
+                    effective_date=entry.effective_date,
+                    amount=entry.quantity * price,
+                    security_id=None,
+                )
+            )
+        # Excluded buys, sales and their fees disappear together. Other cash flows stay intact.
+    try:
+        replay(result)
+    except HTTPException as exc:
+        raise ValueError(
+            "Scenario unavailable: remaining trades or withdrawals need cash from excluded stocks"
+        ) from exc
+    return result
 
 
 def calculate(entries, histories, start, end, *, provisional=False):
@@ -255,6 +305,10 @@ def calculate(entries, histories, start, end, *, provisional=False):
         "series": values,
         "warnings": warnings,
         "return": last["portfolio"],
+        "cagr": {
+            key: annualized_return(last[key], days[0], days[-1])
+            for key in ("portfolio", *market.BENCHMARKS)
+        },
         "SPY": last["SPY"],
         "QQQ": last["QQQ"],
         "excess_spy": None if warnings else last["portfolio"] - last["SPY"],
@@ -287,6 +341,11 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         raise HTTPException(422, "Start on or after your first ledger entry")
     entries = [e for e in entries if e.effective_date <= period.end]
     securities = {e.security_id: e.security for e in entries if e.security_id}
+    excluded = set(period.exclude_security_ids)
+    if not excluded.issubset(securities):
+        raise HTTPException(
+            422, "Choose excluded stocks from this account's history through the end date"
+        )
     try:
         symbols = {
             market.symbol_for(s, provisional=provisional) for s in securities.values()
@@ -304,6 +363,23 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
             result = calculate(entries, fetched, period.start, period.end, provisional=provisional)
+            result["scenario"] = None
+            result["scenario_error"] = None
+            if excluded:
+                try:
+                    alternative = scenario_entries(
+                        entries, excluded, fetched, provisional=provisional
+                    )
+                    result["scenario"] = calculate(
+                        alternative, fetched, period.start, period.end, provisional=provisional
+                    )
+                    result["scenario"]["excluded"] = [
+                        {"id": sid, "ticker": s.ticker, "exchange": s.exchange}
+                        for sid, s in securities.items()
+                        if sid in excluded
+                    ]
+                except ValueError as exc:
+                    result["scenario_error"] = str(exc)
         return wire({**result, "fetched_at": datetime.now(UTC), "source": market.SOURCE})
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
