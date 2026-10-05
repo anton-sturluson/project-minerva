@@ -94,3 +94,63 @@ def test_unformatted_export_preserves_fractional_shares_and_precise_prices():
     assert str(entries[-1].effective_date) == "2024-07-22"
     assert report["raw_source"] == raw.decode()
     assert Decimal(report["opening_cash"]) >= entries[-1].price * entries[-1].quantity
+
+
+@pytest.mark.parametrize("google", [False, True])
+def test_usd_total_import_preserves_reported_cash_and_basis(database, google):
+    from investor_platform.accounting import replay
+
+    columns = ["Date", "Type", "Symbol", "Shares", "Price (USD)", "Total (USD)"]
+    values = [
+        ["2024-01-02", "Buy", "AAA", 3, 33.33333333, 100.02],
+        ["2024-01-03", "Sell", "AAA", 1, 40, 39.98],
+    ]
+    if google:
+        payload = (
+            "google.visualization.Query.setResponse("
+            + json.dumps(
+                {
+                    "table": {
+                        "cols": [{"label": col} for col in columns],
+                        "rows": [{"c": [{"v": v, "f": "rounded"} for v in row]} for row in values],
+                    }
+                }
+            )
+            + ");"
+        ).encode()
+    else:
+        payload = (
+            ",".join(columns) + "\n" + "\n".join(",".join(map(str, row)) for row in values)
+        ).encode()
+    entries, report = reconstruct(payload, LISTINGS)
+    assert report["transaction_layout"] == "usd-totals"
+    assert report["imported_trades"] == 2 and not report["skipped"]
+    assert entries[1].price == Decimal("33.33333333")
+    assert Decimal(report["opening_cash"]) == Decimal("100.02")
+    aid, created = apply_import(database, "Synthetic USD export", entries, report)
+    assert created
+    with Session(database) as session:
+        records = entries_for(session, aid)
+        balance, lots, realized = replay(records)
+        assert balance == Decimal("39.98")
+        assert records[1].amount == Decimal("100.02")
+        assert records[2].amount == Decimal("39.98")
+        assert records[1].fees == 0  # Never invent itemized fees from the cash difference.
+        assert sum(lot.basis for sl in lots.values() for lot in sl) == Decimal("66.68")
+        assert realized[records[2].id] == Decimal("6.64")
+    assert apply_import(database, "Synthetic USD export", entries, report) == (aid, False)
+
+
+def test_usd_totals_normalize_export_noise_and_require_explicit_cash():
+    payload = b"""Date,Type,Symbol,Shares,Price (USD),Total (USD)
+2024-01-02,Buy,AAA,1,10,10.010000000000001
+2024-01-03,Buy,AAA,1,10,
+2024-01-03,Buy,AAA,1,10,NaN
+2024-01-03,Buy,AAA,1,10,-10
+2024-01-03,Buy,AAA,1,10,0.0000000001
+"""
+    entries, report = reconstruct(payload, LISTINGS)
+    assert entries[-1].reported_amount == Decimal("10.01")
+    assert report["raw_source"] == payload.decode()
+    assert report["imported_trades"] == 1
+    assert [r["row"] for r in report["skipped"]] == [3, 4, 5, 6]

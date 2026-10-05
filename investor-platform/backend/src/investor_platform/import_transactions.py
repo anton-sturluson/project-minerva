@@ -8,6 +8,7 @@ import json
 import re
 from datetime import date, datetime
 from decimal import ROUND_CEILING, Decimal, InvalidOperation, localcontext
+from enum import StrEnum
 from pathlib import Path
 from urllib.request import urlopen
 from uuid import NAMESPACE_URL, uuid5
@@ -19,7 +20,7 @@ from .accounting import replay
 from .accounts import AccountInput
 from .db import LOCAL_OWNER, LOCAL_WORKSPACE, Actor, make_engine
 from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
-from .ledger import CashInput, entries_for, fingerprint
+from .ledger import CashInput, Money, entries_for, fingerprint
 from .models import Account, LedgerEntry, Workspace
 from .trades import TradeInput, build_trade
 
@@ -30,6 +31,16 @@ WARNING = (
     "minimums, not broker balances. Fees, cash flows, distributions and corporate actions are "
     "incomplete. Holdings, trade statistics and portfolio returns are provisional."
 )
+
+
+class TransactionLayout(StrEnum):
+    LEGACY = "legacy"
+    USD_TOTALS = "usd-totals"
+
+
+class ImportedTrade(TradeInput):
+    # Reported cash may include charges or execution-price precision absent from unit prices.
+    reported_amount: Money
 
 
 def decimal(value):
@@ -73,8 +84,15 @@ def source_rows(payload):
 def reconstruct(payload: bytes, listings: dict):
     """Keep raw evidence, reject ambiguous rows and infer only minimum opening balances."""
     rows, source_format = source_rows(payload)
-    if not rows or not {"Date", "Type", "Symbol", "Shares", "Cost", "Price"} <= rows[0].keys():
-        raise ValueError("CSV needs Date, Type, Symbol, Shares, Cost and Price columns")
+    columns = set(rows[0]) if rows else set()
+    if not {"Date", "Type", "Symbol", "Shares"} <= columns:
+        raise ValueError("CSV needs Date, Type, Symbol and Shares columns")
+    if {"Price (USD)", "Total (USD)"} <= columns:
+        layout = TransactionLayout.USD_TOTALS
+    elif {"Cost", "Price"} <= columns:
+        layout = TransactionLayout.LEGACY
+    else:
+        raise ValueError("CSV needs Price (USD) and Total (USD), or legacy Cost and Price columns")
     digest = hashlib.sha256(payload).hexdigest()
     # Include the explicit listing/currency choices in retry identity.
     identity = hashlib.sha256(payload + json.dumps(listings, sort_keys=True).encode()).hexdigest()
@@ -95,19 +113,31 @@ def reconstruct(payload: bytes, listings: dict):
                     raise ValueError(
                         "Shares round to zero at the supported eight-decimal precision"
                     )
-                quoted = decimal(row["Cost" if kind == EntryKind.BUY else "Price"])
-                total = row.get(
-                    "Total Cost" if kind == EntryKind.BUY else "Market Value", ""
+                modern = layout == TransactionLayout.USD_TOTALS
+                quoted = decimal(
+                    row["Price (USD)" if modern else "Cost" if kind == EntryKind.BUY else "Price"]
+                )
+                total = (
+                    row["Total (USD)"]
+                    if modern
+                    else row.get("Total Cost" if kind == EntryKind.BUY else "Market Value", "")
                 ).strip()
+                if modern and not total:
+                    raise ValueError("Total (USD) is required; no cash total is inferred")
                 price = quoted.quantize(Decimal("0.00000001"))
                 if total:
                     total = decimal(total)
+                    if modern:
+                        total = total.quantize(Decimal("0.00000001"))
+                        if not total:
+                            raise ValueError("Total rounds to zero at eight-decimal precision")
                     if abs(quantity * quoted - total) > Decimal("0.01"):
                         differences.append(row_number)
                     # Displayed per-share prices are rounded. Prefer the source cash total.
-                    if source_format == "csv":
+                    if source_format == "csv" and not modern:
                         price = (total / quantity).quantize(Decimal("0.00000001"))
-                trade = TradeInput(
+                trade_type = ImportedTrade if modern else TradeInput
+                trade = trade_type(
                     kind=kind,
                     effective_date=trade_date(row["Date"]),
                     ticker=ticker,
@@ -116,7 +146,12 @@ def reconstruct(payload: bytes, listings: dict):
                     quantity=quantity,
                     price=price,
                     request_key=uuid5(NAMESPACE_URL, f"{identity}:row:{row_number}"),
-                    note=f"Source row {row_number}; rounded totals; fees not supplied.",
+                    note=(
+                        f"Source row {row_number}; reported USD cash total; charges not itemized."
+                        if modern
+                        else f"Source row {row_number}; rounded totals; fees not supplied."
+                    ),
+                    **({"reported_amount": total} if modern else {}),
                 )
                 trades.append((row_number, trade))
             except (ValueError, InvalidOperation, TypeError, AttributeError) as exc:
@@ -132,7 +167,8 @@ def reconstruct(payload: bytes, listings: dict):
                 1 if t.kind == EntryKind.BUY else -1
             )
             minimum[key] = min(minimum.get(key, Decimal(0)), shares[key])
-            cash += t.quantity * t.price * (-1 if t.kind == EntryKind.BUY else 1)
+            amount = t.reported_amount if isinstance(t, ImportedTrade) else t.quantity * t.price
+            cash += amount * (-1 if t.kind == EntryKind.BUY else 1)
             lowest = min(lowest, cash)
         start = trades[0][1].effective_date
         opening_cash = (-lowest).quantize(Decimal("0.01"), rounding=ROUND_CEILING)
@@ -171,6 +207,7 @@ def reconstruct(payload: bytes, listings: dict):
         "identity": identity,
         "source_rows": rows,
         "source_format": source_format,
+        "transaction_layout": layout,
         "raw_source": payload.decode("utf-8-sig"),
         "listings": listings,
         "imported_trades": len(trades),
@@ -211,8 +248,13 @@ def apply_import(engine, name, entries, summary):
         actor = Actor(LOCAL_OWNER, LOCAL_WORKSPACE)
         for entry in entries:
             body = fingerprint(entry)
+            trade_data = (
+                TradeInput.model_validate(entry.model_dump(exclude={"reported_amount"}))
+                if isinstance(entry, ImportedTrade)
+                else entry
+            )
             record = (
-                build_trade(account, entry, session, actor, body)
+                build_trade(account, trade_data, session, actor, body)
                 if isinstance(entry, TradeInput)
                 else LedgerEntry(
                     account_id=account.id,
@@ -221,6 +263,8 @@ def apply_import(engine, name, entries, summary):
                     **entry.model_dump(),
                 )
             )
+            if isinstance(entry, ImportedTrade):
+                record.amount = entry.reported_amount
             session.add(record)
         session.flush()
         replay(entries_for(session, account.id))
