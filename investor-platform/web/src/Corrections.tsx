@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { IncomeFields, incomePayload } from "./IncomeFields";
 import { api, errorMessage, type Account } from "./api";
 import {
   exact,
@@ -7,6 +8,7 @@ import {
   today,
   type Entry,
   type Holding,
+  type Security,
   isPositionKind,
 } from "./records";
 
@@ -43,6 +45,13 @@ export function EntrySummary({ entry }: { entry: Entry }) {
           )}
         </>
       )}{" "}
+      {entry.income_kind && <> · {entry.income_kind}</>}
+      {entry.income_security && (
+        <>
+          {" "}
+          · {entry.income_security.ticker} · ex {entry.accrual_date}
+        </>
+      )}
       · {entry.note || "No note"}
     </p>
   );
@@ -51,17 +60,22 @@ export function EntrySummary({ entry }: { entry: Entry }) {
 export function Corrections({
   account,
   entry,
+  securities,
   onSaved,
   onCancel,
 }: {
   account: Account;
   entry: Entry;
+  securities: Security[];
   onSaved: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [action, setAction] = useState("replace");
   const [draft, setDraft] = useState({
     kind: entry.kind,
+    income_kind: entry.income_kind ?? "",
+    income_security_id: entry.income_security?.id ?? "",
+    accrual_date: entry.accrual_date ?? "",
     effective_date: entry.effective_date,
     amount: entry.amount,
     ticker: entry.security?.ticker ?? "",
@@ -110,7 +124,11 @@ export function Corrections({
               ? draft.cost_basis
               : null,
         }
-      : { ...common, amount: draft.amount };
+      : {
+          ...common,
+          amount: draft.amount,
+          ...(draft.kind === "income" ? incomePayload(draft) : {}),
+        };
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -234,6 +252,14 @@ export function Corrections({
                 </>
               ) : (
                 field("amount", "Replacement cash amount", "number")
+              )}
+              {draft.kind === "income" && (
+                <IncomeFields
+                  value={draft}
+                  paymentDate={draft.effective_date}
+                  securities={securities}
+                  onChange={change}
+                />
               )}
               {field("note", "Replacement note", "text", false)}
             </>

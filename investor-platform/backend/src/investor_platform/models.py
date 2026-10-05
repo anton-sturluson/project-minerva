@@ -79,6 +79,17 @@ class LedgerEntry(Base):
     """,
             name="entry_shape",
         ),
+        CheckConstraint(
+            """
+            (income_kind IS NULL AND income_security_id IS NULL AND accrual_date IS NULL)
+            OR (kind = 'income' AND income_kind IS NOT NULL AND income_kind IN ('interest','other')
+                AND income_security_id IS NULL AND accrual_date IS NULL)
+            OR (kind = 'income' AND income_kind IS NOT NULL AND income_kind = 'dividend'
+                AND income_security_id IS NOT NULL
+                AND accrual_date IS NOT NULL AND accrual_date <= effective_date)
+            """,
+            name="income_attribution",
+        ),
         Index("ledger_order", "account_id", "effective_date", "id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -94,7 +105,11 @@ class LedgerEntry(Base):
     request_body: Mapped[str] = mapped_column(Text)
 
     security_id: Mapped[UUID | None] = mapped_column(ForeignKey("securities.id"))
-    security: Mapped["Security | None"] = relationship()
+    security: Mapped["Security | None"] = relationship(foreign_keys=[security_id])
+    income_kind: Mapped[str | None] = mapped_column(String(16))
+    income_security_id: Mapped[UUID | None] = mapped_column(ForeignKey("securities.id"))
+    income_security: Mapped["Security | None"] = relationship(foreign_keys=[income_security_id])
+    accrual_date: Mapped[date | None] = mapped_column(Date)
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     fees: Mapped[Decimal] = mapped_column(Numeric(24, 8), default=Decimal(0), server_default="0")

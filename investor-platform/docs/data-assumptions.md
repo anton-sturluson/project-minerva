@@ -8,7 +8,7 @@ This is the living register of reconstruction assumptions. Change it with the im
 | Unrecorded trades and deposits/withdrawals are absent from the model. | Missing records can materially change returns. Add dated records and regenerate the comparison. |
 | Explicit USD totals establish settlement currency, not listing identity. | Imported exchanges may remain unconfirmed until issuer and listing evidence are reconciled. Keep native quote currency separate from USD cash. |
 | Original rows and discrepancies are retained privately. | Use import provenance and correction history for reconciliation. |
-| Missing gross distributions are estimated on ex-dates and held in cash. | Same-date recorded income offsets the model; payment-date income can double count distributions. |
+| Dividends need both the ex-date and actual cash payment date, linked to the security. | Recorded receivables enter value on the ex-date and leave receivables when cash arrives. Missing or mismatched gross distributions withhold returns; no synthetic income is added. |
 | Unrecorded fees and taxes are absent. | Estimates are not after-tax returns. |
 | Recent comparisons use recorded opening cash and share quantities. | Missing pre-period income and corporate actions are not reconstructed; verify opening balances. Full history retains its stricter data requirements. |
 | Market prices come from one provider. | Values are not independently verified and may be revised. |

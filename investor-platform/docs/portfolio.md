@@ -36,7 +36,7 @@ Imported minimum opening holdings remain provisional. When receipt evidence beco
 
 ## Transaction reconstruction
 
-The [transaction import CLI](transaction-import.md) downloads or reads a source export, previews the reconstruction and writes a separate testing database. It preserves fractional shares, raw evidence, exclusions and inferred balances. Incomplete imports show explicitly provisional performance with inferred balances and modeled gross distributions.
+The [transaction import CLI](transaction-import.md) downloads or reads a source export, previews the reconstruction and writes a separate testing database. It preserves fractional shares, raw evidence, exclusions and inferred balances. Incomplete imports retain inferred balances and withhold returns until funding and distributions reconcile.
 
 ## Portfolio tracker
 
@@ -46,7 +46,7 @@ Open **[ Performance ]** for an automatic comparison from the first recorded dat
 
 This first feed supports USD equities/ETFs on NYSE, NASDAQ, NYSEARCA/ARCA, AMEX and BATS (plus XNYS/XNAS/ARCX aliases), with matching provider listing metadata. It supports at most 128 portfolio securities and ten years of ledger history. Yahoo is the default stock source. An optional Tiingo API key enables unavailable US histories and dated FX; see [setup](operations.md#historical-data-fallback). Only public symbols and date ranges go to providers; account names, quantities and transactions stay local. A provider outage leaves record entry and the scorecard usable.
 
-Returns use a documented end-of-day cash-flow convention. Missing prices, positions spanning splits, unsupported listings/currencies, and undefined zero-balance periods block comparisons. Missing gross distributions withhold portfolio return; record investment income on the ex-date and reconcile against broker history. This uses book accounting, not settled broker cash or payment-date receivables. These checks do not establish complete corporate-action coverage. Quotes are provider-sourced and revisable. This is local exploratory tracking, not an audited return or a data-redistribution service.
+Returns use a documented end-of-day cash-flow convention. Missing prices, positions spanning splits, unsupported listings/currencies, and undefined zero-balance periods block comparisons. Missing gross distributions withhold portfolio return; record dividend income with a security, ex-date and actual cash payment date, then reconcile against broker history. The performance report recognizes unpaid recorded dividends as receivables; the cash balance changes only on payment. These checks do not establish complete corporate-action coverage. Quotes are provider-sourced and revisable. This is local exploratory tracking, not an audited return or a data-redistribution service.
 
 See [calculation definitions and sources](performance.md). Split accounting, verified backup/restore and reconciliation of real portfolio records remain separate work.
 
@@ -69,6 +69,10 @@ Market % is each position’s closing market value divided by portfolio value, i
 ## Current holdings valuation
 
 Current holdings fetch only open securities and remain available if the historical performance report fails. A missing quote keeps the affected row unpriced while other rows retain their prices; aggregate value and market weights are withheld until complete. ASX/TSXV quotes use verified listing identity and same-date AUD/USD or CAD/USD closes. Prices must be no more than four calendar days old. Cash is the recorded balance, without modeled distributions. Use Refresh prices to retry. See [ADR 0003](decisions/0003-independent-holdings.md).
+
+## Investment income
+
+Choose **Dividend · gross**, **Interest**, or **Other investment income** under Activity → Record cash. Dividends require a security already present in the account records and an ex-dividend date no later than the effective cash payment date. Record taxes as **Fee or tax**. Corrections retain and preview the income classification, security and ex-date. Interest remains in exclusion scenarios; dividends for excluded stocks are removed. Unclassified/other income blocks scenarios because its stock attribution is unknown.
 
 ## References
 

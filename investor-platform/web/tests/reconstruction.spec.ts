@@ -64,7 +64,7 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
               ...point,
               portfolio: null,
             })),
-            modeled_income: "6",
+            receivables: "0",
             assumptions: ["Opening cash is inferred, not a verified balance."],
           },
         });

@@ -20,7 +20,9 @@ from .domain import (
     Currency,
     EntryKind,
     FundingStatus,
+    IncomeKind,
 )
+from .income import dividend_receivables
 from .ledger import entries_for
 from .models import LedgerEntry
 
@@ -144,9 +146,13 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
     """Build a read-only cash alternative; never mutate or attach ledger objects."""
     prefix = [] if start is None else [e for e in entries if e.effective_date < start]
     current = entries if start is None else [e for e in entries if e.effective_date >= start]
-    if any(e.kind == EntryKind.INCOME for e in current):
+    if any(
+        e.kind == EntryKind.INCOME
+        and e.income_kind not in {IncomeKind.DIVIDEND, IncomeKind.INTEREST}
+        for e in current
+    ):
         raise ValueError(
-            "Scenario unavailable: recorded income is not linked to individual stocks yet"
+            "Scenario unavailable: classify recorded income as dividends or interest first"
         )
     result = list(prefix)
     sessions = sorted(histories["SPY"].close)
@@ -175,6 +181,12 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
                 )
             )
     for entry in current:
+        if (
+            entry.income_kind == IncomeKind.DIVIDEND
+            and entry.income_security_id in excluded
+            and (start is None or entry.accrual_date > start)
+        ):
+            continue
         if entry.security_id not in excluded:
             result.append(entry)
         elif entry.kind in IN_KIND_ENTRIES:
@@ -252,43 +264,18 @@ def calculate(
     warnings = []
     if funding_status == FundingStatus.INFERRED:
         warnings.append("Cash history needs reconciliation; starting funding was inferred.")
-    distributions = {}
-    for sid, h in prices.items():
-        for exdate, dividend in h.dividends.items():
-            if exdate > days[-1] or (baseline == Baseline.RECORDED and exdate < start):
-                continue
-            shares = sum(
-                (
-                    e.quantity * (-1 if e.kind == EntryKind.SELL else 1)
-                    for e in entries
-                    if e.security_id == sid and e.effective_date < exdate
-                ),
-                ZERO,
-            )
-            distributions[exdate] = distributions.get(exdate, ZERO) + shares * dividend
-    modeled_income = {}
-    for exdate, expected in sorted(distributions.items()):
-        income = sum(
-            (
-                e.amount
-                for e in entries
-                if e.kind == EntryKind.INCOME and e.effective_date == exdate
-            ),
-            ZERO,
-        )
-        if provisional:
-            # Fill only the missing gross amount on its ex-date; never write modeled income.
-            modeled_income[exdate] = max(ZERO, expected - income)
-        elif expected > 0 and abs(income - expected) > Decimal("0.01"):
-            warnings.append(
-                f"Income needs reconciliation for {exdate}: expected gross distributions "
-                f"{expected:.2f}, recorded {income:.2f}. Record income on the ex-date."
-            )
+    receivables, income_warnings = dividend_receivables(
+        entries,
+        prices,
+        securities,
+        days,
+        validation_start=start if baseline == Baseline.RECORDED else None,
+    )
+    warnings.extend(income_warnings)
     latest_holdings = []
     for d in days:
         prefix = [e for e in entries if e.effective_date <= d]
         cash, lots, _ = replay(prefix)
-        cash += sum((amount for day, amount in modeled_income.items() if day <= d), ZERO)
         holdings = []
         for sid, sl in lots.items():
             quantity = sum((lot.quantity for lot in sl), ZERO)
@@ -315,7 +302,7 @@ def calculate(
                     "unrealized_pnl": None if basis is None else quantity * price - basis,
                 }
             )
-        value = cash + sum((h["value"] for h in holdings), ZERO)
+        value = cash + receivables[d] + sum((h["value"] for h in holdings), ZERO)
         if previous is not None:
             interval = [e for e in entries if previous_day < e.effective_date <= d]
             flow = ZERO
@@ -348,6 +335,7 @@ def calculate(
                 "date": d,
                 "value": value,
                 "cash": cash,
+                "receivables": receivables[d],
                 "portfolio": growth - ONE,
                 "SPY": spy.adjusted[d] / spy.adjusted[days[0]] - ONE,
                 "QQQ": qqq.adjusted[d] / qqq.adjusted[days[0]] - ONE,
@@ -361,13 +349,14 @@ def calculate(
     return {
         "provisional": provisional,
         "funding_status": funding_status,
-        "modeled_income": sum(modeled_income.values(), ZERO),
+        "receivables": receivables[days[-1]],
         "assumptions": [
             "Testing estimate: opening shares and cash are inferred, not verified broker balances.",
             "Assumes no missing trades or external flows; excluded import rows are not included.",
             "Uses exchange-specific listings and dated USD FX; confirm security identity.",
-            "Missing gross distributions are modeled on ex-dates and held as cash. Recorded income "
-            "offsets the model only on the same ex-date; payment-date income may double count it.",
+            "Dividends accrue on their recorded ex-dates and become cash on payment dates. "
+            "Missing or mismatched distributions withhold returns; "
+            "interest is recognized when posted.",
             "No unrecorded fees or taxes. Benchmarks reinvest distributions.",
         ]
         if provisional
@@ -419,7 +408,12 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         )
     if not entries or period.start < entries[0].effective_date:
         raise HTTPException(422, "Start on or after your first ledger entry")
-    entries = [e for e in entries if e.effective_date <= period.end]
+    entries = [
+        e
+        for e in entries
+        if e.effective_date <= period.end
+        or (e.income_kind == IncomeKind.DIVIDEND and e.accrual_date <= period.end)
+    ]
     recorded = period.baseline == Baseline.RECORDED
     securities = period_securities(entries, period.start if recorded else None)
     fetch_start = period.start if recorded else entries[0].effective_date

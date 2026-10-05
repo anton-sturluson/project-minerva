@@ -42,6 +42,7 @@ export type Report = {
   end: string;
   value: string;
   cash: string;
+  receivables?: string;
   return: string | null;
   SPY: string;
   QQQ: string;
@@ -359,11 +360,23 @@ export function Tracker({
             <p className="report-date">
               {report.start} — {report.end} · {report.source}
             </p>
-            {report.warnings.map((w) => (
+            {report.warnings.slice(0, 1).map((w) => (
               <p key={w} role="alert" className="error">
                 {w} Portfolio return is withheld.
               </p>
             ))}
+            {report.warnings.length > 1 && (
+              <details>
+                <summary>
+                  Other reconciliation checks ({report.warnings.length - 1})
+                </summary>
+                <ul>
+                  {report.warnings.slice(1).map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
             <p>
               <span>
                 {report.provisional
@@ -371,6 +384,12 @@ export function Tracker({
                   : "Closing value (USD)"}
               </span>{" "}
               <strong>{number(report.value)}</strong>
+              {Number(report.receivables ?? 0) > 0 && (
+                <>
+                  {" "}
+                  · includes {number(report.receivables!)} in unpaid dividends
+                </>
+              )}
             </p>
             {report.scenario_error && (
               <p role="alert" className="error">

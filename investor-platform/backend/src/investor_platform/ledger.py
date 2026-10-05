@@ -13,8 +13,8 @@ from sqlalchemy.orm import joinedload
 
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
-from .models import LedgerCorrection, LedgerEntry
+from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind, IncomeKind
+from .models import LedgerCorrection, LedgerEntry, Security
 
 router = APIRouter(prefix="/api/accounts")
 Money = Annotated[Decimal, Field(ge=0, max_digits=24, decimal_places=8, allow_inf_nan=False)]
@@ -44,11 +44,26 @@ class CashInput(EntryInput):
         EntryKind.EXPENSE,
     ]
     amount: Money
+    income_kind: IncomeKind | None = None
+    income_security_id: UUID | None = None
+    accrual_date: date | None = None
 
     @model_validator(mode="after")
     def positive_amount(self):
         if self.kind != EntryKind.OPENING_CASH and self.amount <= 0:
             raise ValueError("Cash entries other than opening cash must be positive")
+        if self.kind != EntryKind.INCOME and any(
+            value is not None
+            for value in (self.income_kind, self.income_security_id, self.accrual_date)
+        ):
+            raise ValueError("Income attribution is only valid for investment income")
+        if self.income_kind == IncomeKind.DIVIDEND:
+            if self.income_security_id is None or self.accrual_date is None:
+                raise ValueError("Dividends require a security and ex-dividend date")
+            if self.accrual_date > self.effective_date:
+                raise ValueError("Ex-dividend date must be on or before the cash payment date")
+        elif self.income_security_id is not None or self.accrual_date is not None:
+            raise ValueError("Only dividends use a security and ex-dividend date")
         return self
 
 
@@ -80,6 +95,9 @@ class EntryView(BaseModel):
     created_by: UUID
     created_at: datetime
     security: SecurityView | None = None
+    income_kind: IncomeKind | None = None
+    income_security: SecurityView | None = None
+    accrual_date: date | None = None
     quantity: WireDecimal | None = None
     price: WireDecimal | None = None
     fees: WireDecimal = Decimal(0)
@@ -109,7 +127,7 @@ def ledger_snapshot(session, account_id):
     rows = session.execute(
         select(LedgerEntry, LedgerCorrection)
         .outerjoin(LedgerCorrection, LedgerCorrection.original_id == LedgerEntry.id)
-        .options(joinedload(LedgerEntry.security))
+        .options(joinedload(LedgerEntry.security), joinedload(LedgerEntry.income_security))
         .where(LedgerEntry.account_id == account_id)
     ).all()
     entries = [entry for entry, _ in rows]
@@ -133,6 +151,18 @@ def entries_for(session, account_id):
 
 def fingerprint(data):
     values = data.model_dump(mode="json", exclude={"request_key"})
+
+    # Preserve retry fingerprints for cash/corrections created before income attribution existed.
+    def omit_empty_income(value):
+        if not isinstance(value, dict):
+            return
+        for key in ("income_kind", "income_security_id", "accrual_date"):
+            if value.get(key) is None:
+                value.pop(key, None)
+        for nested in value.values():
+            omit_empty_income(nested)
+
+    omit_empty_income(values)
     # Equivalent decimal spellings have the same retry identity.
     with localcontext() as context:
         context.prec = ACCOUNTING_PRECISION
@@ -218,12 +248,27 @@ def record_cash(account_id: UUID, data: CashInput, session: DB, actor: Identity)
     entries = entries_for(session, account_id)
     if data.kind == EntryKind.OPENING_CASH and entries:
         raise HTTPException(409, "Opening cash must be the first entry; use a deposit instead")
-    entry = LedgerEntry(
-        account_id=account_id, created_by=actor.owner_id, request_body=body, **data.model_dump()
-    )
+    entry = build_cash(account, data, session, actor, body)
     session.add(entry)
     session.flush()
     replay(entries_for(session, account_id))
     session.commit()
     session.refresh(entry)
     return entry
+
+
+def build_cash(account, data, session, actor, body):
+    if data.currency != account.base_currency:
+        raise HTTPException(422, "Entry currency must match the account")
+    if data.income_security_id is not None:
+        security = session.scalar(
+            select(Security).where(
+                Security.id == data.income_security_id,
+                Security.workspace_id == actor.workspace_id,
+            )
+        )
+        if security is None:
+            raise HTTPException(404, "Dividend security not found")
+    return LedgerEntry(
+        account_id=account.id, created_by=actor.owner_id, request_body=body, **data.model_dump()
+    )
