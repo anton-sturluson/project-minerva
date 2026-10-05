@@ -54,6 +54,10 @@ Migration `0006` adds the audit table and replaces opening-entry database indexe
 
 Market % is each position’s closing market value divided by portfolio value, including cash. Cost % is remaining position basis divided by total remaining basis plus the same cash balance. Cash participates in both denominators. These are allocation measures, not a gain/loss percentage or original lifetime capital allocation. The chart compares the five largest positions by market value and groups smaller holdings as Other. All cost weights are unavailable when any open position has unknown basis or the cost denominator is zero; known subsets are never normalized as a complete portfolio. Recorded quantities and basis remain available during quote outages.
 
+## Current holdings valuation
+
+Current holdings fetch only open securities and remain available if the historical performance report fails. A missing quote keeps the affected row unpriced while other rows retain their prices; aggregate value and market weights are withheld until complete. ASX/TSXV quotes use verified listing identity and same-date AUD/USD or CAD/USD closes. Prices must be no more than four calendar days old. Cash is the recorded balance, without modeled distributions. Use Refresh prices to retry. See [ADR 0003](decisions/0003-independent-holdings.md).
+
 ## References
 
 - [Ledger implementation](../backend/src/investor_platform/ledger.py) — active records and cash writes.
@@ -63,4 +67,4 @@ Market % is each position’s closing market value divided by portfolio value, i
 
 ## Overview and pages
 
-Portfolio shows the trade scorecard, one holdings table with allocation bars, then performance. Allocation uses closing market values as of the selected report end date, including cash in the denominator. The five largest securities are shown separately, with smaller positions grouped as Other holdings. Without quotes, recorded shares and basis remain available; market values and allocation stay unavailable. Activity contains collapsible cash/trade forms and transaction history. Research is a separate placeholder view.
+Portfolio shows the trade scorecard, one holdings table with allocation bars, then performance. Allocation uses recent completed closes and current recorded shares and cash, independently of the selected performance period. Cash is included in the denominator. The five largest securities are shown separately, with smaller positions grouped as Other holdings. Without quotes, recorded shares and basis remain available; market values and allocation stay unavailable. Activity contains collapsible cash/trade forms and transaction history. Research is a separate placeholder view.

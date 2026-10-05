@@ -34,7 +34,9 @@ def positive(value):
     return value
 
 
-def history(symbol: str, start: date, end: date) -> History:
+def history(
+    symbol: str, start: date, end: date, *, currency=Currency.USD, instruments=("EQUITY", "ETF")
+) -> History:
     # Fetch through today even for historical reports: later splits adjust earlier closes.
     params = urlencode(
         {
@@ -56,10 +58,10 @@ def history(symbol: str, start: date, end: date) -> History:
     with urlopen(request, timeout=6) as response:
         payload = json.load(response, parse_float=Decimal)
     result = payload["chart"]["result"][0]
-    if result["meta"]["currency"] != Currency.USD:
-        raise ValueError("Market currency is not USD")
-    if result["meta"]["instrumentType"] not in {"EQUITY", "ETF"}:
-        raise ValueError("Only equities and ETFs are supported")
+    if result["meta"]["currency"] != currency:
+        raise ValueError(f"Market currency is not {currency}")
+    if result["meta"]["instrumentType"] not in instruments:
+        raise ValueError("Unexpected market instrument type")
     tz = ZoneInfo(result["meta"]["exchangeTimezoneName"])
 
     def day(stamp):
@@ -72,7 +74,9 @@ def history(symbol: str, start: date, end: date) -> History:
     }
     dates = [day(t) for t in result.get("timestamp", [])]
     closes = result["indicators"]["quote"][0]["close"]
-    adjusted = result["indicators"]["adjclose"][0]["adjclose"]
+    adjusted = (
+        closes if instruments == ("CURRENCY",) else result["indicators"]["adjclose"][0]["adjclose"]
+    )
     prices, returns = {}, {}
     for d, close, adj in zip(dates, closes, adjusted, strict=True):
         if not start <= d <= end or close is None or adj is None:

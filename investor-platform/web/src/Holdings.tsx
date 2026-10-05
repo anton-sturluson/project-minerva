@@ -1,16 +1,62 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, errorMessage } from "./api";
 import { number, percent } from "./format";
 import { exact, type Ledger } from "./records";
-import type { Report } from "./Tracker";
+type Valuation = {
+  end: string;
+  provisional: boolean;
+  value: string | null;
+  cash: string;
+  complete: boolean;
+  holdings: {
+    ticker: string;
+    exchange: string;
+    quantity: string;
+    basis: string | null;
+    close: string | null;
+    value: string | null;
+    weight: string | null;
+    unrealized_pnl: string | null;
+    price_error?: string | null;
+    quote_date?: string | null;
+  }[];
+};
 
 export function Holdings({
   ledger,
-  report,
+  accountId,
 }: {
   ledger: Ledger;
-  report: Report | null;
+  accountId: string;
 }) {
+  const [report, setReport] = useState<Valuation | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
+  const refresh = useCallback(() => setRevision((n) => n + 1), []);
+  useEffect(() => {
+    let active = true;
+    setReport(null);
+    setError("");
+    setBusy(true);
+    void api<Valuation>(`/accounts/${accountId}/valuation`, undefined, 60000)
+      .then((value) => {
+        if (active) setReport(value);
+      })
+      .catch((e) => {
+        if (active) setError(errorMessage(e));
+      })
+      .finally(() => {
+        if (active) setBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountId, ledger, revision]);
   const rows = report
-    ? [...report.holdings].sort((a, b) => Number(b.value) - Number(a.value))
+    ? [...report.holdings].sort(
+        (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0),
+      )
     : ledger.holdings.map((h) => ({
         ticker: h.security.ticker,
         exchange: h.security.exchange,
@@ -20,6 +66,8 @@ export function Holdings({
         value: null,
         weight: null,
         unrealized_pnl: null,
+        price_error: null,
+        quote_date: null,
       }));
   const total = Number(report?.value ?? 0);
   const cash = report?.cash ?? ledger.balance;
@@ -64,10 +112,31 @@ export function Holdings({
         <h2 id="holdings-heading">Holdings</h2>
         <p className="report-date">
           {report
-            ? `${report.provisional ? "Provisional · " : ""}${report.end}`
-            : "Market values unavailable"}
+            ? `${report.provisional ? "Provisional · " : ""}Latest closes · ${report.end}`
+            : busy
+              ? "Updating prices…"
+              : "Market values unavailable"}
         </p>
       </div>
+      <button
+        type="button"
+        className="refresh-prices"
+        disabled={busy}
+        onClick={refresh}
+      >
+        Refresh prices
+      </button>
+      {error && (
+        <p className="error" role="alert">
+          Holdings prices: {error}
+        </p>
+      )}
+      {report && !report.complete && (
+        <p className="form-note basis-note">
+          Some closes are unavailable. Portfolio value and market weights are
+          withheld.
+        </p>
+      )}
       {report && total > 0 && (
         <figure
           className="allocation-chart"
@@ -138,7 +207,7 @@ export function Holdings({
                 Shares
               </th>
               <th scope="col" className="number">
-                Close
+                Close (USD)
               </th>
               <th scope="col" className="number">
                 Value ({ledger.currency})
@@ -167,9 +236,20 @@ export function Holdings({
                 <th scope="row" className="security-name">
                   <strong>{h.ticker}</strong>
                   <small>{h.exchange}</small>
+                  {h.price_error && (
+                    <small className="loss">Quote unavailable</small>
+                  )}
                 </th>
                 <td className="number">{exact(h.quantity, 0)}</td>
-                <td className="number">{number(h.close)}</td>
+                <td
+                  className="number"
+                  title={
+                    h.price_error ??
+                    (h.quote_date ? `Close: ${h.quote_date}` : undefined)
+                  }
+                >
+                  {number(h.close)}
+                </td>
                 <td className="number">{number(h.value)}</td>
                 <td className="number">{percent(h.weight)}</td>
                 <td className="number cost-weight">

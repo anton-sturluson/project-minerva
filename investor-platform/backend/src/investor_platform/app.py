@@ -22,6 +22,7 @@ from .hit_rate import router as hit_rate_router
 from .ledger import router as ledger_router
 from .performance import router as performance_router
 from .trades import router as trades_router
+from .valuation import router as valuation_router
 
 LOCAL_ORIGINS = frozenset({"http://127.0.0.1:5173", "http://localhost:5173"})
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -65,6 +66,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.include_router(trades_router)
     app.include_router(corrections_router)
     app.include_router(performance_router)
+    app.include_router(valuation_router)
     app.include_router(hit_rate_router)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
