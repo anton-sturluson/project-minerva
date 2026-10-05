@@ -16,6 +16,10 @@ A seeded local owner is resolved at one API boundary. Every account route checks
 
 Account and ledger failures offer a manual retry. After an uncertain save, retry the unchanged form or inspect Activity before submitting again; reloading the page loses its in-memory retry key.
 
+## Daily collection
+
+See [Daily prices](daily-prices.md) to enable the built-in 5 p.m. Eastern worker and inspect or retry runs. Migration 0013 persists its status.
+
 ## Verification
 
 With PostgreSQL running, from `investor-platform/backend`:

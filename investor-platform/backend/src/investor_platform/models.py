@@ -154,3 +154,12 @@ class LedgerCorrection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     request_key: Mapped[UUID]
     request_body: Mapped[str] = mapped_column(Text)
+
+
+class PriceRefreshRun(Base):
+    __tablename__ = "price_refresh_runs"
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    scheduled_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int]
+    report: Mapped[dict] = mapped_column(JSONB)

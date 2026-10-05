@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 investor-api = "investor_platform.app:main"
+investor-refresh-prices = "investor_platform.price_refresh:main"
 investor-import = "investor_platform.import_transactions:main"
 investor-reconcile-cash = "investor_platform.reconcile_cash:main"
 

@@ -496,3 +496,27 @@ test("chart dates label every year and adapt to shorter periods", async ({
     ),
   ).toBe(true);
 });
+
+test("performance and post-mortem include today only after 5pm Eastern", async ({
+  page,
+}) => {
+  await page.route("**/ledger", (route) => route.fulfill({ json: ledger }));
+  for (const [time, end] of [
+    ["2026-07-06T20:59:00Z", "2026-07-05"],
+    ["2026-07-06T21:00:00Z", "2026-07-06"],
+    ["2026-01-06T21:59:00Z", "2026-01-05"],
+    ["2026-01-06T22:00:00Z", "2026-01-06"],
+  ]) {
+    await page.goto("about:blank");
+    await page.clock.setFixedTime(new Date(time));
+    const request = page.waitForRequest("**/performance");
+    await page.goto("/#performance");
+    expect((await request).postDataJSON().end).toBe(end);
+    await expect(page.getByLabel("Performance end")).toHaveValue(end);
+    const postMortem = page.waitForRequest("**/performance");
+    await page
+      .getByRole("link", { name: "[ Post-mortem ]", exact: true })
+      .click();
+    expect((await postMortem).postDataJSON().end).toBe(end);
+  }
+});

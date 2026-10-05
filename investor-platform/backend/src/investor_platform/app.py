@@ -1,10 +1,12 @@
 """Loopback API, with optional identity-checked Tailscale Serve access."""
 
+import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from pathlib import Path
+from threading import Event, Thread
 from urllib.parse import urlsplit
 
 import uvicorn
@@ -32,8 +34,19 @@ WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 async def lifespan(app):
     if not hasattr(app.state, "engine"):
         app.state.engine = make_engine()
-    yield
-    app.state.engine.dispose()
+    stop, worker = Event(), None
+    if app.state.daily_prices:
+        from .price_refresh import run_worker
+
+        worker = Thread(target=run_worker, args=(app.state.engine, stop), daemon=True)
+        worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        if worker:
+            await asyncio.to_thread(worker.join)
+        app.state.engine.dispose()
 
 
 class Health(BaseModel):
@@ -61,6 +74,8 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
         hosts = ["127.0.0.1", "localhost"]
 
     app = FastAPI(title="Minerva Investor Platform", version="0.1.0", lifespan=lifespan)
+    # Opt-in only on the private deployment, never on the synthetic development server.
+    app.state.daily_prices = remote and os.environ.get("INVESTOR_DAILY_PRICES") == "1"
     app.include_router(router)
     app.include_router(ledger_router)
     app.include_router(trades_router)

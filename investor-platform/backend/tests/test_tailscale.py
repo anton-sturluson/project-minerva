@@ -112,3 +112,25 @@ def test_missing_build_refuses_startup(remote_env):
     (remote_env / "index.html").unlink()
     with pytest.raises(RuntimeError, match="Build the frontend"):
         create_app(web_dist=remote_env)
+
+
+def test_daily_worker_starts_only_when_enabled_and_stops_with_api(remote_env, monkeypatch):
+    from threading import Event
+
+    from investor_platform import price_refresh
+
+    entered, stopped = Event(), Event()
+
+    def worker(engine, stop):
+        entered.set()
+        stop.wait(5)
+        stopped.set()
+
+    monkeypatch.setattr(price_refresh, "run_worker", worker)
+    monkeypatch.setenv("INVESTOR_DAILY_PRICES", "1")
+    with remote_client(remote_env):
+        assert entered.wait(2)
+        assert not stopped.is_set()
+    assert stopped.is_set()
+    monkeypatch.setenv("INVESTOR_MODE", "local")
+    assert not create_app().state.daily_prices

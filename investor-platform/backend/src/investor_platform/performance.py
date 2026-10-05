@@ -22,6 +22,7 @@ from .domain import (
     EntryKind,
     FundingStatus,
     IncomeKind,
+    completed_market_date,
 )
 from .income import dividend_receivables, market_dividends
 from .ledger import entries_for
@@ -488,13 +489,13 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     today = datetime.now(MARKET_TIMEZONE).date()
     if (
         period.start >= period.end
-        or period.end >= today
+        or period.end > completed_market_date()
         or period.start < today - market.HISTORY_WINDOW
     ):
         raise HTTPException(
             422,
             "Choose a period of at least two days within the past ten years, "
-            "ending before today (New York)",
+            "ending by the latest available date (today after 5 p.m. New York)",
         )
     if not entries or period.start < entries[0].effective_date:
         raise HTTPException(422, "Start on or after your first ledger entry")

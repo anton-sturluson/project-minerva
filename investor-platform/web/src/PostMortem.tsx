@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage, type Account } from "./api";
 import { number, percent } from "./format";
-import { today, type Ledger } from "./records";
+import { completedMarketDate, today, type Ledger } from "./records";
 
 type Stock = {
   security_id: string;
@@ -56,8 +56,7 @@ export function PostMortem({
     setError("");
     setBusy(false);
     if (!first || account.base_currency !== "USD") return;
-    const end = new Date(today() + "T12:00:00Z");
-    end.setUTCDate(end.getUTCDate() - 1);
+    const end = completedMarketDate();
     setBusy(true);
     void api<{ attribution: Attribution[] | null }>(
       `/accounts/${account.id}/performance`,
@@ -65,7 +64,7 @@ export function PostMortem({
         method: "POST",
         body: JSON.stringify({
           start: first,
-          end: end.toISOString().slice(0, 10),
+          end,
           scope: "stocks",
         }),
       },

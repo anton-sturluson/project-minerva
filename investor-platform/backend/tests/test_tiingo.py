@@ -74,7 +74,7 @@ def test_cache_covers_retries_expands_ranges_and_rejects_bad_refresh(database, m
 def test_historical_exchange_exception_requires_dated_evidence(monkeypatch):
     body = sample()
     body["meta"]["exchangeCode"] = "PINK"
-    monkeypatch.setattr(tiingo, "payload", lambda *args: body)
+    monkeypatch.setattr(tiingo, "payload", lambda *args, **kwargs: body)
     security = SimpleNamespace(
         ticker="AAA", exchange="NASDAQ", currency="USD", market_identity=None
     )
@@ -117,7 +117,7 @@ def test_yahoo_failure_falls_back_only_for_the_required_holding_window(database,
 
     calls = []
 
-    def fallback(security, first, last, engine, workspace_id):
+    def fallback(security, first, last, engine, workspace_id, **kwargs):
         calls.append((first, last))
         return tiingo.parse_stock(sample(), "AAA")
 
@@ -138,7 +138,7 @@ def test_yahoo_failure_falls_back_only_for_the_required_holding_window(database,
 def test_pln_valuation_uses_inverse_usd_pair(monkeypatch):
     calls = []
 
-    def payload(engine, workspace, symbol, start, end, *, fx):
+    def payload(engine, workspace, symbol, start, end, *, fx, refresh_after=None):
         calls.append((symbol, fx))
         return {"rows": [{"date": "2020-01-02", "ticker": "usdpln", "close": "4"}]}
 

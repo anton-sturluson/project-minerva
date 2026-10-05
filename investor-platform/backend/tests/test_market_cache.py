@@ -129,3 +129,25 @@ def test_cached_prices_do_not_hide_ledger_edits(db_client, monkeypatch):
     cash(db_client, aid, "deposit", "500")
     assert Decimal(db_client.get(url).json()["value"]) == 1540
     assert len(calls) == 1
+
+
+def test_scheduled_refresh_bypasses_ttl_and_reuses_its_results(database, monkeypatch):
+    calls = []
+
+    def download(symbol, first, last):
+        calls.append(symbol)
+        return market.History({START: Decimal(len(calls))}, {})
+
+    monkeypatch.setattr(market, "history", download)
+
+    def read(**kwargs):
+        return market.cached_history(
+            "AAA", START, END, engine=database, workspace_id=LOCAL_WORKSPACE, **kwargs
+        )
+
+    assert read().close[START] == 1
+    cutoff = datetime.now(UTC)
+    assert read(refresh_after=cutoff).close[START] == 2
+    assert read(refresh_after=cutoff).close[START] == 2
+    assert read().close[START] == 2
+    assert len(calls) == 2
