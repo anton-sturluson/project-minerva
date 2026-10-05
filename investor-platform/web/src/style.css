@@ -767,7 +767,8 @@ summary:focus-visible {
   summary {
     padding-block: 6px;
   }
-  .scenario-picker label {
+  .scenario-picker label,
+  .scorecard-toggle {
     min-height: 44px;
   }
 }
@@ -782,14 +783,16 @@ summary:focus-visible {
   border: 1px solid var(--rule);
   margin-block: 8px;
 }
-.scenario-picker label {
+.scenario-picker label,
+.scorecard-toggle {
   display: flex;
   flex-direction: row;
   flex: 0 1 auto;
   align-items: center;
   gap: 6px;
 }
-.scenario-picker input[type="checkbox"] {
+.scenario-picker input[type="checkbox"],
+.scorecard-toggle input {
   width: 16px;
   height: 16px;
   min-height: 16px;

@@ -39,6 +39,12 @@ A trade episode begins with no shares and ends with no shares in the same securi
 
 These are project conventions; average-win/average-loss is a standard profit/loss statistic, but the episode definition and exclusion rules must accompany it. ([QuantConnect glossary](https://www.quantconnect.com/docs/v2/writing-algorithms/key-concepts/glossary))
 
+## Hypothetical close-all scorecard
+
+The scorecard toggle simulates selling every currently open position at its latest completed USD close. Quotes use the same listing and matching-date FX checks as current holdings. It adds detached in-memory sales, then runs the ordinary FIFO/flat-to-flat scorecard across the complete recorded history. Earlier partial sales remain part of each decision. Recorded closed decisions stay included; unknown-basis decisions remain excluded. Missing or stale quotes withhold the hypothetical result instead of dropping positions silently.
+
+The UI shows the actual quote dates: this is not an executable intraday quote. New sale fees, slippage and taxes are omitted. No trade, cash balance, holding, or benchmark hit-rate record is changed. Switching back restores the recorded-only scorecard.
+
 ## References
 
 ### Methodology

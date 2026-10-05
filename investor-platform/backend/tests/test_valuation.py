@@ -101,3 +101,47 @@ def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
     gap = True
     result = db_client.get(f"/api/accounts/{aid}/valuation").json()
     assert result["value"] is None and result["holdings"][1]["price_error"]
+
+
+def test_hypothetical_closes_finish_whole_episodes_and_leave_records_unchanged(
+    db_client, portfolio, monkeypatch
+):
+    from test_ledger import ledger
+
+    aid, _ = portfolio
+    trade(db_client, aid, "sell", "5", "90", ticker="AAA", exchange="NYSE")
+    trade(db_client, aid, quantity="1", price="200", fees="2", ticker="CCC", exchange="NYSE")
+    trade(db_client, aid, quantity="1", price="100", ticker="DDD")
+    trade(db_client, aid, "sell", "1", "90", ticker="DDD")
+    trade(db_client, aid, "opening_position", "1", ticker="UNKNOWN", exchange="NYSE")
+    before = ledger(db_client, aid)
+    realized = db_client.get(f"/api/accounts/{aid}/statistics").json()
+    calls = []
+
+    def quote(symbol, start, end):
+        calls.append(symbol)
+        return History({end: D(120 if symbol == "AAA" else 150)}, {}, exchange="NYQ")
+
+    monkeypatch.setattr(market, "history", quote)
+    url = f"/api/accounts/{aid}/statistics/hypothetical"
+    response = db_client.get(url)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert set(calls) == {"AAA", "CCC", "UNKNOWN"}  # No closed/delisted history needed.
+    assert (result["wins"], result["losses"], result["unknown"], result["open"]) == (1, 2, 1, 0)
+    assert result["simulated_positions"] == 3
+    assert float(result["win_rate"]) == pytest.approx(1 / 3)
+    assert float(result["payoff_ratio"]) == pytest.approx(50 / 31)
+    assert sum(e["hypothetical"] for e in result["episodes"]) == 3
+    assert D(next(e for e in result["episodes"] if e["ticker"] == "AAA")["pnl"]) == 50
+    assert ledger(db_client, aid) == before
+    assert db_client.get(f"/api/accounts/{aid}/statistics").json() == realized
+    assert db_client.get(f"/api/accounts/{uuid4()}/statistics/hypothetical").status_code == 404
+
+    def unavailable(*args):
+        raise OSError("offline")
+
+    monkeypatch.setattr(market, "history", unavailable)
+    response = db_client.get(url)
+    assert response.status_code == 503 and "Latest prices unavailable" in response.json()["detail"]
+    assert ledger(db_client, aid) == before

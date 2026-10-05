@@ -14,11 +14,15 @@ type Stats = {
   average_win: string | null;
   average_loss: string | null;
   payoff_ratio: string | null;
+  simulated_positions?: number;
+  quote_start?: string | null;
+  quote_end?: string | null;
   episodes: {
     ticker: string;
     exchange: string;
     closed_on: string;
     pnl: string | null;
+    hypothetical?: boolean;
   }[];
 };
 export function TradeScorecard({
@@ -28,6 +32,7 @@ export function TradeScorecard({
   account: Account;
   ledger: Ledger;
 }) {
+  const [hypothetical, setHypothetical] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsError, setStatsError] = useState("");
   const [retryStats, setRetryStats] = useState(0);
@@ -35,7 +40,9 @@ export function TradeScorecard({
     let active = true;
     setStats(null);
     setStatsError("");
-    void api<Stats>(`/accounts/${account.id}/statistics`)
+    void api<Stats>(
+      `/accounts/${account.id}/statistics${hypothetical ? "/hypothetical" : ""}`,
+    )
       .then((s) => {
         if (active) setStats(s);
       })
@@ -45,12 +52,35 @@ export function TradeScorecard({
     return () => {
       active = false;
     };
-  }, [account.id, ledger, retryStats]);
+  }, [account.id, ledger, retryStats, hypothetical]);
   return (
     <>
       <h3>
         Trade scorecard <small>· all recorded history</small>
       </h3>
+      <label className="form-note scorecard-toggle">
+        <input
+          type="checkbox"
+          checked={hypothetical}
+          onChange={(event) => setHypothetical(event.target.checked)}
+        />{" "}
+        Hypothetical: close all open positions
+      </label>
+      {hypothetical && stats && (
+        <p className="form-note">
+          {stats.simulated_positions ? (
+            <>
+              Latest closes · {stats.quote_start}
+              {stats.quote_start !== stats.quote_end
+                ? ` — ${stats.quote_end}`
+                : ""}{" "}
+              · before selling fees and taxes.
+            </>
+          ) : (
+            "No open positions to close."
+          )}
+        </p>
+      )}
       {statsError && (
         <p role="alert" className="error">
           {statsError}{" "}
@@ -90,7 +120,11 @@ export function TradeScorecard({
             open positions.
           </p>
           <details>
-            <summary>Closed positions</summary>
+            <summary>
+              {hypothetical
+                ? "Closed + hypothetical positions"
+                : "Closed positions"}
+            </summary>
             {stats.episodes.length > 0 && (
               <div
                 className="table-scroll"
@@ -116,7 +150,7 @@ export function TradeScorecard({
                             ? "Exchange unconfirmed"
                             : s.exchange}
                         </td>
-                        <td>{s.closed_on}</td>
+                        <td>{s.hypothetical ? "Hypothetical" : s.closed_on}</td>
                         <td className="number">
                           {s.pnl === null ? "Unknown basis" : number(s.pnl)}
                         </td>
