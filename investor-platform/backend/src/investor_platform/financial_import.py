@@ -1,4 +1,4 @@
-"""Read a WAL-consistent SQLite snapshot and copy only financial input tables."""
+"""Import a read-only, WAL-consistent SQLite snapshot and verify every mapped field."""
 
 import hashlib
 import json
@@ -9,111 +9,100 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 
-from psycopg import sql
+from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
 
-from .financial_store import CORE_TABLES, initialize, json_result, relation, source_id
+from .financial_store import (
+    CORE_TABLES,
+    Dataset,
+    Report,
+    Row,
+    Value,
+    initialize,
+    json_result,
+    relation,
+    source_id,
+)
 
-DATE_FIELDS = {"period_start", "period_end"}
-TIME_FIELDS = {"created_at", "updated_at"}
-SOURCE_COLUMNS = {
-    "companies": {
-        "id",
-        "ticker",
-        "name",
-        "sector",
-        "description",
-        "categories",
-        "folder_exists",
-        "exchange",
-        "created_at",
-        "updated_at",
-    },
-    "metrics": {
-        "id",
-        "metric_key",
-        "display_name",
-        "description",
-        "value_type",
-        "created_at",
-        "updated_at",
-    },
-    "company_periods": {
-        "id",
-        "company_id",
-        "period_kind",
-        "fiscal_year",
-        "fiscal_quarter",
-        "fiscal_label",
-        "period_start",
-        "period_end",
-        "created_at",
-        "updated_at",
-    },
-    "metric_values": {
-        "id",
-        "metric_id",
-        "period_id",
-        "value",
-        "value_high",
-        "value_status",
-        "qualifier",
-        "scenario",
-        "origin",
-        "currency_code",
-        "reported_text",
-        "source_ref",
-        "calculation_note",
-        "created_at",
-        "updated_at",
-    },
+SOURCE_COLUMNS: dict[str, frozenset[str]] = {
+    "companies": frozenset(
+        (
+            "id ticker name sector created_at updated_at description "
+            "categories folder_exists exchange"
+        ).split()
+    ),
+    "metrics": frozenset(
+        "id metric_key display_name description value_type created_at updated_at".split()
+    ),
+    "company_periods": frozenset(
+        (
+            "id company_id period_kind fiscal_year fiscal_quarter fiscal_label "
+            "period_start period_end created_at updated_at"
+        ).split()
+    ),
+    "metric_values": frozenset(
+        (
+            "id metric_id period_id value value_high value_status qualifier scenario origin "
+            "currency_code reported_text source_ref calculation_note created_at updated_at"
+        ).split()
+    ),
 }
 
 
-def normalize(table, row):
-    result = dict(row)
+def normalize(table: str, row: sqlite3.Row) -> Row:
+    """Preserve legacy representations while converting dates, decimals and metadata."""
+    result: Row = dict(row)
+    key: str
+    value: Value
     for key, value in result.items():
         if value is None:
             continue
-        if key in DATE_FIELDS:
-            result[key] = date.fromisoformat(value)
-        elif key in TIME_FIELDS:
-            stamp = datetime.fromisoformat(value)
+        if key in {"period_start", "period_end"}:
+            result[key] = date.fromisoformat(str(value))
+        elif key in {"created_at", "updated_at"}:
+            stamp: datetime = datetime.fromisoformat(str(value))
             result[key] = stamp.replace(tzinfo=UTC) if stamp.tzinfo is None else stamp
         elif key in {"value", "value_high"}:
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError("Legacy observations must be finite")
             result[key] = Decimal(str(value))
     if table == "companies":
-        if result.get("categories") is not None:
-            categories = json.loads(result["categories"])
+        if result["categories"] is not None:
+            categories: list[str] = json.loads(str(result["categories"]))
             if not isinstance(categories, list) or not all(isinstance(x, str) for x in categories):
-                raise ValueError("Legacy company categories must be a JSON array of strings")
+                raise ValueError("Legacy categories must be a JSON array of strings")
             result["categories"] = categories
-        if result.get("folder_exists") not in {0, 1}:
+        if result["folder_exists"] not in {0, 1}:
             raise ValueError("Legacy folder flag must be zero or one")
         result["folder_exists"] = bool(result["folder_exists"])
     if table == "metric_values":
-        result["source_id"] = None
-        result["verification_status"] = "legacy_unverified"
+        result.update(source_id=None, verification_status="legacy_unverified")
     return result
 
 
-def read_legacy(path):
-    path = Path(path).resolve(strict=True)
-    dataset = {}
-    # mode=ro includes committed WAL data; immutable=1 would incorrectly ignore it.
+def read_legacy(path: Path) -> Dataset:
+    """Read committed WAL records without writing or checkpointing the source."""
+    path = path.resolve(strict=True)
+    dataset: Dataset = {}
+    temporary: str
+    source: sqlite3.Connection
+    destination: sqlite3.Connection
+    conn: sqlite3.Connection
     with TemporaryDirectory(prefix="investor-financial-snapshot-") as temporary:
-        snapshot = Path(temporary) / "snapshot.db"
+        snapshot: Path = Path(temporary) / "snapshot.db"
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as source:
             source.execute("PRAGMA query_only = ON")
             with closing(sqlite3.connect(snapshot)) as destination:
                 source.backup(destination)
         with closing(sqlite3.connect(snapshot.as_uri() + "?mode=ro", uri=True)) as conn:
             conn.row_factory = sqlite3.Row
+            table: str
             for table in CORE_TABLES:
-                columns = {r["name"] for r in conn.execute(f'PRAGMA table_info("{table}")')}
+                columns: set[str] = {
+                    r["name"] for r in conn.execute(f'PRAGMA table_info("{table}")')
+                }
                 if columns != SOURCE_COLUMNS[table]:
                     raise ValueError(f"Unsupported legacy {table} columns; review the mapping")
                 try:
@@ -125,65 +114,70 @@ def read_legacy(path):
                     raise ValueError(
                         f"Invalid legacy {table} format; source remains unchanged"
                     ) from exc
-    sources = {}
-    period_companies = {row["id"]: row["company_id"] for row in dataset["company_periods"]}
+    sources: dict[str, Row] = {}
+    period_companies: dict[int, int] = {
+        cast(int, row["id"]): cast(int, row["company_id"]) for row in dataset["company_periods"]
+    }
+    row: Row
     for row in dataset["metric_values"]:
-        reference = row["source_ref"]
-        if reference and reference.strip():
-            if row["period_id"] not in period_companies:
+        reference: Value = row["source_ref"]
+        if isinstance(reference, str) and reference.strip():
+            period_id: int = cast(int, row["period_id"])
+            if period_id not in period_companies:
                 raise ValueError("Legacy observation refers to an unknown fiscal period")
-            company_id = period_companies[row["period_id"]]
+            company_id: int = period_companies[period_id]
             row["source_id"] = source_id(company_id, reference)
-            sources[row["source_id"]] = {
+            sources[str(row["source_id"])] = {
                 "id": row["source_id"],
                 "company_id": company_id,
                 "reference": reference,
                 "url": reference if reference.startswith(("https://", "http://")) else None,
             }
-    dataset["sources"] = sorted(sources.values(), key=lambda row: str(row["id"]))
+    dataset["sources"] = [sources[key] for key in sorted(sources)]
     return dataset
 
 
-def summary(dataset):
-    serialized = json_result(dataset).encode()
+def summary(dataset: Dataset) -> Report:
+    """Report counts and a snapshot digest without printing private records."""
     return {
         "counts": {table: len(rows) for table, rows in dataset.items()},
-        "snapshot_sha256": hashlib.sha256(serialized).hexdigest(),
+        "snapshot_sha256": hashlib.sha256(json_result(dataset).encode()).hexdigest(),
         "legacy_verification": "legacy_unverified",
     }
 
 
-def verify(conn, schema, dataset):
-    """Compare every migrated field, not only counts or selected examples."""
+def verify(conn: Connection[Row], schema: str, dataset: Dataset) -> Report:
+    """Compare every mapped field and refuse any conflicting target data."""
+    table: str
     for table in (*CORE_TABLES, "sources"):
-        expected = dataset[table]
-        actual = conn.execute(
+        expected: list[Row] = dataset[table]
+        actual: list[Row] = conn.execute(
             sql.SQL("SELECT * FROM {} ORDER BY id").format(relation(schema, table))
         ).fetchall()
         if len(actual) != len(expected):
             raise ValueError(f"Target {table} count differs; no overwrite is permitted")
-        if table == "sources":
-            actual.sort(key=lambda row: str(row["id"]))
+        wanted: Row
+        saved: Row
         for wanted, saved in zip(expected, actual, strict=True):
             if any(saved[key] != value for key, value in wanted.items()):
                 raise ValueError(f"Target {table} data differs; no overwrite is permitted")
     return {**summary(dataset), "matches": True}
 
 
-def migrate(conn, schema, dataset):
+def migrate(conn: Connection[Row], schema: str, dataset: Dataset) -> Report:
+    """Import atomically into an empty namespace, or verify an exact rerun."""
     initialize(conn, schema)
-    counts = [
-        conn.execute(
+    table: str
+    for table in (*CORE_TABLES, "sources"):
+        if conn.execute(
             sql.SQL("SELECT count(*) AS n FROM {}").format(relation(schema, table))
-        ).fetchone()["n"]
-        for table in (*CORE_TABLES, "sources")
-    ]
-    if any(counts):
-        return {**verify(conn, schema, dataset), "status": "unchanged"}
+        ).fetchone()["n"]:
+            return {**verify(conn, schema, dataset), "status": "unchanged"}
+    record: Row
     for table in ("companies", "metrics", "company_periods", "sources", "metric_values"):
         for record in dataset[table]:
-            columns = list(record)
-            values = [
+            columns: list[str] = list(record)
+            values: list[Value | Jsonb] = [
                 Jsonb(value) if key == "categories" and value is not None else value
                 for key, value in record.items()
             ]
@@ -198,88 +192,9 @@ def migrate(conn, schema, dataset):
     for table in CORE_TABLES:
         conn.execute(
             sql.SQL(
-                "SELECT setval(pg_get_serial_sequence(%s, 'id'), "
-                "COALESCE(MAX(id), 1), MAX(id) IS NOT NULL) FROM {}"
+                "SELECT setval(pg_get_serial_sequence(%s, 'id'), COALESCE(MAX(id), 1), "
+                "MAX(id) IS NOT NULL) FROM {}"
             ).format(relation(schema, table)),
             (f"{schema}.{table}",),
         )
     return {**verify(conn, schema, dataset), "status": "imported"}
-
-
-def upgrade_v1(conn, schema):
-    """Explicit atomic upgrade of the preparation-only v1 namespace; no live cutover."""
-    from .financial_store import SCHEMA_VERSION
-
-    relation(schema, "sources")
-    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (schema,))
-    existing = conn.execute(
-        "SELECT obj_description(oid, 'pg_namespace') AS version "
-        "FROM pg_namespace WHERE nspname = %s",
-        (schema,),
-    ).fetchone()
-    if existing and existing["version"] == SCHEMA_VERSION:
-        return {"status": "unchanged", "version": SCHEMA_VERSION}
-    if not existing or existing["version"] != "minerva-financial-inputs-v1":
-        raise ValueError("Upgrade requires the known financial v1 namespace")
-    sources = conn.execute(
-        sql.SQL("SELECT * FROM {}").format(relation(schema, "sources"))
-    ).fetchall()
-    owners = conn.execute(
-        sql.SQL(
-            "SELECT DISTINCT v.source_id, p.company_id FROM {} v JOIN {} p ON p.id=v.period_id "
-            "WHERE v.source_id IS NOT NULL"
-        ).format(relation(schema, "metric_values"), relation(schema, "company_periods"))
-    ).fetchall()
-    if {s["id"] for s in sources} != {o["source_id"] for o in owners}:
-        raise ValueError("Review orphan source records before upgrading; no records removed")
-    grantees = conn.execute(
-        "SELECT grantee FROM information_schema.role_table_grants WHERE table_schema=%s "
-        "AND table_name='metric_values_flat' AND privilege_type='SELECT'",
-        (schema,),
-    ).fetchall()
-    ddl = Path(__file__).with_name("financial_upgrade_v2.sql").read_text()
-    conn.execute(sql.SQL(ddl).format(schema=sql.Identifier(schema)))
-    by_id = {s["id"]: s for s in sources}
-    for owner in owners:
-        record = {**by_id[owner["source_id"]], "company_id": owner["company_id"]}
-        record["id"] = source_id(owner["company_id"], record["reference"])
-        columns = list(record)
-        conn.execute(
-            sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
-                relation(schema, "sources"),
-                sql.SQL(", ").join(map(sql.Identifier, columns)),
-                sql.SQL(", ").join(sql.Placeholder() for _ in columns),
-            ),
-            list(record.values()),
-        )
-        conn.execute(
-            sql.SQL(
-                "UPDATE {} v SET source_id=%s FROM {} p "
-                "WHERE p.id=v.period_id AND p.company_id=%s AND v.source_id=%s"
-            ).format(relation(schema, "metric_values"), relation(schema, "company_periods")),
-            (record["id"], owner["company_id"], owner["source_id"]),
-        )
-    conn.execute(
-        sql.SQL("DELETE FROM {} WHERE company_id IS NULL").format(relation(schema, "sources"))
-    )
-    conn.execute(
-        sql.SQL(
-            "ALTER TABLE {} ALTER COLUMN company_id SET NOT NULL, "
-            "ADD UNIQUE (company_id, reference)"
-        ).format(relation(schema, "sources"))
-    )
-    # Reuse the current read-view definition; preserve SELECT grants across its replacement.
-    view = Path(__file__).with_name("financial_schema.sql").read_text().split("CREATE VIEW", 1)[1]
-    conn.execute(sql.SQL("CREATE VIEW" + view).format(schema=sql.Identifier(schema)))
-    for grantee in grantees:
-        conn.execute(
-            sql.SQL("GRANT SELECT ON {} TO {}").format(
-                relation(schema, "metric_values_flat"), sql.Identifier(grantee["grantee"])
-            )
-        )
-    conn.execute(
-        sql.SQL("COMMENT ON SCHEMA {} IS {}").format(
-            sql.Identifier(schema), sql.Literal(SCHEMA_VERSION)
-        )
-    )
-    return {"status": "upgraded", "version": SCHEMA_VERSION}

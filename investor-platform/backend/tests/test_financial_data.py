@@ -1,34 +1,36 @@
+"""Exercise financial migration and read access with synthetic SQLite and PostgreSQL data."""
+
 import json
 import os
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Iterator
 from contextlib import closing
-from datetime import UTC, date, datetime
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg import sql
+from psycopg import Connection, sql
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
-from pydantic import HttpUrl, ValidationError
+from sqlalchemy import Connection as SQLConnection
+from sqlalchemy import Engine, text
 
-from investor_platform.financial_import import migrate, read_legacy, summary, upgrade_v1, verify
+from investor_platform.financial_import import migrate, read_legacy, summary, verify
 from investor_platform.financial_store import (
-    ObservationBatch,
-    append_observations,
-    connect,
-    grant_access,
+    Dataset,
+    Row,
+    company_rows,
+    grant_reader,
     history_rows,
     initialize,
     relation,
-    source_id,
 )
 
-LEGACY_DDL = """
+LEGACY_DDL: str = """
 CREATE TABLE companies (id INTEGER PRIMARY KEY, ticker TEXT, name TEXT, sector TEXT,
  created_at TEXT, updated_at TEXT, description TEXT, categories TEXT,
  folder_exists INTEGER, exchange TEXT);
@@ -45,8 +47,10 @@ CREATE TABLE metric_values (id INTEGER PRIMARY KEY, metric_id INTEGER, period_id
 
 
 @pytest.fixture
-def legacy(tmp_path):
-    path = tmp_path / "fixture.db"
+def legacy(tmp_path: Path) -> Path:
+    """Create synthetic legacy records, including an explicitly missing observation."""
+    path: Path = tmp_path / "fixture.db"
+    conn: sqlite3.Connection
     with closing(sqlite3.connect(path)) as conn:
         conn.executescript(LEGACY_DDL)
         conn.execute(
@@ -79,115 +83,94 @@ def legacy(tmp_path):
 
 
 @pytest.fixture
-def financial(database):
-    dsn = database.url.render_as_string(hide_password=False).replace(
+def financial(database: Engine) -> Iterator[tuple[str, str]]:
+    """Isolate each PostgreSQL test from real portfolio and financial records."""
+    dsn: str = database.url.render_as_string(hide_password=False).replace(
         "postgresql+psycopg://", "postgresql://"
     )
-    schema = "investor_data_test_" + uuid4().hex
+    schema: str = "investor_data_test_" + uuid4().hex
+    conn: Connection[Row]
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         initialize(conn, schema)
     try:
         yield dsn, schema
     finally:
-        with psycopg.connect(dsn) as conn:
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
             conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
-def load_reviewed_legacy(conn, schema, legacy):
-    migrate(conn, schema, read_legacy(legacy))
-    # Only this synthetic Revenue definition has a reviewed normalization contract.
-    conn.execute(
-        sql.SQL(
-            "UPDATE {} SET measurement_basis='duration', unit_convention='base_currency', "
-            "entity_scope='consolidated' WHERE id=17"
-        ).format(relation(schema, "metrics"))
-    )
-
-
-def batch(**extra):
-    data = {
-        "company_id": 42,
-        "period": {
-            "period_kind": "year",
-            "fiscal_year": 2025,
-            "fiscal_label": "FY2025",
-            "period_start": "2025-01-01",
-            "period_end": "2025-12-31",
-        },
-        "observations": [
-            {
-                "metric_key": "revenue.total.reported",
-                "value": "123.00000000000000001",
-                "currency_code": "USD",
-                "source": {
-                    "reference": "Synthetic FY2025 report",
-                    "url": "https://example.com/fy2025",
-                    "published_on": "2026-02-01",
-                },
-                "source_locator": "Income statement, page 1",
-                **extra,
-            }
-        ],
-    }
-    return ObservationBatch.model_validate(data)
-
-
-def test_import_preserves_every_field_missingness_ids_and_source(legacy, financial):
+def test_import_fidelity_missingness_sequences_and_retry(
+    legacy: Path, financial: tuple[str, str]
+) -> None:
+    """Preserve every mapped field, missing figures and identities across exact retries."""
+    dsn: str
+    schema: str
+    conn: Connection[Row]
     dsn, schema = financial
-    before = summary(read_legacy(legacy))
+    dataset: Dataset = read_legacy(legacy)
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        dataset = read_legacy(legacy)
         assert migrate(conn, schema, dataset)["status"] == "imported"
         assert verify(conn, schema, dataset)["matches"]
         assert migrate(conn, schema, dataset)["status"] == "unchanged"
-        rows = history_rows(conn, schema, 42)
-        assert rows[0]["value"] == Decimal("100.25")
-        assert rows[0]["verification_status"] == "legacy_unverified"
-        assert rows[0]["published_on"] is None
-        assert rows[0]["source_url"] == "https://example.com/report"
-        missing = history_rows(conn, schema, 42, scenario="guidance")
-        assert missing[0]["value"] is None and missing[0]["value_status"] == "not_disclosed"
-        next_id = conn.execute(
-            sql.SQL(
-                "INSERT INTO {} (name) VALUES ('Another synthetic issuer') RETURNING id"
-            ).format(relation(schema, "companies"))
-        ).fetchone()["id"]
-        assert next_id > 42
-    assert summary(read_legacy(legacy)) == before
+        row: Row = history_rows(conn, schema, 42)[0]
+        assert row["value"] == Decimal("100.25")
+        assert row["verification_status"] == "legacy_unverified" and row["published_on"] is None
+        assert row["source_url"] == "https://example.com/report"
+        missing: Row = history_rows(conn, schema, 42, scenario="guidance")[0]
+        assert missing["value"] is None and missing["value_status"] == "not_disclosed"
+        assert (
+            conn.execute(
+                sql.SQL(
+                    "INSERT INTO {} (name) VALUES ('Synthetic second issuer') RETURNING id"
+                ).format(relation(schema, "companies"))
+            ).fetchone()["id"]
+            > 42
+        )
+    assert summary(read_legacy(legacy)) == summary(dataset)
 
 
-def test_snapshot_includes_committed_wal_and_does_not_checkpoint(legacy):
+def test_committed_wal_is_included(legacy: Path) -> None:
+    """Read committed WAL records while the writer remains open."""
+    writer: sqlite3.Connection
     with closing(sqlite3.connect(legacy)) as writer:
         writer.execute("PRAGMA journal_mode=WAL")
         writer.execute("PRAGMA wal_autocheckpoint=0")
         writer.execute("UPDATE metric_values SET value=201.5 WHERE id=99")
         writer.commit()
         assert read_legacy(legacy)["metric_values"][0]["value"] == Decimal("201.5")
-        assert writer.execute("SELECT value FROM metric_values WHERE id=99").fetchone()[0] == 201.5
 
 
-def test_import_conflict_preserves_existing_data(legacy, financial):
+def test_conflicting_retry_preserves_target(legacy: Path, financial: tuple[str, str]) -> None:
+    """Refuse a changed source snapshot without overwriting the prepared copy."""
+    dsn: str
+    schema: str
+    conn: Connection[Row]
     dsn, schema = financial
-    original = read_legacy(legacy)
+    dataset: Dataset = read_legacy(legacy)
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        migrate(conn, schema, original)
-    changed = read_legacy(legacy)
+        migrate(conn, schema, dataset)
+    changed: Dataset = read_legacy(legacy)
     changed["metric_values"][0]["value"] = Decimal("999")
     with pytest.raises(ValueError, match="no overwrite"):
         with psycopg.connect(dsn, row_factory=dict_row) as conn:
             migrate(conn, schema, changed)
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        assert verify(conn, schema, original)["matches"]
+        assert verify(conn, schema, dataset)["matches"]
 
 
-def test_failed_import_rolls_back_all_tables(legacy, financial):
+def test_foreign_key_failure_rolls_back_import(legacy: Path, financial: tuple[str, str]) -> None:
+    """Reject broken references without retaining a partial import."""
+    dsn: str
+    schema: str
+    conn: Connection[Row]
     dsn, schema = financial
-    dataset = read_legacy(legacy)
+    dataset: Dataset = read_legacy(legacy)
     dataset["metric_values"][0]["metric_id"] = 999
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         with psycopg.connect(dsn, row_factory=dict_row) as conn:
             migrate(conn, schema, dataset)
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        table: str
         for table in dataset:
             assert (
                 conn.execute(
@@ -197,384 +180,157 @@ def test_failed_import_rolls_back_all_tables(legacy, financial):
             )
 
 
-def test_append_exact_decimals_retry_and_conflict(legacy, financial):
-    dsn, schema = financial
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-        assert append_observations(conn, schema, batch()) == {"inserted": 1, "unchanged": 0}
-        assert append_observations(conn, schema, batch()) == {"inserted": 0, "unchanged": 1}
-        rows = history_rows(conn, schema, 42)
-        assert rows[-1]["value"] == Decimal("123.00000000000000001")
-        assert rows[-1]["verification_status"] == "unverified"
-    with pytest.raises(ValueError, match="conflicts"):
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            append_observations(conn, schema, batch(value="124"))
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        assert history_rows(conn, schema, 42)[-1]["value"] == Decimal("123.00000000000000001")
-
-
-def test_append_failure_is_atomic(legacy, financial):
-    dsn, schema = financial
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-    data = batch()
-    data.observations.append(data.observations[0].model_copy(update={"metric_key": "missing"}))
-    with pytest.raises(ValueError, match="Define the metric"):
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            append_observations(conn, schema, data)
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        assert len(history_rows(conn, schema, 42)) == 1
-        assert (
-            conn.execute(
-                sql.SQL("SELECT count(*) AS n FROM {}").format(relation(schema, "company_periods"))
-            ).fetchone()["n"]
-            == 1
-        )
-
-
-@pytest.mark.parametrize(
-    "extra",
-    [
-        {"value": 0.1},
-        {"value": "NaN"},
-        {"value": "Infinity"},
-        {"source_locator": None},
-        {"source_locator": "   "},
-        {"origin": "derived", "calculation_note": "   "},
-        {"source": {"reference": "Synthetic report", "retrieved_at": "2026-01-01T12:00:00"}},
-        {"qualifier": "range", "value_high": "1"},
-        {"value": None},
-        {"source": None},
-        {"value": "123", "value_status": "not_disclosed"},
-    ],
-)
-def test_ambiguous_or_invalid_input_is_rejected(extra):
-    with pytest.raises(ValidationError):
-        batch(**extra)
-
-
-def test_missing_database_config_and_namespace_fail_closed(monkeypatch):
-    monkeypatch.delenv("INVESTOR_DATA_DATABASE_URL", raising=False)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://example.invalid/other")
-    with pytest.raises(ValueError, match="no database fallback"):
-        connect()
-    for name in ("public", "investor_data; DROP SCHEMA public", "test_other"):
-        with pytest.raises(ValueError):
-            relation(name, "companies")
-
-
-def test_dedicated_roles_can_append_but_not_overwrite_or_verify(legacy, financial):
-    dsn, schema = financial
-    suffix = uuid4().hex
-    reader, writer = "investor_data_reader_" + suffix, "investor_data_writer_" + suffix
-    try:
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            load_reviewed_legacy(conn, schema, legacy)
-            for role in (reader, writer):
-                conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
-            grant_access(conn, schema, reader, writer)
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(writer)))
-            assert append_observations(conn, schema, batch())["inserted"] == 1
-        for role, statement in [
-            (
-                reader,
-                sql.SQL("INSERT INTO {} (name) VALUES ('Forbidden')").format(
-                    relation(schema, "companies")
-                ),
-            ),
-            (writer, sql.SQL("UPDATE {} SET value=0").format(relation(schema, "metric_values"))),
-            (
-                writer,
-                sql.SQL("INSERT INTO {} (verification_status) VALUES ('source_verified')").format(
-                    relation(schema, "metric_values")
-                ),
-            ),
-        ]:
-            with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                with psycopg.connect(dsn) as conn:
-                    conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
-                    conn.execute(statement)
-    finally:
-        with psycopg.connect(dsn) as conn:
-            for role in (reader, writer):
-                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
-
-
-def test_cli_chronological_exact_json(legacy, financial):
-    dsn, schema = financial
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-        append_observations(conn, schema, batch())
-    env = os.environ | {"INVESTOR_DATA_DATABASE_URL": dsn}
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "investor_platform.financial_cli",
-            "--schema",
-            schema,
-            "history",
-            "--company-id",
-            "42",
-        ],
-        env=env,
-        text=True,
-        capture_output=True,
-    )
-    assert result.returncode == 0, result.stderr
-    rows = json.loads(result.stdout)
-    assert [row["fiscal_year"] for row in rows] == [2024, 2025]
-    assert rows[-1]["value"] == "123.00000000000000001"
-
-
-def test_quarter_and_ytd_same_end_ranges_and_estimates_remain_distinct(legacy, financial):
-    dsn, schema = financial
-    quarter = batch(value="110", value_high="120", qualifier="range", scenario="estimate")
-    quarter.period = quarter.period.model_copy(
-        update={
-            "period_kind": "quarter",
-            "fiscal_quarter": 2,
-            "fiscal_label": "Q2 FY2025",
-            "period_start": date(2025, 4, 1),
-            "period_end": date(2025, 6, 30),
-        }
-    )
-    ytd = batch(value=None, value_status="not_disclosed")
-    ytd.period = quarter.period.model_copy(
-        update={
-            "period_kind": "ytd",
-            "fiscal_label": "H1 FY2025",
-            "period_start": date(2025, 1, 1),
-        }
-    )
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-        append_observations(conn, schema, quarter)
-        append_observations(conn, schema, ytd)
-        estimate = history_rows(conn, schema, 42, scenario="estimate")[0]
-        assert estimate["period_kind"] == "quarter"
-        assert estimate["value_high"] == 120 and estimate["qualifier"] == "range"
-        actual = history_rows(conn, schema, 42)[-1]
-        assert actual["period_kind"] == "ytd" and actual["value"] is None
-
-
-def test_unknown_source_column_and_foreign_namespace_are_not_modified(legacy, financial):
-    with closing(sqlite3.connect(legacy)) as conn:
-        conn.execute("ALTER TABLE companies ADD COLUMN extra_information TEXT")
-        conn.commit()
+def test_unknown_columns_and_schema_versions_are_refused(
+    legacy: Path, financial: tuple[str, str]
+) -> None:
+    """Prevent silent source-field loss and changes to unsupported target schemas."""
+    source: sqlite3.Connection
+    with closing(sqlite3.connect(legacy)) as source:
+        source.execute("ALTER TABLE companies ADD COLUMN extra_information TEXT")
+        source.commit()
     with pytest.raises(ValueError, match="review the mapping"):
         read_legacy(legacy)
+    dsn: str
+    schema: str
+    conn: Connection[Row]
     dsn, schema = financial
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        conn.execute(
-            sql.SQL("COMMENT ON SCHEMA {} IS 'Another application'").format(sql.Identifier(schema))
-        )
-    with pytest.raises(ValueError, match="already exists"):
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            initialize(conn, schema)
-
-
-def test_cli_validation_error_keeps_values_out_of_stderr(legacy, financial, tmp_path):
-    dsn, schema = financial
-    payload = batch().model_dump(mode="json")
-    payload["observations"][0]["value"] = "PRIVATE_TEST_MARKER"
-    input_file = tmp_path / "input.json"
-    input_file.write_text(json.dumps(payload))
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "investor_platform.financial_cli",
-            "--schema",
-            schema,
-            "append",
-            "--input",
-            str(input_file),
-        ],
-        env=os.environ | {"INVESTOR_DATA_DATABASE_URL": dsn},
-        text=True,
-        capture_output=True,
-    )
-    assert result.returncode == 1
-    assert "PRIVATE_TEST_MARKER" not in result.stderr
-    assert json.loads(result.stderr)["fields"] == [["observations", 0, "value"]]
-
-
-def test_new_numeric_facts_require_reviewed_contract_and_duration_start(legacy, financial):
-    dsn, schema = financial
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        migrate(conn, schema, read_legacy(legacy))
-    with pytest.raises(ValueError, match="Review metric"):
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            append_observations(conn, schema, batch())
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-    data = batch()
-    data.period.period_start = None
-    with pytest.raises(ValueError, match="period start"):
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            append_observations(conn, schema, data)
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        assert len(history_rows(conn, schema, 42)) == 1
-
-
-def test_source_labels_and_tickers_are_not_global_issuer_identity(legacy, financial):
-    dsn, schema = financial
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-        conn.execute(
-            sql.SQL(
-                "INSERT INTO {} (id,ticker,name,exchange) "
-                "VALUES (43,'DEMO','Second synthetic issuer','OTHER')"
-            ).format(relation(schema, "companies"))
-        )
-        first = batch()
-        second = batch()
-        second.company_id = 43
-        second.observations[0].source.url = HttpUrl("https://example.com/another-issuer")
-        append_observations(conn, schema, first)
-        append_observations(conn, schema, second)
-        a, b = history_rows(conn, schema, 42)[-1], history_rows(conn, schema, 43)[0]
-        assert a["source_ref"] == b["source_ref"] and a["source_id"] != b["source_id"]
-        assert a["source_url"] != b["source_url"]
-
-
-def test_source_refetch_and_optional_metadata_do_not_change_document(legacy, financial):
-    dsn, schema = financial
-    first_time = datetime(2026, 2, 2, tzinfo=UTC)
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-        first = batch()
-        first.observations[0].source.retrieved_at = first_time
-        append_observations(conn, schema, first)
-        retry = batch()
-        retry.observations[0].source.retrieved_at = datetime(2026, 2, 3, tzinfo=UTC)
-        retry.observations[0].source.url = None
-        retry.observations[0].source.published_on = None
-        assert append_observations(conn, schema, retry)["unchanged"] == 1
-        assert history_rows(conn, schema, 42)[-1]["retrieved_at"] == first_time
-    with pytest.raises(ValueError, match="Source metadata differs"):
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
-            append_observations(
-                conn,
-                schema,
-                batch(
-                    source={
-                        "reference": "Synthetic FY2025 report",
-                        "url": "https://example.com/different-document",
-                    }
-                ),
-            )
-
-
-def test_fiscal_labels_can_repeat_without_collapsing_distinct_date_ranges(legacy, financial):
-    dsn, schema = financial
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        load_reviewed_legacy(conn, schema, legacy)
-        append_observations(conn, schema, batch())
-        stub = batch(value="60")
-        stub.period.period_start = date(2025, 7, 1)
-        append_observations(conn, schema, stub)
-        assert len(history_rows(conn, schema, 42)) == 3
-    data = batch().model_dump(mode="json")
-    data["period"].update(period_kind="ytd", fiscal_quarter=None)
-    with pytest.raises(ValidationError, match="ending fiscal quarter"):
-        ObservationBatch.model_validate(data)
-
-
-def test_explicit_v1_upgrade_preserves_shared_provenance_and_is_idempotent(legacy, financial):
-    dsn, schema = financial
-    expected = read_legacy(legacy)
-    expected["companies"].append({**expected["companies"][0], "id": 43, "ticker": "SECOND"})
-    expected["company_periods"].append(
-        {**expected["company_periods"][0], "id": 24, "company_id": 43}
-    )
-    reference = expected["sources"][0]["reference"]
-    expected["metric_values"].append(
-        {
-            **expected["metric_values"][0],
-            "id": 101,
-            "period_id": 24,
-            "source_id": source_id(43, reference),
-        }
-    )
-    expected["sources"].append(
-        {**expected["sources"][0], "id": source_id(43, reference), "company_id": 43}
-    )
-    expected["sources"].sort(key=lambda row: str(row["id"]))
-    metadata = {
-        "published_on": date(2025, 2, 1),
-        "retrieved_at": datetime(2026, 2, 1, tzinfo=UTC),
-        "content_sha256": "a" * 64,
-        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
-    }
-    for source in expected["sources"]:
-        source.update(metadata)
-    old_id = uuid4()
-    reader = "investor_data_reader_" + uuid4().hex
-    with psycopg.connect(dsn, row_factory=dict_row) as conn:
-        conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
-        conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-        ddl = Path(__file__).with_name("fixtures").joinpath("financial_v1.sql").read_text()
-        conn.execute(sql.SQL(ddl).format(schema=sql.Identifier(schema)))
         conn.execute(
             sql.SQL("COMMENT ON SCHEMA {} IS 'minerva-financial-inputs-v1'").format(
                 sql.Identifier(schema)
             )
         )
-        for table in ("companies", "metrics", "company_periods", "sources", "metric_values"):
-            records = expected[table]
-            if table == "sources":
-                records = [
-                    {
-                        "id": old_id,
-                        "reference": reference,
-                        "url": "https://example.com/report",
-                        **metadata,
-                    }
-                ]
-            for original in records:
-                record = dict(original)
-                if table == "metric_values":
-                    record["source_id"] = old_id
-                conn.execute(
-                    sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
-                        relation(schema, table),
-                        sql.SQL(", ").join(map(sql.Identifier, record)),
-                        sql.SQL(", ").join(sql.Placeholder() for _ in record),
-                    ),
-                    [Jsonb(v) if k == "categories" else v for k, v in record.items()],
-                )
-        conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(reader)))
-        conn.execute(
-            sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
-                sql.Identifier(schema), sql.Identifier(reader)
-            )
+    with pytest.raises(ValueError, match="already exists"):
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            initialize(conn, schema)
+    with pytest.raises(ValueError):
+        relation("public", "companies")
+
+
+def test_issuer_source_and_period_identity(legacy: Path, financial: tuple[str, str]) -> None:
+    """Keep duplicate tickers, document labels and fiscal labels separate by real identity."""
+    source: sqlite3.Connection
+    with closing(sqlite3.connect(legacy)) as source:
+        source.execute("UPDATE metric_values SET source_ref='FY2024 annual report'")
+        source.execute(
+            "INSERT INTO companies SELECT 43,ticker,'Another synthetic "
+            "issuer',sector,created_at,updated_at,description,categories,folder_exists,'OTHER' "
+            "FROM companies WHERE id=42"
         )
-        conn.execute(
-            sql.SQL("GRANT SELECT ON {} TO {}").format(
-                relation(schema, "metric_values_flat"), sql.Identifier(reader)
-            )
+        source.execute(
+            "INSERT INTO company_periods SELECT "
+            "24,43,period_kind,fiscal_year,fiscal_quarter,fiscal_label,"
+            "period_start,period_end,created_at,updated_at "
+            "FROM company_periods WHERE id=23"
         )
-        assert upgrade_v1(conn, schema)["status"] == "upgraded"
-        assert verify(conn, schema, expected)["matches"]
-        assert upgrade_v1(conn, schema)["status"] == "unchanged"
-        assert conn.execute(
-            sql.SQL("SELECT unit_convention,entity_scope FROM {}").format(
-                relation(schema, "metrics")
-            )
-        ).fetchone() == {"unit_convention": None, "entity_scope": None}
-        conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(reader)))
+        source.execute(
+            "INSERT INTO company_periods SELECT "
+            "25,42,period_kind,fiscal_year,fiscal_quarter,fiscal_label,"
+            "'2024-07-01',period_end,created_at,updated_at "
+            "FROM company_periods WHERE id=23"
+        )
+        source.execute(
+            "INSERT INTO metric_values SELECT "
+            "101,metric_id,24,value,value_high,value_status,qualifier,scenario,origin,"
+            "currency_code,reported_text,source_ref,calculation_note,created_at,updated_at "
+            "FROM metric_values WHERE id=99"
+        )
+        source.commit()
+    dsn: str
+    schema: str
+    conn: Connection[Row]
+    dsn, schema = financial
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        migrate(conn, schema, read_legacy(legacy))
+        assert len(company_rows(conn, schema, "DEMO")) == 2
+        assert (
+            history_rows(conn, schema, 42)[0]["source_id"]
+            != history_rows(conn, schema, 43)[0]["source_id"]
+        )
         assert (
             conn.execute(
-                sql.SQL("SELECT count(*) AS n FROM {}").format(
-                    relation(schema, "metric_values_flat")
-                )
+                sql.SQL("SELECT count(*) AS n FROM {}").format(relation(schema, "company_periods"))
             ).fetchone()["n"]
             == 3
         )
-        conn.execute("RESET ROLE")
-        conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(reader)))
-        conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(reader)))
+
+
+def test_reader_permissions_and_cli_json(
+    legacy: Path, financial: tuple[str, str], database: Engine
+) -> None:
+    """Check reader permissions and read-only CLI decimal JSON, ordering and limits."""
+    dsn: str
+    schema: str
+    conn: Connection[Row]
+    dsn, schema = financial
+    portfolio_conn: SQLConnection
+    with database.connect() as portfolio_conn:
+        portfolio_schema: str = str(
+            portfolio_conn.execute(text("SELECT current_schema()")).scalar_one()
+        )
+    reader: str = "investor_data_reader_" + uuid4().hex
+    try:
+        dataset: Dataset = read_legacy(legacy)
+        dataset["company_periods"].append(
+            {
+                **dataset["company_periods"][0],
+                "id": 24,
+                "fiscal_year": 2025,
+                "fiscal_label": "FY2025",
+                "period_start": date(2025, 1, 1),
+                "period_end": date(2025, 12, 31),
+            }
+        )
+        dataset["metric_values"].append(
+            {
+                **dataset["metric_values"][0],
+                "id": 101,
+                "period_id": 24,
+                "value": Decimal("0.1"),
+                "reported_text": "$0.10",
+            }
+        )
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            migrate(conn, schema, dataset)
+            conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(reader)))
+            grant_reader(conn, schema, reader)
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(reader)))
+            assert history_rows(conn, schema, 42)[0]["value"] == Decimal("100.25")
+        statement: sql.Composed
+        for statement in [
+            sql.SQL("INSERT INTO {} (name) VALUES ('Forbidden')").format(
+                relation(schema, "companies")
+            ),
+            sql.SQL("UPDATE {} SET value=0").format(relation(schema, "metric_values")),
+            sql.SQL("SELECT * FROM {}").format(sql.Identifier(portfolio_schema, "ledger_entries")),
+        ]:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                with psycopg.connect(dsn, row_factory=dict_row) as conn:
+                    conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(reader)))
+                    conn.execute(statement)
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "investor_platform.financial_cli",
+                "--schema",
+                schema,
+                "history",
+                "--company-id",
+                "42",
+            ],
+            env=os.environ | {"INVESTOR_DATA_DATABASE_URL": dsn},
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 0, result.stderr
+        rows: list[dict[str, str]] = json.loads(result.stdout)
+        assert [row["fiscal_label"] for row in rows] == ["FY2024", "FY2025"]
+        assert [row["value"] for row in rows] == ["100.25", "0.1"]
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            assert history_rows(conn, schema, 42, limit=1)[0]["fiscal_year"] == 2025
+    finally:
+        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(reader)))
+            conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(reader)))
