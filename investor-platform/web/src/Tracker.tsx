@@ -15,6 +15,7 @@ import { BenchmarkReturn, YearlyPerformance } from "./YearlyPerformance";
 import { completedMarketDate, today, type Ledger } from "./records";
 
 type Scope = "stocks" | "account";
+type BenchmarkMode = "buy_hold" | "matched" | "funded_hold";
 
 type Baseline = "history" | "recorded";
 
@@ -32,6 +33,15 @@ type CAGR = {
   QQQ: string | null;
 };
 export type Report = {
+  benchmark_values?: Record<"SPY" | "QQQ", { value: string }>;
+  funding_estimate?: { capital: string; estimated_dividends: string };
+  benchmark_mode?: BenchmarkMode;
+  matched_benchmarks?: Record<
+    "SPY" | "QQQ",
+    {
+      value: string;
+    }
+  > | null;
   scope?: Scope;
   baseline?: Baseline;
   security_ids?: string[];
@@ -86,7 +96,13 @@ export function Tracker({
   account: Account;
   ledger: Ledger;
 }) {
-  const [scope, setScope] = useState<Scope>("stocks");
+  const canEstimate =
+    account.reconstruction?.funding_status === "inferred" &&
+    account.reconstruction.opening_cash !== undefined;
+  const [scope, setScope] = useState<Scope>(canEstimate ? "account" : "stocks");
+  const [benchmarkMode, setBenchmarkMode] = useState<BenchmarkMode>(
+    canEstimate ? "funded_hold" : "buy_hold",
+  );
   const [baseline, setBaseline] = useState<Baseline>("history");
   const [start, setStart] = useState(
     ledger.entries[0]?.effective_date ?? completedMarketDate(),
@@ -113,6 +129,7 @@ export function Tracker({
       basis: Baseline = "history",
       measurement: Scope = "stocks",
       anchor?: string,
+      indexes: BenchmarkMode = "buy_hold",
     ) => {
       const version = ++generation.current;
       setBusy(true);
@@ -127,6 +144,7 @@ export function Tracker({
             method: "POST",
             body: JSON.stringify({
               scope: measurement,
+              benchmark_mode: indexes,
               ...(anchor ? { anchor_date: anchor } : {}),
               start: from,
               end: through,
@@ -158,7 +176,10 @@ export function Tracker({
     const through = completedMarketDate();
     const from = ledger.entries[0]?.effective_date ?? through;
     setAnchor(undefined);
-    setScope("stocks");
+    const initialMode = canEstimate ? "funded_hold" : "buy_hold";
+    const initialScope = canEstimate ? "account" : "stocks";
+    setScope(initialScope);
+    setBenchmarkMode(initialMode);
     setBaseline("history");
     setExcluded([]);
     setStart(from);
@@ -171,14 +192,28 @@ export function Tracker({
       from < through &&
       account.base_currency === "USD"
     )
-      void compare(from, through);
+      void compare(
+        from,
+        through,
+        [],
+        "history",
+        initialScope,
+        undefined,
+        initialMode,
+      );
     return () => {
       generation.current += 1;
     };
-  }, [account.base_currency, account.reconstruction, ledger, compare]);
+  }, [
+    account.base_currency,
+    account.reconstruction,
+    canEstimate,
+    ledger,
+    compare,
+  ]);
   function submit(e: FormEvent) {
     e.preventDefault();
-    void compare(start, end, excluded, baseline, scope, anchor);
+    void compare(start, end, excluded, baseline, scope, anchor, benchmarkMode);
   }
   function choosePeriod(shortcut: Shortcut) {
     const through = completedMarketDate();
@@ -190,8 +225,19 @@ export function Tracker({
     setEnd(through);
     setExcluded([]);
     setReport(null);
-    void compare(from, through, [], basis, scope, anchor);
+    void compare(from, through, [], basis, scope, anchor, benchmarkMode);
   }
+  const showInvestedValue =
+    report?.scope === "stocks" &&
+    report.benchmark_mode === "matched" &&
+    !!report.matched_benchmarks;
+  const estimated = benchmarkMode === "funded_hold";
+  const showEstimatedValue =
+    report?.benchmark_mode === "funded_hold" && !!report.benchmark_values;
+  const showValue = showInvestedValue || showEstimatedValue;
+  const benchmarkValues = showEstimatedValue
+    ? report?.benchmark_values
+    : report?.matched_benchmarks;
   return (
     <>
       <div id="decisions" className="decisions">
@@ -211,9 +257,11 @@ export function Tracker({
         aria-labelledby="performance-heading"
       >
         <h2 id="performance-heading">
-          {scope === "stocks"
-            ? "Stocks vs. the market"
-            : "Account vs. the market"}
+          {estimated
+            ? "Portfolio vs. buy & hold"
+            : scope === "stocks"
+              ? "Stocks vs. the market"
+              : "Account vs. the market"}
         </h2>
         <p className="period-shortcuts">
           <button
@@ -250,16 +298,51 @@ export function Tracker({
             <select
               aria-label="Performance measure"
               value={scope}
-              disabled={busy}
+              disabled={busy || estimated}
               onChange={(e) => {
                 const next = e.target.value as Scope;
                 setScope(next);
                 setReport(null);
-                void compare(start, end, excluded, baseline, next, anchor);
+                void compare(
+                  start,
+                  end,
+                  excluded,
+                  baseline,
+                  next,
+                  anchor,
+                  benchmarkMode,
+                );
               }}
             >
               <option value="stocks">Stocks only</option>
               <option value="account">Whole account</option>
+            </select>
+          </label>
+          <label>
+            Index comparison
+            <select
+              aria-label="Index comparison"
+              value={benchmarkMode}
+              disabled={
+                busy ||
+                !ledger.entries.length ||
+                account.base_currency !== "USD"
+              }
+              onChange={(e) => {
+                const next = e.target.value as BenchmarkMode;
+                const nextScope = next === "funded_hold" ? "account" : "stocks";
+                setBenchmarkMode(next);
+                setScope(nextScope);
+                setExcluded([]);
+                setReport(null);
+                void compare(start, end, [], baseline, nextScope, anchor, next);
+              }}
+            >
+              <option value="buy_hold">Buy and hold</option>
+              <option value="matched">Match buys &amp; sales</option>
+              {canEstimate && (
+                <option value="funded_hold">Estimated buy &amp; hold</option>
+              )}
             </select>
           </label>
           <label>
@@ -320,7 +403,7 @@ export function Tracker({
                 ? "Retry comparison"
                 : "Compare performance"}
           </button>
-          {securities.length > 0 && (
+          {!estimated && securities.length > 0 && (
             <StockExclusions
               stocks={securities.filter(
                 (security) =>
@@ -360,11 +443,6 @@ export function Tracker({
         )}
         {report && (
           <>
-            {report.scope === "stocks" && (
-              <p className="form-note">
-                Estimated · stocks only · gross dividends included.
-              </p>
-            )}
             {report.warnings.slice(0, 1).map((w) => (
               <p key={w} role="alert" className="error">
                 {w} Portfolio return is withheld.
@@ -382,22 +460,24 @@ export function Tracker({
                 </ul>
               </details>
             )}
-            <p>
-              <span>
-                {report.scope === "stocks"
-                  ? "Stock value (USD)"
-                  : report.provisional
-                    ? "Estimated closing value (USD)"
-                    : "Closing value (USD)"}
-              </span>{" "}
-              <strong>{number(report.value)}</strong>
-              {Number(report.receivables ?? 0) > 0 && (
-                <>
-                  {" "}
-                  · includes {number(report.receivables!)} in unpaid dividends
-                </>
-              )}
-            </p>
+            {!showValue && (
+              <p>
+                <span>
+                  {report.scope === "stocks"
+                    ? "Stock value (USD)"
+                    : report.provisional
+                      ? "Estimated closing value (USD)"
+                      : "Closing value (USD)"}
+                </span>{" "}
+                <strong>{number(report.value)}</strong>
+                {Number(report.receivables ?? 0) > 0 && (
+                  <>
+                    {" "}
+                    · includes {number(report.receivables!)} in unpaid dividends
+                  </>
+                )}
+              </p>
+            )}
             {report.scenario_error && (
               <p role="alert" className="error">
                 {report.scenario_error}.
@@ -423,7 +503,21 @@ export function Tracker({
               <table>
                 <thead>
                   <tr>
-                    <th>Return</th>
+                    <th>Portfolio</th>
+                    {showValue && (
+                      <th
+                        className="number"
+                        title={
+                          showEstimatedValue
+                            ? "Estimated stocks plus cash versus indexes never sold. Funding covers daily purchase shortfalls after recycled sales and estimated gross dividends on ex-dates; deposit history, dividend payment dates and taxes are unverified."
+                            : "Value still invested after matching purchases and sales; cash and exited proceeds are excluded"
+                        }
+                      >
+                        {showEstimatedValue
+                          ? "Estimated value (USD)"
+                          : "Invested value (USD)"}
+                      </th>
+                    )}
                     <th className="number">Cumulative</th>
                     <th
                       className="number"
@@ -436,12 +530,17 @@ export function Tracker({
                 <tbody>
                   <tr>
                     <td>
-                      {report.scope === "stocks"
-                        ? "Stock portfolio return"
-                        : report.provisional
-                          ? "Estimated portfolio return"
-                          : "Portfolio return"}
+                      {showEstimatedValue
+                        ? "Your portfolio + cash"
+                        : report.scope === "stocks"
+                          ? "Stock portfolio return"
+                          : report.provisional
+                            ? "Estimated portfolio return"
+                            : "Portfolio return"}
                     </td>
+                    {showValue && (
+                      <td className="number">{number(report.value)}</td>
+                    )}
                     <td className="number">{percent(report.return)}</td>
                     <td className="number">
                       {percent(report.cagr?.portfolio ?? null)}
@@ -450,6 +549,11 @@ export function Tracker({
                   {report.scenario && (
                     <tr>
                       <td>Without excluded stocks</td>
+                      {showValue && (
+                        <td className="number">
+                          {number(report.scenario.value)}
+                        </td>
+                      )}
                       <td className="number">
                         {percent(report.scenario.return)}
                       </td>
@@ -460,6 +564,11 @@ export function Tracker({
                   )}
                   <tr>
                     <td>S&amp;P 500 · SPY</td>
+                    {showValue && (
+                      <td className="number">
+                        {number(benchmarkValues!.SPY.value)}
+                      </td>
+                    )}
                     <td className="number">
                       <BenchmarkReturn
                         value={report.SPY}
@@ -477,6 +586,11 @@ export function Tracker({
                   </tr>
                   <tr>
                     <td>Nasdaq-100 · QQQ</td>
+                    {showValue && (
+                      <td className="number">
+                        {number(benchmarkValues!.QQQ.value)}
+                      </td>
+                    )}
                     <td className="number">
                       <BenchmarkReturn
                         value={report.QQQ}
@@ -495,7 +609,11 @@ export function Tracker({
                 </tbody>
               </table>
             </div>
-            <ReturnChart series={report.series} scenario={report.scenario} />
+            <ReturnChart
+              series={report.series}
+              scenario={report.scenario}
+              benchmarkMode={report.benchmark_mode}
+            />
             <YearlyPerformance report={report} requestedEnd={end} />
           </>
         )}
@@ -506,9 +624,11 @@ export function Tracker({
 function ReturnChart({
   series: actual,
   scenario,
+  benchmarkMode,
 }: {
   series: Point[];
   scenario?: Report | null;
+  benchmarkMode?: BenchmarkMode;
 }) {
   const series = actual.map((p, i) => ({
     ...p,
@@ -562,7 +682,13 @@ function ReturnChart({
   return (
     <figure className="return-chart">
       <figcaption>
-        Cumulative return · <span className="portfolio-key">Portfolio</span> /{" "}
+        Cumulative return
+        {benchmarkMode === "funded_hold"
+          ? " · estimated buy & hold"
+          : benchmarkMode === "matched"
+            ? " · matched buys & sales"
+            : ""}{" "}
+        · <span className="portfolio-key">Portfolio</span> /{" "}
         <span className="spy-key">S&amp;P 500 (SPY)</span> /{" "}
         <span className="qqq-key">Nasdaq-100 (QQQ)</span>
         {scenario && (

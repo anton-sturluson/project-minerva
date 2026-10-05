@@ -82,6 +82,7 @@ test("compares dated returns, explains outage, and invalidates old results", asy
   const comparison = page.waitForRequest("**/performance");
   await page.getByRole("button", { name: "Compare performance" }).click();
   expect((await comparison).postDataJSON()).toEqual({
+    benchmark_mode: "buy_hold",
     scope: "account",
     start: "2026-01-02",
     end: "2026-01-06",
@@ -93,6 +94,7 @@ test("compares dated returns, explains outage, and invalidates old results", asy
   const custom = page.waitForRequest("**/performance");
   await page.getByRole("button", { name: "Compare performance" }).click();
   expect((await custom).postDataJSON()).toEqual({
+    benchmark_mode: "buy_hold",
     scope: "account",
     start: "2026-01-05",
     end: "2026-01-06",

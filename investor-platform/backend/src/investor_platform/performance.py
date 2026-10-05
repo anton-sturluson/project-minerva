@@ -24,8 +24,10 @@ from .domain import (
     IncomeKind,
     completed_market_date,
 )
+from .funding_estimate import estimate
 from .income import dividend_receivables, market_dividends
 from .ledger import entries_for
+from .matched_benchmarks import matched_series
 from .models import LedgerEntry
 
 router = APIRouter(prefix="/api/accounts")
@@ -108,12 +110,19 @@ class PerformanceScope(StrEnum):
     STOCKS = "stocks"
 
 
+class BenchmarkMode(StrEnum):
+    BUY_HOLD = "buy_hold"
+    MATCHED = "matched"
+    FUNDED_HOLD = "funded_hold"
+
+
 class Period(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: date
     end: date
     anchor_date: date | None = None
     scope: PerformanceScope = PerformanceScope.ACCOUNT
+    benchmark_mode: BenchmarkMode = BenchmarkMode.BUY_HOLD
     baseline: Baseline = Baseline.HISTORY
     exclude_security_ids: list[UUID] = Field(default_factory=list, max_length=market.MAX_SECURITIES)
 
@@ -259,6 +268,7 @@ def calculate(
     funding_status=FundingStatus.RECORDED,
     closing_cash_ids=frozenset(),
     scope=PerformanceScope.ACCOUNT,
+    benchmark_mode=BenchmarkMode.BUY_HOLD,
 ):
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
     include_opening_gain = (
@@ -430,8 +440,22 @@ def calculate(
     if warnings:
         for row in values:
             row["portfolio"] = None
+    matched = None
+    if benchmark_mode == BenchmarkMode.MATCHED:
+        matched = matched_series(
+            entries,
+            histories,
+            days,
+            recorded=baseline == Baseline.RECORDED,
+            provisional=provisional,
+        )
+        for row in values:
+            for symbol in market.BENCHMARKS:
+                row[symbol] = matched[row["date"]][symbol]["return"]
     last = values[-1]
     return {
+        "benchmark_mode": benchmark_mode,
+        "matched_benchmarks": matched[days[-1]] if matched is not None else None,
         "attribution": attribution.report() if attribution is not None else None,
         "scope": scope,
         "provisional": provisional or stock_only,
@@ -512,14 +536,48 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     ]
     if period.anchor_date is not None and period.anchor_date >= period.end:
         raise HTTPException(422, "The comparison boundary must precede the ending date")
-    recorded = period.baseline == Baseline.RECORDED
-    securities = period_securities(entries, period.start if recorded else None)
+    estimated = period.benchmark_mode == BenchmarkMode.FUNDED_HOLD
+    if estimated and (
+        not provisional
+        or funding_status != FundingStatus.INFERRED
+        or account.reconstruction.get("opening_cash") is None
+    ):
+        raise HTTPException(422, "Minimum-funding estimates require an inferred-funding portfolio")
+    if estimated and period.exclude_security_ids:
+        raise HTTPException(
+            422, "Stock exclusions are unavailable in the minimum-funding comparison"
+        )
+    recorded = period.baseline == Baseline.RECORDED and not estimated
     fetch_start = period.start if recorded else entries[0].effective_date
     excluded = set(period.exclude_security_ids)
-    if not excluded.issubset(securities):
-        raise HTTPException(422, "Choose excluded stocks held during this comparison period")
     try:
-        if len(securities) > market.MAX_SECURITIES or fetch_start < today - market.HISTORY_WINDOW:
+        if fetch_start < today - market.HISTORY_WINDOW:
+            raise ValueError("This tracker supports ten years of ledger history")
+        price_end = period.end
+        if estimated:
+            benchmarks = market.security_histories(
+                [],
+                fetch_start,
+                period.end,
+                engine=session.get_bind(),
+                workspace_id=actor.workspace_id,
+            )
+            sessions = [d for d in benchmarks["SPY"].close if fetch_start <= d <= period.end]
+            if not sessions:
+                raise ValueError("Funding estimate needs completed benchmark sessions")
+            price_end = max(sessions)
+            if (period.end - price_end).days > 4:
+                raise ValueError("Benchmark history is stale at the requested end date")
+            entries = [
+                e
+                for e in entries
+                if e.effective_date <= price_end
+                or (e.income_kind == IncomeKind.DIVIDEND and e.accrual_date <= price_end)
+            ]
+        securities = period_securities(entries, period.start if recorded else None)
+        if not excluded.issubset(securities):
+            raise HTTPException(422, "Choose excluded stocks held during this comparison period")
+        if len(securities) > market.MAX_SECURITIES:
             raise ValueError(
                 f"This tracker supports up to {market.MAX_SECURITIES} securities "
                 "and ten years of ledger history"
@@ -528,12 +586,12 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         fetched = market.security_histories(
             securities.values(),
             fetch_start,
-            period.end,
+            price_end,
             provisional=provisional,
             engine=session.get_bind(),
             workspace_id=actor.workspace_id,
             windows=holding_windows(
-                entries, securities, fetch_start, period.end, provisional=provisional
+                entries, securities, fetch_start, price_end, provisional=provisional
             ),
         )
         calculation_start = period.start
@@ -547,14 +605,33 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
             result = calculate(
                 entries,
                 fetched,
-                calculation_start,
-                period.end,
+                fetch_start if estimated else calculation_start,
+                price_end,
                 provisional=provisional,
-                baseline=period.baseline,
+                baseline=Baseline.HISTORY if estimated else period.baseline,
                 funding_status=funding_status,
-                scope=period.scope,
+                scope=PerformanceScope.STOCKS if estimated else period.scope,
+                benchmark_mode=BenchmarkMode.BUY_HOLD if estimated else period.benchmark_mode,
             )
-            result["baseline"] = period.baseline
+            if estimated:
+                result = estimate(
+                    entries,
+                    fetched,
+                    result,
+                    calculation_start,
+                    provisional=provisional,
+                    inferred_opening=Decimal(account.reconstruction["opening_cash"]),
+                )
+                result["cagr"] = {
+                    key: annualized_return(
+                        result[key] if key != "portfolio" else result["return"],
+                        result["start"],
+                        result["end"],
+                    )
+                    for key in ("portfolio", *market.BENCHMARKS)
+                }
+            else:
+                result["baseline"] = period.baseline
             result["security_ids"] = list(securities)
             result["scenario"] = None
             result["scenario_error"] = None
@@ -592,6 +669,27 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                             if e.kind in IN_KIND_ENTRIES and e.security_id in excluded
                         },
                     )
+                    # Benchmark lines always describe the original stock deployments.
+                    if period.benchmark_mode == BenchmarkMode.MATCHED:
+                        scenario = result["scenario"]
+                        scenario["benchmark_mode"] = period.benchmark_mode
+                        scenario["matched_benchmarks"] = result["matched_benchmarks"]
+                        for original, alternative in zip(result["series"], scenario["series"]):
+                            for symbol in market.BENCHMARKS:
+                                alternative[symbol] = original[symbol]
+                        for symbol in market.BENCHMARKS:
+                            scenario[symbol] = result[symbol]
+                            scenario["cagr"][symbol] = result["cagr"][symbol]
+                        scenario["excess_spy"] = (
+                            None
+                            if scenario["return"] is None
+                            else scenario["return"] - result["SPY"]
+                        )
+                        scenario["excess_qqq"] = (
+                            None
+                            if scenario["return"] is None
+                            else scenario["return"] - result["QQQ"]
+                        )
                     result["scenario"]["excluded"] = [
                         {"id": sid, "ticker": s.ticker, "exchange": s.exchange}
                         for sid, s in securities.items()
