@@ -120,7 +120,7 @@ export function Trades({
             />
           </label>
           <label>
-            Effective date (UTC)
+            Effective date (New York)
             <input
               aria-label="Position effective date"
               type="date"

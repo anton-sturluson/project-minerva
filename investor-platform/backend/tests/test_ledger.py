@@ -125,3 +125,26 @@ def test_concurrent_retries_only_write_once(db_client, account_id):
         ids = list(pool.map(deposit, range(2)))
     assert ids[0] == ids[1]
     assert len(ledger(db_client, account_id)["entries"]) == 1
+
+
+@pytest.mark.parametrize(
+    "instant,expected",
+    [
+        ("2026-07-10T02:00:00+00:00", "2026-07-09"),
+        ("2026-01-10T03:00:00+00:00", "2026-01-09"),
+    ],
+)
+def test_future_date_validation_uses_new_york(monkeypatch, instant, expected):
+    from datetime import date
+
+    from investor_platform import ledger
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromisoformat(instant).astimezone(tz)
+
+    monkeypatch.setattr(ledger, "datetime", Clock)
+    assert ledger.EntryInput.no_future(date.fromisoformat(expected)).isoformat() == expected
+    with pytest.raises(ValueError, match="New York"):
+        ledger.EntryInput.no_future(date.fromisoformat(expected) + timedelta(days=1))

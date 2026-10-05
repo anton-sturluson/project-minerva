@@ -87,6 +87,21 @@ test("compares dated returns, explains outage, and invalidates old results", asy
   await expect(
     page.getByText("Closing value (USD)", { exact: true }),
   ).toBeVisible();
+  await page.getByLabel("Performance start").fill("2026-01-05");
+  const custom = page.waitForRequest("**/performance");
+  await page.getByRole("button", { name: "Compare performance" }).click();
+  expect((await custom).postDataJSON()).toEqual({
+    start: "2026-01-05",
+    end: "2026-01-06",
+    baseline: "recorded",
+  });
+  await expect(page.getByText(/Uses recorded starting cash/)).toBeVisible();
+  const full = page.waitForRequest("**/performance");
+  await page.getByRole("button", { name: "Full history", exact: true }).click();
+  expect((await full).postDataJSON().baseline).toBeUndefined();
+  await expect(
+    page.getByText("Closing value (USD)", { exact: true }),
+  ).toBeVisible();
   fail = true;
   await page.getByRole("button", { name: "Compare performance" }).click();
   await expect(page.getByRole("alert")).toContainText(

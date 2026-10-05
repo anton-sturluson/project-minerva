@@ -1,3 +1,4 @@
+import { today } from "../src/records";
 import { expect, test } from "./fixtures";
 
 test("shows a closed synthetic trade and recovers a scorecard load failure", async ({
@@ -6,7 +7,7 @@ test("shows a closed synthetic trade and recovers a scorecard load failure", asy
 }) => {
   const account = (await (await request.get("/api/accounts")).json())[0];
   const base = `/api/accounts/${account.id}`;
-  const date = new Date().toISOString().slice(0, 10);
+  const date = today();
   const ticker = `S${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   const cash = await request.post(`${base}/cash`, {
     data: {

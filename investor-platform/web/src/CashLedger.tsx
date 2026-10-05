@@ -148,7 +148,7 @@ export function CashLedger({
                   </select>
                 </label>
                 <label>
-                  Effective date (UTC)
+                  Effective date (New York)
                   <input
                     aria-label="Cash effective date"
                     type="date"

@@ -47,7 +47,8 @@ export function exact(value: string, minimumDecimals = 2) {
     (decimals ? "." + decimals : "")
   );
 }
-export const today = () => new Date().toISOString().slice(0, 10);
+export const today = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 export const labels = {
   opening_cash: "Opening cash",
   deposit: "Deposit",

@@ -10,7 +10,7 @@ import { TradeScorecard } from "./TradeScorecard";
 import { number, percent } from "./format";
 import { HitRate } from "./HitRate";
 import { Holdings } from "./Holdings";
-import { type Ledger } from "./records";
+import { today, type Ledger } from "./records";
 
 type Baseline = "history" | "recorded";
 
@@ -54,10 +54,7 @@ export type Report = {
 };
 const yesterday = () => {
   // Date selection is based on completed US sessions, never an intraday quote.
-  const d = new Date(
-    new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }) +
-      "T12:00:00Z",
-  );
+  const d = new Date(today() + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 };
@@ -234,6 +231,11 @@ export function Tracker({
               max={end}
               onChange={(e) => {
                 setStart(e.target.value);
+                setBaseline(
+                  e.target.value === ledger.entries[0]?.effective_date
+                    ? "history"
+                    : "recorded",
+                );
                 setExcluded([]);
                 setReport(null);
                 setError("");

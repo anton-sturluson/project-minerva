@@ -1,3 +1,4 @@
+import { today } from "../src/records";
 import { expect, test } from "./fixtures";
 
 test("opening shares, buy, partial sale, oversell rejection, close and reload", async ({
@@ -13,7 +14,7 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
       kind: "deposit",
       amount: "1000",
       currency: "USD",
-      effective_date: new Date().toISOString().slice(0, 10),
+      effective_date: today(),
       request_key: crypto.randomUUID(),
     },
   });

@@ -78,3 +78,28 @@ def test_provisional_import_still_checks_a_confirmed_exchange():
     security = SimpleNamespace(ticker="AAA", exchange="NYSE", currency="USD")
     with pytest.raises(ValueError, match="listing does not match"):
         market.verify_exchange(security, market.History({}, {}, exchange="NMS"), provisional=True)
+
+
+def test_history_failure_reports_all_missing_symbols_and_recovers(monkeypatch):
+    from types import SimpleNamespace
+
+    missing = {"AAA", "BBB"}
+
+    def fetch(symbol, *args, **kwargs):
+        if symbol in missing:
+            raise OSError("private provider response must not reach the user")
+        return market.History({date(2026, 1, 2): Decimal(10)}, {}, exchange="NYQ")
+
+    monkeypatch.setattr(market, "history", fetch)
+    securities = [SimpleNamespace(ticker=t, exchange="NYSE", currency="USD") for t in missing]
+    with pytest.raises(market.MarketDataError) as error:
+        market.security_histories(securities, date(2026, 1, 2), date(2026, 1, 5))
+    assert "AAA, BBB" in str(error.value)
+    assert "private provider" not in str(error.value)
+    missing.clear()
+    assert set(market.security_histories(securities, date(2026, 1, 2), date(2026, 1, 5))) == {
+        "AAA",
+        "BBB",
+        "SPY",
+        "QQQ",
+    }

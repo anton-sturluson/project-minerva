@@ -1,7 +1,7 @@
 """Exact cash records; account locks serialize each account's mutations."""
 
 import json
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from decimal import Decimal, localcontext
 from typing import Annotated, Literal
 from uuid import UUID
@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload
 
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
 from .models import LedgerCorrection, LedgerEntry
 
 router = APIRouter(prefix="/api/accounts")
@@ -30,8 +30,8 @@ class EntryInput(BaseModel):
     @field_validator("effective_date")
     @classmethod
     def no_future(cls, value):
-        if value > datetime.now(UTC).date():
-            raise ValueError("Posted entries cannot be future dated (UTC)")
+        if value > datetime.now(MARKET_TIMEZONE).date():
+            raise ValueError("Posted entries cannot be future dated (New York)")
         return value
 
 

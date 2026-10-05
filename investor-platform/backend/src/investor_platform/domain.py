@@ -1,6 +1,9 @@
 """Stable API values shared by validation and accounting; storage remains plain text."""
 
 from enum import StrEnum
+from zoneinfo import ZoneInfo
+
+MARKET_TIMEZONE = ZoneInfo("America/New_York")
 
 # Share-price products exceed Decimal's default precision.
 ACCOUNTING_PRECISION = 64
