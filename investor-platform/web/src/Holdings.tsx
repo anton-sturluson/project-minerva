@@ -176,7 +176,7 @@ export function Holdings({
                   <strong>{h.ticker}</strong>
                   <small>{h.exchange}</small>
                   {h.price_error && (
-                    <small className="loss">Quote unavailable</small>
+                    <small className="loss">{h.price_error}</small>
                   )}
                 </th>
                 <td className="number" title={h.quantity}>
