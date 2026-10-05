@@ -4,11 +4,8 @@ import { expect, test } from "./fixtures";
 test("opening shares, buy, partial sale, oversell rejection, close and reload", async ({
   page,
   request,
+  account,
 }, info) => {
-  await request.post("/api/accounts", {
-    data: { name: "Browser test account", base_currency: "USD" },
-  });
-  const account = (await (await request.get("/api/accounts")).json())[0];
   await request.post(`/api/accounts/${account.id}/cash`, {
     data: {
       kind: "deposit",
@@ -66,7 +63,7 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
     .getByRole("button", { name: "Save position entry", exact: true })
     .click();
   await expect(page.getByRole("alert")).toBeHidden();
-  expect(Number((await holding()).quantity)).toBe(5);
+  await expect.poll(async () => Number((await holding()).quantity)).toBe(5);
   await page
     .getByLabel("Position action", { exact: true })
     .selectOption("sell");
@@ -82,7 +79,12 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
     .getByRole("button", { name: "Save position entry", exact: true })
     .click();
   await expect(page.getByRole("alert")).toBeHidden();
-  expect(Number((await holding()).cost_basis)).toBe(10.5);
+  await expect
+    .poll(async () => {
+      const { cost_basis } = await holding();
+      return cost_basis === null ? null : Number(cost_basis);
+    })
+    .toBe(10.5);
   await page.getByText("Account activity", { exact: true }).click();
   const sale = page.getByRole("row").filter({ hasText: `Sell · ${ticker}` });
   await sale.locator("summary").click();
@@ -115,8 +117,8 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
 test("receives shares without a cash trade and keeps acquisition basis unknown", async ({
   page,
   request,
+  account,
 }) => {
-  const account = (await (await request.get("/api/accounts")).json())[0];
   const before = await (
     await request.get(`/api/accounts/${account.id}/ledger`)
   ).json();

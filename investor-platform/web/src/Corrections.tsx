@@ -182,7 +182,7 @@ export function Corrections({
   return (
     <section
       ref={panel}
-      className="reconstruction"
+      className="corrections"
       aria-label="Correct ledger entry"
     >
       <h3>Correct entry #{entry.id}</h3>

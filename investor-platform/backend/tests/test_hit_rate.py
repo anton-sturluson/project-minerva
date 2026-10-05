@@ -5,8 +5,7 @@ from types import SimpleNamespace as NS
 from uuid import uuid4
 
 import pytest
-from test_ledger import cash
-from test_trades import trade
+from helpers import cash, trade
 
 from investor_platform import market
 from investor_platform.hit_rate import calculate_hit_rate

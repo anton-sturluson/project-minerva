@@ -3,21 +3,10 @@ from decimal import Decimal as D
 from uuid import UUID
 
 import pytest
+from helpers import DAYS, cash, dividend, ledger, stock_report, trade
 from sqlalchemy.orm import Session
-from test_ledger import cash, ledger
-from test_performance import DAYS, dividend
-from test_trades import trade
 
 from investor_platform.models import Account
-
-pytest_plugins = ["test_performance"]
-
-
-def stock_report(client, aid, **extra):
-    return client.post(
-        f"/api/accounts/{aid}/performance",
-        json={"start": "2026-01-02", "end": "2026-01-06", "scope": "stocks", **extra},
-    )
 
 
 def test_stock_return_ignores_cash_and_uses_ex_date_dividends_once(db_client, portfolio):

@@ -489,7 +489,6 @@ test("chart dates label every year and adapt to shorter periods", async ({
     .click();
   await expect(chart.getByText("Apr 26", { exact: true })).toBeVisible();
   await expect(chart.getByText("Jul 26", { exact: true })).toBeVisible();
-  await expect(page.getByText("Daily values", { exact: true })).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

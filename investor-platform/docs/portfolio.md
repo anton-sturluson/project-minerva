@@ -64,7 +64,7 @@ Migration `0006` adds the audit table and replaces opening-entry database indexe
 
 ## Allocation comparison
 
-Market % is each position’s closing market value divided by portfolio value, including cash. Cost % is remaining position basis divided by total remaining basis plus the same cash balance. Cash participates in both denominators. These are allocation measures, not a gain/loss percentage or original lifetime capital allocation. The chart compares the five largest positions by market value and groups smaller holdings as Other. All cost weights are unavailable when any open position has unknown basis or the cost denominator is zero; known subsets are never normalized as a complete portfolio. Recorded quantities and basis remain available during quote outages.
+Market % is each position’s closing market value divided by portfolio value, including cash. Cost % is remaining position basis divided by total remaining basis plus the same cash balance. Cash participates in both denominators. These are allocation measures, not a gain/loss percentage or original lifetime capital allocation. Both weights appear in the holdings table. All cost weights are unavailable when any open position has unknown basis or the cost denominator is zero; known subsets are never normalized as a complete portfolio. Recorded quantities and basis remain available during quote outages.
 
 ## Current holdings valuation
 
@@ -76,17 +76,9 @@ Choose **Dividend · gross**, **Interest**, or **Other investment income** under
 
 Current holdings with an unresolved split during the current position display **Split adjustment required** and withhold value, unrealized gains, weights and hypothetical liquidation. Other holdings retain valid prices; portfolio totals remain unavailable while any holding is unresolved. The guard checks from the current position's acquisition rather than only the latest ten days, and ignores splits before a position was reopened. It also rejects a pre-split previous close for a post-split purchase. This safeguard does not create a split transaction or change recorded shares/basis. ([Current valuation](../backend/src/investor_platform/valuation.py))
 
-## References
-
-- [Current valuation](../backend/src/investor_platform/valuation.py) — independent pricing and unresolved-split safeguard.
-- [Ledger implementation](../backend/src/investor_platform/ledger.py) — active records and cash writes.
-- [Accounting](../backend/src/investor_platform/accounting.py) — cash validation and FIFO calculations.
-- [Corrections](../backend/src/investor_platform/corrections.py) — preview, replacement, void and audit behavior.
-- [Performance methodology](performance.md) and [hit-rate methodology](hit-rate.md) — benchmark comparisons.
-
 ## Overview and pages
 
-Portfolio shows the trade scorecard, one holdings table with allocation bars, then performance. Allocation uses recent completed closes and current recorded shares and cash, independently of the selected performance period. Cash is included in the denominator. The five largest securities are shown separately, with smaller positions grouped as Other holdings. Without quotes, recorded shares and basis remain available; market values and allocation stay unavailable. Activity contains collapsible cash/trade forms and transaction history. Research is a separate placeholder view.
+Portfolio shows the trade scorecard, one holdings table with market/cost weights, then performance. Weights use recent completed closes and current recorded shares and cash, independently of the selected performance period. Cash is included in the denominator. Every holding appears in the table; there is no separate allocation chart. Without quotes, recorded shares and basis remain available; affected market values and aggregate weights stay unavailable. Activity contains collapsible cash/trade forms and transaction history. Post-mortem explains dollar gains and linked stock contributions. Research is a separate placeholder view.
 
 Cash **Fee or tax** entries reduce both cash and investment return. Use **Withdrawal** only for money leaving the investment portfolio, not brokerage fees, debit interest or withholding tax. Do not record a fee separately if a trade already includes it.
 
@@ -95,3 +87,11 @@ Cash **Fee or tax** entries reduce both cash and investment return. Use **Withdr
 The percentage in **Unrealized return** is unrealized P&L divided by the remaining cost basis of each holding; zero or unknown basis displays unavailable. The **Stocks total** row excludes cash and sums stock market value, remaining basis and net unrealized P&L. Its gain percentage uses total P&L / total basis, not an average of individual percentages. Cash remains a separate row, and market/cost allocation weights include cash in their denominators. Missing prices or basis withhold affected aggregate figures instead of adding only known positions.
 
 Holdings figures display one decimal place, including shares, prices, dollar values and percentages. Calculations and stored transactions retain full precision; the shares tooltip retains the recorded quantity. Unrealized dollar returns and percentages share one column, including in the totals row.
+
+## References
+
+- [Current valuation](../backend/src/investor_platform/valuation.py) — independent pricing and unresolved-split safeguard.
+- [Ledger implementation](../backend/src/investor_platform/ledger.py) — active records and cash writes.
+- [Accounting](../backend/src/investor_platform/accounting.py) — cash validation and FIFO calculations.
+- [Corrections](../backend/src/investor_platform/corrections.py) — preview, replacement, void and audit behavior.
+- [Performance methodology](performance.md) and [hit-rate methodology](hit-rate.md) — benchmark comparisons.

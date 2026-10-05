@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from helpers import cash, ledger
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,24 +20,6 @@ def account_id(db_client):
     return db_client.post(
         "/api/accounts", json={"name": "Ledger fixture", "base_currency": "USD"}
     ).json()["id"]
-
-
-def cash(client, account_id, kind="deposit", amount="100", day="2026-01-01", **extra):
-    return client.post(
-        f"/api/accounts/{account_id}/cash",
-        json={
-            "request_key": str(uuid4()),
-            "kind": kind,
-            "amount": amount,
-            "effective_date": day,
-            "currency": "USD",
-            **extra,
-        },
-    )
-
-
-def ledger(client, account_id):
-    return client.get(f"/api/accounts/{account_id}/ledger").json()
 
 
 def test_exact_cash_and_audit(db_client, account_id):

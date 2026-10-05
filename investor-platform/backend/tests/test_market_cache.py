@@ -109,8 +109,7 @@ def test_cache_separates_workspace_and_validation_options(database, monkeypatch)
 
 
 def test_cached_prices_do_not_hide_ledger_edits(db_client, monkeypatch):
-    from test_ledger import cash
-    from test_trades import trade
+    from helpers import cash, trade
 
     aid = db_client.post(
         "/api/accounts", json={"name": "Cache fixture", "base_currency": "USD"}

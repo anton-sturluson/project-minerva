@@ -1,16 +1,10 @@
 import { expect, test } from "./fixtures";
 
-test.beforeEach(async ({ request }) => {
-  await request.post("/api/accounts", {
-    data: { name: "Browser test account", base_currency: "USD" },
-  });
-});
-
 test("records cash, rejects overdraft, and keeps the draft", async ({
   page,
   request,
+  account,
 }) => {
-  const account = (await (await request.get("/api/accounts")).json())[0];
   const before = await (
     await request.get(`/api/accounts/${account.id}/ledger`)
   ).json();
@@ -75,8 +69,8 @@ test("records cash, rejects overdraft, and keeps the draft", async ({
 test("retry after a lost response does not duplicate cash", async ({
   page,
   request,
+  account,
 }) => {
-  const account = (await (await request.get("/api/accounts")).json())[0];
   const url = `/api/accounts/${account.id}/ledger`;
   const before = await (await request.get(url)).json();
   await page.goto("/#activity");
