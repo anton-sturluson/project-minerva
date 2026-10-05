@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Portfolio } from "./Portfolio";
 
 type Theme = "system" | "light" | "dark";
@@ -20,7 +20,22 @@ const initialTheme = savedTheme();
 // Apply before React renders to avoid flashing the wrong stored theme on reload.
 applyTheme(initialTheme);
 
+export type Page = "portfolio" | "activity" | "research";
+function currentPage(): Page {
+  return location.hash === "#activity"
+    ? "activity"
+    : location.hash === "#research"
+      ? "research"
+      : "portfolio";
+}
+
 export function App() {
+  const [page, setPage] = useState<Page>(currentPage);
+  useEffect(() => {
+    const navigate = () => setPage(currentPage());
+    window.addEventListener("hashchange", navigate);
+    return () => window.removeEventListener("hashchange", navigate);
+  }, []);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   function changeTheme(value: Theme) {
     setTheme(value);
@@ -56,14 +71,31 @@ export function App() {
         </a>
       </header>
       <nav className="main-nav" aria-label="Main navigation">
-        <a href="#portfolio">[ Portfolio ]</a>
+        <a
+          href="#portfolio"
+          aria-current={page === "portfolio" ? "page" : undefined}
+        >
+          [ Portfolio ]
+        </a>
         <a href="#performance">[ Performance ]</a>
-        <a href="#decisions">[ Decisions ]</a>
-        <a href="#research">[ Research ]</a>
+        <a
+          href="#activity"
+          aria-current={page === "activity" ? "page" : undefined}
+        >
+          [ Activity ]
+        </a>
+        <a
+          href="#research"
+          aria-current={page === "research" ? "page" : undefined}
+        >
+          [ Research ]
+        </a>
       </nav>
       <main id="main">
-        <Portfolio />
-        <div className="directory" aria-label="Planned capabilities">
+        <div hidden={page === "research"}>
+          <Portfolio page={page} />
+        </div>
+        <div hidden={page !== "research"} className="directory">
           <section id="research" aria-labelledby="research-heading">
             <div className="directory-heading">
               <h2 id="research-heading">

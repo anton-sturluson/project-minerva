@@ -50,9 +50,7 @@ test("shows a closed synthetic trade and recovers a scorecard load failure", asy
   await page.getByRole("button", { name: "Retry scorecard" }).click();
   await expect(page.getByTestId("win-rate")).toBeVisible();
   await expect(page.getByRole("alert")).toBeHidden();
-  await page
-    .getByText("How the scorecard works & closed positions", { exact: true })
-    .click();
+  await page.getByText("Closed positions", { exact: true }).click();
   await expect(
     page
       .getByLabel("Closed positions", { exact: true })

@@ -1,6 +1,6 @@
 import { expect, test, performance } from "./fixtures";
 
-test("shows provisional performance, recovers from failure, and preserves import assumptions", async ({
+test("shows provisional performance, recovers from failure, and keeps provisional status without import prose", async ({
   page,
 }) => {
   await page.route("**/api/account", async (route) => {
@@ -54,32 +54,9 @@ test("shows provisional performance, recovers from failure, and preserves import
         });
   });
   await page.goto("/");
-  await expect(page.getByLabel("Reconstruction assumptions")).toContainText(
-    "3 transactions imported · 1 rows excluded · 1 inferred opening positions",
-  );
-  await page
-    .getByText("Import assumptions & excluded rows", { exact: true })
-    .click();
-  await expect(
-    page.getByText("Row 5: Unconfirmed currency", { exact: true }),
-  ).toBeVisible();
   await expect(page.getByText(/Quotes temporarily unavailable/)).toBeVisible();
   unavailable = false;
   await page.getByRole("button", { name: "Retry comparison" }).click();
-  await expect(
-    page.getByText("Opening cash is inferred, not a verified balance.", {
-      exact: true,
-    }),
-  ).toBeHidden();
-  await page.getByText("Estimate assumptions", { exact: true }).click();
-  await expect(
-    page.getByText("Opening cash is inferred, not a verified balance.", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(page.getByLabel("Estimate assumptions")).toContainText(
-    "Opening cash is inferred",
-  );
   await expect(
     page.getByText("Estimated portfolio return", { exact: true }),
   ).toBeVisible();
@@ -87,7 +64,12 @@ test("shows provisional performance, recovers from failure, and preserves import
     page.getByRole("button", { name: "Calculate hit rate" }),
   ).toBeHidden();
   await page.reload();
-  await expect(page.getByLabel("Estimate assumptions")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Provisional portfolio vs. the market" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Import assumptions & excluded rows", { exact: true }),
+  ).toHaveCount(0);
   expect(requests).toBeGreaterThanOrEqual(3);
   expect(
     await page.evaluate(

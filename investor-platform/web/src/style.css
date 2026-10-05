@@ -561,3 +561,10 @@ summary:focus-visible {
   --success: #b0daba;
   --error: #ffa7ac;
 }
+
+[hidden] {
+  display: none !important;
+}
+.main-nav [aria-current="page"] {
+  font-weight: bold;
+}
