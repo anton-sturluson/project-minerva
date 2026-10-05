@@ -9,7 +9,7 @@ from pathlib import Path
 import psycopg
 from pydantic import ValidationError
 
-from .financial_import import migrate, read_legacy, summary, verify
+from .financial_import import migrate, read_legacy, summary, upgrade_v1, verify
 from .financial_store import (
     ObservationBatch,
     append_observations,
@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--schema", default="investor_data")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("upgrade-v1", help="Explicitly upgrade the prepared financial v1 namespace")
     commands.add_parser("init", help="Create only the versioned financial namespace")
     for command in ("inspect-sqlite", "migrate-sqlite", "verify-sqlite"):
         sub = commands.add_parser(command)
@@ -57,7 +58,9 @@ def main():
             )
             readonly = args.command in {"verify-sqlite", "companies", "history"}
             with connect(readonly=readonly) as conn:
-                if args.command == "init":
+                if args.command == "upgrade-v1":
+                    result = upgrade_v1(conn, args.schema)
+                elif args.command == "init":
                     initialize(conn, args.schema)
                     result = {"status": "initialized"}
                 elif args.command == "migrate-sqlite":

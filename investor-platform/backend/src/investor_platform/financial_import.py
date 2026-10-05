@@ -95,8 +95,7 @@ def normalize(table, row):
             raise ValueError("Legacy folder flag must be zero or one")
         result["folder_exists"] = bool(result["folder_exists"])
     if table == "metric_values":
-        reference = result.get("source_ref")
-        result["source_id"] = source_id(reference) if reference and reference.strip() else None
+        result["source_id"] = None
         result["verification_status"] = "legacy_unverified"
     return result
 
@@ -127,11 +126,17 @@ def read_legacy(path):
                         f"Invalid legacy {table} format; source remains unchanged"
                     ) from exc
     sources = {}
+    period_companies = {row["id"]: row["company_id"] for row in dataset["company_periods"]}
     for row in dataset["metric_values"]:
-        if row["source_id"] is not None:
-            reference = row["source_ref"]
+        reference = row["source_ref"]
+        if reference and reference.strip():
+            if row["period_id"] not in period_companies:
+                raise ValueError("Legacy observation refers to an unknown fiscal period")
+            company_id = period_companies[row["period_id"]]
+            row["source_id"] = source_id(company_id, reference)
             sources[row["source_id"]] = {
                 "id": row["source_id"],
+                "company_id": company_id,
                 "reference": reference,
                 "url": reference if reference.startswith(("https://", "http://")) else None,
             }
@@ -199,3 +204,82 @@ def migrate(conn, schema, dataset):
             (f"{schema}.{table}",),
         )
     return {**verify(conn, schema, dataset), "status": "imported"}
+
+
+def upgrade_v1(conn, schema):
+    """Explicit atomic upgrade of the preparation-only v1 namespace; no live cutover."""
+    from .financial_store import SCHEMA_VERSION
+
+    relation(schema, "sources")
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (schema,))
+    existing = conn.execute(
+        "SELECT obj_description(oid, 'pg_namespace') AS version "
+        "FROM pg_namespace WHERE nspname = %s",
+        (schema,),
+    ).fetchone()
+    if existing and existing["version"] == SCHEMA_VERSION:
+        return {"status": "unchanged", "version": SCHEMA_VERSION}
+    if not existing or existing["version"] != "minerva-financial-inputs-v1":
+        raise ValueError("Upgrade requires the known financial v1 namespace")
+    sources = conn.execute(
+        sql.SQL("SELECT * FROM {}").format(relation(schema, "sources"))
+    ).fetchall()
+    owners = conn.execute(
+        sql.SQL(
+            "SELECT DISTINCT v.source_id, p.company_id FROM {} v JOIN {} p ON p.id=v.period_id "
+            "WHERE v.source_id IS NOT NULL"
+        ).format(relation(schema, "metric_values"), relation(schema, "company_periods"))
+    ).fetchall()
+    if {s["id"] for s in sources} != {o["source_id"] for o in owners}:
+        raise ValueError("Review orphan source records before upgrading; no records removed")
+    grantees = conn.execute(
+        "SELECT grantee FROM information_schema.role_table_grants WHERE table_schema=%s "
+        "AND table_name='metric_values_flat' AND privilege_type='SELECT'",
+        (schema,),
+    ).fetchall()
+    ddl = Path(__file__).with_name("financial_upgrade_v2.sql").read_text()
+    conn.execute(sql.SQL(ddl).format(schema=sql.Identifier(schema)))
+    by_id = {s["id"]: s for s in sources}
+    for owner in owners:
+        record = {**by_id[owner["source_id"]], "company_id": owner["company_id"]}
+        record["id"] = source_id(owner["company_id"], record["reference"])
+        columns = list(record)
+        conn.execute(
+            sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+                relation(schema, "sources"),
+                sql.SQL(", ").join(map(sql.Identifier, columns)),
+                sql.SQL(", ").join(sql.Placeholder() for _ in columns),
+            ),
+            list(record.values()),
+        )
+        conn.execute(
+            sql.SQL(
+                "UPDATE {} v SET source_id=%s FROM {} p "
+                "WHERE p.id=v.period_id AND p.company_id=%s AND v.source_id=%s"
+            ).format(relation(schema, "metric_values"), relation(schema, "company_periods")),
+            (record["id"], owner["company_id"], owner["source_id"]),
+        )
+    conn.execute(
+        sql.SQL("DELETE FROM {} WHERE company_id IS NULL").format(relation(schema, "sources"))
+    )
+    conn.execute(
+        sql.SQL(
+            "ALTER TABLE {} ALTER COLUMN company_id SET NOT NULL, "
+            "ADD UNIQUE (company_id, reference)"
+        ).format(relation(schema, "sources"))
+    )
+    # Reuse the current read-view definition; preserve SELECT grants across its replacement.
+    view = Path(__file__).with_name("financial_schema.sql").read_text().split("CREATE VIEW", 1)[1]
+    conn.execute(sql.SQL("CREATE VIEW" + view).format(schema=sql.Identifier(schema)))
+    for grantee in grantees:
+        conn.execute(
+            sql.SQL("GRANT SELECT ON {} TO {}").format(
+                relation(schema, "metric_values_flat"), sql.Identifier(grantee["grantee"])
+            )
+        )
+    conn.execute(
+        sql.SQL("COMMENT ON SCHEMA {} IS {}").format(
+            sql.Identifier(schema), sql.Literal(SCHEMA_VERSION)
+        )
+    )
+    return {"status": "upgraded", "version": SCHEMA_VERSION}

@@ -14,7 +14,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
-SCHEMA_VERSION = "minerva-financial-inputs-v1"
+SCHEMA_VERSION = "minerva-financial-inputs-v2"
 CORE_TABLES = ("companies", "metrics", "company_periods", "metric_values")
 
 
@@ -67,8 +67,8 @@ def wire(value):
     raise TypeError(type(value).__name__)
 
 
-def source_id(reference):
-    return uuid5(NAMESPACE_URL, reference)
+def source_id(company_id, reference):
+    return uuid5(NAMESPACE_URL, json.dumps([company_id, reference], ensure_ascii=False))
 
 
 def company_rows(conn, schema, ticker=None):
@@ -114,8 +114,8 @@ class PeriodInput(Input):
             raise ValueError("Period start must not follow its end")
         if self.period_kind == "year" and self.fiscal_quarter is not None:
             raise ValueError("A fiscal year cannot carry a fiscal quarter")
-        if self.period_kind == "quarter" and self.fiscal_quarter is None:
-            raise ValueError("A quarter needs a fiscal quarter number")
+        if self.period_kind in {"quarter", "ytd"} and self.fiscal_quarter is None:
+            raise ValueError("Quarter and YTD periods need an ending fiscal quarter")
         return self
 
 
@@ -161,6 +161,8 @@ class ObservationInput(Input):
     def shape(self):
         if self.value_status == "valid" and self.value is None:
             raise ValueError("A valid observation needs a value")
+        if self.value_status != "valid" and (self.value is not None or self.value_high is not None):
+            raise ValueError("Missing observations cannot carry numeric values")
         if self.qualifier == "range":
             if self.value is None or self.value_high is None or self.value_high < self.value:
                 raise ValueError("A range needs ordered lower and upper values")
@@ -199,9 +201,10 @@ def append_observations(conn, schema, batch):
     )
     existing = conn.execute(
         sql.SQL(
-            "SELECT * FROM {} WHERE company_id = %s AND period_kind = %s AND period_end = %s"
+            "SELECT * FROM {} WHERE company_id = %s AND period_kind = %s "
+            "AND period_start IS NOT DISTINCT FROM %s AND period_end = %s"
         ).format(periods),
-        (batch.company_id, period["period_kind"], period["period_end"]),
+        (batch.company_id, period["period_kind"], period["period_start"], period["period_end"]),
     ).fetchone()
     if existing is None or any(existing[key] != value for key, value in period.items()):
         raise ValueError("The existing fiscal period differs; no dates were replaced")
@@ -213,8 +216,32 @@ def append_observations(conn, schema, batch):
         ).fetchone()
         if metric is None:
             raise ValueError("Define the metric before appending observations")
-        if metric["value_type"] in {"currency", "per_share"} and observation.value is not None:
-            if observation.currency_code is None:
+        if observation.value is not None:
+            units = {
+                "currency": "base_currency",
+                "per_share": "base_currency_per_share",
+                "percent": "fraction",
+                "ratio": "ratio",
+                "count": "count",
+                "days": "days",
+                "multiple": "multiple",
+                "other": "defined_unit",
+            }
+            if (
+                metric["measurement_basis"] is None
+                or metric["unit_convention"] != units[metric["value_type"]]
+                or not metric["entity_scope"]
+                or (metric["value_type"] == "other" and not metric["description"])
+            ):
+                raise ValueError(
+                    "Review metric basis, normalized units and entity scope before numeric appends"
+                )
+            if metric["measurement_basis"] == "duration" and period["period_start"] is None:
+                raise ValueError("Duration observations need a period start")
+            if (
+                metric["value_type"] in {"currency", "per_share"}
+                and observation.currency_code is None
+            ):
                 raise ValueError("Monetary observations need a currency")
         row = observation.model_dump(exclude={"metric_key", "source"})
         row.update(
@@ -223,7 +250,8 @@ def append_observations(conn, schema, batch):
         if observation.source:
             source = observation.source.model_dump()
             source["url"] = str(source["url"]) if source["url"] is not None else None
-            source["id"] = source_id(source["reference"])
+            source["company_id"] = batch.company_id
+            source["id"] = source_id(batch.company_id, source["reference"])
             columns = list(source)
             conn.execute(
                 sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT DO NOTHING").format(
@@ -237,7 +265,11 @@ def append_observations(conn, schema, batch):
                 sql.SQL("SELECT * FROM {} WHERE id = %s").format(relation(schema, "sources")),
                 (source["id"],),
             ).fetchone()
-            if saved is None or any(saved[key] != value for key, value in source.items()):
+            if saved is None or any(
+                saved[key] is not None and value is not None and saved[key] != value
+                for key, value in source.items()
+                if key != "retrieved_at"
+            ):
                 raise ValueError("Source metadata differs; use the correct document identity")
             row.update(source_id=source["id"], source_ref=source["reference"])
         columns = list(row)
