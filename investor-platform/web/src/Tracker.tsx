@@ -10,6 +10,7 @@ import { TradeScorecard } from "./TradeScorecard";
 import { number, percent } from "./format";
 import { HitRate } from "./HitRate";
 import { Holdings } from "./Holdings";
+import { StockExclusions } from "./StockExclusions";
 import { today, type Ledger } from "./records";
 
 type Scope = "stocks" | "account";
@@ -63,12 +64,24 @@ const yesterday = () => {
   return d.toISOString().slice(0, 10);
 };
 
-const recentStart = (ledger: Ledger, through: string) => {
-  const date = new Date(through + "T12:00:00Z");
-  date.setUTCDate(date.getUTCDate() - 90);
-  const recent = date.toISOString().slice(0, 10);
+type Shortcut = "ytd" | "year" | "history";
+
+const shortcutDates = (ledger: Ledger, through: string, shortcut: Shortcut) => {
   const first = ledger.entries[0]?.effective_date ?? through;
-  return first > recent ? first : recent;
+  if (shortcut === "history") return { from: first, anchor: undefined };
+  const boundary = new Date(through + "T12:00:00Z");
+  if (shortcut === "ytd") {
+    boundary.setUTCFullYear(Number(today().slice(0, 4)) - 1, 11, 31);
+  } else {
+    const month = boundary.getUTCMonth();
+    boundary.setUTCFullYear(boundary.getUTCFullYear() - 1);
+    if (boundary.getUTCMonth() !== month) boundary.setUTCDate(0); // Feb 29 -> Feb 28.
+  }
+  const anchor = boundary.toISOString().slice(0, 10);
+  // Fetch enough history to select the close on/before a holiday or weekend boundary.
+  boundary.setUTCDate(boundary.getUTCDate() - 7);
+  const fetchFrom = boundary.toISOString().slice(0, 10);
+  return { from: first > fetchFrom ? first : fetchFrom, anchor };
 };
 
 export function Tracker({
@@ -84,6 +97,7 @@ export function Tracker({
     ledger.entries[0]?.effective_date ?? yesterday(),
   );
   const [end, setEnd] = useState(yesterday());
+  const [anchor, setAnchor] = useState<string | undefined>();
   const [excluded, setExcluded] = useState<string[]>([]);
   const securities = [
     ...new Map(
@@ -103,6 +117,7 @@ export function Tracker({
       exclusions: string[] = [],
       basis: Baseline = "history",
       measurement: Scope = "stocks",
+      anchor?: string,
     ) => {
       const version = ++generation.current;
       setBusy(true);
@@ -117,6 +132,7 @@ export function Tracker({
             method: "POST",
             body: JSON.stringify({
               scope: measurement,
+              ...(anchor ? { anchor_date: anchor } : {}),
               start: from,
               end: through,
               ...(basis === "recorded" ? { baseline: basis } : {}),
@@ -127,7 +143,10 @@ export function Tracker({
           },
           60000,
         );
-        if (version === generation.current) setReport(r);
+        if (version === generation.current) {
+          setReport(r);
+          if (anchor) setStart(r.start);
+        }
       } catch (e) {
         if (version === generation.current) {
           setReport(null);
@@ -143,6 +162,7 @@ export function Tracker({
     // Always open the full recorded history; recent comparisons are explicitly selected.
     const through = yesterday();
     const from = ledger.entries[0]?.effective_date ?? through;
+    setAnchor(undefined);
     setScope("stocks");
     setBaseline("history");
     setExcluded([]);
@@ -163,20 +183,19 @@ export function Tracker({
   }, [account.base_currency, account.reconstruction, ledger, compare]);
   function submit(e: FormEvent) {
     e.preventDefault();
-    void compare(start, end, excluded, baseline, scope);
+    void compare(start, end, excluded, baseline, scope, anchor);
   }
-  function choosePeriod(basis: Baseline) {
+  function choosePeriod(shortcut: Shortcut) {
     const through = yesterday();
-    const from =
-      basis === "recorded"
-        ? recentStart(ledger, through)
-        : (ledger.entries[0]?.effective_date ?? through);
+    const basis: Baseline = shortcut === "history" ? "history" : "recorded";
+    const { from, anchor } = shortcutDates(ledger, through, shortcut);
+    setAnchor(anchor);
     setBaseline(basis);
     setStart(from);
     setEnd(through);
     setExcluded([]);
     setReport(null);
-    void compare(from, through, [], basis, scope);
+    void compare(from, through, [], basis, scope, anchor);
   }
   return (
     <>
@@ -207,9 +226,18 @@ export function Tracker({
             disabled={
               busy || !ledger.entries.length || account.base_currency !== "USD"
             }
-            onClick={() => choosePeriod("recorded")}
+            onClick={() => choosePeriod("ytd")}
           >
-            Last 90 days
+            YTD
+          </button>{" "}
+          <button
+            type="button"
+            disabled={
+              busy || !ledger.entries.length || account.base_currency !== "USD"
+            }
+            onClick={() => choosePeriod("year")}
+          >
+            1 year
           </button>{" "}
           <button
             type="button"
@@ -238,7 +266,7 @@ export function Tracker({
                 const next = e.target.value as Scope;
                 setScope(next);
                 setReport(null);
-                void compare(start, end, excluded, baseline, next);
+                void compare(start, end, excluded, baseline, next, anchor);
               }}
             >
               <option value="stocks">Stocks only</option>
@@ -255,6 +283,7 @@ export function Tracker({
               min={ledger.entries[0]?.effective_date}
               max={end}
               onChange={(e) => {
+                setAnchor(undefined);
                 setStart(e.target.value);
                 setBaseline(
                   e.target.value === ledger.entries[0]?.effective_date
@@ -278,6 +307,7 @@ export function Tracker({
               min={start}
               max={yesterday()}
               onChange={(e) => {
+                setAnchor(undefined);
                 setEnd(e.target.value);
                 setExcluded([]);
                 setReport(null);
@@ -302,65 +332,25 @@ export function Tracker({
                 : "Compare performance"}
           </button>
           {securities.length > 0 && (
-            <details className="scenario-picker">
-              <summary>
-                Exclude stocks{excluded.length ? ` (${excluded.length})` : ""}
-              </summary>
-              <fieldset disabled={busy}>
-                <legend>
-                  {baseline === "recorded"
-                    ? "Exclude from this period"
-                    : "What if I never held these stocks?"}
-                </legend>
-                {securities
-                  .filter(
-                    (security) =>
-                      baseline !== "recorded" ||
-                      !report?.security_ids ||
-                      report.security_ids.includes(security.id),
-                  )
-                  .map((security) => (
-                    <label key={security.id}>
-                      <input
-                        type="checkbox"
-                        checked={excluded.includes(security.id)}
-                        onChange={(e) => {
-                          setExcluded((current) =>
-                            e.target.checked
-                              ? [...current, security.id]
-                              : current.filter((id) => id !== security.id),
-                          );
-                          setReport((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  scenario: null,
-                                  scenario_error: null,
-                                }
-                              : null,
-                          );
-                          setError("");
-                        }}
-                      />
-                      {security.ticker} · {security.exchange}
-                    </label>
-                  ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setExcluded([]);
-                    setReport((current) =>
-                      current
-                        ? { ...current, scenario: null, scenario_error: null }
-                        : null,
-                    );
-                    setError("");
-                  }}
-                >
-                  Clear exclusions
-                </button>
-              </fieldset>
-            </details>
+            <StockExclusions
+              stocks={securities.filter(
+                (security) =>
+                  baseline !== "recorded" ||
+                  !report?.security_ids ||
+                  report.security_ids.includes(security.id),
+              )}
+              selected={excluded}
+              disabled={busy}
+              onChange={(ids) => {
+                setExcluded(ids);
+                setReport((current) =>
+                  current
+                    ? { ...current, scenario: null, scenario_error: null }
+                    : null,
+                );
+                setError("");
+              }}
+            />
           )}
         </form>
         {account.base_currency !== "USD" && (

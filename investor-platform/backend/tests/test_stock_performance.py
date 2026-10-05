@@ -154,3 +154,15 @@ def test_cash_reconciliation_and_market_quality_stay_separate(db_client, portfol
     assert account_report["return"] is None
     del data["AAA"].close[DAYS[1]]
     assert stock_report(db_client, aid).status_code == 422
+
+
+def test_shortcut_anchor_uses_prior_session_and_keeps_first_day_gain(db_client, portfolio):
+    aid, _ = portfolio
+    # A Sunday boundary selects Friday's close; Monday's gain must remain included.
+    r = stock_report(db_client, aid, baseline="recorded", anchor_date="2026-01-04")
+    assert r.status_code == 200, r.text
+    assert r.json()["start"] == "2026-01-02"
+    assert D(r.json()["return"]) == D(".21")
+    # An account opened after the boundary starts at its first available close.
+    assert stock_report(db_client, aid, anchor_date="2025-12-31").json()["start"] == "2026-01-02"
+    assert stock_report(db_client, aid, anchor_date="2026-01-06").status_code == 422

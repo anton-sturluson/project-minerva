@@ -396,3 +396,47 @@ test("partial holdings quotes remain visible and retry restores complete totals"
     page.getByText("Quote unavailable", { exact: true }),
   ).toHaveCount(0);
 });
+
+test("YTD and one-year request prior-close boundaries and preserve the measurement", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-10-04T16:00:00Z") });
+  await page.route("**/ledger", (route) =>
+    route.fulfill({
+      json: {
+        ...ledger,
+        entries: [{ ...ledger.entries[0], effective_date: "2020-04-02" }],
+      },
+    }),
+  );
+  await page.route("**/performance", (route) => {
+    const request = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        ...performance,
+        start: request.anchor_date ?? request.start,
+        end: request.end,
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "YTD", exact: true }),
+  ).toBeEnabled();
+  let request = page.waitForRequest("**/performance");
+  await page.getByRole("button", { name: "YTD", exact: true }).click();
+  expect((await request).postDataJSON()).toMatchObject({
+    scope: "stocks",
+    anchor_date: "2025-12-31",
+    baseline: "recorded",
+  });
+  await expect(page.getByLabel("Performance start")).toHaveValue("2025-12-31");
+  request = page.waitForRequest("**/performance");
+  await page.getByRole("button", { name: "1 year", exact: true }).click();
+  expect((await request).postDataJSON()).toMatchObject({
+    anchor_date: "2025-10-03",
+  });
+  await expect(page.getByLabel("Performance start")).toHaveValue("2025-10-03");
+  await page.getByRole("button", { name: "Full history", exact: true }).click();
+  await expect(page.getByLabel("Performance start")).toHaveValue("2020-04-02");
+});

@@ -618,7 +618,7 @@ summary:focus-visible {
 .performance-controls label {
   flex: 0 1 200px;
 }
-.performance-controls .scenario-picker {
+.performance-controls .stock-exclusions {
   flex-basis: 100%;
   margin: 0;
 }
@@ -658,35 +658,72 @@ summary:focus-visible {
   summary {
     padding-block: 6px;
   }
-  .scenario-picker label,
+  .stock-options fieldset label,
   .scorecard-toggle {
     min-height: 44px;
   }
 }
 
-.scenario-picker {
+.stock-exclusions {
   width: 100%;
 }
-.scenario-picker fieldset {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  border: 1px solid var(--rule);
-  margin-block: 8px;
+.stock-exclusions details {
+  margin: 0;
 }
-.scenario-picker label,
+.stock-exclusions summary {
+  border: 1px solid var(--rule);
+  padding: 8px 12px;
+  font:
+    14px/1.5 Arial,
+    sans-serif;
+  text-decoration: none;
+  background: var(--paper);
+}
+.stock-options {
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-top: 0;
+}
+.stock-options fieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 10px 0 0;
+  border: 0;
+  padding: 0;
+}
+.stock-options fieldset label,
 .scorecard-toggle {
   display: flex;
   flex-direction: row;
-  flex: 0 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-height: 36px;
 }
-.scenario-picker input[type="checkbox"],
+.stock-options input[type="checkbox"],
 .scorecard-toggle input {
   width: 16px;
   height: 16px;
   min-height: 16px;
+}
+.selected-stocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 .scenario-line {
   stroke: var(--error);
