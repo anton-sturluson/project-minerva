@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, EntryKind
+from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, EntryKind
 from .ledger import EntryInput, EntryView, Money, entries_for, fingerprint
 from .models import LedgerEntry, Security
 
@@ -17,7 +17,7 @@ Quantity = Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=8, allow
 
 
 class TradeInput(EntryInput):
-    kind: Literal[EntryKind.OPENING_POSITION, EntryKind.BUY, EntryKind.SELL]
+    kind: Literal[EntryKind.OPENING_POSITION, EntryKind.TRANSFER_IN, EntryKind.BUY, EntryKind.SELL]
     ticker: Annotated[
         str,
         StringConstraints(pattern=r"^[A-Z0-9][A-Z0-9.\-]{0,19}$"),
@@ -38,10 +38,10 @@ class TradeInput(EntryInput):
 
     @model_validator(mode="after")
     def valid_trade(self):
-        if self.kind == EntryKind.OPENING_POSITION:
+        if self.kind in IN_KIND_ENTRIES:
             if self.price is not None or self.fees != 0:
                 raise ValueError(
-                    "Opening positions use optional total cost basis, not a price or fee"
+                    "Received shares use optional total cost basis, not a price or fee"
                 )
         elif self.price is None or self.cost_basis is not None:
             raise ValueError(
@@ -103,7 +103,7 @@ def build_trade(account, data, session, actor, body):
     with localcontext() as context:
         context.prec = ACCOUNTING_PRECISION
         amount = Decimal(0)
-        if data.kind != EntryKind.OPENING_POSITION:
+        if data.kind not in IN_KIND_ENTRIES:
             gross = data.quantity * data.price
             amount = gross + data.fees if data.kind == EntryKind.BUY else gross - data.fees
             if amount < 0:

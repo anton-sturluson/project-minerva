@@ -9,9 +9,9 @@ from fastapi import APIRouter, HTTPException
 from . import market
 from .accounting import UNIT
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, MARKET_TIMEZONE, Currency, EntryKind
 from .ledger import entries_for
-from .performance import position_episodes, wire
+from .performance import holding_windows, position_episodes, wire
 
 router = APIRouter(prefix="/api/accounts")
 ZERO = Decimal(0)
@@ -19,8 +19,8 @@ CENT = Decimal("0.01")
 
 
 def exclusion(episode, today):
-    if any(e.kind == EntryKind.OPENING_POSITION for e in episode):
-        return "Opening position: original purchase dates are unknown"
+    if any(e.kind in IN_KIND_ENTRIES for e in episode):
+        return "Received shares: original purchase dates are unknown"
     if episode[-1].effective_date >= today:
         return "Wait for completed closing prices after today's trades"
     if episode[0].effective_date < today - market.HISTORY_WINDOW:
@@ -154,13 +154,21 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
             end = max(e[-1].effective_date for e in candidates)
             # P&L is already recorded in USD. Use actual local sessions to validate
             # trade dates; holiday-carried valuation prices are not trade sessions.
+            securities = {e[0].security_id: e[0].security for e in candidates}
             histories = market.security_histories(
-                {e[0].security_id: e[0].security for e in candidates}.values(),
+                securities.values(),
                 start,
                 end,
                 convert_fx=False,
                 engine=session.get_bind(),
                 workspace_id=actor.workspace_id,
+                windows=holding_windows(
+                    [entry for episode in candidates for entry in episode],
+                    securities,
+                    start,
+                    end,
+                    provisional=False,
+                ),
             )
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION

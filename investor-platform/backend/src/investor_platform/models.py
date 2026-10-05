@@ -59,18 +59,19 @@ class LedgerEntry(Base):
         UniqueConstraint("account_id", "request_key", name="ledger_request_key"),
         CheckConstraint(
             "kind IN ('opening_cash','deposit','withdrawal','income',"
-            "'opening_position','buy','sell')",
+            "'opening_position','transfer_in','buy','sell')",
             name="ledger_kind",
         ),
         CheckConstraint(
-            "amount >= 0 AND (kind IN ('opening_cash','opening_position','sell') OR amount > 0)",
+            "amount >= 0 AND (kind IN ('opening_cash','opening_position',"
+            "'transfer_in','sell') OR amount > 0)",
             name="ledger_amount",
         ),
         CheckConstraint(
             """
       (kind IN ('opening_cash','deposit','withdrawal','income') AND security_id IS NULL
         AND quantity IS NULL AND price IS NULL AND fees = 0 AND cost_basis IS NULL)
-      OR (kind = 'opening_position' AND security_id IS NOT NULL AND quantity > 0
+      OR (kind IN ('opening_position','transfer_in') AND security_id IS NOT NULL AND quantity > 0
         AND quantity IS NOT NULL AND price IS NULL AND fees = 0 AND amount = 0
         AND (cost_basis IS NULL OR cost_basis >= 0))
       OR (kind IN ('buy','sell') AND security_id IS NOT NULL AND quantity IS NOT NULL

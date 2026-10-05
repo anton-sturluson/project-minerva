@@ -36,7 +36,7 @@ def trade(client, account, kind="buy", quantity="10", price="100", **extra):
         "request_key": str(uuid4()),
         **extra,
     }
-    if kind == "opening_position":
+    if kind in {"opening_position", "transfer_in"}:
         data["price"] = None
     return client.post(f"/api/accounts/{account}/trades", json=data)
 
@@ -217,3 +217,17 @@ def test_concurrent_trade_retries_do_not_duplicate_shares(db_client, account_id)
     state = ledger(db_client, account_id)
     assert Decimal(state["holdings"][0]["quantity"]) == 10
     assert Decimal(state["balance"]) == 9000
+
+
+def test_receipts_preserve_unknown_basis_and_do_not_move_cash(db_client, account_id):
+    before = Decimal(ledger(db_client, account_id)["balance"])
+    assert trade(db_client, account_id, quantity="1", price="10").status_code == 201
+    r = trade(db_client, account_id, "transfer_in", "2")
+    assert r.status_code == 201, r.text
+    state = ledger(db_client, account_id)
+    assert Decimal(state["balance"]) == before - 10
+    assert state["holdings"][0]["cost_basis"] is None
+    r = trade(db_client, account_id, "sell", "3", "20")
+    assert r.status_code == 201 and r.json()["realized_pnl"] is None
+    r = trade(db_client, account_id, "transfer_in", "1", fees="1")
+    assert r.status_code == 422

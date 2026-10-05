@@ -6,6 +6,7 @@ import {
   type PositionKind,
   positionKinds,
   labels,
+  isInKind,
 } from "./records";
 
 export function Trades({
@@ -40,9 +41,9 @@ export function Trades({
       currency: account.base_currency,
       effective_date: date,
       quantity,
-      price: kind === "opening_position" ? null : price,
-      fees: kind === "opening_position" ? "0" : fees,
-      cost_basis: kind === "opening_position" && basis !== "" ? basis : null,
+      price: isInKind(kind) ? null : price,
+      fees: isInKind(kind) ? "0" : fees,
+      cost_basis: isInKind(kind) && basis !== "" ? basis : null,
       note,
     };
     const body = JSON.stringify(payload);
@@ -144,7 +145,7 @@ export function Trades({
               disabled={saving}
             />
           </label>
-          {kind === "opening_position" ? (
+          {isInKind(kind) ? (
             <label>
               Total cost basis ({account.base_currency}, optional)
               <input
@@ -198,8 +199,8 @@ export function Trades({
             />
           </label>
           <p className="form-note">
-            {kind === "opening_position"
-              ? "Leave basis blank if unknown. Record opening shares before trades."
+            {isInKind(kind)
+              ? "Leave basis blank if unknown. Receipts add shares without moving cash."
               : "Fees affect cash and cost basis. Sales use FIFO."}
           </p>
           <button type="submit" disabled={saving}>

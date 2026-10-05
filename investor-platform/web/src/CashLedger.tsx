@@ -15,6 +15,7 @@ import {
   exact,
   today,
   labels,
+  isInKind,
   type Entry,
   type Ledger,
   type CashKind,
@@ -282,7 +283,7 @@ export function CashLedger({
                                       <dd>{exact(e.fees)}</dd>
                                     </>
                                   )}
-                                  {e.kind === "opening_position" && (
+                                  {isInKind(e.kind) && (
                                     <>
                                       <dt>Opening total basis</dt>
                                       <dd>

@@ -111,3 +111,51 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
     ),
   ).toBe(true);
 });
+
+test("receives shares without a cash trade and keeps acquisition basis unknown", async ({
+  page,
+  request,
+}) => {
+  const account = (await (await request.get("/api/accounts")).json())[0];
+  const before = await (
+    await request.get(`/api/accounts/${account.id}/ledger`)
+  ).json();
+  const ticker = `R${crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+  await page.goto("/#activity");
+  await page.getByText("Record a position or trade", { exact: true }).click();
+  await page.getByLabel("Position action").selectOption("transfer_in");
+  await page.getByLabel("Ticker", { exact: true }).fill(ticker);
+  await page.getByLabel("Exchange", { exact: true }).fill("NASDAQ");
+  await page.getByLabel("Shares", { exact: true }).fill("0.25");
+  await expect(
+    page.getByLabel("Price per share", { exact: true }),
+  ).toBeHidden();
+  await page
+    .getByRole("button", { name: "Save position entry", exact: true })
+    .click();
+  await expect(
+    page.getByText("Position entry saved.", { exact: true }),
+  ).toBeVisible();
+  const after = await (
+    await request.get(`/api/accounts/${account.id}/ledger`)
+  ).json();
+  expect(after.balance).toBe(before.balance);
+  const receipt = after.entries.find(
+    (e: { security?: { ticker: string } }) => e.security?.ticker === ticker,
+  );
+  expect(receipt.kind).toBe("transfer_in");
+  expect(receipt.cost_basis).toBeNull();
+  await page.getByText("Account activity", { exact: true }).click();
+  await page
+    .getByRole("button", { name: `Correct entry ${receipt.id}`, exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Replacement price", { exact: true }),
+  ).toBeHidden();
+  await expect(
+    page.getByLabel("Replacement total basis (optional)", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Cancel correction", exact: true })
+    .click();
+});

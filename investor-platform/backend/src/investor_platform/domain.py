@@ -15,6 +15,7 @@ class EntryKind(StrEnum):
     WITHDRAWAL = "withdrawal"
     INCOME = "income"
     OPENING_POSITION = "opening_position"
+    TRANSFER_IN = "transfer_in"
     BUY = "buy"
     SELL = "sell"
 
@@ -29,3 +30,6 @@ class Currency(StrEnum):
     CHF = "CHF"
     HKD = "HKD"
     SGD = "SGD"
+
+
+IN_KIND_ENTRIES = frozenset({EntryKind.OPENING_POSITION, EntryKind.TRANSFER_IN})

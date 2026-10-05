@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import market
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
-from .domain import ACCOUNTING_PRECISION, MARKET_TIMEZONE, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, MARKET_TIMEZONE, Currency, EntryKind
 from .ledger import entries_for
 from .models import LedgerEntry
 
@@ -170,7 +170,7 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
     for entry in current:
         if entry.security_id not in excluded:
             result.append(entry)
-        elif entry.kind == EntryKind.OPENING_POSITION:
+        elif entry.kind in IN_KIND_ENTRIES:
             # Preserve contributed capital: replace opening shares with their first session value.
             day = next((d for d in sessions if d >= entry.effective_date), None)
             symbol = market.symbol_for(entry.security, provisional=provisional)
@@ -306,7 +306,7 @@ def calculate(entries, histories, start, end, *, provisional=False, baseline=Bas
                     flow += e.amount
                 elif e.kind == EntryKind.WITHDRAWAL:
                     flow -= e.amount
-                elif e.kind == EntryKind.OPENING_POSITION:
+                elif e.kind in IN_KIND_ENTRIES:
                     price = prices[e.security_id].close.get(d)
                     if price is None:
                         raise ValueError("Missing price for an in-kind contribution")

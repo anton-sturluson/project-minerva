@@ -156,3 +156,51 @@ def test_non_usd_account_does_not_fetch_a_usd_benchmark(db_client, monkeypatch):
     monkeypatch.setattr(market, "history", unexpected_fetch)
     response = db_client.post(f"/api/accounts/{aid}/hit-rate")
     assert response.status_code == 422 and "USD" in response.json()["detail"]
+
+
+def test_hit_rate_fetches_only_each_closed_security_window(db_client, monkeypatch):
+    aid = db_client.post(
+        "/api/accounts", json={"name": "Dated decisions", "base_currency": "USD"}
+    ).json()["id"]
+    cash(db_client, aid, "opening_cash", "1000")
+    for ticker, opened, closed in [
+        ("DEMO", "2026-01-02", "2026-01-05"),
+        ("OTHER", "2026-01-06", "2026-01-07"),
+    ]:
+        assert (
+            trade(
+                db_client,
+                aid,
+                "buy",
+                "1",
+                "100",
+                ticker=ticker,
+                exchange="NASDAQ",
+                effective_date=opened,
+            ).status_code
+            == 201
+        )
+        assert (
+            trade(
+                db_client,
+                aid,
+                "sell",
+                "1",
+                "110",
+                ticker=ticker,
+                exchange="NASDAQ",
+                effective_date=closed,
+            ).status_code
+            == 201
+        )
+
+    def fetch(securities, start, end, **kwargs):
+        assert kwargs["windows"] == {"DEMO": (DAYS[0], DAYS[1]), "OTHER": (DAYS[2], DAYS[3])}
+        data = histories()
+        data["OTHER"] = data["DEMO"]
+        return data
+
+    monkeypatch.setattr(market, "security_histories", fetch)
+    result = db_client.post(f"/api/accounts/{aid}/hit-rate")
+    assert result.status_code == 200
+    assert result.json()["benchmarks"]["SPY"]["evaluated"] == 2
