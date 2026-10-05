@@ -14,6 +14,7 @@ class EntryKind(StrEnum):
     DEPOSIT = "deposit"
     WITHDRAWAL = "withdrawal"
     INCOME = "income"
+    EXPENSE = "expense"
     OPENING_POSITION = "opening_position"
     TRANSFER_IN = "transfer_in"
     BUY = "buy"

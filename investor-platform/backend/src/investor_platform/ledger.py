@@ -36,13 +36,19 @@ class EntryInput(BaseModel):
 
 
 class CashInput(EntryInput):
-    kind: Literal[EntryKind.OPENING_CASH, EntryKind.DEPOSIT, EntryKind.WITHDRAWAL, EntryKind.INCOME]
+    kind: Literal[
+        EntryKind.OPENING_CASH,
+        EntryKind.DEPOSIT,
+        EntryKind.WITHDRAWAL,
+        EntryKind.INCOME,
+        EntryKind.EXPENSE,
+    ]
     amount: Money
 
     @model_validator(mode="after")
     def positive_amount(self):
         if self.kind != EntryKind.OPENING_CASH and self.amount <= 0:
-            raise ValueError("Deposits, withdrawals and income must be positive")
+            raise ValueError("Cash entries other than opening cash must be positive")
         return self
 
 

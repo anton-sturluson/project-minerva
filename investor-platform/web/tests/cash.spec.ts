@@ -30,6 +30,12 @@ test("records cash, rejects overdraft, and keeps the draft", async ({
     .getByRole("button", { name: "Save cash entry", exact: true })
     .click();
   await expect(page.getByLabel("Cash amount", { exact: true })).toHaveValue("");
+  await page.getByLabel("Entry type", { exact: true }).selectOption("expense");
+  await page.getByLabel("Cash amount", { exact: true }).fill("0.50");
+  await page
+    .getByRole("button", { name: "Save cash entry", exact: true })
+    .click();
+  await expect(page.getByLabel("Cash amount", { exact: true })).toHaveValue("");
   await page
     .getByLabel("Entry type", { exact: true })
     .selectOption("withdrawal");
@@ -54,8 +60,8 @@ test("records cash, rejects overdraft, and keeps the draft", async ({
   const after = await (
     await request.get(`/api/accounts/${account.id}/ledger`)
   ).json();
-  expect(Number(after.balance)).toBe(Number(before.balance) + 4.5);
-  expect(after.entries.length).toBe(before.entries.length + 3);
+  expect(Number(after.balance)).toBe(Number(before.balance) + 4);
+  expect(after.entries.length).toBe(before.entries.length + 4);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
