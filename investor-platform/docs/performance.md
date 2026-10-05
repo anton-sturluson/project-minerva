@@ -4,7 +4,17 @@
 
 USD-settled long-only equities/ETFs, immutable recorded cash/trades, and daily closing observations. SPY and QQQ are investable S&P 500 and Nasdaq-100 proxies, not the index series themselves. Their fund costs and tracking differences remain in their returns. ([SPY](https://www.ssga.com/us/en/institutional/etfs/state-street-spdr-sp-500-etf-trust-spy), [QQQ](https://www.invesco.com/qqq-etf/en/home.html))
 
-## Valuations and comparison
+## Stock portfolio return (default)
+
+The default **Stocks only** view measures the invested stock positions from recorded purchases, sales and share receipts. It is an estimated daily time-weighted stock return, not the return of the entire brokerage account. Idle cash, cash-currency translation, interest, lending income, withholding and account-level expenses are excluded. Native stock prices still use dated USD FX. Recorded trading fees remain in purchase costs and net sale proceeds.
+
+For each session, link `(ending stock value + net sales + estimated gross dividends − close-valued share receipts) / (previous stock value + purchase costs)`. Purchases are treated as contributions at the start of the session and sale proceeds as withdrawals at its end. Gross distributions use provider ex-dates and prior-day quantities, regardless of when a broker pays cash. They are paid out of the measured stock sleeve; no cash or dividend records are created. Provider estimates may differ from actual broker distributions. This follows the same daily flow convention as the account calculation below, with the measurement boundary around stocks instead of all account assets.
+
+The first displayed close is the baseline; first-day trading gains are excluded. With no invested capital and no purchases, the index stays flat; an in-kind receipt starts at its closing value. Later purchases restart measurement without erasing earlier returns. An empty stock selection is unavailable. Benchmarks use the same displayed dates and reinvest distributions. Excluding a stock removes its positions, trade capital and estimated distributions; it does not retain hypothetical idle cash. Both period controls preserve the selected measurement.
+
+Missing prices, invalid listings and unsupported held-period splits still block this estimate. Incomplete trades and inferred opening shares still affect accuracy. Missing cash funding records do not block it because cash is outside this measurement. Choose **Whole account** to include cash and recorded income, with the reconciliation checks below. The selector never changes stored data or the trade scorecard. See [ADR 0007](decisions/0007-stock-performance-scope.md).
+
+## Whole-account valuations and comparison
 
 Portfolio value = recorded cash + recorded unpaid dividend receivables + shares × closing price. Unknown basis affects gains, not market value. Unknown prices prevent the report rather than creating zero-value holdings. Yahoo adjusted closes are used only for benchmark return ratios; they adjust for splits and distributions. Yahoo portfolio valuations reverse subsequent split adjustment, including splits after the requested report end. Tiingo fallback uses its already as-traded close without reversing splits again. ([Yahoo adjusted close](https://in.help.yahoo.com/kb/adjusted-close-sln28256.html))
 
@@ -20,13 +30,13 @@ Shares held across a provider-reported split block the report until split accoun
 
 ## Recent and full-history views
 
-All portfolios open to **Full history**. **Last 90 days** is optional and uses recorded starting cash and shares. Earlier closed positions require no price lookup, but their sale proceeds and original FIFO lots remain in accounting. Earlier missing income and split adjustments are not reconstructed in this mode, so the opening balance must be treated as provisional. Dates remain editable. **Full history** retains inception reconciliation and can still fail if a delisted price series is unavailable. Neither mode replaces missing prices with zero or trade prices. See [ADR 0005](decisions/0005-recorded-period-baselines.md).
+All portfolios open to **Full history**, with **Stocks only** selected. The following cash treatment applies to **Whole account**. **Last 90 days** is optional and uses recorded starting cash and shares. Earlier closed positions require no price lookup, but their sale proceeds and original FIFO lots remain in accounting. Earlier missing income and split adjustments are not reconstructed in this mode, so the opening balance must be treated as provisional. Dates remain editable. **Full history** retains inception reconciliation and can still fail if a delisted price series is unavailable. Neither mode replaces missing prices with zero or trade prices. See [ADR 0005](decisions/0005-recorded-period-baselines.md).
 
 In a recorded-baseline view, exclusions apply within that period: prior trades remain, and excluded opening shares become cash at the first session close. The all-history trade scorecard and current holdings are independent of this choice.
 
 ## Funding reconciliation
 
-An inferred minimum opening cash balance is a bookkeeping placeholder, not evidence that all future capital was present at inception. Imported accounts default to `funding_status: inferred`, including legacy imports without a status field. Portfolio return, CAGR, excess returns and stock-exclusion scenarios are withheld in both full-history and recorded-period views. Benchmark curves remain available; any reconstructed closing value is explicitly estimated.
+An inferred minimum opening cash balance is a bookkeeping placeholder, not evidence that all future capital was present at inception. Imported accounts default to `funding_status: inferred`, including legacy imports without a status field. Whole-account return, CAGR, excess returns and stock-exclusion scenarios are withheld in both full-history and recorded-period views. The stocks-only calculation is independent of these cash records. Benchmark curves remain available; any reconstructed closing value is explicitly estimated.
 
 Mark a reconstruction `reconciled` only after reviewing dated deposits/withdrawals, transfers within the portfolio boundary, income, fees, opening balances and closing cash. A current cash override cannot establish historical funding dates. Keep source rows, transfer matches and unresolved allocations in ignored private storage. Accounts entered directly use `recorded` funding status; that is not independent broker certification.
 
@@ -40,7 +50,7 @@ Up to 128 securities are fetched with bounded concurrency. Histories unavailable
 
 CAGR annualizes the geometrically linked, flow-adjusted cumulative return: `(1 + return) ** (365.25 / elapsed calendar days) - 1`. The actual first and last displayed sessions define elapsed days; this project uses an ACT/365.25 convention. It does not annualize the raw change in portfolio balance, which includes contributions. The same formula applies to SPY, QQQ and a valid scenario. A withheld cumulative return also withholds CAGR. Periods shorter than 365 elapsed days display no CAGR; this avoids presenting an extrapolated short-period return as annual performance. This follows GIPS guidance on avoiding sub-year annualization, without claiming compliance. ([GIPS partial-period guidance](https://www.gipsstandards.org/qadatabase/5001/))
 
-Select stocks under **Exclude stocks**, then compare. The original portfolio stays visible; a fourth chart line and summary row show the hypothetical cash alternative. Clearing exclusions and comparing restores the ordinary view. See [ADR 0002](decisions/0002-stock-exclusion-scenarios.md) for opening-position valuation, income attribution and funding rules. Hypotheticals never write ledger records, change real holdings or recalculate the trade scorecard.
+Select stocks under **Exclude stocks**, then compare. The original portfolio stays visible; a fourth chart line and summary row show the hypothetical alternative. Whole-account exclusions retain cash; stock-only exclusions measure only the remaining stocks. Clearing exclusions and comparing restores the ordinary view. See [ADR 0002](decisions/0002-stock-exclusion-scenarios.md) for opening-position valuation, income attribution and funding rules. Hypotheticals never write ledger records, change real holdings or recalculate the trade scorecard.
 
 ## Trade scorecard
 

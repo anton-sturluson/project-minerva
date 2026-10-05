@@ -22,7 +22,7 @@ from .domain import (
     FundingStatus,
     IncomeKind,
 )
-from .income import dividend_receivables
+from .income import dividend_receivables, market_dividends
 from .ledger import entries_for
 from .models import LedgerEntry
 
@@ -101,10 +101,16 @@ class Baseline(StrEnum):
     RECORDED = "recorded"
 
 
+class PerformanceScope(StrEnum):
+    ACCOUNT = "account"
+    STOCKS = "stocks"
+
+
 class Period(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: date
     end: date
+    scope: PerformanceScope = PerformanceScope.ACCOUNT
     baseline: Baseline = Baseline.HISTORY
     exclude_security_ids: list[UUID] = Field(default_factory=list, max_length=market.MAX_SECURITIES)
 
@@ -217,6 +223,28 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
     return result
 
 
+def funded_stock_entries(entries):
+    """Read-only stock sleeve: each purchase is funded and each sale removes proceeds.
+
+    These balancing flows exist only for calculation, never in the stored ledger.
+    They preserve execution amounts (including recorded fees) and FIFO ordering.
+    """
+    result = []
+    for entry in entries:
+        if entry.security_id is None:
+            continue
+        result.append(entry)
+        if entry.kind in {EntryKind.BUY, EntryKind.SELL}:
+            result.append(
+                LedgerEntry(
+                    kind=EntryKind.DEPOSIT if entry.kind == EntryKind.BUY else EntryKind.WITHDRAWAL,
+                    effective_date=entry.effective_date,
+                    amount=entry.amount,
+                )
+            )
+    return result
+
+
 def calculate(
     entries,
     histories,
@@ -227,8 +255,14 @@ def calculate(
     baseline=Baseline.HISTORY,
     funding_status=FundingStatus.RECORDED,
     closing_cash_ids=frozenset(),
+    scope=PerformanceScope.ACCOUNT,
 ):
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
+    stock_only = scope == PerformanceScope.STOCKS
+    if stock_only:
+        entries = funded_stock_entries(entries)
+        if not entries:
+            raise ValueError("Choose at least one stock with recorded holdings or trades")
     spy, qqq = histories["SPY"], histories["QQQ"]
     days = sorted(d for d in spy.close if start <= d <= end)
     if len(days) < 2 or any(d not in qqq.adjusted for d in days):
@@ -265,16 +299,23 @@ def calculate(
     previous = None
     previous_day = None
     warnings = []
-    if funding_status == FundingStatus.INFERRED:
+    if not stock_only and funding_status == FundingStatus.INFERRED:
         warnings.append("Cash history needs reconciliation; starting funding was inferred.")
-    receivables, income_warnings = dividend_receivables(
-        entries,
-        prices,
-        securities,
-        days,
-        validation_start=start if baseline == Baseline.RECORDED else None,
-    )
-    warnings.extend(income_warnings)
+    distributions = {}
+    if stock_only:
+        # Estimated gross distributions are paid out of this stock sleeve on the ex-date.
+        # Actual broker cash, payment timing, interest and currency cash are outside its scope.
+        distributions = market_dividends(entries, prices, days[-1])
+        receivables = dict.fromkeys(days, ZERO)
+    else:
+        receivables, income_warnings = dividend_receivables(
+            entries,
+            prices,
+            securities,
+            days,
+            validation_start=start if baseline == Baseline.RECORDED else None,
+        )
+        warnings.extend(income_warnings)
     latest_holdings = []
     for d in days:
         prefix = [e for e in entries if e.effective_date <= d]
@@ -322,14 +363,24 @@ def calculate(
                     if price is None:
                         raise ValueError("Missing price for an in-kind contribution")
                     in_kind += e.quantity * price
-            if previous <= 0:
+            if previous <= 0 and not stock_only:
                 raise ValueError(
                     "Return is undefined across a zero-value balance; "
                     "select a continuously funded period"
                 )
             # Dated cash deposits are available to invest at the start of the session.
             # Withdrawals and close-valued in-kind receipts occur at its end.
-            factor = (value + outgoing - in_kind) / (previous + incoming)
+            dividend = sum(
+                (
+                    amount
+                    for (_, exdate), amount in distributions.items()
+                    if previous_day < exdate <= d
+                ),
+                ZERO,
+            )
+            denominator = previous + incoming
+            # Flat periods have no invested capital. A new in-kind position starts at its close.
+            factor = (value + outgoing + dividend - in_kind) / denominator if denominator else ONE
             if factor < 0:
                 raise ValueError(
                     "Daily flow convention is invalid for this cash movement; "
@@ -355,10 +406,20 @@ def calculate(
             row["portfolio"] = None
     last = values[-1]
     return {
-        "provisional": provisional,
+        "scope": scope,
+        "provisional": provisional or stock_only,
         "funding_status": funding_status,
         "receivables": receivables[days[-1]],
         "assumptions": [
+            "Stock sleeve only: idle cash, cash FX, interest and account-level expenses excluded.",
+            "Purchases fund the sleeve at session start; sale proceeds leave at session end.",
+            "Provider-estimated gross dividends leave the sleeve on the ex-date; "
+            "no broker cash is invented.",
+            "Recorded execution amounts include only recorded trading costs. "
+            "Benchmarks reinvest distributions.",
+        ]
+        if stock_only
+        else [
             "Testing estimate: opening shares and cash are inferred, not verified broker balances.",
             "Assumes no missing trades or external flows; excluded import rows are not included.",
             "Uses exchange-specific listings and dated USD FX; confirm security identity.",
@@ -456,21 +517,30 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 provisional=provisional,
                 baseline=period.baseline,
                 funding_status=funding_status,
+                scope=period.scope,
             )
             result["baseline"] = period.baseline
             result["security_ids"] = list(securities)
             result["scenario"] = None
             result["scenario_error"] = None
-            if excluded and funding_status == FundingStatus.INFERRED:
+            if (
+                excluded
+                and period.scope == PerformanceScope.ACCOUNT
+                and funding_status == FundingStatus.INFERRED
+            ):
                 result["scenario_error"] = "Reconcile cash history before comparing exclusions"
             elif excluded:
                 try:
-                    alternative = scenario_entries(
-                        entries,
-                        excluded,
-                        fetched,
-                        provisional=provisional,
-                        start=period.start if recorded else None,
+                    alternative = (
+                        [e for e in entries if e.security_id not in excluded]
+                        if period.scope == PerformanceScope.STOCKS
+                        else scenario_entries(
+                            entries,
+                            excluded,
+                            fetched,
+                            provisional=provisional,
+                            start=period.start if recorded else None,
+                        )
                     )
                     result["scenario"] = calculate(
                         alternative,
@@ -480,6 +550,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                         provisional=provisional,
                         baseline=period.baseline,
                         funding_status=funding_status,
+                        scope=period.scope,
                         closing_cash_ids={
                             e.id
                             for e in entries

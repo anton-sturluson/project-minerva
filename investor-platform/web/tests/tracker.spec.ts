@@ -78,9 +78,14 @@ test("compares dated returns, explains outage, and invalidates old results", asy
   await expect(
     page.getByText("Closing value (USD)", { exact: true }),
   ).toBeHidden();
+  await page.getByLabel("Performance measure").selectOption("account");
+  await expect(
+    page.getByRole("button", { name: "Compare performance" }),
+  ).toBeEnabled();
   const comparison = page.waitForRequest("**/performance");
   await page.getByRole("button", { name: "Compare performance" }).click();
   expect((await comparison).postDataJSON()).toEqual({
+    scope: "account",
     start: "2026-01-02",
     end: "2026-01-06",
   });
@@ -91,6 +96,7 @@ test("compares dated returns, explains outage, and invalidates old results", asy
   const custom = page.waitForRequest("**/performance");
   await page.getByRole("button", { name: "Compare performance" }).click();
   expect((await custom).postDataJSON()).toEqual({
+    scope: "account",
     start: "2026-01-05",
     end: "2026-01-06",
     baseline: "recorded",

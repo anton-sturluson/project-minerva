@@ -4,11 +4,11 @@ This is the living register of reconstruction assumptions. Change it with the im
 
 | Assumption | Consequence / resolution |
 | --- | --- |
-| Transaction history is incomplete. Opening shares and minimum balancing cash are inferred. | Portfolio return, CAGR, excess returns and exclusion scenarios are withheld until dated funding and broker balances are reconciled. Current holdings and benchmark series remain available. |
+| Transaction history is incomplete. Opening shares and minimum balancing cash are inferred. | Whole-account return, CAGR, excess returns and exclusion scenarios are withheld until dated funding and broker balances are reconciled. The default stock-only estimate measures trade capital separately. Current holdings and benchmark series remain available. |
 | Unrecorded trades and deposits/withdrawals are absent from the model. | Missing records can materially change returns. Add dated records and regenerate the comparison. |
 | USD totals may be reporting equivalents; they establish neither settlement currency nor listing identity. | Imported exchanges may remain unconfirmed until issuer and listing evidence are reconciled. Keep native quote currency and actual cash currency separate from reporting equivalents. Verify broker instrument name and native currency before choosing a listing; a shared ticker does not establish issuer identity. |
 | Original rows and discrepancies are retained privately. | Use import provenance and correction history for reconciliation. |
-| Dividends need both the ex-date and actual cash payment date, linked to the security. | Recorded receivables enter value on the ex-date and leave receivables when cash arrives. Missing or mismatched gross distributions withhold returns; no synthetic income is added. |
+| Dividends need both the ex-date and actual cash payment date, linked to the security. | Recorded receivables enter value on the ex-date and leave receivables when cash arrives. Missing or mismatched gross distributions withhold whole-account returns. Stock-only estimates use provider gross distributions; neither mode adds synthetic ledger income. |
 | Unrecorded fees and taxes are absent. | Estimates are not after-tax returns. |
 | Recent comparisons use recorded opening cash and share quantities. | Missing pre-period income and corporate actions are not reconstructed; verify opening balances. Full history retains its stricter data requirements. |
 | Market prices come from one provider. | Values are not independently verified and may be revised. |
