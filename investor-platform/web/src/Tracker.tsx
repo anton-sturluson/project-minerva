@@ -12,6 +12,8 @@ import { HitRate } from "./HitRate";
 import { Holdings } from "./Holdings";
 import { type Ledger } from "./records";
 
+type Baseline = "history" | "recorded";
+
 type Point = {
   date: string;
   value: string;
@@ -26,6 +28,8 @@ type CAGR = {
   QQQ: string | null;
 };
 export type Report = {
+  baseline?: Baseline;
+  security_ids?: string[];
   cagr: CAGR;
   scenario?:
     | (Report & {
@@ -58,6 +62,14 @@ const yesterday = () => {
   return d.toISOString().slice(0, 10);
 };
 
+const recentStart = (ledger: Ledger, through: string) => {
+  const date = new Date(through + "T12:00:00Z");
+  date.setUTCDate(date.getUTCDate() - 90);
+  const recent = date.toISOString().slice(0, 10);
+  const first = ledger.entries[0]?.effective_date ?? through;
+  return first > recent ? first : recent;
+};
+
 export function Tracker({
   account,
   ledger,
@@ -65,6 +77,7 @@ export function Tracker({
   account: Account;
   ledger: Ledger;
 }) {
+  const [baseline, setBaseline] = useState<Baseline>("history");
   const [start, setStart] = useState(
     ledger.entries[0]?.effective_date ?? yesterday(),
   );
@@ -82,7 +95,12 @@ export function Tracker({
   const [error, setError] = useState("");
   const generation = useRef(0);
   const compare = useCallback(
-    async (from: string, through: string, exclusions: string[] = []) => {
+    async (
+      from: string,
+      through: string,
+      exclusions: string[] = [],
+      basis: Baseline = "history",
+    ) => {
       const version = ++generation.current;
       setBusy(true);
       setError("");
@@ -97,6 +115,7 @@ export function Tracker({
             body: JSON.stringify({
               start: from,
               end: through,
+              ...(basis === "recorded" ? { baseline: basis } : {}),
               ...(exclusions.length
                 ? { exclude_security_ids: exclusions }
                 : {}),
@@ -117,9 +136,10 @@ export function Tracker({
     [account.id],
   );
   useEffect(() => {
-    // New records reset the comparison to the full recorded history.
-    const from = ledger.entries[0]?.effective_date ?? yesterday();
+    // Always open the full recorded history; recent comparisons are explicitly selected.
     const through = yesterday();
+    const from = ledger.entries[0]?.effective_date ?? through;
+    setBaseline("history");
     setExcluded([]);
     setStart(from);
     setEnd(through);
@@ -138,7 +158,20 @@ export function Tracker({
   }, [account.base_currency, account.reconstruction, ledger, compare]);
   function submit(e: FormEvent) {
     e.preventDefault();
-    void compare(start, end, excluded);
+    void compare(start, end, excluded, baseline);
+  }
+  function choosePeriod(basis: Baseline) {
+    const through = yesterday();
+    const from =
+      basis === "recorded"
+        ? recentStart(ledger, through)
+        : (ledger.entries[0]?.effective_date ?? through);
+    setBaseline(basis);
+    setStart(from);
+    setEnd(through);
+    setExcluded([]);
+    setReport(null);
+    void compare(from, through, [], basis);
   }
   return (
     <>
@@ -163,6 +196,32 @@ export function Tracker({
             ? "Provisional portfolio vs. the market"
             : "Portfolio vs. the market"}
         </h2>
+        <p className="period-shortcuts">
+          <button
+            type="button"
+            disabled={
+              busy || !ledger.entries.length || account.base_currency !== "USD"
+            }
+            onClick={() => choosePeriod("recorded")}
+          >
+            Last 90 days
+          </button>{" "}
+          <button
+            type="button"
+            disabled={
+              busy || !ledger.entries.length || account.base_currency !== "USD"
+            }
+            onClick={() => choosePeriod("history")}
+          >
+            Full history
+          </button>
+        </p>
+        {baseline === "recorded" && (
+          <p className="form-note">
+            Uses recorded starting cash and shares; earlier income is not
+            reconstructed.
+          </p>
+        )}
         <form className="entry-form performance-controls" onSubmit={submit}>
           <label>
             From
@@ -175,6 +234,7 @@ export function Tracker({
               max={end}
               onChange={(e) => {
                 setStart(e.target.value);
+                setExcluded([]);
                 setReport(null);
                 setError("");
               }}
@@ -220,33 +280,44 @@ export function Tracker({
                 Exclude stocks{excluded.length ? ` (${excluded.length})` : ""}
               </summary>
               <fieldset disabled={busy}>
-                <legend>What if I never held these stocks?</legend>
-                {securities.map((security) => (
-                  <label key={security.id}>
-                    <input
-                      type="checkbox"
-                      checked={excluded.includes(security.id)}
-                      onChange={(e) => {
-                        setExcluded((current) =>
-                          e.target.checked
-                            ? [...current, security.id]
-                            : current.filter((id) => id !== security.id),
-                        );
-                        setReport((current) =>
-                          current
-                            ? {
-                                ...current,
-                                scenario: null,
-                                scenario_error: null,
-                              }
-                            : null,
-                        );
-                        setError("");
-                      }}
-                    />
-                    {security.ticker} · {security.exchange}
-                  </label>
-                ))}
+                <legend>
+                  {baseline === "recorded"
+                    ? "Exclude from this period"
+                    : "What if I never held these stocks?"}
+                </legend>
+                {securities
+                  .filter(
+                    (security) =>
+                      baseline !== "recorded" ||
+                      !report?.security_ids ||
+                      report.security_ids.includes(security.id),
+                  )
+                  .map((security) => (
+                    <label key={security.id}>
+                      <input
+                        type="checkbox"
+                        checked={excluded.includes(security.id)}
+                        onChange={(e) => {
+                          setExcluded((current) =>
+                            e.target.checked
+                              ? [...current, security.id]
+                              : current.filter((id) => id !== security.id),
+                          );
+                          setReport((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  scenario: null,
+                                  scenario_error: null,
+                                }
+                              : null,
+                          );
+                          setError("");
+                        }}
+                      />
+                      {security.ticker} · {security.exchange}
+                    </label>
+                  ))}
                 <button
                   type="button"
                   onClick={() => {
@@ -278,7 +349,7 @@ export function Tracker({
         {busy && <p role="status">Loading portfolio and index returns…</p>}
         {error && (
           <p role="alert" className="error">
-            {error} Your saved records are unchanged.
+            {error}
           </p>
         )}
         {report && (

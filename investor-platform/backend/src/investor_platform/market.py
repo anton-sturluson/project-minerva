@@ -210,7 +210,8 @@ def security_histories(securities, start, end, *, provisional=False, convert_fx=
             return symbol, history(symbol, start - MAX_CLOSE_AGE, end, **requests[symbol])
         except (OSError, KeyError, TypeError, IndexError) as exc:
             raise MarketDataError(
-                f"{symbol}: market history unavailable; saved records are unchanged"
+                f"Price history unavailable for {symbol}. "
+                "A complete comparison needs these historical prices."
             ) from exc
 
     with ThreadPoolExecutor(max_workers=6) as pool:
