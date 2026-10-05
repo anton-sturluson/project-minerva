@@ -49,7 +49,8 @@ export function EntrySummary({ entry }: { entry: Entry }) {
       {entry.income_security && (
         <>
           {" "}
-          · {entry.income_security.ticker} · ex {entry.accrual_date}
+          · {entry.income_security.ticker}{" "}
+          {entry.accrual_date && <>· ex {entry.accrual_date}</>}
         </>
       )}
       · {entry.note || "No note"}

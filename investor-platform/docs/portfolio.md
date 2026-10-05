@@ -72,7 +72,7 @@ Current holdings fetch only open securities and remain available if the historic
 
 ## Investment income
 
-Choose **Dividend · gross**, **Interest**, or **Other investment income** under Activity → Record cash. Dividends require a security already present in the account records and an ex-dividend date no later than the effective cash payment date. Record taxes as **Fee or tax**. Corrections retain and preview the income classification, security and ex-date. Interest remains in exclusion scenarios; dividends for excluded stocks are removed. Unclassified/other income blocks scenarios because its stock attribution is unknown.
+Choose **Dividend · gross**, **Interest**, or **Other investment income** under Activity → Record cash. Dividends require a security already present in the account records and an ex-dividend date no later than the effective cash payment date. Record taxes as **Fee or tax**. Corrections retain and preview the income classification, security and ex-date. Interest and other income can optionally be linked to a security, for example stock-lending payments. Linked payments for excluded stocks are removed; account-level interest remains. Unclassified or unlinked other income blocks scenarios because its stock attribution is unknown.
 
 ## References
 

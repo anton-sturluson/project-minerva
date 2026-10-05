@@ -62,8 +62,11 @@ class CashInput(EntryInput):
                 raise ValueError("Dividends require a security and ex-dividend date")
             if self.accrual_date > self.effective_date:
                 raise ValueError("Ex-dividend date must be on or before the cash payment date")
+        elif self.income_kind in {IncomeKind.INTEREST, IncomeKind.OTHER}:
+            if self.accrual_date is not None:
+                raise ValueError("Only dividends use an ex-dividend date")
         elif self.income_security_id is not None or self.accrual_date is not None:
-            raise ValueError("Only dividends use a security and ex-dividend date")
+            raise ValueError("Classify income before linking a security")
         return self
 
 
@@ -268,7 +271,7 @@ def build_cash(account, data, session, actor, body):
             )
         )
         if security is None:
-            raise HTTPException(404, "Dividend security not found")
+            raise HTTPException(404, "Income security not found")
     return LedgerEntry(
         account_id=account.id, created_by=actor.owner_id, request_body=body, **data.model_dump()
     )
