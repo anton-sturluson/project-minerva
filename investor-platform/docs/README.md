@@ -11,6 +11,7 @@
 | [ADR 0006](decisions/0006-dividend-accrual.md) | Dividend attribution, receivables and payment-date cash. |
 | [Operations](operations.md) | Configuration, start/stop, migrations, testing and project layout. |
 | [Portfolio guide](portfolio.md) | Accounts, cash, positions, trade entry, corrections and tracker usage. |
+| [Cash reconciliation](cash-reconciliation.md) | Reviewed dated cash replacement, checkpoint validation and immutable audit. |
 | [Transaction import](transaction-import.md) | Preview and import a testing portfolio; source evidence, exclusions and inferred balances. |
 | [Performance](performance.md) | Portfolio returns, SPY/QQQ benchmarks, valuation conventions and data limits. |
 | [Decision hit rate](hit-rate.md) | Matched-capital comparisons, decision grouping and exclusions. |

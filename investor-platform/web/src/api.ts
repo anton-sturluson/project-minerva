@@ -35,6 +35,7 @@ export type Account = {
   base_currency: string;
   created_at: string;
   reconstruction?: {
+    funding_status?: "recorded" | "inferred" | "reconciled";
     warning: string;
     source_sha256: string;
     imported_trades: number;

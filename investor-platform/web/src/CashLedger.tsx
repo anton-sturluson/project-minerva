@@ -117,7 +117,8 @@ export function CashLedger({
           <div hidden={page !== "activity"}>
             <div className="balance-line">
               <span>
-                {account.reconstruction
+                {account.reconstruction &&
+                account.reconstruction.funding_status !== "reconciled"
                   ? "Reconstructed balancing cash"
                   : "Cash balance"}
               </span>

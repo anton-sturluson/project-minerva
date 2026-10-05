@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 investor-api = "investor_platform.app:main"
 investor-import = "investor_platform.import_transactions:main"
+investor-reconcile-cash = "investor_platform.reconcile_cash:main"
 
 [build-system]
 requires = ["hatchling"]
