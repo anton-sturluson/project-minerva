@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "./api";
-import { number, percent } from "./format";
-import { exact, type Ledger } from "./records";
+import { number as formatNumber, percent as formatPercent } from "./format";
+import { type Ledger } from "./records";
+
+const number = (value: string | null) => formatNumber(value, 1);
+const percent = (value: string | null) => formatPercent(value, 1);
 type Valuation = {
   end: string;
   provisional: boolean;
@@ -155,17 +158,14 @@ export function Holdings({
                 Cost %
               </th>
               <th scope="col" className="number">
-                Basis
-              </th>
-              <th scope="col" className="number">
-                Unrealized P&amp;L
+                Basis ({ledger.currency})
               </th>
               <th
                 scope="col"
                 className="number"
-                title="Unrealized gain or loss / remaining cost basis"
+                title={`Unrealized gain or loss in ${ledger.currency} and as a percentage of remaining basis`}
               >
-                Gain %
+                Unrealized return ({ledger.currency} / %)
               </th>
             </tr>
           </thead>
@@ -179,7 +179,9 @@ export function Holdings({
                     <small className="loss">Quote unavailable</small>
                   )}
                 </th>
-                <td className="number">{exact(h.quantity, 0)}</td>
+                <td className="number" title={h.quantity}>
+                  {number(h.quantity)}
+                </td>
                 <td
                   className="number"
                   title={
@@ -197,14 +199,9 @@ export function Holdings({
                 <td className="number">{number(h.basis)}</td>
                 <td className={`number ${tone(h.unrealized_pnl)}`}>
                   {signed(h.unrealized_pnl)}
-                </td>
-                <td className={`number ${tone(h.unrealized_pnl)}`}>
-                  {h.unrealized_pnl !== null &&
-                  Number(h.unrealized_pnl) > 0 &&
-                  Number(h.basis) > 0
-                    ? "+"
-                    : ""}
-                  {gainPercent(h.unrealized_pnl, h.basis)}
+                  {h.unrealized_pnl !== null && (
+                    <> ({gainPercent(h.unrealized_pnl, h.basis)})</>
+                  )}
                 </td>
               </tr>
             ))}
@@ -221,7 +218,6 @@ export function Holdings({
               <td className="number cost-weight">
                 {percent(costWeight(cash))}
               </td>
-              <td>—</td>
               <td>—</td>
               <td>—</td>
             </tr>
@@ -247,12 +243,9 @@ export function Holdings({
               </td>
               <td className={`number ${tone(stockGain)}`}>
                 {signed(stockGain)}
-              </td>
-              <td className={`number ${tone(stockGain)}`}>
-                {stockGain !== null && stockGain > 0 && Number(stockBasis) > 0
-                  ? "+"
-                  : ""}
-                {gainPercent(stockGain, stockBasis)}
+                {stockGain !== null && (
+                  <> ({gainPercent(stockGain, stockBasis)})</>
+                )}
               </td>
             </tr>
           </tfoot>

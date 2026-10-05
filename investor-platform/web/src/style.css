@@ -774,6 +774,9 @@ summary:focus-visible {
   background: var(--paper);
   white-space: nowrap;
 }
-.yearly-performance .form-note {
-  margin-top: 8px;
+
+@media (max-width: 650px) {
+  .return-chart .chart-dates text {
+    font-size: 22px;
+  }
 }
