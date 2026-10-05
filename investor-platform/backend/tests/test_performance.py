@@ -166,7 +166,7 @@ def test_zero_balance_breaks_a_continuous_return_period(db_client, portfolio):
 
 
 def test_provisional_comparison_does_not_invent_missing_dividend_income(
-    db_client, portfolio, database
+    db_client, portfolio, database, expire_prices
 ):
     from uuid import UUID
 
@@ -194,9 +194,12 @@ def test_provisional_comparison_does_not_invent_missing_dividend_income(
     assert D(result["value"]) == 1214
     assert ledger(db_client, aid) == before
     # Modeling never relaxes missing-price or corporate-action safeguards.
+    expire_prices()
     data["AAA"].splits.add(DAYS[1])
     assert report(db_client, aid).status_code == 422
+    expire_prices()
     data["AAA"].splits.clear()
+    expire_prices()
     del data["AAA"].close[DAYS[1]]
     assert report(db_client, aid).status_code == 422
 
@@ -369,7 +372,7 @@ def test_cagr_annualizes_linked_returns_instead_of_cash_growth(db_client, portfo
     ],
 )
 def test_foreign_performance_and_scenario_use_dated_fx(
-    db_client, portfolio, monkeypatch, exchange, suffix, currency, provider
+    db_client, portfolio, monkeypatch, exchange, suffix, currency, provider, expire_prices
 ):
     aid, data = portfolio
     cash(db_client, aid, amount="100", day="2026-01-02")
@@ -397,6 +400,7 @@ def test_foreign_performance_and_scenario_use_dated_fx(
     assert float(result["return"]) == pytest.approx(1348 / 1100 - 1)
     assert D(result["scenario"]["value"]) == 1310
     assert ledger(db_client, aid) == before
+    expire_prices()
     del fx.close[DAYS[1]]
     missing = report(db_client, aid)
     assert missing.status_code == 422 and "Missing close" in missing.json()["detail"]
@@ -434,7 +438,7 @@ def test_foreign_hit_rate_requires_actual_trade_sessions_not_holiday_carries(
 
 
 def test_recorded_baseline_needs_no_closed_history_but_keeps_cash_and_current_safeguards(
-    db_client, portfolio, monkeypatch
+    db_client, portfolio, monkeypatch, expire_prices
 ):
     aid, data = portfolio
     trade(db_client, aid, "opening_position", "1", ticker="OLD", exchange="NYSE", cost_basis="10")
@@ -467,8 +471,10 @@ def test_recorded_baseline_needs_no_closed_history_but_keeps_cash_and_current_sa
     assert D(scenario_result["scenario"]["value"]) == 1250
     assert D(scenario_result["scenario"]["return"]) == 0
     assert ledger(db_client, aid) == before
+    expire_prices()
     data["AAA"].splits.add(DAYS[2])
     assert db_client.post(url, json=period).status_code == 422
+    expire_prices()
     data["AAA"].splits.clear()
     del data["AAA"].close[DAYS[2]]
     assert db_client.post(url, json=period).status_code == 422

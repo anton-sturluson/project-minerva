@@ -16,6 +16,8 @@ def remote_env(monkeypatch, tmp_path):
     monkeypatch.setenv("TAILSCALE_USER_LOGIN", LOGIN)
     (tmp_path / "index.html").write_text("<h1>Private portfolio</h1>")
     (tmp_path / "asset.js").write_text("// private application asset")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-12345678.js").write_text("// immutable build asset")
     return tmp_path
 
 
@@ -28,6 +30,7 @@ def remote_client(remote_env, peer="127.0.0.1"):
     [
         ("/", None),
         ("/asset.js", None),
+        ("/assets/index-12345678.js", None),
         ("/api/accounts", None),
         ("/docs", None),
         ("/api/accounts", "someone-else@example.com"),
@@ -45,6 +48,12 @@ def test_allowed_identity_serves_ui_and_api(remote_env):
     with remote_client(remote_env) as client:
         client.headers["Tailscale-User-Login"] = LOGIN
         assert "Private portfolio" in client.get("/").text
+        assert client.get("/").headers["cache-control"] == "no-store"
+        assert client.get("/api/health").headers["cache-control"] == "no-store"
+        assert client.get("/assets/index-12345678.js").headers["cache-control"] == (
+            "private, max-age=31536000, immutable"
+        )
+        assert client.get("/assets/missing-12345678.js").headers["cache-control"] == "no-store"
         assert client.get("/asset.js").status_code == 200
         assert client.get("/api/health").json()["status"] == "ok"
         assert client.post("/api/accounts", json={}).status_code == 403

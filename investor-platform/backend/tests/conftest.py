@@ -41,3 +41,21 @@ def db_client(database):
             yield client
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def expire_prices(database):
+    """Advance cached inputs past expiry before simulating a changed provider response."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from investor_platform.models import MarketCache
+
+    def expire():
+        with database.begin() as connection:
+            connection.execute(
+                update(MarketCache).values(fetched_at=datetime.now(UTC) - timedelta(days=2))
+            )
+
+    return expire

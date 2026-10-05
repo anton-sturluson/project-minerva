@@ -106,7 +106,7 @@ def test_fx_uses_same_date_reciprocal_without_filling_missing_days():
         )
 
 
-def test_yahoo_failure_falls_back_only_for_the_required_holding_window(monkeypatch):
+def test_yahoo_failure_falls_back_only_for_the_required_holding_window(database, monkeypatch):
     monkeypatch.setenv("TIINGO_API_KEY", "synthetic-token")
 
     def yahoo(symbol, first, last):
@@ -127,7 +127,7 @@ def test_yahoo_failure_falls_back_only_for_the_required_holding_window(monkeypat
         [SimpleNamespace(ticker="AAA", exchange="NYSE", currency="USD")],
         START,
         END,
-        engine=object(),
+        engine=database,
         workspace_id=LOCAL_WORKSPACE,
         windows={"AAA": (START, START)},
     )

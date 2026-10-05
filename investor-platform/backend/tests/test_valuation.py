@@ -70,7 +70,7 @@ def test_partial_quote_failure_retains_other_values_without_partial_weights(
     ],
 )
 def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
-    db_client, portfolio, monkeypatch, exchange, suffix, currency, provider
+    db_client, portfolio, monkeypatch, exchange, suffix, currency, provider, expire_prices
 ):
     from test_ledger import ledger
 
@@ -102,13 +102,14 @@ def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
     assert D(result["holdings"][1]["close"]) == 7
     assert D(result["holdings"][1]["unrealized_pnl"]) == 4
     assert ledger(db_client, aid) == before
+    expire_prices()
     gap = True
     result = db_client.get(f"/api/accounts/{aid}/valuation").json()
     assert result["value"] is None and result["holdings"][1]["price_error"]
 
 
 def test_hypothetical_closes_finish_whole_episodes_and_leave_records_unchanged(
-    db_client, portfolio, monkeypatch
+    db_client, portfolio, monkeypatch, expire_prices
 ):
     from test_ledger import ledger
 
@@ -145,6 +146,7 @@ def test_hypothetical_closes_finish_whole_episodes_and_leave_records_unchanged(
     def unavailable(*args):
         raise OSError("offline")
 
+    expire_prices()
     monkeypatch.setattr(market, "history", unavailable)
     response = db_client.get(url)
     assert response.status_code == 503 and "Latest prices unavailable" in response.json()["detail"]

@@ -1,5 +1,6 @@
 """Small replaceable Yahoo adapter. Only public symbols/dates leave the app."""
 
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +12,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from .domain import ACCOUNTING_PRECISION, Currency
+from .market_cache import cached_payload
 
 MAX_SECURITIES = 128
 HISTORY_WINDOW = timedelta(days=3660)
@@ -106,6 +108,40 @@ def history(
     if not prices:
         raise ValueError("No completed market sessions in this period")
     return History(prices, returns, dividends, set(splits), result["meta"]["exchangeName"])
+
+
+def cached_history(symbol, start, end, *, engine=None, workspace_id=None, **options):
+    if engine is None:
+        return history(symbol, start, end, **options)
+    # Currency and instrument validation must not be bypassed by a cache hit.
+    variant = hashlib.sha256(json.dumps(options, sort_keys=True).encode()).hexdigest()[:12]
+
+    def load(first, last):
+        result = history(symbol, first, last, **options)
+        return {
+            name: {day.isoformat(): str(value) for day, value in getattr(result, name).items()}
+            for name in ("close", "adjusted", "dividends")
+        } | {
+            "splits": sorted(day.isoformat() for day in result.splits),
+            "exchange": result.exchange,
+            "source": result.source,
+        }
+
+    body = cached_payload(engine, workspace_id, "yahoo-v1", f"{symbol}:{variant}", start, end, load)
+    values = {
+        name: {
+            date.fromisoformat(day): Decimal(value)
+            for day, value in body[name].items()
+            if start <= date.fromisoformat(day) <= end
+        }
+        for name in ("close", "adjusted", "dividends")
+    }
+    return History(
+        **values,
+        splits={date.fromisoformat(day) for day in body["splits"]},
+        exchange=body["exchange"],
+        source=body["source"],
+    )
 
 
 EXCHANGES = {
@@ -236,7 +272,9 @@ def security_histories(
                 from .tiingo import fx_history
 
                 return symbol, fx_history(symbol[:-5], first, last, engine, workspace_id)
-            return symbol, history(symbol, first, last, **requests[symbol])
+            return symbol, cached_history(
+                symbol, first, last, engine=engine, workspace_id=workspace_id, **requests[symbol]
+            )
         except (OSError, KeyError, TypeError, IndexError):
             if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol in by_symbol:
                 from .tiingo import stock_history
