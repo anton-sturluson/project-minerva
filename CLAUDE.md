@@ -95,6 +95,17 @@ Each file must include:
 - **`worktrees/`** — Git worktrees live here (see below).
 - **Research co-location**: All research source materials (downloaded filings, scraped articles, fetched transcripts) must be saved inside the report folder they support (e.g., `hard-disk/reports/{REPORT}/research/`), never in a separate top-level directory. Each report should be self-contained.
 
+## Keep the Main Checkout Clean
+
+The top-level checkout is the shared runtime for scheduled jobs, including the morning brief. Keep it on `main`, clean, and up to date with `origin/main`.
+
+- Make all code and tracked-document changes in a separate branch and worktree under `worktrees/`, including edits to these instructions. Do not develop, switch branches, or leave scratch files in the main checkout.
+- Bring reviewed changes into the main checkout only after they are merged into `origin/main`. Fetch and fast-forward only; never create local-only commits on `main` or run an automatic merge/rebase there.
+- Before updating or running a scheduled job, verify that the branch is `main` and `git status --porcelain` is empty. If not, stop and report the unexpected state. Never silently stash, reset, clean, overwrite, or delete another agent's work to pass this check.
+- When cleanup is explicitly authorized, preserve unfinished work in a separate recovery worktree or private archive and verify the saved contents before removing it from the main checkout.
+- Run scheduled jobs from the main checkout with project-local dependencies (`uv run`). Keep reports, data, caches, logs, and temporary files in existing ignored locations such as `hard-disk/`, `data/`, or `.tmp/`; verify they are ignored. Do not hide source edits with new ignore rules.
+- After a change is merged, fast-forward the main checkout and verify that it remains clean. Do not create a separate permanent morning-brief runtime worktree.
+
 ## Git Worktrees
 
 All git worktrees must be created inside the top-level `worktrees/` folder, one subdirectory per worktree (e.g., `worktrees/backtesting/`). Do not create worktrees elsewhere in the repo or outside it. The `worktrees/` directory itself is not checked in.
