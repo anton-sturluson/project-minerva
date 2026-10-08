@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Portfolio } from "./Portfolio";
+import { Research } from "./Research";
 
 type Theme = "system" | "light" | "dark";
 function savedTheme(): Theme {
@@ -101,16 +102,7 @@ export function App() {
         <div hidden={page === "research"}>
           <Portfolio page={page} />
         </div>
-        <div hidden={page !== "research"} className="directory">
-          <section id="research" aria-labelledby="research-heading">
-            <div className="directory-heading">
-              <h2 id="research-heading">
-                <span aria-hidden="true">✳ </span>Research
-              </h2>
-              <span className="planned">Coming soon</span>
-            </div>
-          </section>
-        </div>
+        {page === "research" && <Research />}
       </main>
       <footer className="page-footer">
         <a href={`#${page}`}>Back to top ↑</a>

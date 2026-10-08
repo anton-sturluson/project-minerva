@@ -1,6 +1,6 @@
 # Investor Platform
 
-A local-first portfolio tracker inside Minerva, built with React/TypeScript, FastAPI and PostgreSQL. Track cash and trades, compare returns with SPY/QQQ, and review payoff ratio and decision hit rate. Incomplete imports are labeled provisional. Research notes are planned.
+A local-first portfolio tracker inside Minerva, built with React/TypeScript, FastAPI and PostgreSQL. Track cash and trades, compare returns with SPY/QQQ, and review payoff ratio and decision hit rate. Incomplete imports are labeled provisional. Research includes a sourced manager directory and imported quarterly SEC holdings comparisons.
 
 ## Run locally
 
