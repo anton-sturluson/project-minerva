@@ -195,5 +195,7 @@ def test_real_cli_skips_explicit_unverified_manager(database: Engine) -> None:
     outcome: dict = json.loads(result.stdout)
     assert outcome["manager"] == "unverified" and outcome["status"] == "skipped"
     assert "verified" in outcome["reason"]
+    assert outcome["complete_filings"] == 1
+    assert outcome["blocked_filings"] == 0
     with Session(database) as session:
         assert session.scalar(select(func.count()).select_from(ResearchFiling)) == 1
