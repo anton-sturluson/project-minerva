@@ -1,0 +1,366 @@
+import { expect, test } from "@playwright/test";
+
+function contributor(
+  name: string,
+  slug: string,
+  delta: string,
+  previous = "0.04",
+  current = "0.05",
+) {
+  return {
+    slug,
+    name,
+    kind: "increased",
+    previous_quantity: "100",
+    current_quantity: "120",
+    previous_weight: previous,
+    current_weight: current,
+    weight_change_pp: delta,
+    source_urls: [
+      `https://example.com/${slug}/previous`,
+      `https://example.com/${slug}/current`,
+    ],
+  };
+}
+const activity = {
+  quarter: "2026-06-30",
+  previous_quarter: "2026-03-31",
+  available_quarters: ["2026-06-30", "2026-03-31"],
+  status: "available",
+  reason: null,
+  included_managers: 3,
+  total_managers: 5,
+  excluded_managers: [
+    {
+      slug: "missing",
+      name: "Example Missing Manager",
+      reason: "Previous quarter is missing",
+    },
+    {
+      slug: "empty",
+      name: "Example Empty Manager",
+      reason: "Current reported value is zero",
+    },
+  ],
+  increased: [
+    {
+      cusip: "123456780",
+      issuer: "Example Cloud",
+      security_class: "COM",
+      manager_count: 2,
+      average_weight_change_pp: "0.5",
+      contributors: [
+        contributor("Example Alpha", "alpha", "1"),
+        contributor("Example Beta", "beta", "0", "0.08", "0.08"),
+      ],
+    },
+    {
+      cusip: "123456781",
+      issuer: "Example Software",
+      security_class: "COM",
+      manager_count: 1,
+      average_weight_change_pp: "2",
+      contributors: [
+        {
+          ...contributor("Example Gamma", "gamma", "2", "0", "0.02"),
+          kind: "new",
+          previous_quantity: "0",
+        },
+      ],
+    },
+    {
+      cusip: "123456782",
+      issuer: "Example Tools",
+      security_class: "COM",
+      manager_count: 1,
+      average_weight_change_pp: "1",
+      contributors: [contributor("Example Alpha", "alpha", "1")],
+    },
+  ],
+  decreased: [
+    {
+      cusip: "123456783",
+      issuer: "Example Semiconductors",
+      security_class: "COM",
+      manager_count: 2,
+      average_weight_change_pp: "-3",
+      contributors: [
+        {
+          ...contributor("Example Alpha", "alpha", "-3", "0.05", "0.02"),
+          kind: "decreased",
+          current_quantity: "80",
+        },
+        {
+          ...contributor("Example Beta", "beta", "-3", "0.05", "0.02"),
+          kind: "decreased",
+          current_quantity: "80",
+        },
+      ],
+    },
+    {
+      cusip: "123456784",
+      issuer: "Example Exit",
+      security_class: "COM",
+      manager_count: 1,
+      average_weight_change_pp: "-5",
+      contributors: [
+        {
+          ...contributor("Example Gamma", "gamma", "-5", "0.05", "0"),
+          kind: "exited",
+          current_quantity: "0",
+        },
+      ],
+    },
+    {
+      cusip: "123456785",
+      issuer: "Example Devices",
+      security_class: "COM",
+      manager_count: 1,
+      average_weight_change_pp: "-1",
+      contributors: [
+        {
+          ...contributor("Example Alpha", "alpha", "-1", "0.05", "0.04"),
+          kind: "decreased",
+          current_quantity: "80",
+        },
+      ],
+    },
+  ],
+};
+
+test("stock activity ranks, contributor sources, coverage and hash navigation", async ({
+  page,
+}) => {
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({ json: activity }),
+  );
+  await page.route("**/api/research/managers", (route) =>
+    route.fulfill({ json: { managers: [] } }),
+  );
+  await page.goto("/#research/activity");
+  await expect(
+    page.getByRole("heading", { name: "Research", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "[ Stock activity ]", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("3 of 5 managers included.")).toBeVisible();
+  await expect(page.getByLabel("Report quarter")).toHaveValue("2026-06-30");
+  const increased = page.getByRole("region", {
+    name: "Most increased",
+    exact: true,
+  });
+  const decreased = page.getByRole("region", {
+    name: "Most decreased",
+    exact: true,
+  });
+  await expect(increased.locator("tbody tr")).toHaveCount(3);
+  await expect(increased.locator("tbody tr").nth(0)).toContainText(
+    "Example Cloud",
+  );
+  await expect(
+    increased.locator("tbody tr").nth(0).getByRole("cell").nth(1),
+  ).toHaveText("2");
+  await expect(
+    increased.locator("tbody tr").nth(0).getByRole("cell").nth(2),
+  ).toHaveText("+0.50 pp");
+  await expect(increased.locator("tbody tr").nth(1)).toContainText(
+    "Example Software",
+  );
+  await expect(increased.locator("tbody tr").nth(2)).toContainText(
+    "Example Tools",
+  );
+  await expect(decreased.locator("tbody tr").nth(0)).toContainText(
+    "Example Semiconductors",
+  );
+  await expect(decreased.locator("tbody tr").nth(1)).toContainText(
+    "Example Exit",
+  );
+  await expect(decreased.locator("tbody tr").nth(2)).toContainText(
+    "Example Devices",
+  );
+  await increased.locator("summary").first().click();
+  const alpha = increased.locator(".activity-contributors li").first();
+  await expect(alpha).toContainText("Example Alpha");
+  await expect(alpha).toContainText("4.00% → 5.00% · +1.00 pp");
+  await expect(alpha).toContainText("Reported shares: 100 → 120");
+  await expect(
+    alpha.getByRole("link", { name: "Filing source 2" }),
+  ).toHaveAttribute("href", "https://example.com/alpha/current");
+  await expect(
+    increased.locator(".activity-contributors li").nth(1),
+  ).toContainText("Example Beta");
+  await decreased.locator("summary").nth(1).click();
+  await expect(
+    decreased.locator(".activity-contributors").nth(1),
+  ).toContainText("Exited · 5.00% → 0.00% · -5.00 pp");
+  await page.getByText("Excluded managers (2)", { exact: true }).click();
+  await expect(page.getByText("Previous quarter is missing")).toBeVisible();
+  await expect(page.getByText("Current reported value is zero")).toBeVisible();
+  await page.getByText("How activity is measured", { exact: true }).click();
+  await expect(
+    page.getByText(/Price changes alone do not count/),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("link", { name: "[ Managers ]", exact: true }).click();
+  await expect(page).toHaveURL(/#research$/);
+  await expect(
+    page.getByRole("heading", { name: "Managers", exact: true }),
+  ).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/#research\/activity$/);
+  await expect(
+    page.getByRole("heading", { name: "Stock activity", exact: true }),
+  ).toBeVisible();
+  await page.goForward();
+  await expect(
+    page.getByRole("heading", { name: "Managers", exact: true }),
+  ).toBeVisible();
+});
+
+test("quarter errors preserve selection and retry recovers empty activity", async ({
+  page,
+}) => {
+  let failPrevious = true;
+  await page.route("**/api/research/activity*", (route) => {
+    if (!route.request().url().includes("quarter=2026-03-31"))
+      return route.fulfill({ json: activity });
+    return failPrevious
+      ? route.fulfill({
+          status: 503,
+          json: { detail: "Example quarter unavailable" },
+        })
+      : route.fulfill({
+          json: {
+            ...activity,
+            quarter: "2026-03-31",
+            previous_quarter: "2025-12-31",
+            increased: [],
+            decreased: [],
+          },
+        });
+  });
+  await page.goto("/#research/activity");
+  await page.getByLabel("Report quarter").selectOption("2026-03-31");
+  await expect(page.getByRole("alert")).toContainText(
+    "Example quarter unavailable",
+  );
+  await expect(page.getByLabel("Report quarter")).toHaveValue("2026-03-31");
+  await expect(
+    page.getByRole("region", { name: "Most increased", exact: true }),
+  ).toHaveCount(0);
+  failPrevious = false;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("2026 Q1 compared with 2025 Q4")).toBeVisible();
+  await expect(page.getByLabel("Report quarter")).toHaveValue("2026-03-31");
+  await expect(
+    page.getByText("No reported quantity changes in this direction."),
+  ).toHaveCount(2);
+});
+
+test("initial failure recovers and unavailable coverage is explicit", async ({
+  page,
+}) => {
+  let failure = true;
+  await page.route("**/api/research/activity*", (route) =>
+    failure
+      ? route.fulfill({
+          status: 503,
+          json: { detail: "Example activity unavailable" },
+        })
+      : route.fulfill({
+          json: {
+            ...activity,
+            quarter: null,
+            previous_quarter: null,
+            available_quarters: [],
+            included_managers: 0,
+            status: "unavailable",
+            reason: "No adjacent quarters loaded",
+            increased: [],
+            decreased: [],
+          },
+        }),
+  );
+  await page.goto("/#research/activity");
+  await expect(page.getByRole("alert")).toContainText(
+    "Example activity unavailable",
+  );
+  failure = false;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(
+    page.getByText("Stock activity unavailable: No adjacent quarters loaded"),
+  ).toBeVisible();
+  await expect(page.getByText("0 of 5 managers included.")).toBeVisible();
+  await expect(page.getByLabel("Report quarter")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Most increased", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("large activity lists show leaders and reset after changing quarter", async ({
+  page,
+}) => {
+  const increased = [
+    ...activity.increased,
+    ...Array.from({ length: 19 }, (_, index) => ({
+      ...activity.increased[2],
+      cusip: String(123456800 + index),
+      issuer: `Example Extra Stock ${index + 1}`,
+    })),
+  ];
+  await page.route("**/api/research/activity*", (route) =>
+    route.fulfill({
+      json: {
+        ...activity,
+        quarter: route.request().url().includes("quarter=2026-03-31")
+          ? "2026-03-31"
+          : "2026-06-30",
+        increased,
+      },
+    }),
+  );
+  await page.goto("/#research/activity");
+  const leaders = page.getByRole("region", {
+    name: "Most increased",
+    exact: true,
+  });
+  await expect(
+    leaders.getByText("Top 20 of 22", { exact: true }),
+  ).toBeVisible();
+  await expect(leaders.locator("tbody tr")).toHaveCount(20);
+  await expect(
+    leaders.getByText("Example Extra Stock 19", { exact: true }),
+  ).toHaveCount(0);
+  await leaders.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(leaders.locator("tbody tr")).toHaveCount(22);
+  await expect(leaders.locator("summary").last()).toContainText(
+    "Example Extra Stock 19",
+  );
+  await leaders.locator("summary").last().click();
+  await expect(
+    leaders
+      .locator("tbody tr")
+      .last()
+      .getByRole("link", { name: "Filing source 2" }),
+  ).toHaveAttribute("href", "https://example.com/alpha/current");
+  await leaders
+    .getByRole("button", { name: "Show top 20", exact: true })
+    .click();
+  await expect(leaders.locator("tbody tr")).toHaveCount(20);
+  await leaders.getByRole("button", { name: "Show all", exact: true }).click();
+  await page.getByLabel("Report quarter").selectOption("2026-03-31");
+  await expect(leaders.locator("tbody tr")).toHaveCount(20);
+  await expect(
+    leaders.getByRole("button", { name: "Show all", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Most decreased", exact: true })
+      .getByText("3 stocks", { exact: true }),
+  ).toBeVisible();
+});

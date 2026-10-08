@@ -820,6 +820,7 @@ summary:focus-visible {
 }
 
 .research {
+  scroll-margin-top: calc(var(--header-height) + 16px);
   border-top: 3px double var(--rule);
   margin-top: 20px;
   padding-top: 16px;
@@ -899,6 +900,45 @@ summary:focus-visible {
 }
 .research-change-group {
   margin-top: 20px;
+}
+.research-navigation {
+  margin-bottom: 18px;
+}
+.research-navigation a[aria-current="page"] {
+  color: var(--plum);
+  font-weight: bold;
+}
+.stock-activity-table {
+  min-width: 470px;
+}
+.stock-activity-table td:first-child {
+  width: 55%;
+  min-width: 220px;
+  white-space: normal;
+}
+.stock-activity-table summary {
+  cursor: pointer;
+}
+.stock-activity-table summary small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+}
+.activity-contributors {
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+.activity-contributors li {
+  margin-bottom: 14px;
+}
+.activity-contributors p {
+  margin: 4px 0;
+}
+.activity-contributors .research-links {
+  margin-top: 6px;
+}
+.activity-coverage {
+  margin: 14px 0;
 }
 .research-change-group h4 {
   margin: 0 0 8px;
