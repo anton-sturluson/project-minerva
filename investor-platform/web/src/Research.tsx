@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "./api";
+import { StockActivity } from "./StockActivity";
+import { percent, quarterLabel } from "./format";
 
 type Coverage = {
   quarters: number;
@@ -57,9 +59,6 @@ const changeLabels: Record<string, string> = {
   decreased: "Reduced",
   unchanged: "Unchanged",
 };
-function quarterLabel(day: string) {
-  return `${day.slice(0, 4)} Q${Math.ceil(Number(day.slice(5, 7)) / 3)}`;
-}
 function quantity(value: string) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
@@ -72,9 +71,7 @@ function dollars(value: string, signed = false) {
   });
 }
 function weight(value: string | null) {
-  return value === null
-    ? "Unavailable"
-    : `${(Number(value) * 100).toFixed(2)}%`;
+  return value === null ? "Unavailable" : percent(value);
 }
 function SourceLink({
   url,
@@ -174,7 +171,36 @@ function QuarterlyChanges({ changes }: { changes: Change[] }) {
   );
 }
 
-export function Research() {
+export function Research({ activity }: { activity: boolean }) {
+  return (
+    <section
+      id={activity ? "research/activity" : "research"}
+      aria-labelledby="research-heading"
+      className="research"
+    >
+      <h2 id="research-heading">
+        <span aria-hidden="true">✳ </span>Research
+      </h2>
+      <nav
+        className="research-links research-navigation"
+        aria-label="Research navigation"
+      >
+        <a href="#research" aria-current={!activity ? "page" : undefined}>
+          [ Managers ]
+        </a>
+        <a
+          href="#research/activity"
+          aria-current={activity ? "page" : undefined}
+        >
+          [ Stock activity ]
+        </a>
+      </nav>
+      {activity ? <StockActivity /> : <ManagersDirectory />}
+    </section>
+  );
+}
+
+function ManagersDirectory() {
   const [managers, setManagers] = useState<Manager[] | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -213,15 +239,9 @@ export function Research() {
         .includes(search.toLowerCase()),
   );
   return (
-    <section
-      id="research"
-      aria-labelledby="research-heading"
-      className="research"
-    >
+    <section aria-labelledby="managers-heading">
       <div className="directory-heading">
-        <h2 id="research-heading">
-          <span aria-hidden="true">✳ </span>Research
-        </h2>
+        <h3 id="managers-heading">Managers</h3>
         {managers && <span>{managers.length} managers</span>}
       </div>
       <p>Ideas from institutional holdings and investor letters.</p>

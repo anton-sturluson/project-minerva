@@ -39,6 +39,16 @@ The manager detail groups positions by reported quantity: Increased includes new
 
 Current 13F weight is current holding value divided by all disclosed current holdings value, including disclosed options and principal positions. It describes the reported 13F portfolio, not the manager's full fund. An exit has zero current weight when the current portfolio has a positive value; a zero-value portfolio has unavailable weights. Before/after fractions and their signed difference share one comparison calculation.
 
+## Stock activity
+
+Research has two subsections: Managers and Stock activity (`#research/activity`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included managers and lists exclusions for missing, blocked, or zero-value snapshots.
+
+The two rankings show shares increased (including new positions) and shares decreased (including exits). A manager contributes once per CUSIP and direction. Rankings exclude options and principal positions; share-type disclosures can also include funds. Unchanged quantities do not contribute, even when their value or weight changes. Share changes can reflect splits or reporting changes as well as trades.
+
+Each ranking sorts by contributing manager count descending, then the signed average weight change: descending for increases, ascending for decreases, then CUSIP. The average gives each contributing manager equal weight and uses only the managers in that direction, not every covered manager. Weight change is current 13F weight minus previous 13F weight, shown in percentage points: 2% to 3% is +1 pp. Both fractions use all disclosed 13F value, including disclosed options and principal positions. An increased quantity can have a negative weight change; the signed result is retained.
+
+The view shows the top 20 stocks in each direction first, with an option to show all results. Expand a stock to see its managers, before/after quantities and weights, and filing links. The same stock can appear in both rankings when managers disagree. Activity is calculated from stored snapshots through the shared comparison calculation; no duplicate activity table, opaque score, or network fetch is added.
+
 ## References
 
 ### SEC
