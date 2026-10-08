@@ -12,6 +12,8 @@ uv run --frozen alembic upgrade head
 uv run --frozen investor-research-sync --catalog-only
 ```
 
+`investor-research-sync` fetches SEC filings, parses the 13F XML, and saves normalized holdings and source evidence in PostgreSQL. `--start-year` includes report quarters on or after January 1 of that year; it defaults to the current year minus ten. Run `uv run --frozen investor-research-sync --help` for options.
+
 SEC collection requires `EDGAR_IDENTITY` set to a descriptive name and valid contact email. Keep the real contact in local environment configuration, never in committed files. Then load one manager or all catalog managers:
 
 ```sh
@@ -20,6 +22,8 @@ uv run --frozen investor-research-sync --start-year 2016
 # Revalidate previously blocked filings after a parser fix or source review.
 uv run --frozen investor-research-sync --manager whale-rock --start-year 2016 --retry-blocked
 ```
+
+Each manager result reports `complete_filings` and `blocked_filings` across the requested report-period scope, including previously saved and newly imported filings. Original filings and amendments count separately; these counts do not measure usable quarter comparisons. `imported_filings` remains the number imported or retried in this run. Skipped or failed manager results also show the stored counts.
 
 Imports are explicit, paced, and idempotent by manager and accession. An explicit blocked-filing retry retains the prior import evidence and replaces normalized rows atomically; complete filings stay unchanged. The API does not fetch SEC data during page requests. Registry loading updates public metadata without deleting filing records. Holdings are independent of portfolio transactions. SEC XML responses are parsed in memory; normalized evidence is stored in PostgreSQL, with source links retained. No downloaded XML files are saved.
 
