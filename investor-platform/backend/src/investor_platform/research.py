@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .db import Actor, get_actor, get_session
 from .domain import ACCOUNTING_PRECISION
 from .models import ResearchFiling, ResearchHolding, ResearchManager
+from .research_eligibility import manager_eligibility
 
 router: APIRouter = APIRouter(prefix="/api/research")
 DB = Annotated[Session, Depends(get_session)]
@@ -140,6 +141,7 @@ def manager_view(session: Session, manager: ResearchManager, *, detail: bool = F
         **manager.profile,
         "slug": manager.slug,
         "cik": manager.cik,
+        "eligibility": manager_eligibility(manager.profile, date.today()),
         "coverage": {
             "quarters": len(usable),
             "first_quarter": usable[0].isoformat() if usable else None,
