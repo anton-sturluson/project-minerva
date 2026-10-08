@@ -19,6 +19,7 @@ from .research import (
     previous_quarter,
     quarter_end,
 )
+from .research_eligibility import Eligibility, manager_eligibility
 
 router: APIRouter = APIRouter(prefix="/api/research")
 
@@ -95,12 +96,13 @@ def activity_for_quarter(
         for manager in managers:
             name: str = manager.profile["name"]
             manager_periods: set[date] = periods.get(manager.id, set())
-            reason: str | None = None
+            eligibility: Eligibility = manager_eligibility(manager.profile, date.today())
+            reason: str | None = eligibility["reason"]
             comparison: dict = {}
             changes: list[PositionChange] = []
-            if quarter not in manager_periods or prior not in manager_periods:
+            if reason is None and (quarter not in manager_periods or prior not in manager_periods):
                 reason = "Missing selected or previous adjacent quarter"
-            else:
+            elif reason is None:
                 comparison = manager_comparison(session, manager, quarter)
                 changes = comparison["changes"]
                 reason = comparison["reason"]
@@ -160,7 +162,9 @@ def activity_for_quarter(
         "previous_quarter": prior.isoformat(),
         "available_quarters": [period.isoformat() for period in available_quarters],
         "status": "available" if included else "unavailable",
-        "reason": None if included else "No managers have a usable adjacent-quarter comparison",
+        "reason": None
+        if included
+        else "No eligible managers have a usable adjacent-quarter comparison",
         "included_managers": included,
         "total_managers": len(managers),
         "excluded_managers": excluded,
@@ -192,10 +196,16 @@ def get_activity(session: DB, actor: Identity, quarter: date | None = None) -> d
     ):
         if quarter_end(period):
             periods.setdefault(manager_id, set()).add(period)
+    eligible_ids: set[UUID] = {
+        manager.id
+        for manager in managers
+        if manager_eligibility(manager.profile, date.today())["status"] == "eligible"
+    }
     available: list[date] = sorted(
         {
             period
-            for manager_periods in periods.values()
+            for manager_id, manager_periods in periods.items()
+            if manager_id in eligible_ids
             for period in manager_periods
             if previous_quarter(period) in manager_periods
         },
@@ -217,14 +227,15 @@ def get_activity(session: DB, actor: Identity, quarter: date | None = None) -> d
         "previous_quarter": None,
         "available_quarters": [],
         "status": "unavailable",
-        "reason": "No adjacent-quarter filing pairs have been imported",
+        "reason": "No eligible managers have an adjacent-quarter filing pair",
         "included_managers": 0,
         "total_managers": len(managers),
         "excluded_managers": [
             {
                 "slug": manager.slug,
                 "name": manager.profile["name"],
-                "reason": "No adjacent-quarter filing pair has been imported",
+                "reason": manager_eligibility(manager.profile, date.today())["reason"]
+                or "No adjacent-quarter filing pair has been imported",
             }
             for manager in managers
         ],

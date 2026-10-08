@@ -35,6 +35,10 @@ def registry(database: Engine, tmp_path: Path) -> UUID:
                     "letters_url": None,
                     "focus": "Technology",
                     "source_urls": ["https://example.com"],
+                    "aum_usd": "100000000",
+                    "aum_as_of": "2026-01-01",
+                    "aum_source_url": "https://example.com/aum",
+                    "aum_measurement": "firm_aum",
                 }
             ]
         )

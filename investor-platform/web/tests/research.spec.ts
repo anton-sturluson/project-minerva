@@ -11,6 +11,15 @@ const manager = {
   history_start_year: 2010,
   history_source_url: "https://example.com/history",
   source_urls: ["https://example.com/"],
+  aum_usd: "100000000",
+  aum_as_of: "2026-01-01",
+  aum_source_url: "https://example.com/aum",
+  aum_measurement: "firm_aum",
+  eligibility: {
+    status: "eligible",
+    minimum_aum_usd: "50000000",
+    reason: null,
+  },
   coverage: {
     quarters: 2,
     first_quarter: "2026-03-31",
@@ -269,4 +278,83 @@ test("research service failure can recover and empty registry is clear", async (
       "No managers loaded yet. Load the research catalog to start.",
     ),
   ).toBeVisible();
+});
+
+test("verified AUM is the default and candidates retain explicit status and history", async ({
+  page,
+}) => {
+  const below = {
+    ...manager,
+    slug: "small-manager",
+    name: "Example Small Partnership",
+    aum_usd: "49000000",
+    eligibility: {
+      status: "below_minimum",
+      minimum_aum_usd: "50000000",
+      reason: "Reported AUM is below the $50,000,000 minimum",
+    },
+  };
+  const unknown = {
+    ...manager,
+    slug: "unknown-manager",
+    name: "Example Unverified Fund",
+    aum_usd: null,
+    aum_as_of: null,
+    aum_source_url: null,
+    aum_measurement: null,
+    eligibility: {
+      status: "unverified",
+      minimum_aum_usd: "50000000",
+      reason:
+        "Official AUM amount, measurement, date and source must be verified",
+    },
+  };
+  await page.route("**/api/research/managers", (route) =>
+    route.fulfill({ json: { managers: [manager, below, unknown] } }),
+  );
+  await page.route("**/api/research/managers/unknown-manager", (route) =>
+    route.fulfill({
+      json: {
+        ...unknown,
+        filings: [
+          {
+            quarter: "2026-06-30",
+            filed_date: "2026-08-14",
+            source_url: "https://example.com/filing",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(
+    "**/api/research/managers/unknown-manager/changes?*",
+    (route) => route.fulfill({ json: comparison }),
+  );
+  await page.goto("/#research");
+  await expect(page.getByRole("button", { name: manager.name })).toBeVisible();
+  await expect(page.getByRole("button", { name: below.name })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: unknown.name })).toHaveCount(0);
+  await expect(
+    page.getByText("Minimum verified AUM: $50,000,000."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "$100,000,000 · source date 2026-01-01" }),
+  ).toHaveAttribute("href", "https://example.com/aum");
+  await page.getByLabel("Show unverified or below-minimum managers").check();
+  await expect(page.getByRole("button", { name: below.name })).toBeVisible();
+  await expect(page.getByRole("button", { name: unknown.name })).toBeVisible();
+  await expect(page.getByText(/Reported AUM is below the/)).toBeVisible();
+  await expect(page.getByText(/AUM unverified/)).toBeVisible();
+  await page.getByRole("button", { name: unknown.name }).click();
+  await expect(
+    page.getByLabel("Manager research").getByText(/AUM unverified/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Increased positions", exact: true }),
+  ).toContainText("Example New Cloud");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });

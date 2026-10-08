@@ -1,6 +1,6 @@
 # Research manager directory
 
-The Research view reads a PostgreSQL manager registry with official websites, public letter or commentary sources, and SEC filing links. The reviewed [catalog](../backend/src/investor_platform/research_managers.json) includes established technology and growth investors plus clearly identified history candidates. See [source verification](research-sources.md).
+The Research view reads a PostgreSQL manager registry with official websites, public letter or commentary sources, and SEC filing links. The reviewed [catalog](../backend/src/investor_platform/research_managers.json) includes established technology, growth, and value investors plus clearly identified history candidates. See [source verification](research-sources.md).
 
 ## Load the registry and holdings
 
@@ -22,6 +22,12 @@ uv run --frozen investor-research-sync --manager whale-rock --start-year 2016 --
 ```
 
 Imports are explicit, paced, and idempotent by manager and accession. An explicit blocked-filing retry retains the prior import evidence and replaces normalized rows atomically; complete filings stay unchanged. The API does not fetch SEC data during page requests. Registry loading updates public metadata without deleting filing records. Holdings are independent of portfolio transactions. SEC XML responses are parsed in memory; normalized evidence is stored in PostgreSQL, with source links retained. No downloaded XML files are saved.
+
+## AUM minimum
+
+Tracking requires sourced firm or regulatory AUM of at least $50 million, inclusive. A verified lower bound also qualifies when it meets the minimum. Each record retains the public source and disclosure date; for Form ADV this is the filing date, not a separate valuation date. The value of disclosed 13F holdings is not used as AUM.
+
+The directory shows eligible managers by default. Unverified and below-minimum records remain available through the candidate filter, and their saved history is retained. They are excluded from new SEC collection and activity rankings, including explicit manager imports. Catalog-only loading still updates all records. AUM evidence is reviewed metadata; page requests do not fetch or refresh it.
 
 ## Interpret coverage and changes
 
