@@ -34,10 +34,13 @@ type Change = {
   put_call: string;
   share_type: string;
   kind: string;
+  category: "increased" | "decreased" | "unchanged";
   previous_quantity: string;
   current_quantity: string;
   quantity_change: string;
-  value_usd: string;
+  current_value_usd: string;
+  value_change_usd: string;
+  current_weight: string | null;
 };
 type Comparison = {
   quarter: string;
@@ -60,6 +63,19 @@ function quarterLabel(day: string) {
 function quantity(value: string) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
+function dollars(value: string, signed = false) {
+  return Number(value).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+    signDisplay: signed ? "exceptZero" : "auto",
+  });
+}
+function weight(value: string | null) {
+  return value === null
+    ? "Unavailable"
+    : `${(Number(value) * 100).toFixed(2)}%`;
+}
 function SourceLink({
   url,
   children,
@@ -71,6 +87,90 @@ function SourceLink({
     <a href={url} target="_blank" rel="noreferrer">
       {children}
     </a>
+  );
+}
+
+function QuarterlyChanges({ changes }: { changes: Change[] }) {
+  const groups = ["increased", "decreased", "unchanged"] as const;
+  return (
+    <section aria-label="Quarterly position changes">
+      <p className="form-note">
+        Largest absolute reported value changes first in each section. Value
+        changes include price effects. Weights use the current reported 13F
+        portfolio, not the whole fund.
+      </p>
+      {groups.map((group) => {
+        const rows = changes.filter((change) => change.category === group);
+        const label = group[0].toUpperCase() + group.slice(1);
+        return (
+          <section
+            key={group}
+            className="research-change-group"
+            aria-label={`${label} positions`}
+          >
+            <h4>
+              {label} <small>({rows.length})</small>
+            </h4>
+            {rows.length === 0 ? (
+              <p className="form-note">No {group} positions.</p>
+            ) : (
+              <div className="table-scroll" tabIndex={0}>
+                <table className="research-changes-table">
+                  <thead>
+                    <tr>
+                      <th>Security</th>
+                      <th className="numeric">Value change</th>
+                      <th className="numeric">Holding value</th>
+                      <th className="numeric">13F weight</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((change) => (
+                      <tr
+                        key={[
+                          change.cusip,
+                          change.security_class,
+                          change.put_call,
+                          change.share_type,
+                        ].join("|")}
+                      >
+                        <td>
+                          {change.issuer}
+                          <br />
+                          <small>
+                            {changeLabels[change.kind] ?? change.kind}
+                          </small>
+                          <br />
+                          <small>
+                            {quantity(change.previous_quantity)} →{" "}
+                            {quantity(change.current_quantity)}{" "}
+                            {change.share_type}
+                          </small>
+                          <br />
+                          <small>
+                            {change.security_class} {change.put_call} ·{" "}
+                            {change.cusip}
+                          </small>
+                        </td>
+                        <td className="numeric">
+                          {dollars(change.value_change_usd, true)}
+                        </td>
+                        <td className="numeric">
+                          {dollars(change.current_value_usd)}
+                        </td>
+                        <td className="numeric">
+                          {weight(change.current_weight)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </section>
   );
 }
 
@@ -331,53 +431,7 @@ function ManagerDetail({ slug }: { slug: string }) {
                   {comparison.changes.length === 0 ? (
                     <p>No disclosed positions in these quarters.</p>
                   ) : (
-                    <div
-                      className="table-scroll"
-                      tabIndex={0}
-                      role="region"
-                      aria-label="Quarterly position changes"
-                    >
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Security</th>
-                            <th>Change</th>
-                            <th className="numeric">Previous quantity</th>
-                            <th className="numeric">Reported quantity</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {comparison.changes.map((change) => (
-                            <tr
-                              key={[
-                                change.cusip,
-                                change.security_class,
-                                change.put_call,
-                                change.share_type,
-                              ].join("|")}
-                            >
-                              <td>
-                                {change.issuer}
-                                <br />
-                                <small>
-                                  {change.security_class} {change.put_call} ·{" "}
-                                  {change.cusip} · {change.share_type}
-                                </small>
-                              </td>
-                              <td>
-                                {changeLabels[change.kind] ?? change.kind}
-                              </td>
-                              <td className="numeric">
-                                {quantity(change.previous_quantity)}
-                              </td>
-                              <td className="numeric">
-                                {quantity(change.current_quantity)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <QuarterlyChanges changes={comparison.changes} />
                   )}
                 </>
               )}
