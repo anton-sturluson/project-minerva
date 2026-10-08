@@ -11,9 +11,10 @@ from typing import TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+from uuid import UUID
 from xml.etree import ElementTree as ET
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .db import LOCAL_WORKSPACE, make_engine
@@ -375,17 +376,45 @@ def sync_manager(
     return imported
 
 
+def filing_counts(session: Session, manager_id: UUID, start_year: int) -> dict[str, int]:
+    """Count saved original and amended filings in the requested report-period scope."""
+    complete: int
+    blocked: int
+    complete, blocked = session.execute(
+        select(
+            func.count().filter(ResearchFiling.status == "complete"),
+            func.count().filter(ResearchFiling.status == "blocked"),
+        ).where(
+            ResearchFiling.manager_id == manager_id,
+            ResearchFiling.report_period >= date(start_year, 1, 1),
+            ResearchFiling.form.in_(["13F-HR", "13F-HR/A"]),
+        )
+    ).one()
+    return {"complete_filings": complete, "blocked_filings": blocked}
+
+
 def main() -> None:
     """Seed reviewed metadata or explicitly collect official SEC history."""
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--catalog-only", action="store_true")
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description="Fetch and parse SEC 13F filings, then persist holdings and source evidence."
+    )
+    parser.add_argument(
+        "--catalog-only",
+        action="store_true",
+        help="Load reviewed manager metadata only; do not fetch SEC filings",
+    )
     parser.add_argument(
         "--retry-blocked",
         action="store_true",
         help="Re-fetch blocked filings while preserving prior import evidence",
     )
     parser.add_argument("--manager", help="Registry slug; omitted means every seeded manager")
-    parser.add_argument("--start-year", type=int, default=date.today().year - 10)
+    parser.add_argument(
+        "--start-year",
+        type=int,
+        default=date.today().year - 10,
+        help="Include report quarters from January 1 of this year (default: %(default)s)",
+    )
     args: argparse.Namespace = parser.parse_args()
     if not 1999 <= args.start_year <= date.today().year:
         parser.error("--start-year must be between 1999 and the current year")
@@ -413,6 +442,7 @@ def main() -> None:
                             "manager": manager.slug,
                             "status": "skipped",
                             "reason": eligibility["reason"],
+                            **filing_counts(session, manager.id, args.start_year),
                         }
                     ),
                     flush=True,
@@ -428,7 +458,14 @@ def main() -> None:
                     client, session, manager, args.start_year, retry_blocked=args.retry_blocked
                 )
                 print(
-                    json.dumps({"manager": manager.slug, "imported_filings": imported}), flush=True
+                    json.dumps(
+                        {
+                            "manager": manager.slug,
+                            "imported_filings": imported,
+                            **filing_counts(session, manager.id, args.start_year),
+                        }
+                    ),
+                    flush=True,
                 )
             except (HTTPError, URLError, ValueError, ET.ParseError) as error:
                 session.rollback()
@@ -439,7 +476,14 @@ def main() -> None:
                     else "SEC history import failed; retry or review the source filing"
                 )
                 print(
-                    json.dumps({"manager": manager.slug, "status": "failed", "reason": reason}),
+                    json.dumps(
+                        {
+                            "manager": manager.slug,
+                            "status": "failed",
+                            "reason": reason,
+                            **filing_counts(session, manager.id, args.start_year),
+                        }
+                    ),
                     flush=True,
                 )
         if failed:
