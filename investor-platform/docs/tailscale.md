@@ -41,6 +41,10 @@ Ctrl+C stops the app without deleting records. To remove only this app's network
 "$TS" serve --https=8444 off
 ```
 
+## Separate development preview
+
+Port 8445 is reserved for an isolated development preview while the main app remains on 8444. Configure its exact `TAILSCALE_ORIGIN` with port 8445 and the same allowed owner, then run the built app on loopback port 8012 with an explicitly selected testing database. Add only that listener with `tailscale serve --bg --https=8445 http://127.0.0.1:8012`. Do not replace the main listener. The normal runner still starts the main app on 8011/8444. Both ports enforce the configured authority, origin, and identity checks.
+
 ## Access boundary and troubleshooting
 
 Tailscale Serve strips caller-supplied identity headers and inserts the authenticated user's identity. The app accepts exactly one configured `Tailscale-User-Login`, the exact HTTPS authority and origin, and a loopback socket peer. Writes require the matching Origin header. HTML, assets, API routes, and API documentation all share this gate. Uvicorn proxy-header rewriting is disabled. Do not bind the backend to a LAN address, proxy it through another service, or expose local development port 8010/5173. Local processes on the host are trusted. [Identity headers](https://tailscale.com/docs/features/tailscale-serve)

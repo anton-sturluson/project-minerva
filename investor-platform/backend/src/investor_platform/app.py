@@ -23,6 +23,7 @@ from .db import make_engine
 from .hit_rate import router as hit_rate_router
 from .ledger import router as ledger_router
 from .performance import router as performance_router
+from .research import router as research_router
 from .trades import router as trades_router
 from .valuation import router as valuation_router
 
@@ -63,8 +64,10 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     login = os.environ.get("TAILSCALE_USER_LOGIN", "")
     if remote:
         # Pin the whole authority (including the dedicated port), not arbitrary ts.net hosts.
-        if not re.fullmatch(r"https://[a-z0-9-]+\.[a-z0-9-]+\.ts\.net:8444", origin):
-            raise RuntimeError("TAILSCALE_ORIGIN must be https://<machine>.<tailnet>.ts.net:8444")
+        if not re.fullmatch(r"https://[a-z0-9-]+\.[a-z0-9-]+\.ts\.net:844[45]", origin):
+            raise RuntimeError(
+                "TAILSCALE_ORIGIN must be https://<machine>.<tailnet>.ts.net:8444 or :8445"
+            )
         if not login or login.strip() != login or not login.isascii():
             raise RuntimeError("TAILSCALE_USER_LOGIN must name the allowed Tailscale user")
         if not (web_dist / "index.html").is_file():
@@ -83,6 +86,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.include_router(performance_router)
     app.include_router(valuation_router)
     app.include_router(hit_rate_router)
+    app.include_router(research_router)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     @app.exception_handler(SQLAlchemyError)

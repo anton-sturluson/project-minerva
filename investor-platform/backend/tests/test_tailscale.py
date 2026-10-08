@@ -1,5 +1,7 @@
 """Verify the trust boundary between Serve and the loopback app."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -97,6 +99,7 @@ def test_duplicate_identity_is_rejected(remote_env):
         ("TAILSCALE_USER_LOGIN", ""),
         ("TAILSCALE_ORIGIN", ""),
         ("TAILSCALE_ORIGIN", "https://test.tail123.ts.net:443"),
+        ("TAILSCALE_ORIGIN", "https://test.tail123.ts.net:8446"),
         ("TAILSCALE_ORIGIN", "http://test.tail123.ts.net:8444"),
         ("TAILSCALE_ORIGIN", ORIGIN + "/"),
         ("INVESTOR_MODE", "server"),
@@ -134,3 +137,27 @@ def test_daily_worker_starts_only_when_enabled_and_stops_with_api(remote_env, mo
     assert stopped.is_set()
     monkeypatch.setenv("INVESTOR_MODE", "local")
     assert not create_app().state.daily_prices
+
+
+def test_preview_port_preserves_exact_origin_and_identity(
+    remote_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A preview has its own pinned port and keeps the existing identity boundary."""
+    preview_origin: str = "https://test.tail123.ts.net:8445"
+    monkeypatch.setenv("TAILSCALE_ORIGIN", preview_origin)
+    with TestClient(
+        create_app(web_dist=remote_env), base_url=preview_origin, client=("127.0.0.1", 12345)
+    ) as client:
+        assert client.get("/").status_code == 403
+        client.headers["Tailscale-User-Login"] = LOGIN
+        assert client.get("/").status_code == 200
+        assert client.get("/api/health").json()["status"] == "ok"
+        assert client.get("/", headers={"Host": "test.tail123.ts.net:8444"}).status_code == 403
+        assert client.get("/", headers={"Origin": ORIGIN}).status_code == 403
+        assert client.post("/api/accounts", headers={"Origin": ORIGIN}, json={}).status_code == 403
+        assert client.post("/api/accounts", json={}).status_code == 403
+        assert (
+            client.post("/api/accounts", headers={"Origin": preview_origin}, json={}).status_code
+            == 422
+        )

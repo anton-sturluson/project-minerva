@@ -1,0 +1,386 @@
+[
+  {
+    "slug": "tiger-global",
+    "name": "Tiger Global",
+    "investor_names": [
+      "Chase Coleman"
+    ],
+    "cik": "0001167483",
+    "website_url": "https://www.tigerglobal.com/",
+    "letters_url": null,
+    "focus": "Growth; public and private equities",
+    "history_start_year": 2001,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001167483.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001167483.json",
+      "https://www.sec.gov/Archives/edgar/data/1167483/000091957402000507/0000919574-02-000507-index.html",
+      "https://www.tigerglobal.com/"
+    ]
+  },
+  {
+    "slug": "coatue",
+    "name": "Coatue",
+    "investor_names": [
+      "Philippe Laffont",
+      "Thomas Laffont"
+    ],
+    "cik": "0001135730",
+    "website_url": "https://www.coatue.com/",
+    "letters_url": null,
+    "focus": "Technology and innovation",
+    "history_start_year": 2000,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001135730.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001135730.json",
+      "https://www.sec.gov/Archives/edgar/data/1135730/000091957401000351/0000919574-01-000351-index.html",
+      "https://www.coatue.com/"
+    ]
+  },
+  {
+    "slug": "viking-global",
+    "name": "Viking Global",
+    "investor_names": [
+      "Andreas Halvorsen"
+    ],
+    "cik": "0001103804",
+    "website_url": "https://vikingglobal.com/",
+    "letters_url": null,
+    "focus": "Fundamental global equities",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001103804.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001103804.json",
+      "https://www.sec.gov/Archives/edgar/data/1103804/000072867200000032/0000728672-00-000032-index.html",
+      "https://vikingglobal.com/"
+    ]
+  },
+  {
+    "slug": "lone-pine",
+    "name": "Lone Pine Capital",
+    "investor_names": [
+      "Stephen Mandel"
+    ],
+    "cik": "0001061165",
+    "website_url": "https://www.lonepinecapital.com/",
+    "letters_url": null,
+    "focus": "Fundamental global equities",
+    "history_start_year": 2004,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001061165.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001061165.json",
+      "https://www.sec.gov/Archives/edgar/data/1061165/000090266405000495/0000902664-05-000495-index.html",
+      "https://www.lonepinecapital.com/"
+    ]
+  },
+  {
+    "slug": "altimeter",
+    "name": "Altimeter",
+    "investor_names": [
+      "Brad Gerstner"
+    ],
+    "cik": "0001541617",
+    "website_url": "https://www.altimeter.com/",
+    "letters_url": null,
+    "focus": "Technology; public and private markets",
+    "history_start_year": 2011,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001541617.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001541617.json",
+      "https://www.sec.gov/Archives/edgar/data/1541617/000119312512058135/0001193125-12-058135-index.html",
+      "https://www.altimeter.com/"
+    ]
+  },
+  {
+    "slug": "dragoneer",
+    "name": "Dragoneer",
+    "investor_names": [
+      "Marc Stad"
+    ],
+    "cik": "0001602189",
+    "website_url": "https://www.dragoneer.com/",
+    "letters_url": null,
+    "focus": "Growth; public and private markets",
+    "history_start_year": 2014,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001602189.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001602189.json",
+      "https://www.sec.gov/Archives/edgar/data/1602189/000160218915000005/0001602189-15-000005-index.html",
+      "https://www.dragoneer.com/"
+    ]
+  },
+  {
+    "slug": "whale-rock",
+    "name": "Whale Rock",
+    "investor_names": [
+      "Alex Sacerdote"
+    ],
+    "cik": "0001387322",
+    "website_url": "https://www.whalerockcapital.com/",
+    "letters_url": null,
+    "focus": "Technology, media and telecom",
+    "history_start_year": 2006,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001387322.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001387322.json",
+      "https://www.sec.gov/Archives/edgar/data/1387322/000138732207000002/0001387322-07-000002-index.html",
+      "https://www.whalerockcapital.com/"
+    ]
+  },
+  {
+    "slug": "scge",
+    "name": "SCGE Management",
+    "investor_names": [],
+    "cik": "0001537530",
+    "website_url": null,
+    "letters_url": null,
+    "focus": "Global equities; technology research candidate",
+    "history_start_year": 2011,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001537530.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001537530.json",
+      "https://www.sec.gov/Archives/edgar/data/1537530/000090445412000106/0000904454-12-000106-index.html"
+    ],
+    "notes": "No official public website was verified."
+  },
+  {
+    "slug": "sands-capital",
+    "name": "Sands Capital",
+    "investor_names": [
+      "Frank Sands"
+    ],
+    "cik": "0001020066",
+    "website_url": "https://www.sandscapital.com/",
+    "letters_url": null,
+    "focus": "Concentrated growth and innovation",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001020066.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001020066.json",
+      "https://www.sec.gov/Archives/edgar/data/1020066/000102006699000001/0001020066-99-000001-index.html",
+      "https://www.sandscapital.com/"
+    ]
+  },
+  {
+    "slug": "wcm",
+    "name": "WCM Investment Management",
+    "investor_names": [],
+    "cik": "0001061186",
+    "website_url": "https://www.wcminvest.com/",
+    "letters_url": null,
+    "focus": "Global growth and quality",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001061186.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001061186.json",
+      "https://www.sec.gov/Archives/edgar/data/1061186/000106118699000009/0001061186-99-000009-index.html",
+      "https://www.wcminvest.com/"
+    ]
+  },
+  {
+    "slug": "polen",
+    "name": "Polen Capital",
+    "investor_names": [],
+    "cik": "0001034524",
+    "website_url": "https://www.polencapital.com/",
+    "letters_url": null,
+    "focus": "Quality growth",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001034524.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001034524.json",
+      "https://www.sec.gov/Archives/edgar/data/1034524/000103452499000002/0001034524-99-000002-index.html",
+      "https://www.polencapital.com/"
+    ]
+  },
+  {
+    "slug": "fundsmith",
+    "name": "Fundsmith",
+    "investor_names": [
+      "Terry Smith"
+    ],
+    "cik": "0001569205",
+    "website_url": "https://www.fundsmith.co.uk/",
+    "letters_url": "https://www.fundsmith.co.uk/documents",
+    "focus": "Global quality equities",
+    "history_start_year": 2012,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001569205.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001569205.json",
+      "https://www.sec.gov/Archives/edgar/data/1569205/000138713113000373/0001387131-13-000373-index.html",
+      "https://www.fundsmith.co.uk/",
+      "https://www.fundsmith.co.uk/documents"
+    ]
+  },
+  {
+    "slug": "akre",
+    "name": "Akre Capital",
+    "investor_names": [
+      "Chuck Akre"
+    ],
+    "cik": "0001112520",
+    "website_url": "https://www.akrecapital.com/",
+    "letters_url": null,
+    "focus": "Concentrated quality compounders",
+    "history_start_year": 2000,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001112520.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001112520.json",
+      "https://www.sec.gov/Archives/edgar/data/1112520/000111252001500008/0001112520-01-500008-index.html",
+      "https://www.akrecapital.com/"
+    ]
+  },
+  {
+    "slug": "baillie-gifford",
+    "name": "Baillie Gifford",
+    "investor_names": [],
+    "cik": "0001088875",
+    "website_url": "https://www.bailliegifford.com/",
+    "letters_url": null,
+    "focus": "Long-term growth and innovation",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001088875-submissions-001.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001088875.json",
+      "https://data.sec.gov/submissions/CIK0001088875-submissions-001.json",
+      "https://www.sec.gov/Archives/edgar/data/1088875/000108887599000007/0001088875-99-000007-index.html",
+      "https://www.bailliegifford.com/"
+    ]
+  },
+  {
+    "slug": "berkshire",
+    "name": "Berkshire Hathaway",
+    "investor_names": [
+      "Warren Buffett"
+    ],
+    "cik": "0001067983",
+    "website_url": "https://www.berkshirehathaway.com/",
+    "letters_url": "https://www.berkshirehathaway.com/letters/letters.html",
+    "focus": "Value and quality businesses",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001067983-submissions-001.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001067983.json",
+      "https://data.sec.gov/submissions/CIK0001067983-submissions-001.json",
+      "https://www.sec.gov/Archives/edgar/data/1067983/000095014899001187/0000950148-99-001187-index.html",
+      "https://www.berkshirehathaway.com/",
+      "https://www.berkshirehathaway.com/letters/letters.html"
+    ]
+  },
+  {
+    "slug": "pershing-square",
+    "name": "Pershing Square",
+    "investor_names": [
+      "Bill Ackman"
+    ],
+    "cik": "0002026053",
+    "website_url": "https://pershingsquareholdings.com/",
+    "letters_url": "https://assets.pershingsquareholdings.com/2022/10/07155606/2017-Annual-Report-Letter-Only.pdf",
+    "focus": "Concentrated fundamental equities",
+    "history_start_year": 2025,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0002026053.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0002026053.json",
+      "https://www.sec.gov/Archives/edgar/data/2026053/000117266125003512/0001172661-25-003512-index.html",
+      "https://pershingsquareholdings.com/",
+      "https://assets.pershingsquareholdings.com/2022/10/07155606/2017-Annual-Report-Letter-Only.pdf",
+      "https://data.sec.gov/submissions/CIK0001336528.json",
+      "https://www.sec.gov/Archives/edgar/data/1336528/000117266126003777/primary_doc.xml",
+      "https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/0001172661-26-003790-index.html"
+    ],
+    "notes": "Current reporter is Pershing Square Inc. (CIK 2026053); legacy manager CIK 1336528 has holdings reports from 2005 and now files notices. Do not join histories or infer exits across this transition without checking the notices. Letter link is a historical letter from affiliated Pershing Square Holdings, not a complete manager-letter archive."
+  },
+  {
+    "slug": "third-point",
+    "name": "Third Point",
+    "investor_names": [
+      "Daniel Loeb"
+    ],
+    "cik": "0001040273",
+    "website_url": "https://www.thirdpoint.com/",
+    "letters_url": "https://assets.thirdpoint.com/f/160155/x/9bcf34e846/third-point-q1-2025-investor-letter.pdf",
+    "focus": "Event-driven and opportunistic equities",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001040273.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001040273.json",
+      "https://www.sec.gov/Archives/edgar/data/1040273/000104027399000003/0001040273-99-000003-index.html",
+      "https://www.thirdpoint.com/",
+      "https://assets.thirdpoint.com/f/160155/x/9bcf34e846/third-point-q1-2025-investor-letter.pdf"
+    ],
+    "notes": "Letter link is one verified 2025 letter, not an archive; former Third Point Investors website redirects to Malibu Life."
+  },
+  {
+    "slug": "tci",
+    "name": "TCI Fund Management",
+    "investor_names": [
+      "Christopher Hohn"
+    ],
+    "cik": "0001647251",
+    "website_url": "https://www.tcifund.com/",
+    "letters_url": null,
+    "focus": "Concentrated quality and activism",
+    "history_start_year": 2015,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001647251.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001647251.json",
+      "https://www.sec.gov/Archives/edgar/data/1647251/000136259815000006/0001362598-15-000006-index.html",
+      "https://www.tcifund.com/"
+    ]
+  },
+  {
+    "slug": "greenhaven",
+    "name": "Greenhaven Associates",
+    "investor_names": [
+      "Edgar Wachenheim"
+    ],
+    "cik": "0000846222",
+    "website_url": null,
+    "letters_url": null,
+    "focus": "Value equities",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000846222.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000846222.json",
+      "https://www.sec.gov/Archives/edgar/data/846222/000089109299000230/0000891092-99-000230-index.html"
+    ],
+    "notes": "No official public website was verified."
+  },
+  {
+    "slug": "d1-capital",
+    "name": "D1 Capital Partners",
+    "investor_names": [
+      "Daniel Sundheim"
+    ],
+    "cik": "0001747057",
+    "website_url": "https://portal.d1capital.com/",
+    "letters_url": null,
+    "focus": "Public and private markets; shorter-history candidate",
+    "history_start_year": 2018,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001747057.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001747057.json",
+      "https://www.sec.gov/Archives/edgar/data/1747057/000117266119000711/0001172661-19-000711-index.html",
+      "https://portal.d1capital.com/"
+    ],
+    "notes": "Less than ten years of observed 13F reporting periods as of 2026-10-07; keep as a candidate."
+  },
+  {
+    "slug": "gqg",
+    "name": "GQG Partners",
+    "investor_names": [
+      "Rajiv Jain"
+    ],
+    "cik": "0001697233",
+    "website_url": "https://gqg.com/",
+    "letters_url": null,
+    "focus": "Global quality growth; shorter-history candidate",
+    "history_start_year": 2016,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001697233.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001697233.json",
+      "https://www.sec.gov/Archives/edgar/data/1697233/000106299317000926/0001062993-17-000926-index.html",
+      "https://gqg.com/"
+    ],
+    "notes": "Less than ten years of observed 13F reporting periods as of 2026-10-07; keep as a candidate."
+  }
+]
