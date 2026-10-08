@@ -909,7 +909,16 @@ summary:focus-visible {
   font-weight: bold;
 }
 .stock-activity-table {
-  min-width: 470px;
+  min-width: 620px;
+}
+.stock-activity-table th button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--blue);
+  text-decoration: underline;
+  cursor: pointer;
 }
 .stock-activity-table td:first-child {
   width: 55%;
