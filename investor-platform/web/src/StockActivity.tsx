@@ -46,6 +46,13 @@ function percentagePoints(value: string) {
     signDisplay: "exceptZero",
   })} pp`;
 }
+type SortColumn = "issuer" | "manager_count" | "weight" | "weight_change";
+const columns: { key: SortColumn; label: string }[] = [
+  { key: "issuer", label: "Security" },
+  { key: "manager_count", label: "Managers" },
+  { key: "weight", label: "Average 13F weight" },
+  { key: "weight_change", label: "Average weight change" },
+];
 function RankedActivity({
   title,
   rows,
@@ -54,7 +61,51 @@ function RankedActivity({
   rows: ActivityRow[];
 }) {
   const [showAll, setShowAll] = useState(false);
-  const visible = showAll ? rows : rows.slice(0, 20);
+  const [sort, setSort] = useState<{
+    column: SortColumn;
+    direction: "ascending" | "descending";
+  }>({ column: "weight", direction: "descending" });
+  const ordered = rows
+    .map((row) => ({
+      ...row,
+      averageWeight:
+        row.contributors.reduce(
+          (sum, manager) => sum + Number(manager.current_weight),
+          0,
+        ) / row.contributors.length,
+    }))
+    .sort((left, right) => {
+      const comparison =
+        sort.column === "issuer"
+          ? left.issuer.localeCompare(right.issuer, "en", {
+              sensitivity: "base",
+            })
+          : sort.column === "manager_count"
+            ? left.manager_count - right.manager_count
+            : sort.column === "weight"
+              ? left.averageWeight - right.averageWeight
+              : Number(left.average_weight_change_pp) -
+                Number(right.average_weight_change_pp);
+      return (
+        (sort.direction === "descending" ? -comparison : comparison) ||
+        left.cusip.localeCompare(right.cusip) ||
+        left.security_class.localeCompare(right.security_class)
+      );
+    });
+  const visible = showAll ? ordered : ordered.slice(0, 20);
+  function changeSort(column: SortColumn) {
+    setSort({
+      column,
+      direction:
+        sort.column === column
+          ? sort.direction === "descending"
+            ? "ascending"
+            : "descending"
+          : column === "issuer"
+            ? "ascending"
+            : "descending",
+    });
+  }
   return (
     <section className="research-change-group" aria-label={title}>
       <h4>
@@ -72,9 +123,26 @@ function RankedActivity({
           <table className="stock-activity-table">
             <thead>
               <tr>
-                <th>Security · expand for sources</th>
-                <th className="number">Managers</th>
-                <th className="number">Average weight change</th>
+                {columns.map((column) => (
+                  <th
+                    key={column.key}
+                    className={column.key === "issuer" ? undefined : "number"}
+                    aria-sort={
+                      sort.column === column.key ? sort.direction : "none"
+                    }
+                  >
+                    <button onClick={() => changeSort(column.key)}>
+                      {column.label}{" "}
+                      <span aria-hidden="true">
+                        {sort.column === column.key
+                          ? sort.direction === "descending"
+                            ? "↓"
+                            : "↑"
+                          : "↕"}
+                      </span>
+                    </button>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -121,6 +189,9 @@ function RankedActivity({
                     </details>
                   </td>
                   <td className="number">{row.manager_count}</td>
+                  <td className="number">
+                    {percent(String(row.averageWeight))}
+                  </td>
                   <td className="number">
                     {percentagePoints(row.average_weight_change_pp)}
                   </td>
@@ -209,8 +280,8 @@ export function StockActivity() {
             {data.included_managers} of {data.total_managers} managers included.
           </p>
           <p className="form-note">
-            Ranked by managers changing shares, then their average 13F weight
-            change (pp).
+            Default order: average current 13F weight, largest first. Select any
+            column heading to change the order.
           </p>
           <details>
             <summary>How activity is measured</summary>
@@ -222,7 +293,8 @@ export function StockActivity() {
               exclude options and principal positions; fund shares can be
               included. Average weight changes use only contributing managers
               and can have a different sign from share changes. Changes are in
-              percentage points (pp).
+              percentage points (pp). Average 13F weight is the equal-weight
+              mean of current portfolio weights among contributing managers.
             </p>
           </details>
           {data.excluded_managers.length > 0 && (

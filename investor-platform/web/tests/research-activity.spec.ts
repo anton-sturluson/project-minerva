@@ -163,21 +163,24 @@ test("stock activity ranks, contributor sources, coverage and hash navigation", 
   ).toHaveText("2");
   await expect(
     increased.locator("tbody tr").nth(0).getByRole("cell").nth(2),
+  ).toHaveText("6.50%");
+  await expect(
+    increased.locator("tbody tr").nth(0).getByRole("cell").nth(3),
   ).toHaveText("+0.50 pp");
   await expect(increased.locator("tbody tr").nth(1)).toContainText(
-    "Example Software",
-  );
-  await expect(increased.locator("tbody tr").nth(2)).toContainText(
     "Example Tools",
   );
+  await expect(increased.locator("tbody tr").nth(2)).toContainText(
+    "Example Software",
+  );
   await expect(decreased.locator("tbody tr").nth(0)).toContainText(
-    "Example Semiconductors",
+    "Example Devices",
   );
   await expect(decreased.locator("tbody tr").nth(1)).toContainText(
-    "Example Exit",
+    "Example Semiconductors",
   );
   await expect(decreased.locator("tbody tr").nth(2)).toContainText(
-    "Example Devices",
+    "Example Exit",
   );
   await increased.locator("summary").first().click();
   const alpha = increased.locator(".activity-contributors li").first();
@@ -190,9 +193,9 @@ test("stock activity ranks, contributor sources, coverage and hash navigation", 
   await expect(
     increased.locator(".activity-contributors li").nth(1),
   ).toContainText("Example Beta");
-  await decreased.locator("summary").nth(1).click();
+  await decreased.locator("summary").nth(2).click();
   await expect(
-    decreased.locator(".activity-contributors").nth(1),
+    decreased.locator(".activity-contributors").nth(2),
   ).toContainText("Exited · 5.00% → 0.00% · -5.00 pp");
   await page.getByText("Excluded managers (2)", { exact: true }).click();
   await expect(page.getByText("Previous quarter is missing")).toBeVisible();
@@ -334,18 +337,21 @@ test("large activity lists show leaders and reset after changing quarter", async
   ).toBeVisible();
   await expect(leaders.locator("tbody tr")).toHaveCount(20);
   await expect(
-    leaders.getByText("Example Extra Stock 19", { exact: true }),
+    leaders.locator("summary").filter({ hasText: "Example Extra Stock 19" }),
   ).toHaveCount(0);
   await leaders.getByRole("button", { name: "Show all", exact: true }).click();
   await expect(leaders.locator("tbody tr")).toHaveCount(22);
-  await expect(leaders.locator("summary").last()).toContainText(
-    "Example Extra Stock 19",
-  );
-  await leaders.locator("summary").last().click();
+  await expect(
+    leaders.locator("summary").filter({ hasText: "Example Extra Stock 19" }),
+  ).toContainText("Example Extra Stock 19");
+  await leaders
+    .locator("summary")
+    .filter({ hasText: "Example Extra Stock 19" })
+    .click();
   await expect(
     leaders
       .locator("tbody tr")
-      .last()
+      .filter({ hasText: "Example Extra Stock 19" })
       .getByRole("link", { name: "Filing source 2" }),
   ).toHaveAttribute("href", "https://example.com/alpha/current");
   await leaders
@@ -363,4 +369,118 @@ test("large activity lists show leaders and reset after changing quarter", async
       .getByRole("region", { name: "Most decreased", exact: true })
       .getByText("3 stocks", { exact: true }),
   ).toBeVisible();
+});
+
+test("all activity columns sort the full list and preserve security sources", async ({
+  page,
+}) => {
+  const increased = Array.from({ length: 22 }, (_, index) => {
+    const count = index === 0 ? 10 : index === 1 ? 2 : 1;
+    const currentWeight = String((20 + index) / 100);
+    return {
+      cusip: String(123456800 + index),
+      issuer: `Example Stock ${String(index + 1).padStart(2, "0")}`,
+      security_class: "COM",
+      manager_count: count,
+      average_weight_change_pp: ["-10", "-2", "2", "10"][index % 4],
+      contributors: Array.from({ length: count }, (_, manager) =>
+        contributor(
+          `Example Manager ${manager + 1}`,
+          `example-${index}-${manager}`,
+          ["-10", "-2", "2", "10"][index % 4],
+          String(
+            Number(currentWeight) -
+              Number(["-10", "-2", "2", "10"][index % 4]) / 100,
+          ),
+          currentWeight,
+        ),
+      ),
+    };
+  });
+  await page.route("**/api/research/activity*", (route) =>
+    route.fulfill({
+      json: {
+        ...activity,
+        included_managers: 32,
+        total_managers: 32,
+        excluded_managers: [],
+        quarter: route.request().url().includes("quarter=2026-03-31")
+          ? "2026-03-31"
+          : activity.quarter,
+        previous_quarter: route.request().url().includes("quarter=2026-03-31")
+          ? "2025-12-31"
+          : activity.previous_quarter,
+        increased,
+        decreased: [],
+      },
+    }),
+  );
+  await page.goto("/#research/activity");
+  const list = page.getByRole("region", {
+    name: "Most increased",
+    exact: true,
+  });
+  const rows = list.locator("tbody tr");
+  const first = rows.first();
+  await expect(rows).toHaveCount(20);
+  await expect(first).toContainText("Example Stock 22");
+  await expect(first.getByRole("cell").nth(2)).toHaveText("41.00%");
+  await expect(
+    list.getByRole("columnheader", { name: "Average 13F weight" }),
+  ).toHaveAttribute("aria-sort", "descending");
+  await first.locator("summary").click();
+  await list.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(rows).toHaveCount(22);
+  await list.getByRole("button", { name: "Security", exact: true }).click();
+  await expect(first).toContainText("Example Stock 01");
+  await expect(
+    list.getByRole("columnheader", { name: "Security" }),
+  ).toHaveAttribute("aria-sort", "ascending");
+  const retained = rows.filter({ hasText: "Example Stock 22" });
+  await expect(
+    retained.getByRole("link", { name: "Filing source 2" }),
+  ).toBeVisible();
+  await expect(
+    retained.getByRole("link", { name: "Filing source 2" }),
+  ).toHaveAttribute("href", "https://example.com/example-21-0/current");
+  await list.getByRole("button", { name: "Security", exact: true }).click();
+  await expect(first).toContainText("Example Stock 22");
+  await list.getByRole("button", { name: "Managers", exact: true }).click();
+  await expect(first).toContainText("Example Stock 01");
+  await expect(first.getByRole("cell").nth(1)).toHaveText("10");
+  await expect(rows.nth(1).getByRole("cell").nth(1)).toHaveText("2");
+  await list.getByRole("button", { name: "Managers", exact: true }).click();
+  await expect(first).toContainText("Example Stock 03");
+  await list
+    .getByRole("button", { name: "Average 13F weight", exact: true })
+    .click();
+  await expect(first).toContainText("Example Stock 22");
+  await list
+    .getByRole("button", { name: "Average 13F weight", exact: true })
+    .click();
+  await expect(first).toContainText("Example Stock 01");
+  await list
+    .getByRole("button", { name: "Average weight change", exact: true })
+    .click();
+  await expect(first).toContainText("Example Stock 04");
+  await expect(first.getByRole("cell").nth(3)).toHaveText("+10.00 pp");
+  await list
+    .getByRole("button", { name: "Average weight change", exact: true })
+    .click();
+  await expect(first).toContainText("Example Stock 01");
+  await expect(first.getByRole("cell").nth(3)).toHaveText("-10.00 pp");
+  await list.getByRole("button", { name: "Show top 20", exact: true }).click();
+  await expect(rows).toHaveCount(20);
+  await expect(first).toContainText("Example Stock 01");
+  await page.getByLabel("Report quarter").selectOption("2026-03-31");
+  await expect(page.getByText("2026 Q1 compared with 2025 Q4")).toBeVisible();
+  await expect(first).toContainText("Example Stock 22");
+  await expect(
+    list.getByRole("columnheader", { name: "Average 13F weight" }),
+  ).toHaveAttribute("aria-sort", "descending");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });
