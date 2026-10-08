@@ -14,8 +14,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001167483.json",
       "https://www.sec.gov/Archives/edgar/data/1167483/000091957402000507/0000919574-02-000507-index.html",
-      "https://www.tigerglobal.com/"
-    ]
+      "https://www.tigerglobal.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/160318/PDF/160318.pdf"
+    ],
+    "aum_usd": "77993959953",
+    "aum_as_of": "2026-03-27",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/160318/PDF/160318.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "coatue",
@@ -33,8 +38,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001135730.json",
       "https://www.sec.gov/Archives/edgar/data/1135730/000091957401000351/0000919574-01-000351-index.html",
-      "https://www.coatue.com/"
-    ]
+      "https://www.coatue.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/157910/PDF/157910.pdf"
+    ],
+    "aum_usd": "92705722582",
+    "aum_as_of": "2026-07-29",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/157910/PDF/157910.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "viking-global",
@@ -51,8 +61,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001103804.json",
       "https://www.sec.gov/Archives/edgar/data/1103804/000072867200000032/0000728672-00-000032-index.html",
-      "https://vikingglobal.com/"
-    ]
+      "https://vikingglobal.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/132272/PDF/132272.pdf"
+    ],
+    "aum_usd": "78202235935",
+    "aum_as_of": "2026-06-15",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/132272/PDF/132272.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "lone-pine",
@@ -69,8 +84,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001061165.json",
       "https://www.sec.gov/Archives/edgar/data/1061165/000090266405000495/0000902664-05-000495-index.html",
-      "https://www.lonepinecapital.com/"
-    ]
+      "https://www.lonepinecapital.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/156602/PDF/156602.pdf"
+    ],
+    "aum_usd": "21624342800",
+    "aum_as_of": "2026-03-30",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/156602/PDF/156602.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "altimeter",
@@ -87,8 +107,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001541617.json",
       "https://www.sec.gov/Archives/edgar/data/1541617/000119312512058135/0001193125-12-058135-index.html",
-      "https://www.altimeter.com/"
-    ]
+      "https://www.altimeter.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/160017/PDF/160017.pdf"
+    ],
+    "aum_usd": "18753715687",
+    "aum_as_of": "2026-03-31",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/160017/PDF/160017.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "dragoneer",
@@ -105,8 +130,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001602189.json",
       "https://www.sec.gov/Archives/edgar/data/1602189/000160218915000005/0001602189-15-000005-index.html",
-      "https://www.dragoneer.com/"
-    ]
+      "https://www.dragoneer.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/161443/PDF/161443.pdf"
+    ],
+    "aum_usd": "37035962249",
+    "aum_as_of": "2026-05-04",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/161443/PDF/161443.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "whale-rock",
@@ -123,8 +153,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001387322.json",
       "https://www.sec.gov/Archives/edgar/data/1387322/000138732207000002/0001387322-07-000002-index.html",
-      "https://www.whalerockcapital.com/"
-    ]
+      "https://www.whalerockcapital.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/140746/PDF/140746.pdf"
+    ],
+    "aum_usd": "12973494887",
+    "aum_as_of": "2026-06-02",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/140746/PDF/140746.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "scge",
@@ -138,9 +173,14 @@
     "history_source_url": "https://data.sec.gov/submissions/CIK0001537530.json",
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001537530.json",
-      "https://www.sec.gov/Archives/edgar/data/1537530/000090445412000106/0000904454-12-000106-index.html"
+      "https://www.sec.gov/Archives/edgar/data/1537530/000090445412000106/0000904454-12-000106-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/157402/PDF/157402.pdf"
     ],
-    "notes": "No official public website was verified."
+    "notes": "No official public website was verified. The AUM source uses the adviser business name Sequoia Global Equities; the 13F name SCGE Management and CIK 1537530 identify the matched reporting entity. This is not a separate added manager.",
+    "aum_usd": "10395355198",
+    "aum_as_of": "2026-07-29",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/157402/PDF/157402.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "sands-capital",
@@ -157,8 +197,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001020066.json",
       "https://www.sec.gov/Archives/edgar/data/1020066/000102006699000001/0001020066-99-000001-index.html",
-      "https://www.sandscapital.com/"
-    ]
+      "https://www.sandscapital.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/137610/PDF/137610.pdf"
+    ],
+    "aum_usd": "44304791445",
+    "aum_as_of": "2026-07-28",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/137610/PDF/137610.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "wcm",
@@ -173,8 +218,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001061186.json",
       "https://www.sec.gov/Archives/edgar/data/1061186/000106118699000009/0001061186-99-000009-index.html",
-      "https://www.wcminvest.com/"
-    ]
+      "https://www.wcminvest.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/104702/PDF/104702.pdf"
+    ],
+    "aum_usd": "96772599352",
+    "aum_as_of": "2026-08-31",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/104702/PDF/104702.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "polen",
@@ -189,8 +239,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001034524.json",
       "https://www.sec.gov/Archives/edgar/data/1034524/000103452499000002/0001034524-99-000002-index.html",
-      "https://www.polencapital.com/"
-    ]
+      "https://www.polencapital.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/106093/PDF/106093.pdf"
+    ],
+    "aum_usd": "24061099864",
+    "aum_as_of": "2026-09-30",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/106093/PDF/106093.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "fundsmith",
@@ -208,8 +263,13 @@
       "https://data.sec.gov/submissions/CIK0001569205.json",
       "https://www.sec.gov/Archives/edgar/data/1569205/000138713113000373/0001387131-13-000373-index.html",
       "https://www.fundsmith.co.uk/",
-      "https://www.fundsmith.co.uk/documents"
-    ]
+      "https://www.fundsmith.co.uk/documents",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/160365/PDF/160365.pdf"
+    ],
+    "aum_usd": "18508143977",
+    "aum_as_of": "2026-06-26",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/160365/PDF/160365.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "akre",
@@ -226,8 +286,13 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001112520.json",
       "https://www.sec.gov/Archives/edgar/data/1112520/000111252001500008/0001112520-01-500008-index.html",
-      "https://www.akrecapital.com/"
-    ]
+      "https://www.akrecapital.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/109242/PDF/109242.pdf"
+    ],
+    "aum_usd": "11821915481",
+    "aum_as_of": "2026-06-04",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/109242/PDF/109242.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "baillie-gifford",
@@ -243,8 +308,15 @@
       "https://data.sec.gov/submissions/CIK0001088875.json",
       "https://data.sec.gov/submissions/CIK0001088875-submissions-001.json",
       "https://www.sec.gov/Archives/edgar/data/1088875/000108887599000007/0001088875-99-000007-index.html",
-      "https://www.bailliegifford.com/"
-    ]
+      "https://www.bailliegifford.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/110296/PDF/110296.pdf",
+      "https://www.sec.gov/Archives/edgar/data/1088875/000108887526000057/primary_doc.xml"
+    ],
+    "aum_usd": "143996422525",
+    "aum_as_of": "2026-07-13",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/110296/PDF/110296.pdf",
+    "aum_measurement": "verified_lower_bound",
+    "aum_notes": "Regulatory AUM of Baillie Gifford Overseas Ltd (CRD 110296), an affiliated adviser identified on the group 2026 Q2 13F cover page. Used as a group AUM lower bound; the group total is not established."
   },
   {
     "slug": "berkshire",
@@ -285,9 +357,15 @@
       "https://assets.pershingsquareholdings.com/2022/10/07155606/2017-Annual-Report-Letter-Only.pdf",
       "https://data.sec.gov/submissions/CIK0001336528.json",
       "https://www.sec.gov/Archives/edgar/data/1336528/000117266126003777/primary_doc.xml",
-      "https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/0001172661-26-003790-index.html"
+      "https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/0001172661-26-003790-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/132982/PDF/132982.pdf"
     ],
-    "notes": "Current reporter is Pershing Square Inc. (CIK 2026053); legacy manager CIK 1336528 has holdings reports from 2005 and now files notices. Do not join histories or infer exits across this transition without checking the notices. Letter link is a historical letter from affiliated Pershing Square Holdings, not a complete manager-letter archive."
+    "notes": "Current reporter is Pershing Square Inc. (CIK 2026053); legacy manager CIK 1336528 has holdings reports from 2005 and now files notices. Do not join histories or infer exits across this transition without checking the notices. Letter link is a historical letter from affiliated Pershing Square Holdings, not a complete manager-letter archive.",
+    "aum_usd": "25061606673",
+    "aum_as_of": "2026-06-03",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/132982/PDF/132982.pdf",
+    "aum_measurement": "regulatory_aum",
+    "aum_notes": "Regulatory AUM disclosed by the associated investment adviser Pershing Square Capital Management, L.P. (CRD 132982). The current 13F reporter is its parent Pershing Square Inc. (CIK 2026053); the AUM measure applies to the adviser."
   },
   {
     "slug": "third-point",
@@ -305,9 +383,14 @@
       "https://data.sec.gov/submissions/CIK0001040273.json",
       "https://www.sec.gov/Archives/edgar/data/1040273/000104027399000003/0001040273-99-000003-index.html",
       "https://www.thirdpoint.com/",
-      "https://assets.thirdpoint.com/f/160155/x/9bcf34e846/third-point-q1-2025-investor-letter.pdf"
+      "https://assets.thirdpoint.com/f/160155/x/9bcf34e846/third-point-q1-2025-investor-letter.pdf",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/137927/PDF/137927.pdf"
     ],
-    "notes": "Letter link is one verified 2025 letter, not an archive; former Third Point Investors website redirects to Malibu Life."
+    "notes": "Letter link is one verified 2025 letter, not an archive; former Third Point Investors website redirects to Malibu Life.",
+    "aum_usd": "28732008681",
+    "aum_as_of": "2026-05-01",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/137927/PDF/137927.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "tci",
@@ -341,9 +424,14 @@
     "history_source_url": "https://data.sec.gov/submissions/CIK0000846222.json",
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0000846222.json",
-      "https://www.sec.gov/Archives/edgar/data/846222/000089109299000230/0000891092-99-000230-index.html"
+      "https://www.sec.gov/Archives/edgar/data/846222/000089109299000230/0000891092-99-000230-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/104729/PDF/104729.pdf"
     ],
-    "notes": "No official public website was verified."
+    "notes": "No official public website was verified.",
+    "aum_usd": "11660691026",
+    "aum_as_of": "2026-02-10",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/104729/PDF/104729.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "d1-capital",
@@ -360,9 +448,14 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001747057.json",
       "https://www.sec.gov/Archives/edgar/data/1747057/000117266119000711/0001172661-19-000711-index.html",
-      "https://portal.d1capital.com/"
+      "https://portal.d1capital.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/297298/PDF/297298.pdf"
     ],
-    "notes": "Less than ten years of observed 13F reporting periods as of 2026-10-07; keep as a candidate."
+    "notes": "Less than ten years of observed 13F reporting periods as of 2026-10-07; keep as a candidate.",
+    "aum_usd": "40160910862",
+    "aum_as_of": "2026-03-31",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/297298/PDF/297298.pdf",
+    "aum_measurement": "regulatory_aum"
   },
   {
     "slug": "gqg",
@@ -379,8 +472,453 @@
     "source_urls": [
       "https://data.sec.gov/submissions/CIK0001697233.json",
       "https://www.sec.gov/Archives/edgar/data/1697233/000106299317000926/0001062993-17-000926-index.html",
-      "https://gqg.com/"
+      "https://gqg.com/",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/283720/PDF/283720.pdf"
     ],
-    "notes": "Less than ten years of observed 13F reporting periods as of 2026-10-07; keep as a candidate."
+    "notes": "Less than ten years of observed 13F reporting periods as of 2026-10-07; keep as a candidate.",
+    "aum_usd": "163856880870",
+    "aum_as_of": "2026-03-30",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/283720/PDF/283720.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "dorsey",
+    "name": "Dorsey Asset Management",
+    "investor_names": [
+      "Pat Dorsey"
+    ],
+    "cik": "0001671657",
+    "website_url": "https://dorseyasset.com/",
+    "letters_url": "https://dorseyasset.com/publications-commentary/",
+    "focus": "Concentrated quality and economic moats",
+    "history_start_year": 2016,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001671657.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001671657.json",
+      "https://www.sec.gov/Archives/edgar/data/1671657/000139834417000586/0001398344-17-000586-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/169056/PDF/169056.pdf",
+      "https://dorseyasset.com/",
+      "https://dorseyasset.com/publications-commentary/",
+      "https://dorseyasset.com/who-we-are/"
+    ],
+    "notes": "Current 13F reporting starts in 2016 Q4; less than ten years of observed quarters. Public source contains presentations and commentary, not a shareholder-letter archive.",
+    "aum_usd": "1445270658",
+    "aum_as_of": "2026-03-24",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/169056/PDF/169056.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "punch-card",
+    "name": "Punch Card Management",
+    "investor_names": [
+      "Norbert Lou"
+    ],
+    "cik": "0001631664",
+    "website_url": "https://punchcardcapital.com/",
+    "letters_url": null,
+    "focus": "Concentrated fundamental value",
+    "history_start_year": 2014,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001631664.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001631664.json",
+      "https://www.sec.gov/Archives/edgar/data/1631664/000139834415001079/0001398344-15-001079-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/162939/PDF/162939.pdf",
+      "https://punchcardcapital.com/",
+      "https://www.sec.gov/Archives/edgar/data/107687/000139834420006580/fp0052007_sc13d.htm"
+    ],
+    "notes": "The website is an investor login portal; no public letter archive was verified. The current adviser CIK starts in 2014 Q4; the older Punch Card Capital fund CIK 1419050 is a separate reporting entity.",
+    "aum_usd": "505397719",
+    "aum_as_of": "2026-03-26",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/162939/PDF/162939.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "dalal-street",
+    "name": "Dalal Street / Pabrai Investment Funds",
+    "investor_names": [
+      "Mohnish Pabrai"
+    ],
+    "cik": "0001549575",
+    "website_url": "https://pabraifunds.com/",
+    "letters_url": null,
+    "focus": "Concentrated global value",
+    "history_start_year": 2012,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001549575.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001549575.json",
+      "https://www.sec.gov/Archives/edgar/data/1549575/000154692712000017/0001546927-12-000017-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/161471/PDF/161471.pdf",
+      "https://pabraifunds.com/"
+    ],
+    "notes": "Dalal Street is the reported adviser; do not add a separate duplicate Mohnish Pabrai manager. No public manager-letter archive was verified.",
+    "aum_usd": "936286116",
+    "aum_as_of": "2026-08-27",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/161471/PDF/161471.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "himalaya",
+    "name": "Himalaya Capital",
+    "investor_names": [
+      "Li Lu"
+    ],
+    "cik": "0001709323",
+    "website_url": "https://www.himcap.com/",
+    "letters_url": "https://www.himcap.com/publications",
+    "focus": "Long-term global value and quality",
+    "history_start_year": 2016,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001709323.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001709323.json",
+      "https://www.sec.gov/Archives/edgar/data/1709323/000170932317000002/0001709323-17-000002-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/157594/PDF/157594.pdf",
+      "https://www.himcap.com/",
+      "https://www.himcap.com/publications"
+    ],
+    "notes": "Current 13F reporting starts in 2016 Q4; less than ten years of observed quarters. Public source contains speeches and publications, not a shareholder-letter archive.",
+    "aum_usd": "21392207523",
+    "aum_as_of": "2026-03-31",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/157594/PDF/157594.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "royce",
+    "name": "Royce Investment Partners",
+    "investor_names": [
+      "Chuck Royce"
+    ],
+    "cik": "0000906304",
+    "website_url": "https://www.royceinvest.com/",
+    "letters_url": "https://www.royceinvest.com/insights/",
+    "focus": "Small-cap quality and value",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000906304-submissions-003.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000906304.json",
+      "https://data.sec.gov/submissions/CIK0000906304-submissions-003.json",
+      "https://www.sec.gov/Archives/edgar/data/906304/000073426999000096/0000734269-99-000096-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/107689/PDF/107689.pdf",
+      "https://www.royceinvest.com/",
+      "https://www.royceinvest.com/insights/"
+    ],
+    "notes": "Chuck Royce is the associated founder; the firm uses multiple portfolio teams. Public source is commentary and research.",
+    "aum_usd": "12408363508",
+    "aum_as_of": "2026-02-02",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/107689/PDF/107689.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "baupost",
+    "name": "The Baupost Group",
+    "investor_names": [
+      "Seth Klarman"
+    ],
+    "cik": "0001061768",
+    "website_url": "https://www.baupost.com/",
+    "letters_url": null,
+    "focus": "Fundamental value and margin of safety",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001061768.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001061768.json",
+      "https://www.sec.gov/Archives/edgar/data/1061768/000105442099000019/0001054420-99-000019-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/109530/PDF/109530.pdf",
+      "https://www.baupost.com/"
+    ],
+    "notes": "No official public shareholder-letter archive was verified.",
+    "aum_usd": "24681434252",
+    "aum_as_of": "2026-03-30",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/109530/PDF/109530.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "greenlight",
+    "name": "Greenlight / DME Capital Management",
+    "investor_names": [
+      "David Einhorn"
+    ],
+    "cik": "0001489933",
+    "website_url": "https://www.greenlightcapital.com/",
+    "letters_url": null,
+    "focus": "Value-oriented long and short investing",
+    "history_start_year": 2024,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001489933.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001489933.json",
+      "https://www.sec.gov/Archives/edgar/data/1489933/000117266124002489/0001172661-24-002489-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/157081/PDF/157081.pdf",
+      "https://www.greenlightcapital.com/",
+      "https://data.sec.gov/submissions/CIK0001079114.json"
+    ],
+    "notes": "Current reporting entity DME Capital Management (CIK 1489933) starts in 2024 Q1. Legacy Greenlight Capital Inc. (CIK 1079114) has reports from 1999 through 2023 Q4. Do not join those histories or infer trades across the reporter transition without review. The public website redirects to investor login.",
+    "aum_usd": "4798925830",
+    "aum_as_of": "2026-05-01",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/157081/PDF/157081.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "harris",
+    "name": "Harris Associates / Oakmark",
+    "investor_names": [
+      "Bill Nygren",
+      "David Herro"
+    ],
+    "cik": "0000813917",
+    "website_url": "https://harrisassoc.com/",
+    "letters_url": "https://oakmark.com/news-insights/",
+    "focus": "Global fundamental value",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000813917.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000813917.json",
+      "https://www.sec.gov/Archives/edgar/data/813917/000081391799000054/0000813917-99-000054-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/106960/PDF/106960.pdf",
+      "https://harrisassoc.com/",
+      "https://oakmark.com/news-insights/",
+      "https://harrisassoc.com/who-we-are/our-team/bill-nygren/"
+    ],
+    "notes": "Firm-level 13F covers multiple strategies; it is not Bill Nygren's individual portfolio. The public source includes Oakmark quarterly fund commentary.",
+    "aum_usd": "109483367869",
+    "aum_as_of": "2026-08-04",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/106960/PDF/106960.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "ruane-cunniff",
+    "name": "Ruane Cunniff / Sequoia",
+    "investor_names": [
+      "William Ruane",
+      "Richard Cunniff"
+    ],
+    "cik": "0001720792",
+    "website_url": "https://www.ruanecunniff.com/",
+    "letters_url": "https://www.sequoiafund.com/resources/",
+    "focus": "Long-term quality businesses at attractive values",
+    "history_start_year": 2018,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001720792.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001720792.json",
+      "https://www.sec.gov/Archives/edgar/data/1720792/000091957418003527/0000919574-18-003527-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/285971/PDF/285971.pdf",
+      "https://www.ruanecunniff.com/",
+      "https://www.ruanecunniff.com/resources/",
+      "https://data.sec.gov/submissions/CIK0000728014.json",
+      "https://www.sequoiafund.com/about/",
+      "https://www.sequoiafund.com/resources/"
+    ],
+    "notes": "People named are associated founders, not current portfolio managers. Current partnership CIK 1720792 starts in 2018 Q1. Legacy corporate CIK 728014 has reports from 1999; preserve the entity transition rather than joining histories. The public source provides recent Sequoia shareholder letters; its wider content library requires login.",
+    "aum_usd": "10525505890",
+    "aum_as_of": "2026-03-31",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/285971/PDF/285971.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "tweedy-browne",
+    "name": "Tweedy, Browne",
+    "investor_names": [
+      "Thomas Shrager",
+      "John Spears",
+      "Robert Wyckoff"
+    ],
+    "cik": "0000732905",
+    "website_url": "https://www.tweedy.com/",
+    "letters_url": "https://www.tweedyfunds.com/commentary/",
+    "focus": "Global value and intrinsic-value discounts",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000732905.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000732905.json",
+      "https://www.sec.gov/Archives/edgar/data/732905/000095013599002575/0000950135-99-002575-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/6857/PDF/6857.pdf",
+      "https://www.tweedy.com/",
+      "https://www.tweedyfunds.com/commentary/"
+    ],
+    "notes": "Firm portfolios are managed by an investment committee. The public source includes fund commentary and annual reports.",
+    "aum_usd": "7127568740",
+    "aum_as_of": "2026-06-29",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/6857/PDF/6857.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "yacktman",
+    "name": "Yacktman Asset Management",
+    "investor_names": [
+      "Donald Yacktman",
+      "Stephen Yacktman"
+    ],
+    "cik": "0000905567",
+    "website_url": "https://yacktman.com/",
+    "letters_url": "https://media.amg.com/content/dam/amgfunds/documents/commentary/AMG%20Yacktman%20Fund%20Commentary.PDF",
+    "focus": "Quality businesses and value",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000905567.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000905567.json",
+      "https://www.sec.gov/Archives/edgar/data/905567/000089706999000358/0000897069-99-000358-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/164420/PDF/164420.pdf",
+      "https://yacktman.com/",
+      "https://media.amg.com/content/dam/amgfunds/documents/commentary/AMG%20Yacktman%20Fund%20Commentary.PDF",
+      "https://yacktman.com/our-history/",
+      "https://yacktman.com/team/stephen-yacktman/"
+    ],
+    "notes": "Donald Yacktman is the associated founder; Stephen Yacktman is CIO. The letter source is an official affiliated AMG fund commentary document, not a complete archive.",
+    "aum_usd": "11712361735",
+    "aum_as_of": "2026-03-26",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/164420/PDF/164420.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "oaktree",
+    "name": "Oaktree Capital Management",
+    "investor_names": [
+      "Howard Marks",
+      "Bruce Karsh"
+    ],
+    "cik": "0000949509",
+    "website_url": "https://www.oaktreecapital.com/",
+    "letters_url": "https://www.oaktreecapital.com/insights",
+    "focus": "Value across credit and equity",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000949509.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000949509.json",
+      "https://www.sec.gov/Archives/edgar/data/949509/000094950999000002/0000949509-99-000002-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/106793/PDF/106793.pdf",
+      "https://www.oaktreecapital.com/",
+      "https://www.oaktreecapital.com/insights"
+    ],
+    "notes": "The 13F reflects reportable equity holdings and is not a complete view of Oaktree's credit investments or Howard Marks' personal portfolio. Public source includes Howard Marks memos.",
+    "aum_usd": "183286850212",
+    "aum_as_of": "2026-08-17",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/106793/PDF/106793.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "southeastern",
+    "name": "Southeastern Asset Management",
+    "investor_names": [
+      "Mason Hawkins"
+    ],
+    "cik": "0000807985",
+    "website_url": "https://southeasternasset.com/",
+    "letters_url": "https://southeasternasset.com/mutual-fund-commentaries/",
+    "focus": "Concentrated engaged value",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000807985-submissions-001.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000807985.json",
+      "https://data.sec.gov/submissions/CIK0000807985-submissions-001.json",
+      "https://www.sec.gov/Archives/edgar/data/807985/000080798599000069/0000807985-99-000069-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/105276/PDF/105276.pdf",
+      "https://southeasternasset.com/",
+      "https://southeasternasset.com/mutual-fund-commentaries/"
+    ],
+    "notes": "Public source contains Longleaf fund reports and commentary; firm-level 13F can include other mandates.",
+    "aum_usd": "3703724946",
+    "aum_as_of": "2026-03-27",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/105276/PDF/105276.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "lountzis",
+    "name": "Lountzis Asset Management",
+    "investor_names": [
+      "Paul Lountzis"
+    ],
+    "cik": "0001821168",
+    "website_url": "https://lountzis.com/",
+    "letters_url": null,
+    "focus": "Fundamental value and capital preservation",
+    "history_start_year": 2020,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001821168.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001821168.json",
+      "https://www.sec.gov/Archives/edgar/data/1821168/000182116820000001/0001821168-20-000001-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/118923/PDF/118923.pdf",
+      "https://lountzis.com/",
+      "https://lountzis.com/about-us/"
+    ],
+    "notes": "Current 13F reporting starts in 2020 Q2; shorter-history candidate despite a longer operating history. No public shareholder-letter archive was verified.",
+    "aum_usd": "624143653",
+    "aum_as_of": "2026-03-24",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/118923/PDF/118923.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "greenhaven-road",
+    "name": "Greenhaven Road Capital",
+    "investor_names": [
+      "Scott Miller"
+    ],
+    "cik": "0001741129",
+    "website_url": "https://www.greenhavenroad.com/",
+    "letters_url": "https://www.greenhavenroad.com/investor-letters",
+    "focus": "Small-company and contrarian value",
+    "history_start_year": 2019,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001741129.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001741129.json",
+      "https://www.sec.gov/Archives/edgar/data/1741129/000174112920000002/0001741129-20-000002-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/288555/PDF/288555.pdf",
+      "https://www.greenhavenroad.com/",
+      "https://www.greenhavenroad.com/investor-letters",
+      "https://www.greenhavenroad.com/about"
+    ],
+    "notes": "Distinct from Greenhaven Associates and Edgar Wachenheim. Current 13F reporting starts in 2019 Q4; shorter-history candidate. Public letters extend earlier than the observed 13F record.",
+    "aum_usd": "299485528",
+    "aum_as_of": "2026-03-30",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/288555/PDF/288555.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "weitz",
+    "name": "Weitz Investment Management",
+    "investor_names": [
+      "Wally Weitz"
+    ],
+    "cik": "0000883965",
+    "website_url": "https://weitzinvestments.com/",
+    "letters_url": "https://weitzinvestments.com/perspectives/investment-insights/default.fs",
+    "focus": "Business value and long-term fundamentals",
+    "history_start_year": 1999,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0000883965.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0000883965.json",
+      "https://www.sec.gov/Archives/edgar/data/883965/000104746999018644/0001047469-99-018644-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/105088/PDF/105088.pdf",
+      "https://weitzinvestments.com/",
+      "https://weitzinvestments.com/perspectives/investment-insights/default.fs"
+    ],
+    "notes": "Wally Weitz is the associated founder; firm-level 13F includes multiple portfolio teams. Public source includes Letter to Shareholders: Value Matters.",
+    "aum_usd": "8079865642",
+    "aum_as_of": "2026-03-30",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/105088/PDF/105088.pdf",
+    "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "first-eagle",
+    "name": "First Eagle Investment Management",
+    "investor_names": [
+      "Matthew McLennan"
+    ],
+    "cik": "0001325447",
+    "website_url": "https://www.firsteagle.com/",
+    "letters_url": "https://www.firsteagle.com/all-insights",
+    "focus": "Global value and capital preservation",
+    "history_start_year": 2006,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001325447.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001325447.json",
+      "https://www.sec.gov/Archives/edgar/data/1325447/000132544706000033/0001325447-06-000033-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/108260/PDF/108260.pdf",
+      "https://www.firsteagle.com/",
+      "https://www.firsteagle.com/all-insights",
+      "https://www.firsteagle.com/our-people/matthew-mclennan"
+    ],
+    "notes": "The reported adviser includes multiple strategies; its 13F is not the Global Value Team portfolio alone. Public source includes Global Value Team quarterly views.",
+    "aum_usd": "136477310831",
+    "aum_as_of": "2026-08-03",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/108260/PDF/108260.pdf",
+    "aum_measurement": "regulatory_aum"
   }
 ]

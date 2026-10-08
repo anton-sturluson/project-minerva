@@ -21,6 +21,16 @@ type Manager = {
   history_source_url: string | null;
   source_urls: string[];
   notes?: string;
+  aum_usd: string | null;
+  aum_as_of: string | null;
+  aum_source_url: string | null;
+  aum_measurement:
+    "regulatory_aum" | "firm_aum" | "verified_lower_bound" | null;
+  eligibility: {
+    status: "eligible" | "below_minimum" | "unverified";
+    minimum_aum_usd: string;
+    reason: string | null;
+  };
   coverage: Coverage;
 };
 type Filing = {
@@ -84,6 +94,30 @@ function SourceLink({
     <a href={url} target="_blank" rel="noreferrer">
       {children}
     </a>
+  );
+}
+
+function AumSummary({ manager }: { manager: Manager }) {
+  const labels = {
+    regulatory_aum: "Regulatory AUM",
+    firm_aum: "Firm AUM",
+    verified_lower_bound: "AUM lower bound",
+  };
+  if (manager.eligibility.status === "unverified") {
+    return (
+      <p className="form-note">AUM unverified · {manager.eligibility.reason}</p>
+    );
+  }
+  return (
+    <p className="form-note">
+      {manager.aum_measurement && labels[manager.aum_measurement]}:{" "}
+      {manager.aum_source_url && manager.aum_usd && (
+        <SourceLink url={manager.aum_source_url}>
+          {dollars(manager.aum_usd)} · source date {manager.aum_as_of}
+        </SourceLink>
+      )}
+      {manager.eligibility.reason && <> · {manager.eligibility.reason}</>}
+    </p>
   );
 }
 
@@ -206,6 +240,7 @@ function ManagersDirectory() {
   const [retry, setRetry] = useState(0);
   const [search, setSearch] = useState("");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [showCandidates, setShowCandidates] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const detailRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -232,6 +267,7 @@ function ManagersDirectory() {
   }, [retry]);
   const visible = managers?.filter(
     (manager) =>
+      (showCandidates || manager.eligibility.status === "eligible") &&
       (!verifiedOnly || manager.coverage.continuous_decade) &&
       [manager.name, manager.investor_names.join(" "), manager.focus]
         .join(" ")
@@ -242,7 +278,7 @@ function ManagersDirectory() {
     <section aria-labelledby="managers-heading">
       <div className="directory-heading">
         <h3 id="managers-heading">Managers</h3>
-        {managers && <span>{managers.length} managers</span>}
+        {managers && <span>{visible?.length} managers</span>}
       </div>
       <p>Ideas from institutional holdings and investor letters.</p>
       {error && (
@@ -258,6 +294,10 @@ function ManagersDirectory() {
       )}
       {managers && managers.length > 0 && (
         <>
+          <p className="form-note">
+            Minimum verified AUM:{" "}
+            {dollars(managers[0].eligibility.minimum_aum_usd)}.
+          </p>
           <div className="research-controls">
             <label>
               Find a manager{" "}
@@ -274,6 +314,14 @@ function ManagersDirectory() {
                 onChange={(event) => setVerifiedOnly(event.target.checked)}
               />{" "}
               Verified 10-year coverage only
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={showCandidates}
+                onChange={(event) => setShowCandidates(event.target.checked)}
+              />{" "}
+              Show unverified or below-minimum managers
             </label>
           </div>
           <p className="form-note">
@@ -295,6 +343,7 @@ function ManagersDirectory() {
                     </button>
                     <p>{manager.investor_names.join(", ")}</p>
                     <p>{manager.focus}</p>
+                    <AumSummary manager={manager} />
                     <p className="form-note">
                       {manager.history_start_year
                         ? `First observed filing period: ${manager.history_start_year}`
@@ -406,6 +455,7 @@ function ManagerDetail({ slug }: { slug: string }) {
         <>
           <h3>{detail.name}</h3>
           <p className="form-note">CIK {detail.cik}</p>
+          <AumSummary manager={detail} />
           {detail.coverage.first_quarter && detail.coverage.last_quarter && (
             <p>
               {quarterLabel(detail.coverage.first_quarter)} –{" "}

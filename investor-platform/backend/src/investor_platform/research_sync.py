@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from .db import LOCAL_WORKSPACE, make_engine
 from .models import ResearchFiling, ResearchHolding, ResearchManager
 from .research import HoldingKey, Position, quarter_end
+from .research_eligibility import Eligibility, manager_eligibility
 
 CATALOG: Path = Path(__file__).with_name("research_managers.json")
 
@@ -389,11 +390,6 @@ def main() -> None:
     if not 1999 <= args.start_year <= date.today().year:
         parser.error("--start-year must be between 1999 and the current year")
     client: SECClient | None = None
-    if not args.catalog_only:
-        try:
-            client = SECClient(os.environ.get("EDGAR_IDENTITY", ""))
-        except ValueError as error:
-            parser.error(str(error))
     with Session(make_engine(), expire_on_commit=False) as session:
         count: int = seed_catalog(session)
         session.commit()
@@ -406,10 +402,27 @@ def main() -> None:
         managers: list[ResearchManager] = list(session.scalars(query))
         if not managers:
             parser.error("No matching manager in the reviewed catalog")
-        assert client is not None
         manager: ResearchManager
         failed: bool = False
         for manager in managers:
+            eligibility: Eligibility = manager_eligibility(manager.profile, date.today())
+            if eligibility["status"] != "eligible":
+                print(
+                    json.dumps(
+                        {
+                            "manager": manager.slug,
+                            "status": "skipped",
+                            "reason": eligibility["reason"],
+                        }
+                    ),
+                    flush=True,
+                )
+                continue
+            if client is None:
+                try:
+                    client = SECClient(os.environ.get("EDGAR_IDENTITY", ""))
+                except ValueError as error:
+                    parser.error(str(error))
             try:
                 imported: int = sync_manager(
                     client, session, manager, args.start_year, retry_blocked=args.retry_blocked
