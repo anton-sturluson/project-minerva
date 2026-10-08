@@ -22,20 +22,23 @@ const initialTheme = savedTheme();
 applyTheme(initialTheme);
 
 export type Page = "portfolio" | "activity" | "research" | "post-mortem";
-function currentPage(): Page {
-  return location.hash === "#activity"
+function currentPage(hash: string): Page {
+  return hash === "#activity"
     ? "activity"
-    : location.hash === "#post-mortem"
+    : hash === "#post-mortem"
       ? "post-mortem"
-      : location.hash === "#research"
+      : hash === "#research" || hash === "#research/activity"
         ? "research"
         : "portfolio";
 }
 
 export function App() {
-  const [page, setPage] = useState<Page>(currentPage);
+  const [hash, setHash] = useState(() => location.hash);
+  const page = currentPage(hash);
+  const contentHash =
+    page === "research" && hash === "#research/activity" ? hash : `#${page}`;
   useEffect(() => {
-    const navigate = () => setPage(currentPage());
+    const navigate = () => setHash(location.hash);
     window.addEventListener("hashchange", navigate);
     return () => window.removeEventListener("hashchange", navigate);
   }, []);
@@ -51,7 +54,7 @@ export function App() {
   }
   return (
     <div className="workspace" id="top">
-      <a className="skip-link" href={`#${page}`}>
+      <a className="skip-link" href={contentHash}>
         Skip to content
       </a>
       <header className="site-header">
@@ -102,10 +105,12 @@ export function App() {
         <div hidden={page === "research"}>
           <Portfolio page={page} />
         </div>
-        {page === "research" && <Research />}
+        {page === "research" && (
+          <Research activity={hash === "#research/activity"} />
+        )}
       </main>
       <footer className="page-footer">
-        <a href={`#${page}`}>Back to top ↑</a>
+        <a href={contentHash}>Back to top ↑</a>
       </footer>
     </div>
   );
