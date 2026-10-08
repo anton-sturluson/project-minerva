@@ -11,7 +11,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from investor_platform.models import ResearchFiling, ResearchHolding, ResearchManager
-from investor_platform.research import previous_quarter
+from investor_platform.research import HoldingKey, Position, compare_positions, previous_quarter
 from investor_platform.research_sync import (
     FilingMetadata,
     parse_holdings,
@@ -116,10 +116,10 @@ def test_persistence_quantities_options_and_duplicates(
     ).json()
     assert response["status"] == "available"
     assert [(item["put_call"], item["kind"]) for item in response["changes"]] == [
-        ("", "unchanged"),
         ("PUT", "increased"),
+        ("", "unchanged"),
     ]
-    assert Decimal(response["changes"][0]["current_quantity"]) == 15
+    assert Decimal(response["changes"][1]["current_quantity"]) == 15
     with Session(database) as session:
         assert session.scalar(select(func.count()).select_from(ResearchFiling)) == 2
         assert session.scalar(select(func.count()).select_from(ResearchHolding)) == 4
@@ -337,3 +337,127 @@ def test_historical_sec_period_and_explicit_blocked_retry_preserve_evidence(
             session, manager, metadata, repaired_primary, table, url, table_url, retry_blocked=True
         )
         assert len(repaired.evidence["previous_import_attempts"]) == 1
+
+
+def test_changes_group_quantity_and_rank_signed_values_with_portfolio_weights(
+    database: Engine,
+    db_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """A quantity increase can lose value or weight while price-only changes stay unchanged."""
+    manager_id: UUID = registry(database, tmp_path)
+    previous: str = (
+        row("10", "100", cusip="111111111")
+        + row("10", "500", cusip="222222222")
+        + row("10", "100", cusip="333333333")
+        + row("10", "100", cusip="444444444")
+        + row("10", "100", cusip="555555555")
+        + row("10", "100", option="PUT", cusip="111111111")
+    )
+    current: str = (
+        row("12", "50", cusip="111111111")
+        + row("12", "700", cusip="222222222")
+        + row("10", "300", cusip="444444444")
+        + row("8", "50", cusip="555555555")
+        + row("2", "800", cusip="666666666")
+        + row("10", "100", option="PUT", cusip="111111111")
+    )
+    filing(database, manager_id, "2026-03-31", "previous-values", previous, count=6)
+    filing(database, manager_id, "2026-06-30", "current-values", current, count=6)
+    response: dict = db_client.get(
+        "/api/research/managers/example/changes?quarter=2026-06-30"
+    ).json()
+    changes: list[dict] = response["changes"]
+    assert [(item["category"], item["cusip"], item["put_call"]) for item in changes] == [
+        ("increased", "666666666", ""),
+        ("increased", "222222222", ""),
+        ("increased", "111111111", ""),
+        ("decreased", "333333333", ""),
+        ("decreased", "555555555", ""),
+        ("unchanged", "444444444", ""),
+        ("unchanged", "111111111", "PUT"),
+    ]
+    added: dict = changes[0]
+    assert added["kind"] == "new"
+    assert Decimal(added["current_weight"]) == Decimal("0.4")
+    increased: dict = changes[2]
+    assert increased["kind"] == "increased"
+    assert Decimal(increased["value_change_usd"]) == -50
+    assert Decimal(increased["previous_value_usd"]) == 100
+    assert Decimal(increased["current_value_usd"]) == 50
+    assert Decimal(increased["previous_weight"]) == Decimal("0.1")
+    assert Decimal(increased["current_weight"]) == Decimal("0.025")
+    assert Decimal(increased["weight_change"]) == Decimal("-0.075")
+    exited: dict = changes[3]
+    assert exited["kind"] == "exited"
+    assert Decimal(exited["current_weight"]) == 0
+    assert Decimal(exited["current_value_usd"]) == 0
+    unchanged: dict = changes[5]
+    assert unchanged["kind"] == "unchanged"
+    assert Decimal(unchanged["value_change_usd"]) == 200
+    assert Decimal(unchanged["quantity_change"]) == 0
+    assert Decimal(unchanged["current_weight"]) == Decimal("0.15")
+    assert sum(Decimal(item["current_weight"]) for item in changes) == 1
+
+
+def position(
+    cusip: str,
+    quantity: str,
+    value: str,
+    *,
+    option: str = "",
+    share_type: str = "SH",
+) -> Position:
+    """Create exact synthetic snapshots for arithmetic and deterministic ranking checks."""
+    return Position(
+        cusip=cusip,
+        issuer="Example",
+        security_class="COM",
+        put_call=option,
+        share_type=share_type,
+        quantity=Decimal(quantity),
+        value_usd=Decimal(value),
+    )
+
+
+def test_comparison_zero_totals_return_unknown_weights_and_ties_are_stable() -> None:
+    """Zero totals stay unknown and equal dollar changes sort by the full security identity."""
+    current: dict[HoldingKey, Position] = {
+        ("222222222", "", "SH"): position("222222222", "2", "50"),
+        ("111111111", "PUT", "SH"): position("111111111", "2", "50", option="PUT"),
+        ("111111111", "", "SH"): position("111111111", "2", "50"),
+        ("111111111", "", "PRN"): position("111111111", "2", "50", share_type="PRN"),
+    }
+    changes: list[dict] = compare_positions(current, {})
+    assert [(item["cusip"], item["put_call"], item["share_type"]) for item in changes] == [
+        ("111111111", "", "PRN"),
+        ("111111111", "", "SH"),
+        ("111111111", "PUT", "SH"),
+        ("222222222", "", "SH"),
+    ]
+    assert all(
+        item["previous_weight"] is None and item["weight_change"] is None for item in changes
+    )
+    assert all(Decimal(item["current_weight"]) == Decimal("0.25") for item in changes)
+    exited: list[dict] = compare_positions({}, current)
+    assert all(item["current_weight"] is None and item["weight_change"] is None for item in exited)
+    zero: dict[HoldingKey, Position] = {
+        ("111111111", "", "SH"): position("111111111", "2", "0"),
+    }
+    empty_values: list[dict] = compare_positions(zero, zero)
+    assert empty_values[0]["category"] == "unchanged"
+    assert empty_values[0]["previous_weight"] is None
+    assert empty_values[0]["current_weight"] is None
+    assert empty_values[0]["weight_change"] is None
+    assert compare_positions({}, {}) == []
+
+
+def test_value_ranking_preserves_decimal_cents_beyond_default_precision() -> None:
+    """Sorting must retain cents when reported values exceed Decimal's default context."""
+    current: dict[HoldingKey, Position] = {
+        ("111111111", "", "SH"): position("111111111", "2", "1234567890123456789012345678.01"),
+        ("222222222", "", "SH"): position("222222222", "2", "1234567890123456789012345678.02"),
+    }
+    changes: list[dict] = compare_positions(current, {})
+    assert [item["cusip"] for item in changes] == ["222222222", "111111111"]
+    assert changes[0]["value_change_usd"] == "1234567890123456789012345678.02"

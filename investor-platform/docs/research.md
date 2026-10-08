@@ -33,6 +33,12 @@ Imports are explicit, paced, and idempotent by manager and accession. An explici
 - Amendments retain separate accession provenance. Uncertain amendments block comparison until resolved.
 - Thirteen-F disclosures are a subset of a manager's investments. A long filing record is not a verified investment return record or a guarantee of reliable ideas. See the [SEC's Form 13F guidance](https://www.sec.gov/divisions/investment/13ffaq).
 
+## Manager position changes
+
+The manager detail groups positions by reported quantity: Increased includes new positions, Decreased includes exits, and Unchanged means the quantity is the same. Each group sorts by the absolute dollar change from largest to smallest, with security identity as the tie-breaker. Dollar change is current reported holding value minus previous reported holding value, so it includes market-price effects and is not trade cash flow.
+
+Current 13F weight is current holding value divided by all disclosed current holdings value, including disclosed options and principal positions. It describes the reported 13F portfolio, not the manager's full fund. An exit has zero current weight when the current portfolio has a positive value; a zero-value portfolio has unavailable weights. Before/after fractions and their signed difference share one comparison calculation.
+
 ## References
 
 ### SEC
