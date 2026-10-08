@@ -897,6 +897,34 @@ summary:focus-visible {
 .research-detail .research-links {
   margin-top: 12px;
 }
+.research-change-group {
+  margin-top: 20px;
+}
+.research-change-group h4 {
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--plum);
+  font-size: 16px;
+}
+.research-change-group h4 small {
+  font-weight: normal;
+}
+.research-changes-table {
+  min-width: 490px;
+}
+.research-changes-table td:first-child {
+  min-width: 165px;
+  white-space: normal;
+}
+.research-changes-table td small {
+  font-size: 11px;
+}
+.research-changes-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 @media (max-width: 800px) {
   .research-layout {
     grid-template-columns: 1fr;
