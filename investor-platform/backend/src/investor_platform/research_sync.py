@@ -3,7 +3,9 @@
 import argparse
 import json
 import os
+import re
 import time
+from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -14,7 +16,7 @@ from urllib.request import Request, urlopen
 from uuid import UUID
 from xml.etree import ElementTree as ET
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.orm import Session
 
 from .db import LOCAL_WORKSPACE, make_engine
@@ -87,7 +89,13 @@ class SECClient:
         return json.loads(self.read(url))
 
 
-def submission_rows(data: dict, start_year: int) -> list[FilingMetadata]:
+def submission_rows(
+    data: dict,
+    start_year: int,
+    *,
+    start_period: date | None = None,
+    end_period: date | None = None,
+) -> list[FilingMetadata]:
     """Select original and amended holdings filings from an index page."""
     rows: list[FilingMetadata] = []
     forms: list[str] = data.get("form", [])
@@ -98,6 +106,11 @@ def submission_rows(data: dict, start_year: int) -> list[FilingMetadata]:
             continue
         period: str = data.get("reportDate", [""] * len(forms))[index]
         if not period or int(period[:4]) < start_year:
+            continue
+        report_period: date = date.fromisoformat(period)
+        if (start_period is not None and report_period < start_period) or (
+            end_period is not None and report_period > end_period
+        ):
             continue
         rows.append(
             FilingMetadata(
@@ -111,16 +124,29 @@ def submission_rows(data: dict, start_year: int) -> list[FilingMetadata]:
     return rows
 
 
-def filings_for(client: SECClient, cik: str, start_year: int) -> list[FilingMetadata]:
+def filings_for(
+    client: SECClient,
+    cik: str,
+    start_year: int,
+    *,
+    start_period: date | None = None,
+    end_period: date | None = None,
+) -> list[FilingMetadata]:
     """Include historical SEC submission pages, not just the recent index."""
     data: dict = client.json(f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json")
-    rows: list[FilingMetadata] = submission_rows(data["filings"]["recent"], start_year)
+    rows: list[FilingMetadata] = submission_rows(
+        data["filings"]["recent"], start_year, start_period=start_period, end_period=end_period
+    )
     archive: dict
     for archive in data["filings"].get("files", []):
         if archive["filingTo"][:4] < str(start_year):
             continue
         historical: dict = client.json("https://data.sec.gov/submissions/" + archive["name"])
-        rows.extend(submission_rows(historical, start_year))
+        rows.extend(
+            submission_rows(
+                historical, start_year, start_period=start_period, end_period=end_period
+            )
+        )
     return sorted(rows, key=lambda row: (row["report_period"], row["filed_date"], row["accession"]))
 
 
@@ -313,9 +339,13 @@ def sync_manager(
     start_year: int,
     *,
     retry_blocked: bool = False,
+    start_period: date | None = None,
+    end_period: date | None = None,
 ) -> int:
     """Import independently reviewable filings, leaving previously imported records intact."""
-    rows: list[FilingMetadata] = filings_for(client, manager.cik, start_year)
+    rows: list[FilingMetadata] = filings_for(
+        client, manager.cik, start_year, start_period=start_period, end_period=end_period
+    )
     imported: int = 0
     metadata: FilingMetadata
     for metadata in rows:
@@ -376,20 +406,49 @@ def sync_manager(
     return imported
 
 
-def filing_counts(session: Session, manager_id: UUID, start_year: int) -> dict[str, int]:
+def quarter_window(quarters: int, through_quarter: str, today: date) -> tuple[date, date]:
+    """Return exactly N inclusive calendar quarter ends without guessing the latest filing."""
+    if quarters <= 0:
+        raise ValueError("--quarters must be positive")
+    if not re.fullmatch(r"[0-9]{4}-Q[1-4]", through_quarter):
+        raise ValueError("--through-quarter must use YYYY-QN, for example 2026-Q2")
+    year: int = int(through_quarter[:4])
+    quarter: int = int(through_quarter[-1])
+    end_month: int = quarter * 3
+    end: date = date(year, end_month, monthrange(year, end_month)[1])
+    first_ordinal: int = year * 4 + quarter - quarters
+    first_year: int = first_ordinal // 4
+    first_month: int = (first_ordinal % 4 + 1) * 3
+    if first_year < 1999:
+        raise ValueError("The requested quarter window must start in 1999 or later")
+    if end > today:
+        raise ValueError("--through-quarter must not be in the future")
+    start: date = date(first_year, first_month, monthrange(first_year, first_month)[1])
+    return start, end
+
+
+def filing_counts(
+    session: Session,
+    manager_id: UUID,
+    start_year: int,
+    *,
+    start_period: date | None = None,
+    end_period: date | None = None,
+) -> dict[str, int]:
     """Count saved original and amended filings in the requested report-period scope."""
+    query: Select[tuple[int, int]] = select(
+        func.count().filter(ResearchFiling.status == "complete"),
+        func.count().filter(ResearchFiling.status == "blocked"),
+    ).where(
+        ResearchFiling.manager_id == manager_id,
+        ResearchFiling.report_period >= (start_period or date(start_year, 1, 1)),
+        ResearchFiling.form.in_(["13F-HR", "13F-HR/A"]),
+    )
+    if end_period is not None:
+        query = query.where(ResearchFiling.report_period <= end_period)
     complete: int
     blocked: int
-    complete, blocked = session.execute(
-        select(
-            func.count().filter(ResearchFiling.status == "complete"),
-            func.count().filter(ResearchFiling.status == "blocked"),
-        ).where(
-            ResearchFiling.manager_id == manager_id,
-            ResearchFiling.report_period >= date(start_year, 1, 1),
-            ResearchFiling.form.in_(["13F-HR", "13F-HR/A"]),
-        )
-    ).one()
+    complete, blocked = session.execute(query).one()
     return {"complete_filings": complete, "blocked_filings": blocked}
 
 
@@ -408,41 +467,85 @@ def main() -> None:
         action="store_true",
         help="Re-fetch blocked filings while preserving prior import evidence",
     )
-    parser.add_argument("--manager", help="Registry slug; omitted means every seeded manager")
+    parser.add_argument("--manager", help="Registry slug; omitted means every manager in scope")
+    parser.add_argument(
+        "--quarters",
+        type=int,
+        help="Collect exactly this many report quarters; requires --through-quarter",
+    )
+    parser.add_argument("--through-quarter", help="Inclusive final report quarter, such as 2026-Q2")
+    parser.add_argument(
+        "--all-investors",
+        action="store_true",
+        help="Collect existing database investors regardless of AUM eligibility",
+    )
+    default_start_year: int = date.today().year - 10
     parser.add_argument(
         "--start-year",
         type=int,
-        default=date.today().year - 10,
-        help="Include report quarters from January 1 of this year (default: %(default)s)",
+        help=f"Include report quarters from January 1 of this year (default: {default_start_year})",
     )
     args: argparse.Namespace = parser.parse_args()
-    if not 1999 <= args.start_year <= date.today().year:
+    if args.through_quarter and args.quarters is None:
+        parser.error("--through-quarter requires --quarters")
+    if args.quarters is not None and (not args.through_quarter or args.start_year is not None):
+        parser.error(
+            "--quarters requires --through-quarter and cannot be combined with --start-year"
+        )
+    if args.all_investors and args.manager:
+        parser.error("--all-investors cannot be combined with --manager")
+    if args.catalog_only and (args.quarters is not None or args.all_investors):
+        parser.error("--catalog-only cannot be combined with bounded or all-investor ingestion")
+    start_period: date | None = None
+    end_period: date | None = None
+    start_year: int = args.start_year if args.start_year is not None else default_start_year
+    if args.quarters is not None:
+        try:
+            start_period, end_period = quarter_window(
+                args.quarters, args.through_quarter, date.today()
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        start_year = start_period.year
+    if not 1999 <= start_year <= date.today().year:
         parser.error("--start-year must be between 1999 and the current year")
     client: SECClient | None = None
     with Session(make_engine(), expire_on_commit=False) as session:
-        count: int = seed_catalog(session)
-        session.commit()
-        if args.catalog_only:
-            print(json.dumps({"seeded_managers": count}))
-            return
-        query = select(ResearchManager).where(ResearchManager.workspace_id == LOCAL_WORKSPACE)
+        existing_only: bool = args.quarters is not None or args.all_investors
+        if not existing_only:
+            count: int = seed_catalog(session)
+            session.commit()
+            if args.catalog_only:
+                print(json.dumps({"seeded_managers": count}))
+                return
+        query: Select[tuple[ResearchManager]] = (
+            select(ResearchManager)
+            .where(ResearchManager.workspace_id == LOCAL_WORKSPACE)
+            .order_by(ResearchManager.slug)
+        )
         if args.manager:
             query = query.where(ResearchManager.slug == args.manager)
         managers: list[ResearchManager] = list(session.scalars(query))
         if not managers:
-            parser.error("No matching manager in the reviewed catalog")
+            parser.error("No matching manager in the workspace database")
         manager: ResearchManager
         failed: bool = False
         for manager in managers:
             eligibility: Eligibility = manager_eligibility(manager.profile, date.today())
-            if eligibility["status"] != "eligible":
+            if not args.all_investors and eligibility["status"] != "eligible":
                 print(
                     json.dumps(
                         {
                             "manager": manager.slug,
                             "status": "skipped",
                             "reason": eligibility["reason"],
-                            **filing_counts(session, manager.id, args.start_year),
+                            **filing_counts(
+                                session,
+                                manager.id,
+                                start_year,
+                                start_period=start_period,
+                                end_period=end_period,
+                            ),
                         }
                     ),
                     flush=True,
@@ -455,14 +558,26 @@ def main() -> None:
                     parser.error(str(error))
             try:
                 imported: int = sync_manager(
-                    client, session, manager, args.start_year, retry_blocked=args.retry_blocked
+                    client,
+                    session,
+                    manager,
+                    start_year,
+                    retry_blocked=args.retry_blocked,
+                    start_period=start_period,
+                    end_period=end_period,
                 )
                 print(
                     json.dumps(
                         {
                             "manager": manager.slug,
                             "imported_filings": imported,
-                            **filing_counts(session, manager.id, args.start_year),
+                            **filing_counts(
+                                session,
+                                manager.id,
+                                start_year,
+                                start_period=start_period,
+                                end_period=end_period,
+                            ),
                         }
                     ),
                     flush=True,
@@ -481,7 +596,13 @@ def main() -> None:
                             "manager": manager.slug,
                             "status": "failed",
                             "reason": reason,
-                            **filing_counts(session, manager.id, args.start_year),
+                            **filing_counts(
+                                session,
+                                manager.id,
+                                start_year,
+                                start_period=start_period,
+                                end_period=end_period,
+                            ),
                         }
                     ),
                     flush=True,
