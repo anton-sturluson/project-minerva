@@ -27,11 +27,23 @@ Each manager result reports `complete_filings` and `blocked_filings` across the 
 
 Imports are explicit, paced, and idempotent by manager and accession. An explicit blocked-filing retry retains the prior import evidence and replaces normalized rows atomically; complete filings stay unchanged. The API does not fetch SEC data during page requests. Registry loading updates public metadata without deleting filing records. Holdings are independent of portfolio transactions. SEC XML responses are parsed in memory; normalized evidence is stored in PostgreSQL, with source links retained. No downloaded XML files are saved.
 
+## Ingest quarterly history with Minerva
+
+From the repository root, use the main CLI with the existing database and SEC identity configuration:
+
+```sh
+uv run minerva sec ingest-13f --quarters 20 --through-quarter 2026-Q2
+```
+
+This collects 2021-Q3 through 2026-Q2, exactly twenty report quarters, for every investor already stored in the workspace database. The final quarter is explicit; the CLI does not guess which quarter has filed. Minerva delegates to the existing platform importer and parser, without adding or refreshing catalog records. Collection includes investors whose AUM is unverified; directory and activity eligibility remain subject to the AUM minimum.
+
+Counts and fetched filing documents stay within the inclusive window; saved filings outside it are retained. Repeated runs skip saved accessions. Missing or blocked quarters remain explicit, and reporting entities are not automatically joined to fill gaps. The internal backend command accepts the same window with `--all-investors`; it cannot combine `--start-year` with `--quarters`.
+
 ## AUM minimum
 
 Tracking requires sourced firm or regulatory AUM of at least $50 million, inclusive. A verified lower bound also qualifies when it meets the minimum. Each record retains the public source and disclosure date; for Form ADV this is the filing date, not a separate valuation date. The value of disclosed 13F holdings is not used as AUM.
 
-The directory shows eligible managers by default. Unverified and below-minimum records remain available through the candidate filter, and their saved history is retained. They are excluded from new SEC collection and activity rankings, including explicit manager imports. Catalog-only loading still updates all records. AUM evidence is reviewed metadata; page requests do not fetch or refresh it.
+The directory shows eligible managers by default. Unverified and below-minimum records remain available through the candidate filter, and their saved history is retained. They are excluded from standard SEC collection and activity rankings, including explicit manager imports. The Minerva all-investor history command can collect their public filings without changing this eligibility status. Catalog-only loading still updates all records. AUM evidence is reviewed metadata; page requests do not fetch or refresh it.
 
 ## Interpret coverage and changes
 

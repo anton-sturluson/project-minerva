@@ -20,6 +20,7 @@ from harness.commands.common import (
     should_retry_network_error,
 )
 from harness.config import HarnessSettings, get_settings
+from harness.commands.research_ingest import INGEST_13F_HELP, ingest_13f_command
 from harness.output import CommandResult, OutputEnvelope
 from harness.workflows.evidence.constants import (
     DEFAULT_10K_ITEMS,
@@ -35,6 +36,7 @@ SEC_HELP = (
     "  minerva sec financials MSFT --type income --periods 5\n"
     "  minerva sec download AAPL --form 10-K --format markdown\n"
     "  minerva sec 13f 1067983 --output pershing-13f.md\n"
+    "  minerva sec ingest-13f --quarters 20 --through-quarter 2026-Q2\n"
     "  minerva sec bulk-download AAPL --output ./filings\n"
 )
 
@@ -86,6 +88,28 @@ def dispatch(
 
     subcommand: str = args[0]
     try:
+        if subcommand == "ingest-13f":
+            if args[1:] == ["--help"]:
+                return CommandResult.from_text(INGEST_13F_HELP)
+            parsed: dict[str, str | bool] = parse_flag_args(args[1:])
+            if set(parsed) - {"quarters", "through-quarter"}:
+                return CommandResult.from_text(
+                    "", stderr="Use only --quarters and --through-quarter. Run minerva sec ingest-13f --help for usage.", exit_code=2,
+                )
+            try:
+                raw_quarters: str | bool = parsed.get("quarters", "20")
+                if isinstance(raw_quarters, bool):
+                    raise ValueError("Missing quarter count")
+                quarters: int = int(raw_quarters)
+            except ValueError:
+                return CommandResult.from_text(
+                    "", stderr="--quarters must be a positive integer. Use --quarters 20 for five years.", exit_code=2,
+                )
+            return ingest_13f_command(
+                quarters=quarters,
+                through_quarter=str(parsed["through-quarter"]) if "through-quarter" in parsed else None,
+            )
+
         if subcommand == "10k":
             if len(args) < 2:
                 return _dispatch_help("10k", ["`sec financials MSFT --type income`"])
@@ -360,6 +384,18 @@ def thirteen_f_command(
         )
     settings = get_settings()
     _print(get_13f_command(cik, output_path=output, settings=settings))
+
+@app.command("ingest-13f", help=INGEST_13F_HELP)
+def ingest_thirteen_f_command(
+    through_quarter: str = typer.Option(..., "--through-quarter", help="Inclusive final quarter, for example 2026-Q2."),
+    quarters: int = typer.Option(20, "--quarters", min=1, help="Number of consecutive quarters to import."),
+) -> None:
+    """Collect stored investors through the platform's existing importer."""
+    result: CommandResult = ingest_13f_command(quarters=quarters, through_quarter=through_quarter)
+    _print(result)
+    if result.exit_code:
+        raise typer.Exit(result.exit_code)
+
 
 @app.command("financials", help="Fetch annual financial statements.\n\nExample:\n  minerva sec financials MSFT --type income --periods 5")
 def financials_command(
