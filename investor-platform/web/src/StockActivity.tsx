@@ -68,6 +68,12 @@ function RankedActivity({
   const ordered = rows
     .map((row) => ({
       ...row,
+      contributors: [...row.contributors].sort(
+        (left, right) =>
+          Number(right.current_weight) - Number(left.current_weight) ||
+          left.name.localeCompare(right.name, "en") ||
+          left.slug.localeCompare(right.slug, "en"),
+      ),
       averageWeight:
         row.contributors.reduce(
           (sum, manager) => sum + Number(manager.current_weight),
@@ -295,6 +301,8 @@ export function StockActivity() {
               and can have a different sign from share changes. Changes are in
               percentage points (pp). Average 13F weight is the equal-weight
               mean of current portfolio weights among contributing managers.
+              Expanded manager lists show current weights from largest to
+              smallest.
             </p>
           </details>
           {data.excluded_managers.length > 0 && (

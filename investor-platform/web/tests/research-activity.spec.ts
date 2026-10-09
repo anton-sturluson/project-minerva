@@ -183,7 +183,13 @@ test("stock activity ranks, contributor sources, coverage and hash navigation", 
     "Example Exit",
   );
   await increased.locator("summary").first().click();
-  const alpha = increased.locator(".activity-contributors li").first();
+  const beta = increased.locator(".activity-contributors li").first();
+  await expect(beta).toContainText("Example Beta");
+  await expect(beta).toContainText("8.00% → 8.00%");
+  await expect(
+    beta.getByRole("link", { name: "Filing source 2" }),
+  ).toHaveAttribute("href", "https://example.com/beta/current");
+  const alpha = increased.locator(".activity-contributors li").nth(1);
   await expect(alpha).toContainText("Example Alpha");
   await expect(alpha).toContainText("4.00% → 5.00% · +1.00 pp");
   await expect(alpha).toContainText("Reported shares: 100 → 120");
@@ -191,7 +197,7 @@ test("stock activity ranks, contributor sources, coverage and hash navigation", 
     alpha.getByRole("link", { name: "Filing source 2" }),
   ).toHaveAttribute("href", "https://example.com/alpha/current");
   await expect(
-    increased.locator(".activity-contributors li").nth(1),
+    increased.locator(".activity-contributors li").first(),
   ).toContainText("Example Beta");
   await decreased.locator("summary").nth(2).click();
   await expect(
@@ -478,6 +484,90 @@ test("all activity columns sort the full list and preserve security sources", as
   await expect(
     list.getByRole("columnheader", { name: "Average 13F weight" }),
   ).toHaveAttribute("aria-sort", "descending");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("expanded reductions show largest current weights first with stable ties and exits last", async ({
+  page,
+}) => {
+  const contributors = [
+    {
+      ...contributor("Example Exit", "exit", "-5", "0.05", "0"),
+      kind: "exited",
+      current_quantity: "0",
+    },
+    {
+      ...contributor("Example Equal", "equal-b", "-5", "0.10", "0.05"),
+      kind: "decreased",
+      current_quantity: "80",
+    },
+    {
+      ...contributor("Example Equal", "equal-a", "-5", "0.10", "0.05"),
+      kind: "decreased",
+      current_quantity: "80",
+    },
+    {
+      ...contributor("Example Alpha", "alpha", "-5", "0.10", "0.05"),
+      kind: "decreased",
+      current_quantity: "80",
+    },
+    {
+      ...contributor("Example Largest", "largest", "-10", "0.20", "0.10"),
+      kind: "decreased",
+      current_quantity: "80",
+    },
+  ];
+  await page.route("**/api/research/activity*", (route) =>
+    route.fulfill({
+      json: {
+        ...activity,
+        included_managers: 5,
+        total_managers: 5,
+        excluded_managers: [],
+        increased: [],
+        decreased: [
+          {
+            cusip: "123456780",
+            issuer: "Example Sorted Reduction",
+            security_class: "COM",
+            manager_count: 5,
+            average_weight_change_pp: "-6",
+            contributors,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/#research/activity");
+  const list = page.getByRole("region", {
+    name: "Most decreased",
+    exact: true,
+  });
+  await expect(list.getByRole("cell").nth(2)).toHaveText("5.00%");
+  await list.locator("summary").click();
+  const managers = list.locator(".activity-contributors li");
+  await expect(managers).toHaveCount(5);
+  await expect(managers.locator("strong")).toHaveText([
+    "Example Largest",
+    "Example Alpha",
+    "Example Equal",
+    "Example Equal",
+    "Example Exit",
+  ]);
+  await expect(managers.first()).toContainText("20.00% → 10.00%");
+  await expect(
+    managers.nth(2).getByRole("link", { name: "Filing source 2" }),
+  ).toHaveAttribute("href", "https://example.com/equal-a/current");
+  await expect(
+    managers.nth(3).getByRole("link", { name: "Filing source 2" }),
+  ).toHaveAttribute("href", "https://example.com/equal-b/current");
+  await expect(managers.last()).toContainText(
+    "Exited · 5.00% → 0.00% · -5.00 pp",
+  );
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
