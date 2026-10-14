@@ -1,6 +1,6 @@
 # Research manager directory
 
-The Research view reads a PostgreSQL manager registry with official websites, public letter or commentary sources, and SEC filing links. The reviewed [catalog](../backend/src/investor_platform/research_managers.json) includes established technology and growth investors plus clearly identified history candidates. See [source verification](research-sources.md).
+The Research view reads a PostgreSQL manager registry with official websites, public letter or commentary sources, and SEC filing links. The reviewed [catalog](../backend/src/investor_platform/research_managers.json) includes established technology, growth, and value investors plus clearly identified history candidates. See [source verification](research-sources.md).
 
 ## Load the registry and holdings
 
@@ -12,6 +12,8 @@ uv run --frozen alembic upgrade head
 uv run --frozen investor-research-sync --catalog-only
 ```
 
+`investor-research-sync` fetches SEC filings, parses the 13F XML, and saves normalized holdings and source evidence in PostgreSQL. `--start-year` includes report quarters on or after January 1 of that year; it defaults to the current year minus ten. Run `uv run --frozen investor-research-sync --help` for options.
+
 SEC collection requires `EDGAR_IDENTITY` set to a descriptive name and valid contact email. Keep the real contact in local environment configuration, never in committed files. Then load one manager or all catalog managers:
 
 ```sh
@@ -21,7 +23,27 @@ uv run --frozen investor-research-sync --start-year 2016
 uv run --frozen investor-research-sync --manager whale-rock --start-year 2016 --retry-blocked
 ```
 
+Each manager result reports `complete_filings` and `blocked_filings` across the requested report-period scope, including previously saved and newly imported filings. Original filings and amendments count separately; these counts do not measure usable quarter comparisons. `imported_filings` remains the number imported or retried in this run. Skipped or failed manager results also show the stored counts.
+
 Imports are explicit, paced, and idempotent by manager and accession. An explicit blocked-filing retry retains the prior import evidence and replaces normalized rows atomically; complete filings stay unchanged. The API does not fetch SEC data during page requests. Registry loading updates public metadata without deleting filing records. Holdings are independent of portfolio transactions. SEC XML responses are parsed in memory; normalized evidence is stored in PostgreSQL, with source links retained. No downloaded XML files are saved.
+
+## Ingest quarterly history with Minerva
+
+From the repository root, use the main CLI with the existing database and SEC identity configuration:
+
+```sh
+uv run minerva sec ingest-13f --quarters 20 --through-quarter 2026-Q2
+```
+
+This collects 2021-Q3 through 2026-Q2, exactly twenty report quarters, for every investor already stored in the workspace database. The final quarter is explicit; the CLI does not guess which quarter has filed. Minerva delegates to the existing platform importer and parser, without adding or refreshing catalog records. Collection includes investors whose AUM is unverified; directory and activity eligibility remain subject to the AUM minimum.
+
+Counts and fetched filing documents stay within the inclusive window; saved filings outside it are retained. Repeated runs skip saved accessions. Missing or blocked quarters remain explicit, and reporting entities are not automatically joined to fill gaps. The internal backend command accepts the same window with `--all-investors`; it cannot combine `--start-year` with `--quarters`.
+
+## AUM minimum
+
+Tracking requires sourced firm or regulatory AUM of at least $50 million, inclusive. A verified lower bound also qualifies when it meets the minimum. Each record retains the public source and disclosure date; for Form ADV this is the filing date, not a separate valuation date. The value of disclosed 13F holdings is not used as AUM.
+
+The directory shows eligible managers by default. Unverified and below-minimum records remain available through the candidate filter, and their saved history is retained. They are excluded from standard SEC collection and activity rankings, including explicit manager imports. The Minerva all-investor history command can collect their public filings without changing this eligibility status. Catalog-only loading still updates all records. AUM evidence is reviewed metadata; page requests do not fetch or refresh it.
 
 ## Interpret coverage and changes
 
@@ -32,6 +54,22 @@ Imports are explicit, paced, and idempotent by manager and accession. An explici
 - CUSIP, option type, and share/principal type identify each position. Security-class descriptions remain display metadata because the text can change. Tickers are not guessed from company names.
 - Amendments retain separate accession provenance. Uncertain amendments block comparison until resolved.
 - Thirteen-F disclosures are a subset of a manager's investments. A long filing record is not a verified investment return record or a guarantee of reliable ideas. See the [SEC's Form 13F guidance](https://www.sec.gov/divisions/investment/13ffaq).
+
+## Manager position changes
+
+The manager detail groups positions by reported quantity: Increased includes new positions, Decreased includes exits, and Unchanged means the quantity is the same. Each group sorts by the absolute dollar change from largest to smallest, with security identity as the tie-breaker. Dollar change is current reported holding value minus previous reported holding value, so it includes market-price effects and is not trade cash flow.
+
+Current 13F weight is current holding value divided by all disclosed current holdings value, including disclosed options and principal positions. It describes the reported 13F portfolio, not the manager's full fund. An exit has zero current weight when the current portfolio has a positive value; a zero-value portfolio has unavailable weights. Before/after fractions and their signed difference share one comparison calculation.
+
+## Stock activity
+
+Research has two subsections: Managers and Stock activity (`#research/activity`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included managers and lists exclusions for missing, blocked, or zero-value snapshots.
+
+The two rankings show shares increased (including new positions) and shares decreased (including exits). A manager contributes once per CUSIP and direction. Rankings exclude options and principal positions; share-type disclosures can also include funds. Unchanged quantities do not contribute, even when their value or weight changes. Share changes can reflect splits or reporting changes as well as trades.
+
+The activity API returns a deterministic order by contributing manager count, then signed average weight change and CUSIP. The view defaults to average current 13F portfolio weight descending. Every column is sortable: security name, manager count, average current weight, and average weight change. Selecting a heading toggles direction; numeric columns start descending and security starts alphabetically. Sorting applies to all results before the top-20 display limit, and a quarter change restores the default order. The average gives each contributing manager equal weight and uses only the managers in that direction, not every covered manager. Weight change is current 13F weight minus previous 13F weight, shown in percentage points: 2% to 3% is +1 pp. Both fractions use all disclosed 13F value, including disclosed options and principal positions. An increased quantity can have a negative weight change; the signed result is retained.
+
+The view shows the top 20 stocks in each direction first, with an option to show all results. Expand a stock to see its managers, before/after quantities and weights, and filing links. Expanded managers sort by current 13F weight from largest to smallest, with names as the tie-breaker. The same stock can appear in both rankings when managers disagree. Activity is calculated from stored snapshots through the shared comparison calculation; no duplicate activity table, opaque score, or network fetch is added.
 
 ## References
 

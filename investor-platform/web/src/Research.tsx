@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "./api";
+import { StockActivity } from "./StockActivity";
+import { percent, quarterLabel } from "./format";
 
 type Coverage = {
   quarters: number;
@@ -19,6 +21,16 @@ type Manager = {
   history_source_url: string | null;
   source_urls: string[];
   notes?: string;
+  aum_usd: string | null;
+  aum_as_of: string | null;
+  aum_source_url: string | null;
+  aum_measurement:
+    "regulatory_aum" | "firm_aum" | "verified_lower_bound" | null;
+  eligibility: {
+    status: "eligible" | "below_minimum" | "unverified";
+    minimum_aum_usd: string;
+    reason: string | null;
+  };
   coverage: Coverage;
 };
 type Filing = {
@@ -34,10 +46,13 @@ type Change = {
   put_call: string;
   share_type: string;
   kind: string;
+  category: "increased" | "decreased" | "unchanged";
   previous_quantity: string;
   current_quantity: string;
   quantity_change: string;
-  value_usd: string;
+  current_value_usd: string;
+  value_change_usd: string;
+  current_weight: string | null;
 };
 type Comparison = {
   quarter: string;
@@ -54,11 +69,19 @@ const changeLabels: Record<string, string> = {
   decreased: "Reduced",
   unchanged: "Unchanged",
 };
-function quarterLabel(day: string) {
-  return `${day.slice(0, 4)} Q${Math.ceil(Number(day.slice(5, 7)) / 3)}`;
-}
 function quantity(value: string) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+function dollars(value: string, signed = false) {
+  return Number(value).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+    signDisplay: signed ? "exceptZero" : "auto",
+  });
+}
+function weight(value: string | null) {
+  return value === null ? "Unavailable" : percent(value);
 }
 function SourceLink({
   url,
@@ -74,12 +97,150 @@ function SourceLink({
   );
 }
 
-export function Research() {
+function AumSummary({ manager }: { manager: Manager }) {
+  const labels = {
+    regulatory_aum: "Regulatory AUM",
+    firm_aum: "Firm AUM",
+    verified_lower_bound: "AUM lower bound",
+  };
+  if (manager.eligibility.status === "unverified") {
+    return (
+      <p className="form-note">AUM unverified · {manager.eligibility.reason}</p>
+    );
+  }
+  return (
+    <p className="form-note">
+      {manager.aum_measurement && labels[manager.aum_measurement]}:{" "}
+      {manager.aum_source_url && manager.aum_usd && (
+        <SourceLink url={manager.aum_source_url}>
+          {dollars(manager.aum_usd)} · source date {manager.aum_as_of}
+        </SourceLink>
+      )}
+      {manager.eligibility.reason && <> · {manager.eligibility.reason}</>}
+    </p>
+  );
+}
+
+function QuarterlyChanges({ changes }: { changes: Change[] }) {
+  const groups = ["increased", "decreased", "unchanged"] as const;
+  return (
+    <section aria-label="Quarterly position changes">
+      <p className="form-note">
+        Largest absolute reported value changes first in each section. Value
+        changes include price effects. Weights use the current reported 13F
+        portfolio, not the whole fund.
+      </p>
+      {groups.map((group) => {
+        const rows = changes.filter((change) => change.category === group);
+        const label = group[0].toUpperCase() + group.slice(1);
+        return (
+          <section
+            key={group}
+            className="research-change-group"
+            aria-label={`${label} positions`}
+          >
+            <h4>
+              {label} <small>({rows.length})</small>
+            </h4>
+            {rows.length === 0 ? (
+              <p className="form-note">No {group} positions.</p>
+            ) : (
+              <div className="table-scroll" tabIndex={0}>
+                <table className="research-changes-table">
+                  <thead>
+                    <tr>
+                      <th>Security</th>
+                      <th className="numeric">Value change</th>
+                      <th className="numeric">Holding value</th>
+                      <th className="numeric">13F weight</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((change) => (
+                      <tr
+                        key={[
+                          change.cusip,
+                          change.security_class,
+                          change.put_call,
+                          change.share_type,
+                        ].join("|")}
+                      >
+                        <td>
+                          {change.issuer}
+                          <br />
+                          <small>
+                            {changeLabels[change.kind] ?? change.kind}
+                          </small>
+                          <br />
+                          <small>
+                            {quantity(change.previous_quantity)} →{" "}
+                            {quantity(change.current_quantity)}{" "}
+                            {change.share_type}
+                          </small>
+                          <br />
+                          <small>
+                            {change.security_class} {change.put_call} ·{" "}
+                            {change.cusip}
+                          </small>
+                        </td>
+                        <td className="numeric">
+                          {dollars(change.value_change_usd, true)}
+                        </td>
+                        <td className="numeric">
+                          {dollars(change.current_value_usd)}
+                        </td>
+                        <td className="numeric">
+                          {weight(change.current_weight)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </section>
+  );
+}
+
+export function Research({ activity }: { activity: boolean }) {
+  return (
+    <section
+      id={activity ? "research/activity" : "research"}
+      aria-labelledby="research-heading"
+      className="research"
+    >
+      <h2 id="research-heading">
+        <span aria-hidden="true">✳ </span>Research
+      </h2>
+      <nav
+        className="research-links research-navigation"
+        aria-label="Research navigation"
+      >
+        <a href="#research" aria-current={!activity ? "page" : undefined}>
+          [ Managers ]
+        </a>
+        <a
+          href="#research/activity"
+          aria-current={activity ? "page" : undefined}
+        >
+          [ Stock activity ]
+        </a>
+      </nav>
+      {activity ? <StockActivity /> : <ManagersDirectory />}
+    </section>
+  );
+}
+
+function ManagersDirectory() {
   const [managers, setManagers] = useState<Manager[] | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [search, setSearch] = useState("");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [showCandidates, setShowCandidates] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const detailRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -106,6 +267,7 @@ export function Research() {
   }, [retry]);
   const visible = managers?.filter(
     (manager) =>
+      (showCandidates || manager.eligibility.status === "eligible") &&
       (!verifiedOnly || manager.coverage.continuous_decade) &&
       [manager.name, manager.investor_names.join(" "), manager.focus]
         .join(" ")
@@ -113,16 +275,10 @@ export function Research() {
         .includes(search.toLowerCase()),
   );
   return (
-    <section
-      id="research"
-      aria-labelledby="research-heading"
-      className="research"
-    >
+    <section aria-labelledby="managers-heading">
       <div className="directory-heading">
-        <h2 id="research-heading">
-          <span aria-hidden="true">✳ </span>Research
-        </h2>
-        {managers && <span>{managers.length} managers</span>}
+        <h3 id="managers-heading">Managers</h3>
+        {managers && <span>{visible?.length} managers</span>}
       </div>
       <p>Ideas from institutional holdings and investor letters.</p>
       {error && (
@@ -138,6 +294,10 @@ export function Research() {
       )}
       {managers && managers.length > 0 && (
         <>
+          <p className="form-note">
+            Minimum verified AUM:{" "}
+            {dollars(managers[0].eligibility.minimum_aum_usd)}.
+          </p>
           <div className="research-controls">
             <label>
               Find a manager{" "}
@@ -154,6 +314,14 @@ export function Research() {
                 onChange={(event) => setVerifiedOnly(event.target.checked)}
               />{" "}
               Verified 10-year coverage only
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={showCandidates}
+                onChange={(event) => setShowCandidates(event.target.checked)}
+              />{" "}
+              Show unverified or below-minimum managers
             </label>
           </div>
           <p className="form-note">
@@ -175,6 +343,7 @@ export function Research() {
                     </button>
                     <p>{manager.investor_names.join(", ")}</p>
                     <p>{manager.focus}</p>
+                    <AumSummary manager={manager} />
                     <p className="form-note">
                       {manager.history_start_year
                         ? `First observed filing period: ${manager.history_start_year}`
@@ -286,6 +455,7 @@ function ManagerDetail({ slug }: { slug: string }) {
         <>
           <h3>{detail.name}</h3>
           <p className="form-note">CIK {detail.cik}</p>
+          <AumSummary manager={detail} />
           {detail.coverage.first_quarter && detail.coverage.last_quarter && (
             <p>
               {quarterLabel(detail.coverage.first_quarter)} –{" "}
@@ -331,53 +501,7 @@ function ManagerDetail({ slug }: { slug: string }) {
                   {comparison.changes.length === 0 ? (
                     <p>No disclosed positions in these quarters.</p>
                   ) : (
-                    <div
-                      className="table-scroll"
-                      tabIndex={0}
-                      role="region"
-                      aria-label="Quarterly position changes"
-                    >
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Security</th>
-                            <th>Change</th>
-                            <th className="numeric">Previous quantity</th>
-                            <th className="numeric">Reported quantity</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {comparison.changes.map((change) => (
-                            <tr
-                              key={[
-                                change.cusip,
-                                change.security_class,
-                                change.put_call,
-                                change.share_type,
-                              ].join("|")}
-                            >
-                              <td>
-                                {change.issuer}
-                                <br />
-                                <small>
-                                  {change.security_class} {change.put_call} ·{" "}
-                                  {change.cusip} · {change.share_type}
-                                </small>
-                              </td>
-                              <td>
-                                {changeLabels[change.kind] ?? change.kind}
-                              </td>
-                              <td className="numeric">
-                                {quantity(change.previous_quantity)}
-                              </td>
-                              <td className="numeric">
-                                {quantity(change.current_quantity)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <QuarterlyChanges changes={comparison.changes} />
                   )}
                 </>
               )}
