@@ -8,6 +8,7 @@ import time
 from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import TypedDict
 from urllib.error import HTTPError, URLError
@@ -582,7 +583,7 @@ def main() -> None:
                     ),
                     flush=True,
                 )
-            except (HTTPError, URLError, ValueError, ET.ParseError) as error:
+            except (URLError, TimeoutError, IncompleteRead, ValueError, ET.ParseError) as error:
                 session.rollback()
                 failed = True
                 reason: str = (

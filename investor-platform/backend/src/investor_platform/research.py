@@ -42,6 +42,18 @@ def quarter_end(value: date) -> bool:
     return value.month in (3, 6, 9, 12) and (value + timedelta(days=1)).day == 1
 
 
+def filing_state(filing: ResearchFiling, reason: str | None) -> tuple[bool, str | None]:
+    """Apply the shared replacement, amendment and completeness rules for one filing."""
+    replacement: bool = filing.form == "13F-HR" or filing.amendment_type == "RESTATEMENT"
+    if replacement:
+        reason = None
+    elif filing.amendment_type != "NEW HOLDINGS":
+        reason = "Unknown amendment type; comparison needs review"
+    if filing.status != "complete":
+        reason = filing.reason or "Filing has incomplete holdings"
+    return replacement, reason
+
+
 def snapshot(
     session: Session, filings: list[ResearchFiling]
 ) -> tuple[dict[HoldingKey, Position], str | None, list[str]]:
@@ -52,14 +64,10 @@ def snapshot(
     filing: ResearchFiling
     for filing in sorted(filings, key=lambda item: (item.filed_date, item.accession)):
         sources.append(filing.source_url)
-        replacement: bool = filing.form == "13F-HR" or filing.amendment_type == "RESTATEMENT"
+        replacement: bool
+        replacement, reason = filing_state(filing, reason)
         if replacement:
             positions = {}
-            reason = None
-        elif filing.amendment_type != "NEW HOLDINGS":
-            reason = "Unknown amendment type; comparison needs review"
-        if filing.status != "complete":
-            reason = filing.reason or "Filing has incomplete holdings"
         holding: ResearchHolding
         rows: list[ResearchHolding] = list(
             session.scalars(select(ResearchHolding).where(ResearchHolding.filing_id == filing.id))
@@ -121,12 +129,7 @@ def manager_view(session: Session, manager: ResearchManager, *, detail: bool = F
             for filing in sorted(
                 quarter_filings, key=lambda item: (item.filed_date, item.accession)
             ):
-                if filing.form == "13F-HR" or filing.amendment_type == "RESTATEMENT":
-                    reason = None
-                else:
-                    reason = "Unknown amendment type"
-                if filing.status != "complete":
-                    reason = filing.reason or "Incomplete filing"
+                reason = filing_state(filing, reason)[1]
         if reason is None:
             usable.append(period)
     streak: int = 0

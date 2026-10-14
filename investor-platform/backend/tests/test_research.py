@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
@@ -234,6 +235,50 @@ def test_all_change_kinds_and_disjoint_additions(
     result: dict = db_client.get("/api/research/managers/example/changes?quarter=2026-06-30").json()
     assert result["status"] == "available"
     assert {item["kind"] for item in result["changes"]} == {"new", "exited", "decreased"}
+
+
+@pytest.mark.parametrize(
+    ("amendment", "blocked", "overlap", "available"),
+    [
+        (None, False, False, True),
+        (None, True, False, False),
+        ("RESTATEMENT", False, False, True),
+        ("RESTATEMENT", True, False, False),
+        ("UNKNOWN", False, False, False),
+        ("NEW HOLDINGS", False, False, True),
+        ("NEW HOLDINGS", False, True, False),
+    ],
+)
+def test_coverage_and_comparison_agree_on_filing_state(
+    database: Engine,
+    db_client: TestClient,
+    tmp_path: Path,
+    amendment: str | None,
+    blocked: bool,
+    overlap: bool,
+    available: bool,
+) -> None:
+    """The directory and comparison API agree on persisted originals and amendment evidence."""
+    manager_id: UUID = registry(database, tmp_path)
+    filing(database, manager_id, "2026-03-31", "a", row("5", "50"))
+    filing(database, manager_id, "2026-06-30", "b", row("5", "50"))
+    cusip: str = "111111111" if amendment == "NEW HOLDINGS" and not overlap else "123456789"
+    filing(
+        database,
+        manager_id,
+        "2026-06-30",
+        "c",
+        row("1", "10", cusip=cusip),
+        amendment=amendment,
+        count=2 if blocked else 1,
+    )
+    coverage: dict = db_client.get("/api/research/managers/example").json()["coverage"]
+    comparison: dict = db_client.get(
+        "/api/research/managers/example/changes?quarter=2026-06-30"
+    ).json()
+    assert coverage["quarters"] == (2 if available else 1)
+    assert coverage["last_quarter"] == ("2026-06-30" if available else "2026-03-31")
+    assert comparison["status"] == ("available" if available else "unavailable")
 
 
 def test_confidential_and_value_mismatch_are_not_complete(
