@@ -1,12 +1,12 @@
 # Annual financial observation contract
 
-Status: proposed · 2026-10-14. This contract defines design inputs. It does not implement a database, collector or report.
+Status: pilot contract · 2026-10-14. This contract defines annual inputs and the bounded import/read path. Collection and portfolio reporting remain separate.
 
 The pilot covers GOOGL, OSCR and ACFN fiscal years 2023–2025. Collect reported US-GAAP annual statement facts in USD. Use confirmed issuer identity; a ticker is a listing label, not a financial join key. Owner earnings, TTM, guidance, adjusted earnings and a generic collection platform are outside this contract.
 
 ## Bundle and evidence
 
-Use the [JSON Schema](../backend/tests/fixtures/financial/annual-financial-bundle.schema.json) and [synthetic bundle](../backend/tests/fixtures/financial/synthetic-annual-bundle.json). One bundle describes one issuer and one annual period. Every named input is present, with either a reported decimal value or an explicit missing/applicability status. Financial values are decimal strings in whole USD; share counts are unscaled decimal strings; EPS is USD per share. Exponents, numeric JSON values and formatted amounts are rejected. Ratios are derived as fractions and formatted as percentages only for display.
+Use the [JSON Schema](../backend/src/investor_platform/annual_financial_bundle.schema.json) and [synthetic bundle](../backend/tests/fixtures/financial/synthetic-annual-bundle.json). One bundle describes one issuer and one annual period. Every named input is present, with either a reported decimal value or an explicit missing/applicability status. Financial values are decimal strings in whole USD; share counts are unscaled decimal strings; EPS is USD per share. Exponents, numeric JSON values and formatted amounts are rejected. Ratios are derived as fractions and formatted as percentages only for display.
 
 `bundle_id` identifies an immutable candidate/publication version. Sources include immutable document identity, HTTPS URL, original publication date, retrieval timestamp and the SHA-256 of the downloaded document bytes. Each reported fact names one source and an exact statement/row/column locator, with page or XBRL tag where available. Source documents can provide comparative prior-year facts; their publication date remains the date of that document. Do not invent an earlier date for a restated comparative value.
 
@@ -78,13 +78,31 @@ Use the existing backend's SQLAlchemy/Alembic migration owner and PostgreSQL ser
 - **Observation:** publication, metric, decimal value or absence status, source locator and any class/split basis. A later snapshot references these stable IDs. A canonical view selects an accepted publication coherently for a company-period; it does not mix arbitrary newest cells across revisions.
 - **Security mapping:** existing security ID to issuer ID, with confirmed class, instrument type and dated ADR conversion if relevant. Do not copy ledger records or portfolio quantities into the company fact store.
 
-Derived-result records, when needed, must retain formula version and exact observation input IDs. A note alone cannot reproduce a calculation. This document does not implement these tables or resurrect the retired SQLite migration.
+Derived-result records, when needed, must retain formula version and exact observation input IDs. A note alone cannot reproduce a calculation. The pilot commands below implement the bounded financial store. The retired SQLite migration remains outside this path.
 
 ## Acceptance beyond JSON Schema
 
 JSON Schema validates fields, decimal syntax, supported keys, units, scopes and presence rules. Use a Draft 2020-12 validator with format checking. It cannot establish financial truth or all cross-record constraints. Acceptance code must check: unique source IDs; resolved fact source references; issuer consistency; start before end; publication/retrieval chronology; supported annual duration; verified document hash and locator; statement/class/split compatibility; explicit applicability; and no overlapping capex categories. A structurally valid bundle remains a candidate until these checks pass.
 
 Preserve restated observations and original publication dates. The annual report's proposed default is retrospective: year-end holdings, fiscal years ending within the selected calendar year, and latest verified restatements. Label that policy. An as-known report selects only source versions published by its information cutoff; the database acceptance timestamp must not be substituted for publication date. Persisted reports pin holdings/quote/FX dates, input versions and formula version. Weighted ratios use each metric's covered market value and show coverage; dollar look-through totals and averages of nominal EPS are outside this contract.
+
+## Pilot import and read commands
+
+The backend now provides `investor-financial validate`, `import` and `show`. Run each with `--help` for its arguments. Successful operations emit clean JSON; errors go to stderr. Set `INVESTOR_FINANCIAL_DATABASE_URL` through private configuration for import/read operations. There is no database fallback. Validation requires original downloaded bytes in the bundle directory, or an explicit `--source-dir`.
+
+```sh
+uv run investor-financial validate research/company/annual-bundle-FY2025.json
+uv run investor-financial import research/company/annual-bundle-FY2025.json --schema investor_financial_pilot --reviewed
+uv run investor-financial show sec-cik:0000000001 2025 --schema investor_financial_pilot
+```
+
+Import requires an explicit `investor_financial_<name>` namespace. A fresh namespace receives the bounded versioned schema; an existing namespace must have the exact supported financial schema marker. Legacy and unrecognized namespaces are refused. The pilot bootstrap is separate from automatic portfolio migrations; it does not deploy or migrate the existing `investor_data` store.
+
+Without `--reviewed`, imports remain candidates. The flag records the caller's completed independent review of financial facts, units, scopes, class rights and locators. Schema validity and matching document hashes establish structural integrity and saved evidence, not financial truth. In particular, a single-class denominator still needs review that it represents the relevant issuer cash-flow scope; this cannot be established from its class name alone.
+
+Publications, observations, document versions, publication-source links and metric definitions are append-only. An identical UUID/content/review-status replay returns unchanged; a conflicting replay is refused. Corrections use a new bundle UUID. Reads select one coherent latest reviewed import, ordered by `imported_at`, per issuer and period ending in the requested calendar year, or the latest candidate import if no reviewed import exists. This does not discover the latest restatement. An older filing imported later can supersede a newer filing, so the reviewer must deliberately choose publication/import order. Each result exposes its review status, observation/source IDs, formula version and exact calculation inputs. Decimal values remain plain decimal strings; divisions use 38 significant digits. The source and period metadata are checked on reuse rather than silently replaced.
+
+A normal annual duration must be 350–380 days for this pilot. Fiscal labels remain independent of the calendar year in which the period ends. Missing PP&E cash spending withholds FCF; optional intangible cash spending does not enter the expressly limited PP&E formula. Insurer gross margin is withheld; insurer cash-flow comparison remains the report's separate applicability decision. Source byte checks do not infer a zero from a missing line.
 
 ## References
 
@@ -93,7 +111,7 @@ Preserve restated observations and original publication dates. The annual report
 - [ADR 0008](decisions/0008-store-annual-financial-observations.md) — proposed store and immutable-observation decision.
 - [Backend models](../backend/src/investor_platform/models.py) — existing securities, ledger and decimal storage.
 - [ADR 0003](decisions/0003-independent-holdings.md) — independent holdings valuation and missing-price handling.
-- [JSON Schema](../backend/tests/fixtures/financial/annual-financial-bundle.schema.json) — machine-readable input structure.
+- [JSON Schema](../backend/src/investor_platform/annual_financial_bundle.schema.json) — machine-readable input structure.
 
 ### SEC filings
 

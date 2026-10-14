@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.0",
     "fastapi",
+    "jsonschema>=4.26.0",
     "psycopg[binary]>=3.3.6",
     "python-dotenv>=1.2.4",
     "sqlalchemy>=2.1.1",
@@ -13,6 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
+investor-financial = "investor_platform.financial_cli:main"
 investor-api = "investor_platform.app:main"
 investor-refresh-prices = "investor_platform.price_refresh:main"
 investor-import = "investor_platform.import_transactions:main"
