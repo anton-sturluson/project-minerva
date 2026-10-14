@@ -14,6 +14,7 @@
 | [ADR 0008](decisions/0008-store-annual-financial-observations.md) | Proposed annual financial store with immutable source evidence. |
 | [Annual financial contract](annual-financial-contract.md) | Financial statement inputs, calculation definitions and pilot bundle schema. |
 | [Annual financial tickets](annual-financial-tickets.md) | Approved three-step pilot: contract, parallel collection and weighted report. |
+| [Weighted financial report](weighted-financial-report.md) | Annual metric weights, separate coverage and reproducible cited reports. |
 | [Daily prices](daily-prices.md) | Daily 5 p.m. Eastern collection, retries, cache freshness and operational status. |
 | [Operations](operations.md) | Configuration, start/stop, migrations, testing and project layout. |
 | [Portfolio guide](portfolio.md) | Accounts, cash, positions, trade entry, corrections and tracker usage. |

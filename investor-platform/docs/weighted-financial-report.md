@@ -1,0 +1,19 @@
+# Annual market-value-weighted financial report
+
+`build_weighted_report(snapshot, profiles)` is a pure calculation. It uses explicit calendar-year-end USD equity market values and saved outputs from `investor-financial show`. It does not read portfolio accounts, fetch prices, infer quantities or write database records. `render_weighted_report(report)` renders cited Markdown; retain the JSON beside it for exact provenance. ([Implementation](../backend/src/investor_platform/weighted_financial.py))
+
+The snapshot contains `synthetic`, `base_currency`, `holdings_date`, `source` and `holdings`. Each holding contains a confirmed `issuer_key` and positive decimal-string `market_value`; a ticker may also be included. Several listings of the same issuer combine under that issuer. Empty holdings or any missing, zero, negative or invalid market value withhold all weighted ratios and coverage. These are supplied market values, not proof of quote or FX accuracy.
+
+Supply one coherent reviewed annual financial profile per issuer. Financial periods must end in the selected calendar year; fiscal labels cannot override their dates. The shared company formulas recompute each eligible profile once; a saved calculated value that disagrees with its observation inputs rejects the report. Unreviewed profiles, absent issuers and unavailable metrics retain their market value in the total selected-equity denominator but do not contribute to that metric. The retrospective policy uses the supplied reviewed publication without an information cutoff. It does not independently select or establish the latest restatement. ([Observation contract](annual-financial-contract.md))
+
+For each metric, the weighted ratio is `sum(market value × company ratio) / covered market value`. Coverage is `covered market value / all selected equity market value`, excluding cash. Different ratios can have different coverage. For example, values of 600 and 400 with margins of 40% and 10% give 28%. If the second margin is missing, the reported ratio is 40% with 60% coverage; the missing value is not zero.
+
+The report includes gross, operating, consolidated net, common-shareholder net, CFO and FCF-after-cash-PP&E margins. Reported losses retain their sign. Insurer consolidated CFO remains included, with an explicit warning that cross-sector economic comparability is unverified. FCF uses the limited PP&E definition and remains unavailable when its inputs are missing. Company tables also show reported revenue, operating income, common earnings, CFO and cash PP&E spending in whole USD, plus available FCF, allocated CFO/FCF per basic share and reported EPS. Nominal EPS and earnings dollars are not averaged. Each weighted metric and company scalar cites its input documents beside the value. ([Company formulas](../backend/src/investor_platform/financial.py))
+
+Every JSON result pins the input snapshot, coherent publication IDs, company calculation versions, observation IDs, source IDs, source documents, financial periods and weighting formula version. The reader-facing Markdown retains financial dates, scopes, coverage, source links and brief missing-data explanations. Internal IDs, formula versions and source hashes stay in the companion JSON. Source publication dates remain distinct from holdings dates. Synthetic input values produce an explicit **SYNTHETIC WEIGHTS — not actual portfolio exposure** label. The pilot's financial observations are real sourced company disclosures; its market values are an explicit validation fixture.
+
+## References
+
+- [Annual financial observation contract](annual-financial-contract.md) — metric scope, missingness and reporting-period policy.
+- [Weighted calculation](../backend/src/investor_platform/weighted_financial.py) — Decimal weighting and retained provenance.
+- [Calculation tests](../backend/tests/test_weighted_financial.py) — weighted arithmetic, missing coverage, valuation failures, date policy and unknown issuers.
