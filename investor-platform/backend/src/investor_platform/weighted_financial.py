@@ -4,7 +4,15 @@ import re
 from datetime import date
 from decimal import Context, Decimal, localcontext
 
-from .financial import FORMULA_VERSION, Json, Record, record, records, validate_capital_spending
+from .financial import (
+    FORMULA_VERSION,
+    Json,
+    Record,
+    basic_share_reason,
+    record,
+    records,
+    validate_capital_spending,
+)
 from .financial import calculations as company_calculations
 
 WEIGHT_FORMULA_VERSION: str = "annual-market-value-weighting-v1"
@@ -16,6 +24,13 @@ RATIO_LABELS: dict[str, str] = {
     "cfo_margin": "Consolidated CFO margin",
     "fcf_margin_after_ppe": "FCF margin after cash PP&E capex",
     "fcf_margin_after_disclosed_capex": "FCF margin after disclosed cash capital spending",
+}
+PER_SHARE_METRICS: dict[str, tuple[str, str]] = {
+    "weighted_company_eps": ("Weighted company basic EPS", "basic_eps"),
+    "weighted_company_fcf_per_share": (
+        "Weighted company FCF per basic share",
+        "allocated_fcf_after_disclosed_capex_per_basic_share",
+    ),
 }
 COMPANY_LABELS: dict[str, str] = {
     "fcf_after_ppe": "FCF after cash PP&E capex",
@@ -95,6 +110,30 @@ def ratio_value(profile: Record, key: str) -> tuple[Decimal | None, str | None]:
         ):
             return None, "Calculation observation/source provenance does not match"
     return decimal_string(calculation["value"]), None
+
+
+def reported_basic_eps(profile: Record) -> tuple[Decimal | None, str | None]:
+    """Read one reported basic EPS measure with its class, split and source evidence."""
+    fact: Record = record(record(profile["facts"]).get("basic_eps", {}))
+    if fact.get("status") != "reported":
+        return None, str(fact.get("reason", "Reported basic EPS is unavailable"))
+    if (
+        fact.get("unit") != "USD_per_share"
+        or fact.get("entity_scope") != "attributable_common"
+        or fact.get("measurement_basis") != "duration"
+    ):
+        return None, "Basic EPS requires annual USD per common share"
+    # EPS can be negative or zero; only the shared class/split safeguards apply here.
+    reason: str | None = basic_share_reason(fact, require_positive=False)
+    if reason is not None:
+        return None, reason
+    if (
+        not fact.get("observation_id")
+        or not fact.get("locator")
+        or fact.get("source_id") not in {s["source_id"] for s in records(profile["sources"])}
+    ):
+        return None, "Basic EPS observation/source provenance does not match"
+    return decimal_string(fact["value"]), None
 
 
 def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
@@ -184,6 +223,7 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
             }
         )
     ratios: Record = {}
+    per_share: Record = {}
     with localcontext() as context:
         context.prec = 64
         total: Decimal = sum(values.values(), Decimal(0))
@@ -197,7 +237,10 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
             )
         key: str
         label: str
-        for key, label in RATIO_LABELS.items():
+        source_key: str
+        for key, (label, source_key) in (
+            {k: (v, k) for k, v in RATIO_LABELS.items()} | PER_SHARE_METRICS
+        ).items():
             covered: Decimal = Decimal(0)
             numerator: Decimal = Decimal(0)
             contributions: list[Record] = []
@@ -208,7 +251,12 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                 reason = str(company["reason"]) if company["reason"] is not None else None
                 ratio: Decimal | None = None
                 if reason is None:
-                    ratio, reason = ratio_value(record(company["profile"]), key)
+                    selected_profile: Record = record(company["profile"])
+                    ratio, reason = (
+                        reported_basic_eps(selected_profile)
+                        if source_key == "basic_eps"
+                        else ratio_value(selected_profile, source_key)
+                    )
                 if reason is not None:
                     exclusions.append({"issuer_key": issuer_key, "reason": reason})
                 elif ratio is not None and issuer_key in values:
@@ -220,12 +268,18 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                             "issuer_key": issuer_key,
                             "bundle_id": selected["bundle_id"],
                             "market_value": format(values[issuer_key], "f"),
-                            "company_ratio": format(ratio, "f"),
-                            "calculation": record(selected["calculations"])[key],
+                            "company_ratio" if key in RATIO_LABELS else "company_value": format(
+                                ratio, "f"
+                            ),
+                            "observation" if source_key == "basic_eps" else "calculation": (
+                                record(selected["facts"])[source_key]
+                                if source_key == "basic_eps"
+                                else record(selected["calculations"])[source_key]
+                            ),
                         }
                     )
             available: bool = not valuation_errors and covered > 0
-            ratios[key] = {
+            result: Record = {
                 "label": label,
                 "status": "calculated" if available else "unavailable",
                 "value": format(numerator / covered, "f") if available else None,
@@ -235,7 +289,11 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                 "covered_market_value": format(covered, "f") if not valuation_errors else None,
                 "total_selected_equity_value": format(total, "f") if not valuation_errors else None,
                 "formula_version": WEIGHT_FORMULA_VERSION,
-                "formula": "sum(company_market_value * company_ratio) / covered_market_value",
+                "formula": (
+                    "sum(company_market_value * company_ratio) / covered_market_value"
+                    if key in RATIO_LABELS
+                    else "sum(company_market_value * company_value) / covered_market_value"
+                ),
                 "reason": None
                 if available
                 else (
@@ -246,6 +304,11 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                 "contributions": contributions,
                 "exclusions": exclusions,
             }
+            if key in RATIO_LABELS:
+                ratios[key] = result
+            else:
+                result["unit"] = "USD_per_company_share"
+                per_share[key] = result
     return {
         "report_version": "annual-weighted-financial-report-v1",
         "synthetic": snapshot["synthetic"],
@@ -266,6 +329,7 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
         "These accounting ratios are not owner earnings.",
         "companies": companies,
         "weighted_ratios": ratios,
+        "weighted_company_per_share": per_share,
     }
 
 
@@ -380,8 +444,9 @@ def render_weighted_report(report: Record) -> str:
             str(report["cash_flow_comparability"]),
             "",
             "Company cash flow per basic share is allocated consolidated cash flow; "
-            "it is not cash attributable to common owners. Nominal EPS, earnings dollars "
-            "and per-share values are not averaged across companies.",
+            "it is not cash attributable to common owners. Weighted company per-share values "
+            "depend on each company's share units and split basis; they are not portfolio-unit "
+            "earnings or cash flow.",
         ]
     )
     references: dict[str, Record] = {}

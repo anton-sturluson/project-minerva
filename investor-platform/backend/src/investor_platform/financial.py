@@ -109,11 +109,11 @@ def validate_capital_spending(bundle: Record) -> None:
             tags.add(tag)
 
 
-def basic_share_reason(fact: Record) -> str | None:
-    """Require reported positive annual basic shares and a supported common-class basis."""
+def basic_share_reason(fact: Record, *, require_positive: bool = True) -> str | None:
+    """Require a reported common-class basis and, for share counts, a positive value."""
     if fact.get("status") != "reported":
         return "Reported annual basic weighted-average shares are unavailable"
-    if Decimal(str(fact["value"])) <= 0:
+    if require_positive and Decimal(str(fact["value"])) <= 0:
         return "A positive annual basic-share denominator is required"
     if not fact.get("share_basis"):
         return "Reported common-class and split basis is unavailable"

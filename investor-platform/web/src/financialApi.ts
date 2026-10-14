@@ -7,6 +7,13 @@ export type PerShareMeasure = {
   inputs?: { source_id?: string }[];
 };
 
+type SummaryMeasure = {
+  label: string;
+  value: string | null;
+  coverage: string | null;
+  exclusions: { issuer_key?: string; reason: string }[];
+};
+
 export type FinancialReport = {
   synthetic: boolean;
   calendar_year: number;
@@ -17,6 +24,7 @@ export type FinancialReport = {
   };
   companies: {
     issuer_key: string;
+    equity_weight?: string | null;
     financial_status?: string;
     profile: {
       review_status?: string;
@@ -26,22 +34,8 @@ export type FinancialReport = {
       sources: { source_id: string; url: string; published_on: string }[];
     } | null;
   }[];
-  weighted_ratios: Record<
-    string,
-    {
-      label: string;
-      value: string | null;
-      coverage: string | null;
-      exclusions: { reason: string }[];
-      contributions?: {
-        issuer_key: string;
-        calculation: {
-          inputs: { source_id?: string }[];
-          review_note?: string;
-        };
-      }[];
-    }
-  >;
+  weighted_ratios: Record<string, SummaryMeasure>;
+  weighted_company_per_share?: Record<string, SummaryMeasure>;
 };
 
 export const annualFinancials = (year: number) =>
