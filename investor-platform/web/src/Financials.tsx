@@ -6,12 +6,12 @@ import { percent } from "./format";
 const metrics = [
   ["gross_margin", "Gross margin"],
   ["operating_margin", "Operating margin"],
-  ["net_margin_common", "Net margin (common shareholders)"],
-  ["cfo_margin", "Consolidated CFO margin"],
-  ["fcf_margin_after_disclosed_capex", "FCF margin after disclosed capex"],
+  ["fcf_margin_after_disclosed_capex", "FCF margin"],
 ] as const;
 
 function missingReason(reason: string) {
+  if (/insurer/i.test(reason) && /not applicable/i.test(reason))
+    return "Not applicable to insurers";
   return reason
     .replace("Missing/applicability inputs:", "Missing")
     .replaceAll("cash_capex_ppe", "cash PP&E spending")
@@ -79,7 +79,7 @@ export function Financials() {
         </label>
       </div>
       <p className="financial-illustration">
-        <strong>Illustrative weights — not your portfolio.</strong>
+        <strong>Illustrative weights</strong>
       </p>
       {loading && <p role="status">Loading FY{year} financials…</p>}
       {error && (
@@ -102,10 +102,6 @@ export function Financials() {
           </p>
         ) : (
           <>
-            <p className="form-note">
-              Year-end weights: {report.holdings_date}. Financial periods end
-              within {year}.
-            </p>
             <div
               className="table-scroll"
               tabIndex={0}
@@ -129,15 +125,6 @@ export function Financials() {
                 <tbody>
                   {metrics.map(([key, label]) => {
                     const metric = report.weighted_ratios[key];
-                    const notes = [
-                      ...new Set(
-                        (metric?.contributions || [])
-                          .flatMap((contribution) => [
-                            contribution.calculation.review_note,
-                          ])
-                          .filter((note): note is string => Boolean(note)),
-                      ),
-                    ];
                     const sources = [
                       ...new Map(
                         (metric?.contributions || [])
@@ -196,14 +183,9 @@ export function Financials() {
                               : "Annual measure not available"}
                         </td>
                         <td>
-                          {sources.length > 0 || notes.length > 0 ? (
+                          {sources.length > 0 ? (
                             <details>
                               <summary>Source filings</summary>
-                              {notes.map((note) => (
-                                <p className="form-note" key={note}>
-                                  {note}
-                                </p>
-                              ))}
                               <ul>
                                 {sources.map((source) => (
                                   <li key={source.url}>
@@ -228,14 +210,6 @@ export function Financials() {
                 </tbody>
               </table>
             </div>
-            <p className="form-note">
-              Each ratio uses covered equity value. Coverage measures all
-              selected equity; cash is excluded. CFO is consolidated cash flow.
-              Insurer cash flow may not be comparable to operating-company cash
-              flow. FCF deducts separately disclosed capital spending;
-              acquisition rows are excluded. These figures are not owner
-              earnings.
-            </p>
           </>
         ))}
     </section>

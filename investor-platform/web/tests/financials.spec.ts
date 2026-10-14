@@ -115,17 +115,23 @@ test("Post-mortem shows annual aggregates and metric sources even when accounts 
   ).toHaveAttribute("aria-current", "page");
   const financials = page.locator(".annual-financials");
   await expect(
-    financials.getByText("Illustrative weights — not your portfolio."),
+    financials.getByText("Illustrative weights", { exact: true }),
   ).toBeVisible();
   await expect(financials.getByText("-12.50%", { exact: true })).toBeVisible();
   await expect(
     financials.getByRole("row", { name: /^Gross margin/ }),
   ).toContainText("75%");
   await expect(
-    financials.getByRole("row", { name: /Net margin \(common shareholders\)/ }),
-  ).toContainText("12.00%");
+    financials.getByText("Not applicable to insurers", { exact: true }),
+  ).toBeVisible();
   await expect(
-    financials.getByRole("row", { name: /^FCF margin after disclosed capex/ }),
+    financials.getByRole("row", { name: /Net margin \(common shareholders\)/ }),
+  ).toHaveCount(0);
+  await expect(
+    financials.getByRole("row", { name: /^Consolidated CFO margin/ }),
+  ).toHaveCount(0);
+  await expect(
+    financials.getByRole("row", { name: /^FCF margin/ }),
   ).toContainText("100%");
   await expect(
     financials.getByText("Consolidated net margin", { exact: true }),
@@ -141,14 +147,14 @@ test("Post-mortem shows annual aggregates and metric sources even when accounts 
     operating.getByRole("link", { name: "Filing 2026-02-01" }),
   ).toHaveAttribute("href", "https://example.org/annual-report");
   const fcf = financials.getByRole("row", {
-    name: /^FCF margin after disclosed capex/,
+    name: /^FCF margin/,
   });
   await fcf.getByText("Source filings", { exact: true }).click();
   await expect(
     fcf.getByText(
       "Mixed acquisition and capital-spending rows are excluded, not assumed zero.",
     ),
-  ).toBeVisible();
+  ).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -236,28 +242,38 @@ test("changing financial year ignores an older late response", async ({
   const finished = new Promise<void>((resolve) => {
     oldFinished = resolve;
   });
+  let oldRequested!: () => void;
+  const requested = new Promise<void>((resolve) => {
+    oldRequested = resolve;
+  });
   await page.route("**/api/financials?year=*", async (route) => {
     const year = Number(
       new URL(route.request().url()).searchParams.get("year"),
     );
-    if (year === 2025) await gate;
-    await route.fulfill({ json: report(year) });
-    if (year === 2025) oldFinished();
+    if (year === 2024) {
+      oldRequested();
+      await gate;
+    }
+    const data = report(year);
+    data.weighted_ratios.operating_margin.value =
+      year === 2023 ? "0.23" : "0.24";
+    await route.fulfill({ json: data });
+    if (year === 2024) oldFinished();
   });
   await page.goto("/#post-mortem");
+  await page.getByLabel("Financial year").selectOption("2024");
+  await requested;
   await page.getByLabel("Financial year").selectOption("2023");
   await expect(
-    page.getByText(
-      "Year-end weights: 2023-12-31. Financial periods end within 2023.",
-    ),
+    page.locator(".annual-financials").getByText("23.00%", { exact: true }),
   ).toBeVisible();
   release();
   await finished;
   await expect(
-    page.locator(".annual-financials").getByText("11.00%", { exact: true }),
+    page.locator(".annual-financials").getByText("23.00%", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.locator(".annual-financials").getByText("-12.50%", { exact: true }),
+    page.locator(".annual-financials").getByText("24.00%", { exact: true }),
   ).toHaveCount(0);
 });
 
