@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Portfolio } from "./Portfolio";
 import { Research } from "./Research";
-import { Financials } from "./Financials";
 
 type Theme = "system" | "light" | "dark";
 function savedTheme(): Theme {
@@ -22,10 +21,9 @@ const initialTheme = savedTheme();
 // Apply before React renders to avoid flashing the wrong stored theme on reload.
 applyTheme(initialTheme);
 
-export type Page =
-  "portfolio" | "activity" | "research" | "post-mortem" | "financials";
+export type Page = "portfolio" | "activity" | "research" | "post-mortem";
 function currentPage(hash: string): Page {
-  if (hash === "#financials") return "financials";
+  if (hash === "#financials") return "post-mortem";
   return hash === "#activity"
     ? "activity"
     : hash === "#post-mortem"
@@ -41,7 +39,13 @@ export function App() {
   const contentHash =
     page === "research" && hash === "#research/activity" ? hash : `#${page}`;
   useEffect(() => {
-    const navigate = () => setHash(location.hash);
+    const navigate = () => {
+      if (location.hash === "#financials") {
+        history.replaceState(null, "", "#post-mortem");
+      }
+      setHash(location.hash);
+    };
+    navigate();
     window.addEventListener("hashchange", navigate);
     return () => window.removeEventListener("hashchange", navigate);
   }, []);
@@ -72,12 +76,6 @@ export function App() {
             [ Portfolio ]
           </a>
           <a href="#performance">[ Performance ]</a>
-          <a
-            href="#financials"
-            aria-current={page === "financials" ? "page" : undefined}
-          >
-            [ Financials ]
-          </a>
           <a
             href="#post-mortem"
             aria-current={page === "post-mortem" ? "page" : undefined}
@@ -111,12 +109,9 @@ export function App() {
         </label>
       </header>
       <main id="main">
-        {page !== "financials" && (
-          <div hidden={page === "research"}>
-            <Portfolio page={page} />
-          </div>
-        )}
-        {page === "financials" && <Financials />}
+        <div hidden={page === "research"}>
+          <Portfolio page={page} />
+        </div>
         {page === "research" && (
           <Research activity={hash === "#research/activity"} />
         )}

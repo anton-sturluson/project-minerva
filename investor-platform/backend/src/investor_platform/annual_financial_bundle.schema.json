@@ -33,6 +33,7 @@
       }
     },
     "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source"}},
+    "capital_spending": {"$ref": "#/$defs/capital_spending"},
     "facts": {
       "type": "object",
       "additionalProperties": false,
@@ -71,6 +72,35 @@
     }
   },
   "$defs": {
+    "capital_spending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "review_note", "components"],
+      "properties": {
+        "scope": {"const": "separately disclosed cash capital spending excluding acquisition rows"},
+        "review_note": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "components": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+          "ppe": {"$ref": "#/$defs/capital_component"},
+          "property_equipment_software": {"$ref": "#/$defs/capital_component"},
+          "technology_investment": {"$ref": "#/$defs/capital_component"},
+          "equipment": {"$ref": "#/$defs/capital_component"},
+          "leasehold_improvements": {"$ref": "#/$defs/capital_component"},
+          "patents": {"$ref": "#/$defs/capital_component"},
+          "other_capital_investments": {"$ref": "#/$defs/capital_component"}
+          }
+        }
+      }
+    },
+    "capital_component": {
+      "allOf": [
+        {"$ref": "#/$defs/nonnegative_amount"},
+        {"properties": {"status": {"const": "reported"}}}
+      ]
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,

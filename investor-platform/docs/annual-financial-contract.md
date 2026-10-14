@@ -108,6 +108,18 @@ The read-only app endpoint is `GET /api/financials?year=2025`, supporting 2023â€
 
 The app uses a single declared illustrative equity-weight registry in `financial_api.py`. Its nominal USD values exercise the weighting formula; they are not actual portfolio positions or historical quotes. Responses retain the existing company/report evidence shapes and expose `synthetic`, `api_status`, coverage and availability reasons. Existing app authentication and origin checks apply.
 
+## Disclosed cash capital spending in storage v2
+
+An optional top-level `capital_spending` object extends the existing `schema_version: "1.0"` bundle without changing reported statement facts. It has a fixed scope, a nonempty `review_note` and a `components` object. The scope is **separately disclosed cash capital spending excluding acquisition rows**. Supported component keys are `ppe`, `property_equipment_software`, `technology_investment`, `equipment`, `leasehold_improvements`, `patents` and `other_capital_investments`. Each component is a reported, nonnegative, whole-USD consolidated annual cash outflow with a resolved source and exact locator.
+
+The collector selects compatible, disjoint cash investment rows. Combined subtotals must not be counted alongside their components. Duplicate semantic keys, source locators and source-tag aliases are refused. The annual period is inherited from the bundle; acceptance still requires an independent check of each source's issuer, annual context, cash classification and scope. This object does not claim a sum is reported or silently split hardware/software spending.
+
+Storage v2 adds one optional JSONB column to immutable publications. Component references use the publication UUID plus `/capital_spending/components/<key>`. New calculations retain every selected component's reference, decimal value, source and locator, plus the scope/review note. `fcf_after_disclosed_capex` subtracts their deterministic sum from reported CFO; `fcf_margin_after_disclosed_capex` divides that result by positive reported revenue. Without accepted components these results remain unavailable. Weighted ratios independently recompute the sum and verify the pinned component evidence.
+
+The old PP&E-only inputs and formulas remain unchanged for archival use. Storage uses the `annual-financial-v2` marker and company formulas use `annual-financial-formulas-v2`. Import revised bundles with new UUIDs into a fresh explicitly configured namespace. Existing v1 namespaces are refused; neither import nor GET requests migrate or mutate them.
+
+Coverage measures availability of this stated formula, not completeness of all investment. In particular, a mixed acquisitions/intangible-assets cash row is excluded when its acquisition-free portion cannot be identified; it is not assumed zero. Source details retain that limit. The measure is not owner earnings or estimated maintenance capital expenditure.
+
 ## References
 
 ### Project contracts

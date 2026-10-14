@@ -17,6 +17,8 @@ from psycopg.rows import dict_row
 from sqlalchemy import Engine
 
 from investor_platform.financial import (
+    SCHEMA,
+    Json,
     Record,
     Row,
     import_bundle,
@@ -249,7 +251,9 @@ def test_missingness_insurer_and_gross_fallback(
     with conn.transaction():
         import_bundle(conn, schema, bundle, True)
         profile = show(conn, schema, "synthetic-example", 2025)
-    assert record(record(profile["calculations"])["gross_margin"])["status"] == "unavailable"
+    insurer_gross: Record = record(record(profile["calculations"])["gross_margin"])
+    assert insurer_gross["status"] == "unavailable"
+    assert "not applicable" in str(insurer_gross["reason"])
 
 
 def test_dates_source_references_and_absence_evidence(candidate: tuple[Path, Record]) -> None:
@@ -298,3 +302,124 @@ def test_same_transaction_revision_order(
         import_bundle(conn, schema, bundle, True)
         import_bundle(conn, schema, revision, True)
         assert show(conn, schema, "synthetic-example", 2025)["bundle_id"] == revision["bundle_id"]
+
+
+def add_capital_spending(bundle: Record, values: dict[str, str]) -> None:
+    """Attach disjoint synthetic reported cash rows using the canonical fixed scope."""
+    source: Record = records(bundle["sources"])[0]
+    components: Record = {}
+    key: str
+    value: str
+    for key, value in values.items():
+        components[key] = {
+            "status": "reported",
+            "unit": "USD",
+            "entity_scope": "consolidated",
+            "measurement_basis": "duration",
+            "value": value,
+            "source_id": source["source_id"],
+            "locator": {
+                "statement": "Consolidated Statements of Cash Flows",
+                "row": key,
+                "column": "2025",
+            },
+        }
+    schema: Record = json.loads(SCHEMA.read_text())
+    definition: Record = record(record(schema["$defs"])["capital_spending"])
+    scope: Json = record(record(definition["properties"])["scope"])["const"]
+    bundle["capital_spending"] = {
+        "scope": scope,
+        "review_note": "Reviewed disjoint annual cash investment rows; no acquisitions.",
+        "components": components,
+    }
+
+
+def test_disclosed_capital_spending_sum_is_persisted_and_reproducible(
+    candidate: tuple[Path, Record], financial: tuple[Connection[Row], str]
+) -> None:
+    """A source-backed component sum restores FCF without changing archival PP&E facts."""
+    path: Path
+    bundle: Record
+    path, bundle = candidate
+    add_capital_spending(
+        bundle,
+        {
+            "equipment": "8000",
+            "leasehold_improvements": "4000",
+            "technology_investment": "20000",
+            "patents": "1000",
+        },
+    )
+    path.write_text(json.dumps(bundle))
+    validate(path)
+    conn: Connection[Row]
+    schema: str
+    conn, schema = financial
+    with conn.transaction():
+        import_bundle(conn, schema, bundle, True)
+        result: Record = show(conn, schema, "synthetic-example", 2025)
+    assert result["capital_spending"] == bundle["capital_spending"]
+    cash: Record = record(record(result["calculations"])["fcf_after_disclosed_capex"])
+    assert cash["capital_spending_total"] == "33000" and cash["value"] == "14967000"
+    assert cash["scope"] == record(bundle["capital_spending"])["scope"]
+    assert len(records(cash["inputs"])) == 5
+    component: Record = records(cash["inputs"])[1]
+    assert (
+        component["component_ref"]
+        == f"{bundle['bundle_id']}#/capital_spending/components/equipment"
+    )
+    assert component["locator"] and component["source_id"] and component["value"] == "8000"
+    assert record(record(result["calculations"])["fcf_after_ppe"])["value"] == "12000000"
+
+
+@pytest.mark.parametrize(
+    "problem", ["overlap", "duplicate_locator", "missing", "source", "negative"]
+)
+def test_invalid_capital_spending_is_refused(candidate: tuple[Path, Record], problem: str) -> None:
+    """Reject unsupported sums rather than presenting source gaps as zero capital spending."""
+    path: Path
+    bundle: Record
+    path, bundle = candidate
+    add_capital_spending(bundle, {"equipment": "8000", "technology_investment": "20000"})
+    spending: Record = record(bundle["capital_spending"])
+    components: Record = record(spending["components"])
+    fact: Record = record(components["equipment"])
+    if problem == "overlap":
+        components["ppe"] = deepcopy(fact)
+    elif problem == "duplicate_locator":
+        record(components["technology_investment"])["locator"] = deepcopy(fact["locator"])
+    elif problem == "missing":
+        fact.pop("value")
+        fact.update(status="not_disclosed", reason="Missing")
+    elif problem == "source":
+        fact["source_id"] = "absent"
+    else:
+        fact["value"] = "-1"
+    path.write_text(json.dumps(bundle))
+    with pytest.raises((ValueError, ValidationError)):
+        validate(path)
+
+
+def test_component_duplicate_keys_and_v1_namespace_are_refused(
+    candidate: tuple[Path, Record], financial: tuple[Connection[Row], str]
+) -> None:
+    """Do not lose repeated source keys or automatically migrate an old financial namespace."""
+    path: Path
+    bundle: Record
+    path, bundle = candidate
+    text: str = json.dumps(bundle).replace(
+        '"schema_version": "1.0"', '"schema_version": "1.0", "schema_version": "1.0"'
+    )
+    path.write_text(text)
+    with pytest.raises(ValueError, match="Duplicate JSON key"):
+        validate(path)
+    conn: Connection[Row]
+    schema: str
+    conn, schema = financial
+    with conn.transaction():
+        conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        conn.execute(
+            sql.SQL("COMMENT ON SCHEMA {} IS 'annual-financial-v1'").format(sql.Identifier(schema))
+        )
+    with pytest.raises(ValueError, match="Unknown existing"), conn.transaction():
+        import_bundle(conn, schema, bundle, True)

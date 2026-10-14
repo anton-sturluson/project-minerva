@@ -35,6 +35,7 @@ CREATE TABLE {schema}.publications (
     review_status text NOT NULL CHECK (review_status IN ('candidate','reviewed')),
     imported_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     issuer jsonb NOT NULL,
+    capital_spending jsonb,
     CHECK (length(bundle_sha256) = 64)
 );
 CREATE TABLE {schema}.publication_sources (

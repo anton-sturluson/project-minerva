@@ -4,7 +4,7 @@ import re
 from datetime import date
 from decimal import Context, Decimal, localcontext
 
-from .financial import FORMULA_VERSION, Json, Record, record, records
+from .financial import FORMULA_VERSION, Json, Record, record, records, validate_capital_spending
 from .financial import calculations as company_calculations
 
 WEIGHT_FORMULA_VERSION: str = "annual-market-value-weighting-v1"
@@ -15,6 +15,7 @@ RATIO_LABELS: dict[str, str] = {
     "net_margin_common": "Common-shareholder net margin",
     "cfo_margin": "Consolidated CFO margin",
     "fcf_margin_after_ppe": "FCF margin after cash PP&E capex",
+    "fcf_margin_after_disclosed_capex": "FCF margin after disclosed cash capital spending",
 }
 COMPANY_LABELS: dict[str, str] = {
     "fcf_after_ppe": "FCF after cash PP&E capex",
@@ -62,6 +63,22 @@ def ratio_value(profile: Record, key: str) -> tuple[Decimal | None, str | None]:
         return None, "Calculation has no observation inputs"
     item: Record
     for item in inputs:
+        if "component_key" in item:
+            spending: Record = record(profile["capital_spending"])
+            component_key: str = str(item["component_key"])
+            components: Record = record(spending["components"])
+            component: Record = record(components.get(component_key))
+            if (
+                item.get("component_ref")
+                != f"{profile['bundle_id']}#/capital_spending/components/{component_key}"
+                or any(
+                    item.get(field) != component.get(field)
+                    for field in ("value", "source_id", "locator")
+                )
+                or str(item.get("source_id")) not in sources
+            ):
+                return None, "Capital spending component/source provenance does not match"
+            continue
         metric: str = str(item["metric_key"])
         if metric not in facts:
             return None, "Calculation references an absent observation"
@@ -71,6 +88,10 @@ def ratio_value(profile: Record, key: str) -> tuple[Decimal | None, str | None]:
             or fact.get("observation_id") != item.get("observation_id")
             or fact.get("source_id") != item.get("source_id")
             or str(item.get("source_id")) not in sources
+            or "value" in item
+            and item.get("value") != fact.get("value")
+            or "locator" in item
+            and item.get("locator") != fact.get("locator")
         ):
             return None, "Calculation observation/source provenance does not match"
     return decimal_string(calculation["value"]), None
@@ -114,9 +135,12 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
         if issuer_key in by_issuer:
             raise ValueError("Supply one coherent financial publication per issuer and year")
         if eligible_profile(profile, holdings_date.year) is None:
+            validate_capital_spending(profile)
             recomputed: Record = company_calculations(
                 {k: record(v) for k, v in record(profile["facts"]).items()},
                 record(profile["issuer"])["business_type"] == "insurer",
+                record(profile["capital_spending"]) if profile.get("capital_spending") else None,
+                str(profile["bundle_id"]),
             )
             key: str
             saved: Json
@@ -130,6 +154,12 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                     or decimal_string(saved_calculation["value"])
                     != decimal_string(expected["value"])
                     or saved_calculation.get("formula") != expected.get("formula")
+                    or key.startswith("fcf_")
+                    and "disclosed_capex" in key
+                    and any(
+                        saved_calculation.get(field) != expected.get(field)
+                        for field in ("inputs", "scope", "review_note", "capital_spending_total")
+                    )
                 ):
                     raise ValueError("Saved company calculation does not match observation inputs")
         by_issuer[issuer_key] = profile
