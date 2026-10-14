@@ -8,20 +8,10 @@ const metrics = [
   ["operating_margin", "Operating margin"],
   ["fcf_margin_after_disclosed_capex", "FCF margin"],
 ] as const;
-
-function missingReason(reason: string) {
-  if (/insurer/i.test(reason) && /not applicable/i.test(reason))
-    return "Not applicable to insurers";
-  return reason
-    .replace("Missing/applicability inputs:", "Missing")
-    .replaceAll("cash_capex_ppe", "cash PP&E spending")
-    .replaceAll("net_income", "consolidated net income")
-    .replaceAll("gross_profit", "gross profit")
-    .replaceAll("cost_of_revenue", "cost of revenue")
-    .replaceAll("operating_cash_flow", "operating cash flow")
-    .split(". ")[0]
-    .slice(0, 160);
-}
+const perShareMetrics = [
+  ["weighted_company_eps", "Weighted company EPS", 2],
+  ["weighted_company_fcf_per_share", "Weighted company FCF/share", 4],
+] as const;
 
 export function Financials() {
   const [year, setYear] = useState(2025);
@@ -37,9 +27,8 @@ export function Financials() {
     annualFinancials(year)
       .then((data) => {
         if (!active) return;
-        if (data.calendar_year !== year || data.synthetic !== true) {
+        if (data.calendar_year !== year || data.synthetic !== true)
           throw new Error("Unexpected report");
-        }
         setReport(data);
       })
       .catch(() => {
@@ -58,6 +47,20 @@ export function Financials() {
       holding.ticker,
     ]) || [],
   );
+  const rows = [
+    ...metrics.map(([key, label]) => ({
+      key,
+      label,
+      metric: report?.weighted_ratios[key],
+      digits: null,
+    })),
+    ...perShareMetrics.map(([key, label, digits]) => ({
+      key,
+      label,
+      metric: report?.weighted_company_per_share?.[key],
+      digits,
+    })),
+  ];
   return (
     <section
       className="annual-financials"
@@ -112,206 +115,150 @@ export function Financials() {
               className="table-scroll"
               tabIndex={0}
               role="region"
-              aria-label="Weighted annual ratios"
+              aria-label="Portfolio-weighted metrics"
             >
               <table className="financial-ratios-table">
                 <thead>
                   <tr>
                     <th scope="col">Measure</th>
                     <th scope="col" className="number">
-                      Ratio
+                      Value
                     </th>
-                    <th scope="col" className="number">
-                      Coverage
-                    </th>
-                    <th scope="col">Missing data</th>
-                    <th scope="col">Sources</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {metrics.map(([key, label]) => {
-                    const metric = report.weighted_ratios[key];
-                    const sources = [
-                      ...new Map(
-                        (metric?.contributions || [])
-                          .flatMap((contribution) => {
-                            const ids = new Set(
-                              contribution.calculation.inputs.map(
-                                (input) => input.source_id,
-                              ),
-                            );
-                            return (
-                              report.companies
-                                .find(
-                                  (company) =>
-                                    company.issuer_key ===
-                                    contribution.issuer_key,
-                                )
-                                ?.profile?.sources.filter((source) =>
-                                  ids.has(source.source_id),
-                                ) || []
-                            );
-                          })
-                          .map((source) => [source.url, source]),
-                      ).values(),
-                    ];
-                    return (
-                      <tr key={key}>
-                        <th scope="row">{label}</th>
-                        <td className="number">
-                          {metric?.value == null
-                            ? "Unavailable"
-                            : percent(metric.value)}
-                        </td>
-                        <td className="number">
-                          {metric?.coverage == null
-                            ? "Unavailable"
-                            : percent(metric.coverage, 0)}
-                        </td>
-                        <td>
-                          {metric?.exclusions.length
-                            ? [
-                                ...new Set(
-                                  metric.exclusions.map((excluded) =>
-                                    missingReason(excluded.reason),
-                                  ),
-                                ),
-                              ].map((reason) => (
-                                <span
-                                  className="financial-missing"
-                                  key={reason}
-                                >
-                                  {reason}
-                                </span>
-                              ))
-                            : metric
-                              ? "—"
-                              : "Annual measure not available"}
-                        </td>
-                        <td>
-                          {sources.length > 0 ? (
-                            <details>
-                              <summary>Source filings</summary>
-                              <ul>
-                                {sources.map((source) => (
-                                  <li key={source.url}>
-                                    <a
-                                      href={source.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      Filing {source.published_on}
-                                    </a>
-                                  </li>
-                                ))}
-                              </ul>
-                            </details>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {rows.map(({ key, label, metric, digits }) => (
+                    <tr key={key}>
+                      <th
+                        scope="row"
+                        aria-describedby={
+                          [
+                            digits !== null ? "weighted-share-basis" : "",
+                            metric?.exclusions.length
+                              ? `${key}-exclusions`
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ") || undefined
+                        }
+                      >
+                        {label}
+                        {(digits !== null ||
+                          Boolean(metric?.exclusions.length)) && <sup>*</sup>}
+                      </th>
+                      <td className="number">
+                        {metric?.value == null
+                          ? "Unavailable"
+                          : digits === null
+                            ? percent(metric.value)
+                            : Number(metric.value).toLocaleString("en-US", {
+                                style: "currency",
+                                currency: "USD",
+                                minimumFractionDigits: digits,
+                                maximumFractionDigits: digits,
+                              })}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-            <div
-              className="table-scroll"
-              tabIndex={0}
-              role="region"
-              aria-label="Company per-share figures"
-            >
-              <table className="financial-per-share-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Company</th>
-                    <th scope="col" className="number">
-                      EPS (basic)
-                    </th>
-                    <th scope="col" className="number">
-                      FCF/share
-                    </th>
-                    <th scope="col">Sources</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.companies.map((company) => {
-                    const profile = company.profile;
-                    const reviewed =
-                      company.financial_status === "eligible" &&
-                      profile?.review_status === "reviewed";
-                    const eps = profile?.facts?.basic_eps;
-                    const fcf =
-                      profile?.calculations
-                        ?.allocated_fcf_after_disclosed_capex_per_basic_share;
-                    const sourceIds = new Set([
-                      eps?.source_id,
-                      ...(fcf?.inputs || []).map((input) => input.source_id),
-                    ]);
-                    const sources = reviewed
-                      ? profile.sources.filter((source) =>
-                          sourceIds.has(source.source_id),
-                        )
-                      : [];
-                    const ticker = tickers.get(company.issuer_key);
-                    return (
-                      <tr key={company.issuer_key}>
-                        <th scope="row">
-                          {ticker || profile?.issuer?.name || "Company"}
-                        </th>
-                        <td className="number">
-                          {reviewed &&
-                          eps?.status === "reported" &&
-                          eps.value != null
-                            ? Number(eps.value).toLocaleString("en-US", {
-                                style: "currency",
-                                currency: "USD",
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })
-                            : "Unavailable"}
-                        </td>
-                        <td className="number">
-                          {reviewed &&
-                          fcf?.status === "calculated" &&
-                          fcf.value != null
-                            ? Number(fcf.value).toLocaleString("en-US", {
-                                style: "currency",
-                                currency: "USD",
-                                minimumFractionDigits: 4,
-                                maximumFractionDigits: 4,
-                              })
-                            : "Unavailable"}
-                        </td>
-                        <td>
-                          {sources.length > 0 ? (
-                            <details>
-                              <summary>Source filings</summary>
-                              <ul>
-                                {sources.map((source) => (
-                                  <li key={source.url}>
-                                    <a
-                                      href={source.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      Filing {source.published_on}
-                                    </a>
-                                  </li>
-                                ))}
-                              </ul>
-                            </details>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {rows
+              .filter(({ metric }) => metric?.exclusions.length)
+              .map(({ key, label, metric }) => (
+                <p className="form-note" id={`${key}-exclusions`} key={key}>
+                  * {label} excludes{" "}
+                  {metric!.exclusions
+                    .map((excluded) => {
+                      const company = report.companies.find(
+                        (item) => item.issuer_key === excluded.issuer_key,
+                      );
+                      const name =
+                        tickers.get(excluded.issuer_key || "") ||
+                        company?.profile?.issuer?.name ||
+                        "Company";
+                      const why =
+                        /insurer/i.test(excluded.reason) &&
+                        /not applicable/i.test(excluded.reason)
+                          ? "insurer"
+                          : "data unavailable";
+                      return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 0)} weight` : "weight unavailable"}; ${why})`;
+                    })
+                    .join(", ")}
+                  .
+                </p>
+              ))}
+            <p className="form-note" id="weighted-share-basis">
+              * Per-share figures are market-value-weighted company averages.
+            </p>
+            <details>
+              <summary>Company details</summary>
+              <div
+                className="table-scroll"
+                tabIndex={0}
+                role="region"
+                aria-label="Company per-share figures"
+              >
+                <table className="financial-per-share-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Company</th>
+                      <th scope="col" className="number">
+                        EPS (basic)
+                      </th>
+                      <th scope="col" className="number">
+                        FCF/share
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.companies.map((company) => {
+                      const profile = company.profile;
+                      const reviewed =
+                        company.financial_status === "eligible" &&
+                        profile?.review_status === "reviewed";
+                      const eps = profile?.facts?.basic_eps;
+                      const fcf =
+                        profile?.calculations
+                          ?.allocated_fcf_after_disclosed_capex_per_basic_share;
+                      return (
+                        <tr key={company.issuer_key}>
+                          <th scope="row">
+                            {tickers.get(company.issuer_key) ||
+                              profile?.issuer?.name ||
+                              "Company"}
+                          </th>
+                          <td className="number">
+                            {reviewed &&
+                            eps?.status === "reported" &&
+                            eps.value != null
+                              ? Number(eps.value).toLocaleString("en-US", {
+                                  style: "currency",
+                                  currency: "USD",
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })
+                              : "Unavailable"}
+                          </td>
+                          <td className="number">
+                            {reviewed &&
+                            fcf?.status === "calculated" &&
+                            fcf.value != null
+                              ? Number(fcf.value).toLocaleString("en-US", {
+                                  style: "currency",
+                                  currency: "USD",
+                                  minimumFractionDigits: 4,
+                                  maximumFractionDigits: 4,
+                                })
+                              : "Unavailable"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           </>
         ))}
     </section>

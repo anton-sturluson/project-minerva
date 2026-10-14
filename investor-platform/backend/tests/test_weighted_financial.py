@@ -277,3 +277,69 @@ def test_missing_disclosed_capex_is_not_replaced_by_legacy_ppe_or_zero() -> None
     result: Record = build_weighted_report(snapshot(), [profile("example:one")])
     assert metric(result, "fcf_margin_after_disclosed_capex")["value"] is None
     assert metric(result, "fcf_margin_after_disclosed_capex")["coverage"] == "0"
+
+
+def per_share_metric(report: Record, key: str = "weighted_company_eps") -> Record:
+    """Read a weighted company amount separately from percentage ratios."""
+    return record(record(report["weighted_company_per_share"])[key])
+
+
+def test_weighted_company_per_share_preserves_negative_values_and_source_proof() -> None:
+    """Reported EPS and disclosed-capex FCF use explicit weights and retain source inputs."""
+    first: Record = with_disclosed_capex(profile("example:one"), "3000000", "1000000")
+    second: Record = with_disclosed_capex(profile("example:two"), "20000000", "0")
+    record(record(first["facts"])["basic_eps"])["value"] = "2"
+    record(record(second["facts"])["basic_eps"])["value"] = "-1"
+    result: Record = build_weighted_report(snapshot(), [first, second])
+    eps: Record = per_share_metric(result)
+    cash: Record = per_share_metric(result, "weighted_company_fcf_per_share")
+    assert Decimal(str(eps["value"])) == Decimal("0.8")
+    assert Decimal(str(cash["value"])) == Decimal("0.46")
+    assert eps["coverage"] == cash["coverage"] == "1"
+    assert eps["unit"] == cash["unit"] == "USD_per_company_share"
+    contribution: Record = records(eps["contributions"])[0]
+    assert record(contribution["observation"])["observation_id"] == "example:one:basic_eps"
+    assert contribution["company_value"] == "2"
+    cash_inputs: list[Record] = records(
+        record(records(cash["contributions"])[0]["calculation"])["inputs"]
+    )
+    assert any(i.get("component_ref") for i in cash_inputs)
+    assert any(i.get("metric_key") == "basic_weighted_average_shares" for i in cash_inputs)
+    assert "weighted_company_eps" not in record(result["weighted_ratios"])
+
+
+def test_weighted_company_amounts_use_independent_coverage_and_no_zero_fallback() -> None:
+    """An absent EPS or uncollected capex removes only the affected amount and issuer."""
+    first: Record = with_disclosed_capex(profile("example:one"), "3000000", "1000000")
+    second: Record = profile("example:two")
+    fact: Record = record(record(first["facts"])["basic_eps"])
+    fact.update(status="unavailable", reason="Not reported")
+    fact.pop("value")
+    result: Record = build_weighted_report(snapshot(), [first, second])
+    eps: Record = per_share_metric(result)
+    cash: Record = per_share_metric(result, "weighted_company_fcf_per_share")
+    assert Decimal(str(eps["value"])) == Decimal("0.8") and eps["coverage"] == "0.4"
+    assert cash["value"] == "1.1" and cash["coverage"] == "0.6"
+    assert records(eps["exclusions"])[0]["reason"] == "Not reported"
+    assert records(cash["exclusions"])[0]["issuer_key"] == "example:two"
+    assert metric(result)["coverage"] == "1"
+
+
+@pytest.mark.parametrize("field", ["source_id", "observation_id", "share_basis"])
+def test_weighted_eps_requires_reported_source_and_supported_share_basis(field: str) -> None:
+    """A missing or unresolved EPS source or share basis cannot enter the weighted result."""
+    selected: Record = profile("example:one")
+    fact: Record = record(record(selected["facts"])["basic_eps"])
+    fact.pop(field)
+    result: Record = build_weighted_report(snapshot(), [selected])
+    assert per_share_metric(result)["value"] is None
+    assert per_share_metric(result)["coverage"] == "0"
+    assert records(per_share_metric(result)["exclusions"])[0]["reason"]
+
+
+def test_invalid_valuation_withholds_weighted_company_amounts() -> None:
+    """A missing market value cannot silently reweight the remaining per-share measures."""
+    result: Record = build_weighted_report(snapshot(second=None), [profile("example:one")])
+    amount: Record
+    for amount in (record(v) for v in record(result["weighted_company_per_share"]).values()):
+        assert amount["value"] is None and amount["coverage"] is None
