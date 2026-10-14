@@ -2,169 +2,153 @@ import { expect, test } from "@playwright/test";
 import type { FinancialReport } from "../src/financialApi";
 
 function report(year = 2025): FinancialReport {
+  const source = {
+    source_id: "filing",
+    url: "https://example.org/annual-report",
+    published_on: `${year + 1}-02-01`,
+  };
+  const contribution = {
+    issuer_key: "example:issuer",
+    calculation: { inputs: [{ source_id: "filing" }] },
+  };
   return {
     synthetic: true,
     calendar_year: year,
     holdings_date: `${year}-12-31`,
     api_status: "partial",
-    market_value_snapshot: {
-      holdings: ["AAA", "BBB", "CCC"].map((ticker) => ({
-        issuer_key: ticker,
-        ticker,
-      })),
-    },
-    companies: ["AAA", "BBB", "CCC"].map((ticker, index) => ({
-      issuer_key: ticker,
-      equity_weight: ["0.60", "0.25", "0.15"][index],
-      financial_status: "eligible",
-      reason: null,
-      profile: {
-        issuer: { name: `Synthetic ${ticker} Company` },
-        period: {
-          fiscal_label: `FY${year}`,
-          start: `${year}-01-01`,
-          end: `${year}-12-31`,
-        },
-        sources: [
-          {
-            source_id: "filing",
-            url: "https://example.org/annual-report",
-            published_on: `${year + 1}-02-01`,
-          },
-        ],
-        facts: {
-          revenue: {
-            status: "reported",
-            value: String(year * 1000),
-            source_id: "filing",
-          },
-          net_income_common: {
-            status: "reported",
-            value: "100000",
-            source_id: "filing",
-          },
-          operating_cash_flow: {
-            status: "reported",
-            value: "50000",
-            source_id: "filing",
-          },
-          basic_eps: {
-            status: "reported",
-            value: "1.25",
-            source_id: "filing",
-            share_basis: {
-              classes: ["class_a"],
-              split_adjusted_through: `${year}-12-31`,
-            },
-          },
-          diluted_eps: {
-            status: "reported",
-            value: "1.10",
-            source_id: "filing",
-            share_basis: {
-              classes: ["class_a"],
-              split_adjusted_through: `${year}-12-31`,
-            },
-          },
-          basic_weighted_average_shares: {
-            status: "reported",
-            value: "100000",
-            share_basis: {
-              classes: ["class_a", "class_b"],
-              split_adjusted_through: `${year}-12-31`,
-              equivalence_note: "Verified common-class economic equivalence.",
-            },
-          },
-          cash_capex_ppe: {
-            status: "unavailable",
-            reason: "Cash capital spending categories cannot be separated.",
-            source_id: "filing",
-          },
-        },
-        calculations: {
-          allocated_cfo_per_basic_share: {
-            status: "calculated",
-            value: "0.50",
-            inputs: [{ source_id: "filing" }],
-          },
-          fcf_after_ppe: {
-            status: "unavailable",
-            reason: "Missing/applicability inputs: cash_capex_ppe",
-            inputs: [{ source_id: "filing" }],
-          },
-        },
-      },
-    })),
+    companies: [
+      { issuer_key: "example:issuer", profile: { sources: [source] } },
+    ],
     weighted_ratios: {
-      operating_margin: {
-        label: "Operating margin",
-        status: "calculated",
-        value: "-0.125",
+      gross_margin: {
+        label: "Gross margin",
+        value: "0.40",
         coverage: "0.75",
         exclusions: [
+          { reason: "Gross margin is not applicable for an insurer." },
+        ],
+        contributions: [contribution],
+      },
+      operating_margin: {
+        label: "Operating margin",
+        value: year === 2023 ? "0.11" : "-0.125",
+        coverage: "0.75",
+        exclusions: [{ reason: "Annual operating figure not collected." }],
+        contributions: [contribution],
+      },
+      net_margin: {
+        label: "Consolidated net margin",
+        value: "0.10",
+        coverage: "0.40",
+        exclusions: [],
+      },
+      net_margin_common: {
+        label: "Common-shareholder net margin",
+        value: "0.12",
+        coverage: "1",
+        exclusions: [],
+        contributions: [contribution],
+      },
+      cfo_margin: {
+        label: "Consolidated CFO margin",
+        value: "0.15",
+        coverage: "1",
+        exclusions: [],
+        contributions: [contribution],
+      },
+      fcf_margin_after_disclosed_capex: {
+        label: "FCF margin after disclosed cash capital spending",
+        value: "0.13",
+        coverage: "1",
+        exclusions: [],
+        contributions: [
           {
-            issuer_key: "BBB",
-            reason: "Annual operating figure not collected.",
+            ...contribution,
+            calculation: {
+              ...contribution.calculation,
+              review_note:
+                "Mixed acquisition and capital-spending rows are excluded, not assumed zero.",
+            },
           },
         ],
       },
       fcf_margin_after_ppe: {
         label: "FCF margin after cash PP&E capex",
-        status: "unavailable",
         value: null,
         coverage: "0",
         exclusions: [
-          {
-            issuer_key: "AAA",
-            reason: "Missing/applicability inputs: cash_capex_ppe",
-          },
+          { reason: "Missing/applicability inputs: cash_capex_ppe" },
         ],
       },
     },
   };
 }
 
-test("annual figures show illustrative weights, class scope, coverage and sources", async ({
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
+});
+
+test("Post-mortem shows annual aggregates and metric sources even when accounts fail", async ({
   page,
 }) => {
+  await page.route("**/api/accounts", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { detail: "Portfolio records temporarily unavailable" },
+    }),
+  );
   await page.route("**/api/financials?year=*", (route) =>
     route.fulfill({ json: report() }),
   );
-  await page.goto("/#financials");
+  await page.goto("/#post-mortem");
   await expect(
-    page.getByRole("heading", { name: "Annual financials" }),
+    page.getByRole("heading", { name: /Post-mortem/, level: 1 }),
   ).toBeVisible();
   await expect(
-    page.getByText("Illustrative weights — not your portfolio."),
+    page.getByRole("heading", { name: "Annual financials", level: 2 }),
   ).toBeVisible();
-  await expect(page.locator(".financial-weights")).toHaveText(
-    "AAA: 60% · BBB: 25% · CCC: 15%",
-  );
-  const ratios = page.getByRole("region", { name: "Weighted annual ratios" });
-  await expect(ratios.getByText("-12.50%", { exact: true })).toBeVisible();
-  await expect(ratios.getByText("75%", { exact: true })).toBeVisible();
   await expect(
-    ratios.getByText("BBB: Annual operating figure not collected"),
+    page.getByRole("link", { name: "[ Financials ]", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "[ Post-mortem ]", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  const financials = page.locator(".annual-financials");
+  await expect(
+    financials.getByText("Illustrative weights — not your portfolio."),
   ).toBeVisible();
-  const company = page.getByRole("region", {
-    name: "Synthetic AAA Company financial figures",
-  });
+  await expect(financials.getByText("-12.50%", { exact: true })).toBeVisible();
   await expect(
-    company.getByRole("row", { name: /Common earnings/ }),
-  ).toContainText("100,000");
-  await expect(company.getByRole("row", { name: /Diluted EPS/ })).toContainText(
-    "Class A · split basis through 2025-12-31",
-  );
+    financials.getByRole("row", { name: /^Gross margin/ }),
+  ).toContainText("75%");
   await expect(
-    company.getByRole("row", { name: /Allocated CFO per basic share/ }),
-  ).toContainText("Verified common-class economic equivalence");
+    financials.getByRole("row", { name: /Net margin \(common shareholders\)/ }),
+  ).toContainText("12.00%");
   await expect(
-    company.getByRole("row", { name: /^Cash PP&E capex/ }),
-  ).toContainText("Cash capital spending categories cannot be separated");
+    financials.getByRole("row", { name: /^FCF margin after disclosed capex/ }),
+  ).toContainText("100%");
   await expect(
-    company.getByRole("link", { name: "Filing 2026-02-01" }).first(),
+    financials.getByText("Consolidated net margin", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    financials.getByText("FCF margin after cash PP&E capex", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator(".financial-company")).toHaveCount(0);
+  await expect(page.locator(".financial-weights")).toHaveCount(0);
+  const operating = financials.getByRole("row", { name: /^Operating margin/ });
+  await operating.getByText("Source filings", { exact: true }).click();
+  await expect(
+    operating.getByRole("link", { name: "Filing 2026-02-01" }),
   ).toHaveAttribute("href", "https://example.org/annual-report");
-  await expect(page.getByLabel("Portfolio", { exact: true })).toHaveCount(0);
+  const fcf = financials.getByRole("row", {
+    name: /^FCF margin after disclosed capex/,
+  });
+  await fcf.getByText("Source filings", { exact: true }).click();
+  await expect(
+    fcf.getByText(
+      "Mixed acquisition and capital-spending rows are excluded, not assumed zero.",
+    ),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -172,7 +156,18 @@ test("annual figures show illustrative weights, class scope, coverage and source
   ).toBe(true);
 });
 
-test("loading, transport failure and retry recover without exposing setup details", async ({
+test("legacy financials URL opens canonical Post-mortem", async ({ page }) => {
+  await page.route("**/api/financials?year=*", (route) =>
+    route.fulfill({ json: report() }),
+  );
+  await page.goto("/#financials");
+  await expect(page).toHaveURL(/#post-mortem$/);
+  await expect(
+    page.getByRole("heading", { name: "Annual financials", level: 2 }),
+  ).toBeVisible();
+});
+
+test("loading, transport failure and retry recover without setup details", async ({
   page,
 }) => {
   let fail = true;
@@ -189,40 +184,44 @@ test("loading, transport failure and retry recover without exposing setup detail
       });
     } else await route.fulfill({ json: report() });
   });
-  await page.goto("/#financials");
-  await expect(page.getByRole("status")).toHaveText(
+  await page.goto("/#post-mortem");
+  const financials = page.locator(".annual-financials");
+  await expect(financials.getByRole("status")).toHaveText(
     "Loading FY2025 financials…",
   );
   release();
-  await expect(page.getByRole("alert")).toContainText(
+  await expect(financials.getByRole("alert")).toContainText(
     "Could not load annual figures.",
   );
   await expect(
     page.getByText("Private database configuration details"),
   ).toHaveCount(0);
   fail = false;
-  await page.getByRole("button", { name: "Retry financials" }).click();
+  await financials.getByRole("button", { name: "Retry financials" }).click();
   await expect(
-    page.getByRole("heading", { name: "Weighted ratios" }),
+    financials.getByRole("region", { name: "Weighted annual ratios" }),
   ).toBeVisible();
 });
 
-test("empty annual data uses a clear retry state", async ({ page }) => {
+test("empty annual data offers retry without empty company sections", async ({
+  page,
+}) => {
   const empty = report();
   empty.api_status = "unavailable";
   empty.companies = [];
   await page.route("**/api/financials?year=*", (route) =>
     route.fulfill({ json: empty }),
   );
-  await page.goto("/#financials");
-  await expect(page.getByRole("status")).toContainText(
+  await page.goto("/#post-mortem");
+  const financials = page.locator(".annual-financials");
+  await expect(financials.getByRole("status")).toContainText(
     "Annual figures aren't available yet.",
   );
   await expect(
-    page.getByRole("button", { name: "Retry financials" }),
+    financials.getByRole("button", { name: "Retry financials" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Weighted ratios" }),
+    financials.getByRole("region", { name: "Weighted annual ratios" }),
   ).toHaveCount(0);
 });
 
@@ -245,7 +244,7 @@ test("changing financial year ignores an older late response", async ({
     await route.fulfill({ json: report(year) });
     if (year === 2025) oldFinished();
   });
-  await page.goto("/#financials");
+  await page.goto("/#post-mortem");
   await page.getByLabel("Financial year").selectOption("2023");
   await expect(
     page.getByText(
@@ -255,9 +254,44 @@ test("changing financial year ignores an older late response", async ({
   release();
   await finished;
   await expect(
-    page.getByText("FY2023 · 2023-01-01 through 2023-12-31 · USD"),
-  ).toHaveCount(3);
+    page.locator(".annual-financials").getByText("11.00%", { exact: true }),
+  ).toBeVisible();
   await expect(
-    page.getByText("FY2025 · 2025-01-01 through 2025-12-31 · USD"),
+    page.locator(".annual-financials").getByText("-12.50%", { exact: true }),
   ).toHaveCount(0);
+});
+
+test("annual aggregates remain visible when selected account ledger fails", async ({
+  page,
+}) => {
+  await page.route("**/api/accounts", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: "00000000-0000-4000-8000-000000000099",
+          name: "Synthetic browser test portfolio",
+          base_currency: "USD",
+          created_at: "2025-01-01T00:00:00Z",
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/accounts/*/ledger", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { detail: "Recorded ledger temporarily unavailable" },
+    }),
+  );
+  await page.route("**/api/financials?year=*", (route) =>
+    route.fulfill({ json: report() }),
+  );
+  await page.goto("/#post-mortem");
+  await expect(
+    page.getByRole("button", { name: "Reload records" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .locator(".annual-financials")
+      .getByRole("region", { name: "Weighted annual ratios" }),
+  ).toBeVisible();
 });

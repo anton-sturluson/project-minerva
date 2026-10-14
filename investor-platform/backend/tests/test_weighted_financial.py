@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from investor_platform.financial import Record, calculations, record, records
+from investor_platform.financial import SCHEMA, Record, calculations, record, records
 from investor_platform.weighted_financial import build_weighted_report, render_weighted_report
 
 
@@ -205,3 +205,70 @@ def test_non_year_end_snapshot_and_multiple_publications_rejected() -> None:
         build_weighted_report(selected, [])
     with pytest.raises(ValueError, match="one coherent"):
         build_weighted_report(snapshot(), [profile("example:one"), profile("example:one")])
+
+
+def with_disclosed_capex(selected: Record, equipment: str, technology: str) -> Record:
+    """Attach two distinct synthetic source rows and call the authoritative company formulas."""
+    source: Record = records(selected["sources"])[0]
+    components: Record = {}
+    key: str
+    value: str
+    for key, value in {"equipment": equipment, "technology_investment": technology}.items():
+        components[key] = {
+            "status": "reported",
+            "unit": "USD",
+            "entity_scope": "consolidated",
+            "measurement_basis": "duration",
+            "value": value,
+            "source_id": source["source_id"],
+            "locator": {"statement": "Cash flow statement", "row": key, "column": "2025"},
+        }
+    schema: Record = json.loads(SCHEMA.read_text())
+    definition: Record = record(record(schema["$defs"])["capital_spending"])
+    selected["capital_spending"] = {
+        "scope": record(record(definition["properties"])["scope"])["const"],
+        "review_note": "Reviewed disjoint synthetic cash rows; no acquisitions.",
+        "components": components,
+    }
+    selected["calculations"] = calculations(
+        {key: record(value) for key, value in record(selected["facts"]).items()},
+        False,
+        record(selected["capital_spending"]),
+        str(selected["bundle_id"]),
+    )
+    return selected
+
+
+def test_disclosed_capex_weighting_recomputes_pinned_components() -> None:
+    """A weighted FCF margin follows reported components and retains their immutable references."""
+    first: Record = with_disclosed_capex(profile("example:one"), "3000000", "1000000")
+    second: Record = with_disclosed_capex(profile("example:two"), "1000000", "1000000")
+    result: Record = build_weighted_report(snapshot(), [first, second])
+    cash: Record = metric(result, "fcf_margin_after_disclosed_capex")
+    assert cash["value"] == "0.118" and cash["coverage"] == "1"
+    contribution: Record = records(cash["contributions"])[0]
+    inputs: list[Record] = records(record(contribution["calculation"])["inputs"])
+    assert len(inputs) == 4
+    assert (
+        inputs[2]["component_ref"] == f"{first['bundle_id']}#/capital_spending/components/equipment"
+    )
+    assert inputs[2]["value"] == "3000000" and inputs[2]["locator"]
+
+
+@pytest.mark.parametrize("field", ["component_ref", "value", "source_id", "locator"])
+def test_tampered_disclosed_component_proof_cannot_change_weighted_cash(field: str) -> None:
+    """Refuse altered component evidence even when the cached cash-flow value looks plausible."""
+    changed: Record = with_disclosed_capex(profile("example:one"), "3000000", "1000000")
+    calculation: Record = record(
+        record(changed["calculations"])["fcf_margin_after_disclosed_capex"]
+    )
+    records(calculation["inputs"])[2][field] = "tampered"
+    with pytest.raises(ValueError, match="does not match observation inputs"):
+        build_weighted_report(snapshot(), [changed])
+
+
+def test_missing_disclosed_capex_is_not_replaced_by_legacy_ppe_or_zero() -> None:
+    """An old PP&E fact cannot fill missing disclosed components or imply zero spending."""
+    result: Record = build_weighted_report(snapshot(), [profile("example:one")])
+    assert metric(result, "fcf_margin_after_disclosed_capex")["value"] is None
+    assert metric(result, "fcf_margin_after_disclosed_capex")["coverage"] == "0"

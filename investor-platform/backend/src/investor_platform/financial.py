@@ -19,8 +19,8 @@ type Value = Json | Decimal | date | datetime | UUID
 type Row = dict[str, Value]
 
 SCHEMA: Path = Path(__file__).with_name("annual_financial_bundle.schema.json")
-VERSION: str = "annual-financial-v1"
-FORMULA_VERSION: str = "annual-financial-formulas-v1"
+VERSION: str = "annual-financial-v2"
+FORMULA_VERSION: str = "annual-financial-formulas-v2"
 
 
 def record(value: Json) -> Record:
@@ -42,9 +42,154 @@ def digest(bundle: Record) -> str:
     return hashlib.sha256(json.dumps(bundle, sort_keys=True).encode()).hexdigest()
 
 
+def unique_object(pairs: list[tuple[str, Json]]) -> Record:
+    """Reject duplicate JSON keys instead of silently discarding evidence components."""
+    result: Record = {}
+    key: str
+    value: Json
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON key {key}; retain each component only once")
+        result[key] = value
+    return result
+
+
+def validate_capital_spending(bundle: Record) -> None:
+    """Require compatible reported components with resolved sources and no duplicated subtotal."""
+    if bundle.get("capital_spending") is None:
+        return
+    spending: Record = record(bundle["capital_spending"])
+    schema: Record = cast(Record, json.loads(SCHEMA.read_text()))
+    Draft202012Validator(
+        {"$ref": "#/$defs/capital_spending", "$defs": schema["$defs"]},
+        format_checker=FormatChecker(),
+    ).validate(spending)
+    components: Record = record(spending["components"])
+    keys: set[str] = set(components)
+    if (
+        "property_equipment_software" in keys
+        and len(keys) > 1
+        or (
+            "ppe" in keys
+            and keys & {"equipment", "leasehold_improvements", "other_capital_investments"}
+        )
+    ):
+        raise ValueError("Capital spending subtotal overlaps components; select disjoint cash rows")
+    sources: dict[str, Record] = {str(s["source_id"]): s for s in records(bundle["sources"])}
+    locations: set[tuple[str, str, str, str, str]] = set()
+    tags: set[tuple[str, str, str]] = set()
+    key: str
+    raw: Json
+    for key, raw in components.items():
+        fact: Record = record(raw)
+        source: Record | None = sources.get(str(fact["source_id"]))
+        if source is None:
+            raise ValueError(
+                f"Unresolved capital spending source for {key}; add its document source"
+            )
+        locator: Record = record(fact["locator"])
+        location: tuple[str, str, str, str, str] = (
+            str(source["document_id"]),
+            str(source["content_sha256"]),
+            str(locator["statement"]).strip().casefold(),
+            str(locator["row"]).strip().casefold(),
+            str(locator["column"]).strip().casefold(),
+        )
+        tag: tuple[str, str, str] = (
+            str(source["document_id"]),
+            str(source["content_sha256"]),
+            str(locator.get("xbrl_tag", "")).strip().casefold(),
+        )
+        if location in locations or tag[2] and tag in tags:
+            raise ValueError(
+                "Duplicate capital spending source locator/tag; do not count a cash row twice"
+            )
+        locations.add(location)
+        if tag[2]:
+            tags.add(tag)
+
+
+def disclosed_capex_calculations(
+    facts: dict[str, Record],
+    spending: Record | None,
+    bundle_id: str | None,
+) -> Record:
+    """Subtract evidenced disclosed capital-spending components without inventing a reported sum."""
+    outputs: Record = {}
+    key: str
+    for key in ("fcf_after_disclosed_capex", "fcf_margin_after_disclosed_capex"):
+        names: list[str] = ["operating_cash_flow"] + (
+            ["revenue"] if key == "fcf_margin_after_disclosed_capex" else []
+        )
+        inputs: list[Record] = [
+            {
+                "metric_key": name,
+                "observation_id": facts[name]["observation_id"],
+                "value": facts[name].get("value"),
+                "source_id": facts[name].get("source_id"),
+                "locator": facts[name].get("locator"),
+            }
+            for name in names
+        ]
+        reason: str | None = None
+        if not spending or not bundle_id:
+            reason = "Disclosed cash capital spending components are unavailable"
+        elif any(facts[name]["status"] != "reported" for name in names):
+            reason = "Reported annual cash flow or revenue is unavailable"
+        elif (
+            key == "fcf_margin_after_disclosed_capex"
+            and Decimal(str(facts["revenue"]["value"])) <= 0
+        ):
+            reason = "A positive revenue denominator is required"
+        components: Record = record(spending["components"]) if spending else {}
+        component_key: str
+        for component_key in sorted(components):
+            component: Record = record(components[component_key])
+            inputs.append(
+                {
+                    "component_key": component_key,
+                    "component_ref": f"{bundle_id}#/capital_spending/components/{component_key}",
+                    "value": component["value"],
+                    "source_id": component["source_id"],
+                    "locator": component["locator"],
+                }
+            )
+        result: Record = {
+            "formula_version": FORMULA_VERSION,
+            "formula": "(CFO - sum(disclosed cash capital spending components)) / revenue"
+            if key == "fcf_margin_after_disclosed_capex"
+            else "CFO - sum(disclosed cash capital spending components)",
+            "inputs": inputs,
+            "scope": spending["scope"] if spending else None,
+            "review_note": spending["review_note"] if spending else None,
+        }
+        if reason:
+            result.update(status="unavailable", reason=reason)
+        else:
+            context: Context
+            with localcontext() as context:
+                context.prec = 38
+                total: Decimal = sum(
+                    (Decimal(str(record(value)["value"])) for value in components.values()),
+                    Decimal(0),
+                )
+                value: Decimal = Decimal(str(facts["operating_cash_flow"]["value"])) - total
+                if key == "fcf_margin_after_disclosed_capex":
+                    value /= Decimal(str(facts["revenue"]["value"]))
+            result.update(
+                status="calculated",
+                value=format(value, "f"),
+                capital_spending_total=format(total, "f"),
+            )
+        outputs[key] = result
+    return outputs
+
+
 def validate(path: Path, source_dir: Path | None = None) -> Record:
     """Check structure, semantic boundaries and original downloaded document hashes."""
-    bundle: Record = record(cast(Json, json.loads(path.read_text())))
+    bundle: Record = record(
+        cast(Json, json.loads(path.read_text(), object_pairs_hook=unique_object))
+    )
     schema: Record = record(cast(Json, json.loads(SCHEMA.read_text())))
     Draft202012Validator(schema, format_checker=FormatChecker()).validate(bundle)
     period: Record = record(bundle["period"])
@@ -94,6 +239,7 @@ def validate(path: Path, source_dir: Path | None = None) -> Record:
                 raise ValueError(
                     f"Unsupported split basis for {key}; use the source's reported basis"
                 )
+    validate_capital_spending(bundle)
     return bundle
 
 
@@ -150,6 +296,7 @@ def _append_bundle(conn: Connection[Row], schema: str, bundle: Record, reviewed:
     Draft202012Validator(json.loads(SCHEMA.read_text()), format_checker=FormatChecker()).validate(
         bundle
     )
+    validate_capital_spending(bundle)
     check_schema(conn, schema, create=True)
     bundle_id: str = str(bundle["bundle_id"])
     status: str = "reviewed" if reviewed else "candidate"
@@ -207,10 +354,18 @@ def _append_bundle(conn: Connection[Row], schema: str, bundle: Record, reviewed:
         raise ValueError("Fiscal identity conflicts; review the existing issuer-period label")
     conn.execute(
         sql.SQL(
-            "INSERT INTO {} (bundle_id,period_id,bundle_sha256,review_status,issuer) "
-            "VALUES (%s,%s,%s,%s,%s)"
+            "INSERT INTO {} "
+            "(bundle_id,period_id,bundle_sha256,review_status,issuer,capital_spending) "
+            "VALUES (%s,%s,%s,%s,%s,%s)"
         ).format(relation(schema, "publications")),
-        (bundle_id, period_id, checksum, status, Jsonb(issuer)),
+        (
+            bundle_id,
+            period_id,
+            checksum,
+            status,
+            Jsonb(issuer),
+            Jsonb(bundle["capital_spending"]) if "capital_spending" in bundle else None,
+        ),
     )
     source: Record
     for source in records(bundle["sources"]):
@@ -292,7 +447,12 @@ def _append_bundle(conn: Connection[Row], schema: str, bundle: Record, reviewed:
     return {"bundle_id": bundle_id, "status": "imported", "review_status": status}
 
 
-def calculations(facts: dict[str, Record], insurer: bool) -> Record:
+def calculations(
+    facts: dict[str, Record],
+    insurer: bool,
+    capital_spending: Record | None = None,
+    bundle_id: str | None = None,
+) -> Record:
     """Compute declared ratios with pinned inputs, missingness and exact decimal arithmetic."""
     outputs: Record = {}
     formulas: dict[str, tuple[list[str], str]] = {
@@ -330,7 +490,7 @@ def calculations(facts: dict[str, Record], insurer: bool) -> Record:
         if insurer and key == "gross_margin":
             reason = "Insurer gross margin is not applicable under the pilot definition"
         missing: list[str] = [name for name in inputs if facts[name]["status"] != "reported"]
-        if missing:
+        if missing and reason is None:
             reason = "Missing/applicability inputs: " + ", ".join(missing)
         denominator: str | None = (
             "basic_weighted_average_shares"
@@ -375,6 +535,7 @@ def calculations(facts: dict[str, Record], insurer: bool) -> Record:
                     value /= amounts[-1]
             result.update(status="calculated", value=format(value, "f"))
         outputs[key] = result
+    outputs.update(disclosed_capex_calculations(facts, capital_spending, bundle_id))
     return outputs
 
 
@@ -454,5 +615,11 @@ def show(conn: Connection[Row], schema: str, issuer_key: str, calendar_year: int
             ],
         ),
         "facts": cast(Json, facts),
-        "calculations": calculations(facts, issuer["business_type"] == "insurer"),
+        "capital_spending": cast(Json, row["capital_spending"]),
+        "calculations": calculations(
+            facts,
+            issuer["business_type"] == "insurer",
+            cast(Record | None, row["capital_spending"]),
+            bundle_id,
+        ),
     }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
 import type { Page } from "./App";
 import { CashLedger } from "./CashLedger";
+import { Financials } from "./Financials";
 
 const selectionKey = "minerva-portfolio";
 function savedSelection() {
@@ -89,6 +90,7 @@ export function Portfolio({ page }: { page: Page }) {
             ? "Post-mortem"
             : "My portfolio"}
       </h1>
+      {page === "post-mortem" && <Financials />}
       {error && (
         <div className="error" role="alert">
           <p>{error}</p>
