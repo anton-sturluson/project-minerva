@@ -256,12 +256,17 @@ def test_disclosed_capex_weighting_recomputes_pinned_components() -> None:
 
 
 @pytest.mark.parametrize("field", ["component_ref", "value", "source_id", "locator"])
-def test_tampered_disclosed_component_proof_cannot_change_weighted_cash(field: str) -> None:
+@pytest.mark.parametrize(
+    "key",
+    ["fcf_margin_after_disclosed_capex", "allocated_fcf_after_disclosed_capex_per_basic_share"],
+)
+def test_tampered_disclosed_component_proof_cannot_change_weighted_cash(
+    field: str,
+    key: str,
+) -> None:
     """Refuse altered component evidence even when the cached cash-flow value looks plausible."""
     changed: Record = with_disclosed_capex(profile("example:one"), "3000000", "1000000")
-    calculation: Record = record(
-        record(changed["calculations"])["fcf_margin_after_disclosed_capex"]
-    )
+    calculation: Record = record(record(changed["calculations"])[key])
     records(calculation["inputs"])[2][field] = "tampered"
     with pytest.raises(ValueError, match="does not match observation inputs"):
         build_weighted_report(snapshot(), [changed])

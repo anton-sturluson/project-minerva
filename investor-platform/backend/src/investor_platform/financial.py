@@ -109,6 +109,23 @@ def validate_capital_spending(bundle: Record) -> None:
             tags.add(tag)
 
 
+def basic_share_reason(fact: Record) -> str | None:
+    """Require reported positive annual basic shares and a supported common-class basis."""
+    if fact.get("status") != "reported":
+        return "Reported annual basic weighted-average shares are unavailable"
+    if Decimal(str(fact["value"])) <= 0:
+        return "A positive annual basic-share denominator is required"
+    if not fact.get("share_basis"):
+        return "Reported common-class and split basis is unavailable"
+    basis: Record = record(fact["share_basis"])
+    classes: list[Json] = cast(list[Json], basis["classes"])
+    if not classes or not basis.get("split_adjusted_through"):
+        return "Reported common-class and split basis is unavailable"
+    if len(classes) > 1 and not basis.get("equivalence_note"):
+        return "Common-class economic equivalence has not been established"
+    return None
+
+
 def disclosed_capex_calculations(
     facts: dict[str, Record],
     spending: Record | None,
@@ -117,10 +134,19 @@ def disclosed_capex_calculations(
     """Subtract evidenced disclosed capital-spending components without inventing a reported sum."""
     outputs: Record = {}
     key: str
-    for key in ("fcf_after_disclosed_capex", "fcf_margin_after_disclosed_capex"):
-        names: list[str] = ["operating_cash_flow"] + (
-            ["revenue"] if key == "fcf_margin_after_disclosed_capex" else []
+    for key in (
+        "fcf_after_disclosed_capex",
+        "fcf_margin_after_disclosed_capex",
+        "allocated_fcf_after_disclosed_capex_per_basic_share",
+    ):
+        denominator: str | None = (
+            "revenue"
+            if key == "fcf_margin_after_disclosed_capex"
+            else "basic_weighted_average_shares"
+            if key.endswith("per_basic_share")
+            else None
         )
+        names: list[str] = ["operating_cash_flow"] + ([denominator] if denominator else [])
         inputs: list[Record] = [
             {
                 "metric_key": name,
@@ -135,12 +161,19 @@ def disclosed_capex_calculations(
         if not spending or not bundle_id:
             reason = "Disclosed cash capital spending components are unavailable"
         elif any(facts[name]["status"] != "reported" for name in names):
-            reason = "Reported annual cash flow or revenue is unavailable"
+            reason = (
+                "Required annual inputs are unavailable"
+                if key.endswith("per_basic_share")
+                else ("Reported annual cash flow or revenue is unavailable")
+            )
         elif (
             key == "fcf_margin_after_disclosed_capex"
             and Decimal(str(facts["revenue"]["value"])) <= 0
         ):
             reason = "A positive revenue denominator is required"
+        if denominator == "basic_weighted_average_shares":
+            reason = reason or basic_share_reason(facts[denominator])
+            inputs[-1]["share_basis"] = facts[denominator].get("share_basis")
         components: Record = record(spending["components"]) if spending else {}
         component_key: str
         for component_key in sorted(components):
@@ -156,8 +189,8 @@ def disclosed_capex_calculations(
             )
         result: Record = {
             "formula_version": FORMULA_VERSION,
-            "formula": "(CFO - sum(disclosed cash capital spending components)) / revenue"
-            if key == "fcf_margin_after_disclosed_capex"
+            "formula": f"(CFO - sum(disclosed cash capital spending components)) / {denominator}"
+            if denominator
             else "CFO - sum(disclosed cash capital spending components)",
             "inputs": inputs,
             "scope": spending["scope"] if spending else None,
@@ -174,13 +207,15 @@ def disclosed_capex_calculations(
                     Decimal(0),
                 )
                 value: Decimal = Decimal(str(facts["operating_cash_flow"]["value"])) - total
-                if key == "fcf_margin_after_disclosed_capex":
-                    value /= Decimal(str(facts["revenue"]["value"]))
+                if denominator:
+                    value /= Decimal(str(facts[denominator]["value"]))
             result.update(
                 status="calculated",
                 value=format(value, "f"),
                 capital_spending_total=format(total, "f"),
             )
+        if denominator == "basic_weighted_average_shares":
+            result["share_basis"] = facts[denominator].get("share_basis")
         outputs[key] = result
     return outputs
 
@@ -501,10 +536,7 @@ def calculations(
             if Decimal(str(facts[denominator]["value"])) <= 0:
                 reason = "A positive denominator is required"
         if denominator == "basic_weighted_average_shares" and not missing:
-            basis: Record = record(facts[denominator]["share_basis"])
-            classes: list[Json] = cast(list[Json], basis["classes"])
-            if len(classes) > 1 and not basis.get("equivalence_note"):
-                reason = "Common-class economic equivalence has not been established"
+            reason = reason or basic_share_reason(facts[denominator])
         result: Record = {
             "formula_version": FORMULA_VERSION,
             "formula": formula,
