@@ -14,6 +14,7 @@
 | [Daily prices](daily-prices.md) | Daily 5 p.m. Eastern collection, retries, cache freshness and operational status. |
 | [Operations](operations.md) | Configuration, start/stop, migrations, testing and project layout. |
 | [Portfolio guide](portfolio.md) | Accounts, cash, positions, trade entry, corrections and tracker usage. |
+| [Research](research.md) | Manager directory, SEC history imports and quarterly position changes. |
 | [Cash reconciliation](cash-reconciliation.md) | Reviewed dated cash replacement, checkpoint validation and immutable audit. |
 | [Transaction import](transaction-import.md) | Preview and import a testing portfolio; source evidence, exclusions and inferred balances. |
 | [Post-mortem](post-mortem.md) | Annual and full-history stock contributions, linking formula and interpretation. |

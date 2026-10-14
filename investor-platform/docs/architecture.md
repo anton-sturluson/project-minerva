@@ -31,7 +31,7 @@ Validated Yahoo and optional Tiingo inputs are cached privately by workspace; le
 
 ## Future work
 
-Add boundaries when their feature needs them. Research storage, hosted login, generated API clients and cloud infrastructure are not scaffolded. The [implementation plan](implementation-plan.md) tracks the small remaining increments.
+Add boundaries when their feature needs them. Hosted login, generated API clients and cloud infrastructure are not scaffolded. Research uses separate workspace-scoped manager, filing and holding tables; explicit SEC imports preserve source evidence, while the API derives quarterly quantity changes. See [Research](research.md). The [implementation plan](implementation-plan.md) tracks remaining increments.
 
 ## Portfolio boundary
 

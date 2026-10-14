@@ -163,3 +163,55 @@ class PriceRefreshRun(Base):
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int]
     report: Mapped[dict] = mapped_column(JSONB)
+
+
+class ResearchManager(Base):
+    """A sourced public manager registry, separate from portfolio records."""
+
+    __tablename__ = "research_managers"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "slug"),
+        UniqueConstraint("workspace_id", "cik"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    slug: Mapped[str] = mapped_column(String(80))
+    cik: Mapped[str] = mapped_column(String(10))
+    profile: Mapped[dict] = mapped_column(JSONB)
+
+
+class ResearchFiling(Base):
+    """Immutable filing provenance and completeness metadata."""
+
+    __tablename__ = "research_filings"
+    __table_args__ = (UniqueConstraint("manager_id", "accession"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    manager_id: Mapped[UUID] = mapped_column(ForeignKey("research_managers.id"))
+    accession: Mapped[str] = mapped_column(String(24))
+    report_period: Mapped[date] = mapped_column(Date)
+    filed_date: Mapped[date] = mapped_column(Date)
+    form: Mapped[str] = mapped_column(String(12))
+    source_url: Mapped[str] = mapped_column(Text)
+    amendment_type: Mapped[str | None] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(24))
+    reason: Mapped[str | None] = mapped_column(Text)
+    evidence: Mapped[dict] = mapped_column(JSONB)
+
+
+class ResearchHolding(Base):
+    """One normalized reported security identity within a filing."""
+
+    __tablename__ = "research_holdings"
+    __table_args__ = (
+        UniqueConstraint("filing_id", "cusip", "put_call", "share_type"),
+        CheckConstraint("quantity >= 0 AND value_usd >= 0", name="research_nonnegative"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    filing_id: Mapped[UUID] = mapped_column(ForeignKey("research_filings.id"))
+    cusip: Mapped[str] = mapped_column(String(9))
+    issuer: Mapped[str] = mapped_column(Text)
+    security_class: Mapped[str] = mapped_column(Text)
+    put_call: Mapped[str] = mapped_column(String(4))
+    share_type: Mapped[str] = mapped_column(String(3))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(30, 8))
+    value_usd: Mapped[Decimal] = mapped_column(Numeric(30, 2))
