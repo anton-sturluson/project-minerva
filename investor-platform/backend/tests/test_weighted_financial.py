@@ -5,8 +5,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from investor_platform.financial import Record, calculations, record, records
 
+from investor_platform.financial import Record, calculations, record, records
 from investor_platform.weighted_financial import build_weighted_report, render_weighted_report
 
 
