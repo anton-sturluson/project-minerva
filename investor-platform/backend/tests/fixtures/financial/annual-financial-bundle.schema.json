@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/minerva/annual-financial-bundle.schema.json",
+  "title": "Annual reported financial bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bundle_id", "issuer", "period", "sources", "facts"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "bundle_id": {"type": "string", "format": "uuid"},
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer_key", "name", "reporting_currency", "accounting_basis", "business_type"],
+      "properties": {
+        "issuer_key": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "reporting_currency": {"const": "USD"},
+        "accounting_basis": {"const": "US_GAAP"},
+        "business_type": {"enum": ["operating_company", "insurer"]}
+      }
+    },
+    "period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "fiscal_year", "fiscal_label", "start", "end"],
+      "properties": {
+        "kind": {"const": "year"},
+        "fiscal_year": {"type": "integer", "minimum": 1900, "maximum": 2200},
+        "fiscal_label": {"type": "string", "minLength": 1},
+        "start": {"type": "string", "format": "date"},
+        "end": {"type": "string", "format": "date"}
+      }
+    },
+    "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source"}},
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revenue",
+        "cost_of_revenue",
+        "gross_profit",
+        "operating_income",
+        "net_income",
+        "net_income_common",
+        "operating_cash_flow",
+        "cash_capex_ppe",
+        "cash_capex_intangibles",
+        "basic_eps",
+        "diluted_eps",
+        "basic_weighted_average_shares",
+        "diluted_weighted_average_shares",
+        "period_end_common_shares"
+      ],
+      "properties": {
+        "revenue": {"$ref": "#/$defs/consolidated_amount"},
+        "cost_of_revenue": {"$ref": "#/$defs/nonnegative_amount"},
+        "gross_profit": {"$ref": "#/$defs/consolidated_amount"},
+        "operating_income": {"$ref": "#/$defs/consolidated_amount"},
+        "net_income": {"$ref": "#/$defs/consolidated_amount"},
+        "net_income_common": {"$ref": "#/$defs/common_amount"},
+        "operating_cash_flow": {"$ref": "#/$defs/consolidated_amount"},
+        "cash_capex_ppe": {"$ref": "#/$defs/nonnegative_amount"},
+        "cash_capex_intangibles": {"$ref": "#/$defs/nonnegative_amount"},
+        "basic_eps": {"$ref": "#/$defs/eps"},
+        "diluted_eps": {"$ref": "#/$defs/eps"},
+        "basic_weighted_average_shares": {"$ref": "#/$defs/weighted_shares"},
+        "diluted_weighted_average_shares": {"$ref": "#/$defs/weighted_shares"},
+        "period_end_common_shares": {"$ref": "#/$defs/instant_shares"}
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "document_id", "url", "published_on", "retrieved_at", "content_sha256"],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "document_id": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "format": "uri", "pattern": "^https://"},
+        "published_on": {"type": "string", "format": "date"},
+        "retrieved_at": {"type": "string", "format": "date-time"},
+        "content_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "row", "column"],
+      "properties": {
+        "statement": {"type": "string", "minLength": 1},
+        "row": {"type": "string", "minLength": 1},
+        "column": {"type": "string", "minLength": 1},
+        "page": {"type": "string", "minLength": 1},
+        "xbrl_tag": {"type": "string", "minLength": 1}
+      }
+    },
+    "share_basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classes", "split_adjusted_through"],
+      "properties": {
+        "classes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "split_adjusted_through": {"type": "string", "format": "date"},
+        "equivalence_note": {"type": "string", "minLength": 1},
+        "class_locators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/locator"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"classes": {"minItems": 2}}},
+          "then": {"required": ["equivalence_note", "class_locators"]}
+        }
+      ]
+    },
+    "fact": {
+      "type": "object",
+      "required": ["status", "unit", "entity_scope", "measurement_basis"],
+      "properties": {
+        "status": {"enum": ["reported", "not_disclosed", "not_applicable", "unavailable"]},
+        "unit": {"enum": ["USD", "USD_per_share", "shares"]},
+        "entity_scope": {"enum": ["consolidated", "attributable_common"]},
+        "measurement_basis": {"enum": ["duration", "instant"]},
+        "value": {"type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"},
+        "source_id": {"type": "string", "minLength": 1},
+        "locator": {"$ref": "#/$defs/locator"},
+        "reason": {"type": "string", "minLength": 1},
+        "share_basis": {"$ref": "#/$defs/share_basis"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "reported"}}},
+          "then": {"required": ["value", "source_id", "locator"]},
+          "else": {"required": ["reason"], "not": {"required": ["value"]}}
+        },
+        {"if": {"required": ["source_id"]}, "then": {"required": ["locator"]}},
+        {"if": {"required": ["locator"]}, "then": {"required": ["source_id"]}},
+        {
+          "if": {"properties": {"unit": {"enum": ["shares", "USD_per_share"]}, "status": {"const": "reported"}}},
+          "then": {"required": ["share_basis"]}
+        },
+        {"if": {"properties": {"unit": {"const": "USD"}}}, "then": {"not": {"required": ["share_basis"]}}}
+      ]
+    },
+    "consolidated_amount": {
+      "allOf": [
+        {"$ref": "#/$defs/fact"},
+        {
+          "properties": {
+            "unit": {"const": "USD"},
+            "entity_scope": {"const": "consolidated"},
+            "measurement_basis": {"const": "duration"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "common_amount": {
+      "allOf": [
+        {"$ref": "#/$defs/fact"},
+        {
+          "properties": {
+            "unit": {"const": "USD"},
+            "entity_scope": {"const": "attributable_common"},
+            "measurement_basis": {"const": "duration"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "nonnegative_amount": {
+      "allOf": [
+        {"$ref": "#/$defs/fact"},
+        {
+          "properties": {
+            "unit": {"const": "USD"},
+            "entity_scope": {"const": "consolidated"},
+            "measurement_basis": {"const": "duration"},
+            "value": {"pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "eps": {
+      "allOf": [
+        {"$ref": "#/$defs/fact"},
+        {
+          "properties": {
+            "unit": {"const": "USD_per_share"},
+            "entity_scope": {"const": "attributable_common"},
+            "measurement_basis": {"const": "duration"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "weighted_shares": {
+      "allOf": [
+        {"$ref": "#/$defs/fact"},
+        {
+          "properties": {
+            "unit": {"const": "shares"},
+            "entity_scope": {"const": "attributable_common"},
+            "measurement_basis": {"const": "duration"},
+            "value": {"pattern": "^([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "instant_shares": {
+      "allOf": [
+        {"$ref": "#/$defs/fact"},
+        {
+          "properties": {
+            "unit": {"const": "shares"},
+            "entity_scope": {"const": "attributable_common"},
+            "measurement_basis": {"const": "instant"},
+            "value": {"pattern": "^([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "schema_version": "1.0",
+  "bundle_id": "00000000-0000-4000-8000-000000000003",
+  "issuer": {
+    "issuer_key": "synthetic-example",
+    "name": "Synthetic Example Company",
+    "reporting_currency": "USD",
+    "accounting_basis": "US_GAAP",
+    "business_type": "operating_company"
+  },
+  "period": {
+    "kind": "year",
+    "fiscal_year": 2025,
+    "fiscal_label": "FY2025",
+    "start": "2025-01-01",
+    "end": "2025-12-31"
+  },
+  "sources": [
+    {
+      "source_id": "synthetic-annual-2025",
+      "document_id": "synthetic-annual-report-2025",
+      "url": "https://example.org/annual-report/2025",
+      "published_on": "2026-02-01",
+      "retrieved_at": "2026-02-02T12:00:00Z",
+      "content_sha256": "56037a8c03d0396ca5a2d5d93c8f88c682acb0d738e9b3b5ad8e1b376a325673"
+    }
+  ],
+  "facts": {
+    "revenue": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "100000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "revenue",
+        "column": "2025"
+      }
+    },
+    "gross_profit": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "40000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "gross_profit",
+        "column": "2025"
+      }
+    },
+    "operating_income": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "12000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "operating_income",
+        "column": "2025"
+      }
+    },
+    "net_income": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "9000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "net_income",
+        "column": "2025"
+      }
+    },
+    "net_income_common": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "attributable_common",
+      "measurement_basis": "duration",
+      "value": "8000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "net_income_common",
+        "column": "2025"
+      }
+    },
+    "operating_cash_flow": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "15000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "operating_cash_flow",
+        "column": "2025"
+      }
+    },
+    "cash_capex_ppe": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "3000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "cash_capex_ppe",
+        "column": "2025"
+      }
+    },
+    "cash_capex_intangibles": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "1000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "cash_capex_intangibles",
+        "column": "2025"
+      }
+    },
+    "basic_eps": {
+      "status": "reported",
+      "unit": "USD_per_share",
+      "entity_scope": "attributable_common",
+      "measurement_basis": "duration",
+      "value": "0.80",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "basic_eps",
+        "column": "2025"
+      },
+      "share_basis": {
+        "classes": [
+          "common"
+        ],
+        "split_adjusted_through": "2025-12-31"
+      }
+    },
+    "diluted_eps": {
+      "status": "reported",
+      "unit": "USD_per_share",
+      "entity_scope": "attributable_common",
+      "measurement_basis": "duration",
+      "value": "0.76",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "diluted_eps",
+        "column": "2025"
+      },
+      "share_basis": {
+        "classes": [
+          "common"
+        ],
+        "split_adjusted_through": "2025-12-31"
+      }
+    },
+    "basic_weighted_average_shares": {
+      "status": "reported",
+      "unit": "shares",
+      "entity_scope": "attributable_common",
+      "measurement_basis": "duration",
+      "value": "10000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "basic_weighted_average_shares",
+        "column": "2025"
+      },
+      "share_basis": {
+        "classes": [
+          "common"
+        ],
+        "split_adjusted_through": "2025-12-31"
+      }
+    },
+    "diluted_weighted_average_shares": {
+      "status": "reported",
+      "unit": "shares",
+      "entity_scope": "attributable_common",
+      "measurement_basis": "duration",
+      "value": "10500000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "diluted_weighted_average_shares",
+        "column": "2025"
+      },
+      "share_basis": {
+        "classes": [
+          "common"
+        ],
+        "split_adjusted_through": "2025-12-31"
+      }
+    },
+    "period_end_common_shares": {
+      "status": "reported",
+      "unit": "shares",
+      "entity_scope": "attributable_common",
+      "measurement_basis": "instant",
+      "value": "10200000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "period_end_common_shares",
+        "column": "2025"
+      },
+      "share_basis": {
+        "classes": [
+          "common"
+        ],
+        "split_adjusted_through": "2025-12-31"
+      }
+    },
+    "cost_of_revenue": {
+      "status": "reported",
+      "unit": "USD",
+      "entity_scope": "consolidated",
+      "measurement_basis": "duration",
+      "value": "60000000",
+      "source_id": "synthetic-annual-2025",
+      "locator": {
+        "statement": "Synthetic financial statements",
+        "row": "cost_of_revenue",
+        "column": "2025"
+      }
+    }
+  }
+}
