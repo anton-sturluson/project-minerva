@@ -52,6 +52,12 @@ export function Financials() {
       active = false;
     };
   }, [year, retry]);
+  const tickers = new Map(
+    report?.market_value_snapshot?.holdings.map((holding) => [
+      holding.issuer_key,
+      holding.ticker,
+    ]) || [],
+  );
   return (
     <section
       className="annual-financials"
@@ -181,6 +187,102 @@ export function Financials() {
                             : metric
                               ? "—"
                               : "Annual measure not available"}
+                        </td>
+                        <td>
+                          {sources.length > 0 ? (
+                            <details>
+                              <summary>Source filings</summary>
+                              <ul>
+                                {sources.map((source) => (
+                                  <li key={source.url}>
+                                    <a
+                                      href={source.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      Filing {source.published_on}
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div
+              className="table-scroll"
+              tabIndex={0}
+              role="region"
+              aria-label="Company per-share figures"
+            >
+              <table className="financial-per-share-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Company</th>
+                    <th scope="col" className="number">
+                      EPS (basic)
+                    </th>
+                    <th scope="col" className="number">
+                      FCF/share
+                    </th>
+                    <th scope="col">Sources</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.companies.map((company) => {
+                    const profile = company.profile;
+                    const reviewed =
+                      company.financial_status === "eligible" &&
+                      profile?.review_status === "reviewed";
+                    const eps = profile?.facts?.basic_eps;
+                    const fcf =
+                      profile?.calculations
+                        ?.allocated_fcf_after_disclosed_capex_per_basic_share;
+                    const sourceIds = new Set([
+                      eps?.source_id,
+                      ...(fcf?.inputs || []).map((input) => input.source_id),
+                    ]);
+                    const sources = reviewed
+                      ? profile.sources.filter((source) =>
+                          sourceIds.has(source.source_id),
+                        )
+                      : [];
+                    const ticker = tickers.get(company.issuer_key);
+                    return (
+                      <tr key={company.issuer_key}>
+                        <th scope="row">
+                          {ticker || profile?.issuer?.name || "Company"}
+                        </th>
+                        <td className="number">
+                          {reviewed &&
+                          eps?.status === "reported" &&
+                          eps.value != null
+                            ? Number(eps.value).toLocaleString("en-US", {
+                                style: "currency",
+                                currency: "USD",
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })
+                            : "Unavailable"}
+                        </td>
+                        <td className="number">
+                          {reviewed &&
+                          fcf?.status === "calculated" &&
+                          fcf.value != null
+                            ? Number(fcf.value).toLocaleString("en-US", {
+                                style: "currency",
+                                currency: "USD",
+                                minimumFractionDigits: 4,
+                                maximumFractionDigits: 4,
+                              })
+                            : "Unavailable"}
                         </td>
                         <td>
                           {sources.length > 0 ? (

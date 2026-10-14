@@ -16,8 +16,48 @@ function report(year = 2025): FinancialReport {
     calendar_year: year,
     holdings_date: `${year}-12-31`,
     api_status: "partial",
+    market_value_snapshot: {
+      holdings: [{ issuer_key: "example:issuer", ticker: "EXM" }],
+    },
     companies: [
-      { issuer_key: "example:issuer", profile: { sources: [source] } },
+      {
+        issuer_key: "example:issuer",
+        financial_status: "eligible",
+        profile: {
+          review_status: "reviewed",
+          issuer: { name: "Example Company" },
+          facts: {
+            basic_eps: {
+              status: "reported",
+              value: "2.34",
+              source_id: "filing",
+            },
+          },
+          calculations: {
+            allocated_fcf_after_disclosed_capex_per_basic_share: {
+              status: "calculated",
+              value: year === 2023 ? "-0.00321" : "0.123456",
+              inputs: [
+                { source_id: "filing" },
+                { source_id: "capital-filing" },
+              ],
+            },
+          },
+          sources: [
+            source,
+            {
+              source_id: "capital-filing",
+              url: "https://example.org/capital-report",
+              published_on: `${year + 1}-03-01`,
+            },
+            {
+              source_id: "unrelated-filing",
+              url: "https://example.org/unrelated-report",
+              published_on: `${year + 1}-04-01`,
+            },
+          ],
+        },
+      },
     ],
     weighted_ratios: {
       gross_margin: {
@@ -86,6 +126,63 @@ function report(year = 2025): FinancialReport {
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
+});
+
+test("company per-share dollars preserve small losses and only cite their inputs", async ({
+  page,
+}) => {
+  await page.route("**/api/financials?year=*", (route) =>
+    route.fulfill({
+      json: report(
+        Number(new URL(route.request().url()).searchParams.get("year")),
+      ),
+    }),
+  );
+  await page.goto("/#post-mortem");
+  const table = page.getByRole("region", { name: "Company per-share figures" });
+  await expect(table.getByRole("row", { name: /^EXM / })).toContainText(
+    "$2.34",
+  );
+  await expect(table.getByText("$0.1235", { exact: true })).toBeVisible();
+  await table.getByText("Source filings", { exact: true }).click();
+  await expect(table.getByRole("link")).toHaveCount(2);
+  await expect(
+    table.locator('a[href="https://example.org/unrelated-report"]'),
+  ).toHaveCount(0);
+  await page.getByLabel("Financial year").selectOption("2023");
+  await expect(table.getByText("-$0.0032", { exact: true })).toBeVisible();
+  await expect(table.getByText("-$0.00", { exact: true })).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("unreviewed and unavailable per-share values stay unavailable", async ({
+  page,
+}) => {
+  await page.route("**/api/financials?year=*", (route) => {
+    const year = Number(
+      new URL(route.request().url()).searchParams.get("year"),
+    );
+    const data = report(year);
+    const profile = data.companies[0].profile!;
+    if (year === 2025) profile.review_status = "candidate";
+    else {
+      profile.facts!.basic_eps.status = "unavailable";
+      profile.calculations!.allocated_fcf_after_disclosed_capex_per_basic_share.status =
+        "unavailable";
+    }
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  const table = page.getByRole("region", { name: "Company per-share figures" });
+  await expect(table.getByText("Unavailable", { exact: true })).toHaveCount(2);
+  await expect(table.getByText("$2.34", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Financial year").selectOption("2024");
+  await expect(table.getByText("Unavailable", { exact: true })).toHaveCount(2);
+  await expect(table.getByText("$0.1235", { exact: true })).toHaveCount(0);
 });
 
 test("Post-mortem shows annual aggregates and metric sources even when accounts fail", async ({

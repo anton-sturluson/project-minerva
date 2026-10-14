@@ -154,11 +154,16 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                     or decimal_string(saved_calculation["value"])
                     != decimal_string(expected["value"])
                     or saved_calculation.get("formula") != expected.get("formula")
-                    or key.startswith("fcf_")
-                    and "disclosed_capex" in key
+                    or "disclosed_capex" in key
                     and any(
                         saved_calculation.get(field) != expected.get(field)
-                        for field in ("inputs", "scope", "review_note", "capital_spending_total")
+                        for field in (
+                            "inputs",
+                            "scope",
+                            "review_note",
+                            "capital_spending_total",
+                            "share_basis",
+                        )
                     )
                 ):
                     raise ValueError("Saved company calculation does not match observation inputs")

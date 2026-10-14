@@ -21,6 +21,7 @@ from investor_platform.financial import (
     Json,
     Record,
     Row,
+    calculations,
     import_bundle,
     record,
     records,
@@ -423,3 +424,96 @@ def test_component_duplicate_keys_and_v1_namespace_are_refused(
         )
     with pytest.raises(ValueError, match="Unknown existing"), conn.transaction():
         import_bundle(conn, schema, bundle, True)
+
+
+def test_disclosed_fcf_per_share_uses_annual_basic_shares_and_keeps_sources(
+    candidate: tuple[Path, Record], financial: tuple[Connection[Row], str]
+) -> None:
+    """Divide source-backed FCF by annual basic shares rather than the year-end share snapshot."""
+    path: Path
+    bundle: Record
+    path, bundle = candidate
+    add_capital_spending(bundle, {"equipment": "8000", "technology_investment": "20000"})
+    conn: Connection[Row]
+    schema: str
+    conn, schema = financial
+    with conn.transaction():
+        import_bundle(conn, schema, bundle, True)
+        result: Record = show(conn, schema, "synthetic-example", 2025)
+    facts: Record = record(result["facts"])
+    cash: Record = record(
+        record(result["calculations"])["allocated_fcf_after_disclosed_capex_per_basic_share"]
+    )
+    assert cash["value"] == "1.4972"
+    denominator: Record = records(cash["inputs"])[1]
+    assert denominator["metric_key"] == "basic_weighted_average_shares"
+    assert (
+        denominator["observation_id"]
+        == record(facts["basic_weighted_average_shares"])["observation_id"]
+    )
+    assert denominator["value"] == "10000000"
+    assert denominator["value"] != record(facts["period_end_common_shares"])["value"]
+    assert denominator["source_id"] and denominator["locator"]
+    assert denominator["share_basis"] == cash["share_basis"]
+    assert len(records(cash["inputs"])) == 4
+    assert records(cash["inputs"])[2]["component_ref"]
+    assert cash["scope"] == record(bundle["capital_spending"])["scope"]
+
+
+@pytest.mark.parametrize("problem", ["missing", "zero", "negative", "basis", "class_equivalence"])
+def test_disclosed_fcf_per_share_withholds_unsupported_denominators(
+    candidate: tuple[Path, Record], problem: str
+) -> None:
+    """Missing shares and unreviewed share-class bases cannot become valid per-share amounts."""
+    path: Path
+    bundle: Record
+    path, bundle = candidate
+    add_capital_spending(bundle, {"equipment": "8000"})
+    facts: dict[str, Record] = {
+        key: record(value) for key, value in record(bundle["facts"]).items()
+    }
+    key: str
+    fact: Record
+    for key, fact in facts.items():
+        fact["observation_id"] = key
+    shares: Record = facts["basic_weighted_average_shares"]
+    if problem == "missing":
+        shares.update(status="unavailable", reason="Not reported")
+        shares.pop("value")
+    elif problem in {"zero", "negative"}:
+        shares["value"] = "0" if problem == "zero" else "-1"
+    elif problem == "basis":
+        shares.pop("share_basis")
+    else:
+        record(shares["share_basis"])["classes"] = ["Class A", "Class B"]
+    results: Record = calculations(
+        facts, False, record(bundle["capital_spending"]), str(bundle["bundle_id"])
+    )
+    cash: Record = record(results["allocated_fcf_after_disclosed_capex_per_basic_share"])
+    assert cash["status"] == "unavailable" and "value" not in cash
+    assert "revenue" not in str(cash["reason"])
+
+
+def test_disclosed_fcf_per_share_keeps_signed_loss_and_reviewed_class_basis(
+    candidate: tuple[Path, Record],
+) -> None:
+    """An accepted common-class basis permits a signed per-share cash-flow loss."""
+    path: Path
+    bundle: Record
+    path, bundle = candidate
+    add_capital_spending(bundle, {"equipment": "8000"})
+    facts: dict[str, Record] = {
+        key: record(value) for key, value in record(bundle["facts"]).items()
+    }
+    key: str
+    fact: Record
+    for key, fact in facts.items():
+        fact["observation_id"] = key
+    facts["operating_cash_flow"]["value"] = "-2000"
+    basis: Record = record(facts["basic_weighted_average_shares"]["share_basis"])
+    basis.update(classes=["Class A", "Class B"], equivalence_note="Same economic rights")
+    results: Record = calculations(
+        facts, False, record(bundle["capital_spending"]), str(bundle["bundle_id"])
+    )
+    cash: Record = record(results["allocated_fcf_after_disclosed_capex_per_basic_share"])
+    assert cash["value"] == "-0.001" and cash["share_basis"] == basis
