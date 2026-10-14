@@ -118,6 +118,7 @@ main,
 #performance,
 #post-mortem,
 #research,
+#financials,
 .corrections {
   scroll-margin-top: calc(var(--header-height) + 16px);
 }
@@ -302,6 +303,41 @@ table {
   font:
     13px/1.5 Arial,
     sans-serif;
+}
+.financial-illustration {
+  padding: 12px;
+  border-block: 1px solid var(--plum);
+  background: var(--yellow);
+}
+.financial-weights {
+  color: var(--plum);
+}
+.financial-company {
+  margin-top: 28px;
+}
+.financial-company h3 {
+  color: var(--plum);
+}
+.financial-company-table {
+  min-width: 650px;
+}
+.financial-ratios-table {
+  min-width: 620px;
+}
+.financial-share-basis {
+  display: block;
+  font-weight: normal;
+  font-size: 11px;
+}
+.financial-company-table th[scope="row"] {
+  width: 38%;
+}
+.financial-company-table td:last-child {
+  max-width: 440px;
+}
+.financial-missing {
+  display: block;
+  max-width: 50ch;
 }
 th,
 td {

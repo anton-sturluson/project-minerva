@@ -20,6 +20,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .accounts import router
 from .corrections import router as corrections_router
 from .db import make_engine
+from .financial_api import router as financial_router
 from .hit_rate import router as hit_rate_router
 from .ledger import router as ledger_router
 from .performance import router as performance_router
@@ -89,6 +90,8 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.include_router(hit_rate_router)
     app.include_router(research_router)
     app.include_router(research_activity_router)
+    app.include_router(financial_router)
+    app.state.financial_schema = os.environ.get("INVESTOR_FINANCIAL_SCHEMA")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     @app.exception_handler(SQLAlchemyError)

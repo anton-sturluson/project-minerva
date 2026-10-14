@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Portfolio } from "./Portfolio";
 import { Research } from "./Research";
+import { Financials } from "./Financials";
 
 type Theme = "system" | "light" | "dark";
 function savedTheme(): Theme {
@@ -21,8 +22,10 @@ const initialTheme = savedTheme();
 // Apply before React renders to avoid flashing the wrong stored theme on reload.
 applyTheme(initialTheme);
 
-export type Page = "portfolio" | "activity" | "research" | "post-mortem";
+export type Page =
+  "portfolio" | "activity" | "research" | "post-mortem" | "financials";
 function currentPage(hash: string): Page {
+  if (hash === "#financials") return "financials";
   return hash === "#activity"
     ? "activity"
     : hash === "#post-mortem"
@@ -70,6 +73,12 @@ export function App() {
           </a>
           <a href="#performance">[ Performance ]</a>
           <a
+            href="#financials"
+            aria-current={page === "financials" ? "page" : undefined}
+          >
+            [ Financials ]
+          </a>
+          <a
             href="#post-mortem"
             aria-current={page === "post-mortem" ? "page" : undefined}
           >
@@ -102,9 +111,12 @@ export function App() {
         </label>
       </header>
       <main id="main">
-        <div hidden={page === "research"}>
-          <Portfolio page={page} />
-        </div>
+        {page !== "financials" && (
+          <div hidden={page === "research"}>
+            <Portfolio page={page} />
+          </div>
+        )}
+        {page === "financials" && <Financials />}
         {page === "research" && (
           <Research activity={hash === "#research/activity"} />
         )}

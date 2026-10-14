@@ -104,6 +104,10 @@ Publications, observations, document versions, publication-source links and metr
 
 A normal annual duration must be 350–380 days for this pilot. Fiscal labels remain independent of the calendar year in which the period ends. Missing PP&E cash spending withholds FCF; optional intangible cash spending does not enter the expressly limited PP&E formula. Insurer gross margin is withheld; insurer cash-flow comparison remains the report's separate applicability decision. Source byte checks do not infer a zero from a missing line.
 
+The read-only app endpoint is `GET /api/financials?year=2025`, supporting 2023–2025. Set `INVESTOR_FINANCIAL_SCHEMA` explicitly to the reviewed pilot namespace on the app's existing `DATABASE_URL` service, then restart the API. Requests use a consistent read-only transaction; they never create a namespace or import data. Unconfigured, missing or unsupported financial namespaces return an unavailable view. Connection or read-permission failures return a recoverable 503 without connection details.
+
+The app uses a single declared illustrative equity-weight registry in `financial_api.py`. Its nominal USD values exercise the weighting formula; they are not actual portfolio positions or historical quotes. Responses retain the existing company/report evidence shapes and expose `synthetic`, `api_status`, coverage and availability reasons. Existing app authentication and origin checks apply.
+
 ## References
 
 ### Project contracts
