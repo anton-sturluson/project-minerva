@@ -274,7 +274,10 @@ function ManagersDirectory() {
   useEffect(() => {
     if (selected) {
       detailRef.current?.focus({ preventScroll: true });
-      detailRef.current?.scrollIntoView({ block: "start" });
+      if (detailRef.current) detailRef.current.scrollTop = 0;
+      if (window.matchMedia("(max-width: 800px)").matches) {
+        detailRef.current?.scrollIntoView({ block: "start" });
+      }
     }
   }, [selected]);
   useEffect(() => {
@@ -352,7 +355,11 @@ function ManagersDirectory() {
             </label>
           </div>
           <div className="research-layout">
-            <div>
+            <section
+              className="research-directory"
+              aria-label="Manager directory"
+              tabIndex={0}
+            >
               {visible?.length === 0 && <p>No managers match these filters.</p>}
               <ul className="manager-directory">
                 {visible?.map((manager) => (
@@ -403,7 +410,7 @@ function ManagersDirectory() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </section>
             <aside
               className="research-detail"
               aria-label="Manager research"

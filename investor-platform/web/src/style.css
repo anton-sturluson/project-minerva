@@ -862,6 +862,16 @@ summary:focus-visible {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 28px;
   margin-top: 20px;
+  height: calc(100dvh - var(--header-height) - 32px);
+}
+.research-directory,
+.research-detail {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+.research-directory {
+  min-width: 0;
 }
 .manager-directory {
   list-style: none;
@@ -1004,6 +1014,12 @@ summary:focus-visible {
 @media (max-width: 800px) {
   .research-layout {
     grid-template-columns: 1fr;
+    height: auto;
+  }
+  .research-directory,
+  .research-detail {
+    overflow-y: visible;
+    overscroll-behavior-y: auto;
   }
   .research-detail {
     border-left: 0;
