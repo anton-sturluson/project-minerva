@@ -343,3 +343,123 @@ def test_invalid_valuation_withholds_weighted_company_amounts() -> None:
     amount: Record
     for amount in (record(v) for v in record(result["weighted_company_per_share"]).values()):
         assert amount["value"] is None and amount["coverage"] is None
+
+
+def prior_profile(selected: Record, year: int = 2024) -> Record:
+    """Copy a synthetic publication to the prior period on the same reviewed split basis."""
+    previous: Record = json.loads(json.dumps(selected))
+    record(previous["period"]).update(start=f"{year}-01-01", end=f"{year}-12-31", fiscal_year=year)
+    previous["bundle_id"] = "synthetic-prior-publication"
+    facts: dict[str, Record] = {k: record(v) for k, v in record(previous["facts"]).items()}
+    key: str
+    fact: Record
+    for key, fact in facts.items():
+        fact["observation_id"] = f"prior:{key}"
+    previous["calculations"] = calculations(
+        facts,
+        False,
+        record(previous["capital_spending"]) if previous.get("capital_spending") else None,
+        str(previous["bundle_id"]),
+    )
+    return previous
+
+
+def test_prior_company_and_weighted_changes_retain_source_evidence() -> None:
+    """A comparable prior cohort produces Decimal changes without altering current measures."""
+    from investor_platform.weighted_financial import add_per_share_comparisons
+
+    first: Record = with_disclosed_capex(profile("example:one"), "3000000", "1000000")
+    old: Record = prior_profile(first)
+    record(record(old["facts"])["basic_eps"])["value"] = "0.40"
+    selected: Record = build_weighted_report(snapshot(), [first])
+    prior_snapshot: Record = snapshot()
+    prior_snapshot["holdings_date"] = "2024-12-31"
+    previous: Record = build_weighted_report(prior_snapshot, [old])
+    before: str = json.dumps(selected["weighted_ratios"], sort_keys=True)
+    add_per_share_comparisons(selected, previous)
+    weighted: Record = record(per_share_metric(selected)["comparison"])
+    assert weighted["prior_year"] == 2024 and weighted["prior_value"] == "0.40"
+    assert weighted["percent_change"] == "1" and weighted["status"] == "calculated"
+    company: Record = records(selected["companies"])[0]
+    change: Record = record(record(company["per_share_comparisons"])["basic_eps"])
+    assert change["percent_change"] == "1"
+    assert record(selected["comparison_inputs"])["companies"] == previous["companies"]
+    assert json.dumps(selected["weighted_ratios"], sort_keys=True) == before
+
+
+@pytest.mark.parametrize("baseline", ["0", "-0.5"])
+def test_nonpositive_prior_value_is_not_meaningful(baseline: str) -> None:
+    """Zero and loss baselines retain the prior amount without a misleading growth rate."""
+    from investor_platform.weighted_financial import change_result
+
+    result: Record = change_result("1", baseline, 2024, None)
+    assert result["prior_value"] == baseline
+    assert result["status"] == "not_meaningful" and result["percent_change"] is None
+    assert change_result("-1", "2", 2024, None)["percent_change"] == "-1.5"
+
+
+@pytest.mark.parametrize("mismatch", ["split", "classes", "coverage", "weight"])
+def test_incomparable_growth_retains_prior_figure_without_rate(mismatch: str) -> None:
+    """Changed units, contributors or weights cannot appear as weighted annual growth."""
+    from investor_platform.weighted_financial import add_per_share_comparisons
+
+    first: Record = profile("example:one")
+    second: Record = profile("example:two")
+    old: Record = prior_profile(first)
+    old_second: Record = prior_profile(second)
+    if mismatch in ("split", "classes"):
+        basis: Record = record(record(record(old["facts"])["basic_eps"])["share_basis"])
+        basis["split_adjusted_through" if mismatch == "split" else "classes"] = (
+            "2024-12-31" if mismatch == "split" else ["different_common"]
+        )
+    prior_snapshot: Record = snapshot(second="300000" if mismatch == "weight" else "400000")
+    prior_snapshot["holdings_date"] = "2024-12-31"
+    previous: Record = build_weighted_report(
+        prior_snapshot, [old] if mismatch == "coverage" else [old, old_second]
+    )
+    current: Record = build_weighted_report(snapshot(), [first, second])
+    add_per_share_comparisons(current, previous)
+    comparison: Record = record(per_share_metric(current)["comparison"])
+    assert comparison["prior_value"] is not None
+    assert comparison["status"] == "unavailable" and comparison["percent_change"] is None
+
+
+def test_missing_prior_year_does_not_invent_previous_amount() -> None:
+    """Uncollected FY2022 remains unavailable when displaying FY2023 comparisons."""
+    from investor_platform.weighted_financial import add_per_share_comparisons
+
+    current_snapshot: Record = snapshot()
+    current_snapshot["holdings_date"] = "2023-12-31"
+    previous_snapshot: Record = snapshot()
+    previous_snapshot["holdings_date"] = "2022-12-31"
+    current: Record = build_weighted_report(
+        current_snapshot, [prior_profile(profile("example:one"), 2023)]
+    )
+    add_per_share_comparisons(current, build_weighted_report(previous_snapshot, []))
+    comparison: Record = record(per_share_metric(current)["comparison"])
+    assert comparison["prior_year"] == 2022 and comparison["prior_value"] is None
+    assert comparison["status"] == "unavailable"
+
+
+def test_proportional_values_preserve_comparison_weights_and_prior_survives_missing_current() -> (
+    None
+):
+    """Scaling all values keeps weights fixed; an unavailable current year retains prior facts."""
+    from investor_platform.weighted_financial import add_per_share_comparisons
+
+    first: Record = profile("example:one")
+    second: Record = profile("example:two")
+    current: Record = build_weighted_report(snapshot(), [first, second])
+    old_snapshot: Record = snapshot(first="1200000", second="800000")
+    old_snapshot["holdings_date"] = "2024-12-31"
+    previous: Record = build_weighted_report(
+        old_snapshot, [prior_profile(first), prior_profile(second)]
+    )
+    add_per_share_comparisons(current, previous)
+    assert record(per_share_metric(current)["comparison"])["status"] == "calculated"
+    absent: Record = build_weighted_report(snapshot(), [])
+    add_per_share_comparisons(absent, previous)
+    company: Record = records(absent["companies"])[0]
+    comparison: Record = record(record(company["per_share_comparisons"])["basic_eps"])
+    assert Decimal(str(comparison["prior_value"])) == Decimal("0.8")
+    assert comparison["status"] == "unavailable"

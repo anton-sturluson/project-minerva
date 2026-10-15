@@ -7,11 +7,20 @@ export type PerShareMeasure = {
   inputs?: { source_id?: string }[];
 };
 
+export type PerShareComparison = {
+  prior_year: number;
+  prior_value: string | null;
+  status: "calculated" | "not_meaningful" | "unavailable";
+  percent_change: string | null;
+  reason?: string | null;
+};
+
 type SummaryMeasure = {
   label: string;
   value: string | null;
   coverage: string | null;
   exclusions: { issuer_key?: string; reason: string }[];
+  comparison?: PerShareComparison;
 };
 
 export type FinancialReport = {
@@ -26,6 +35,7 @@ export type FinancialReport = {
     issuer_key: string;
     equity_weight?: string | null;
     financial_status?: string;
+    per_share_comparisons?: Record<string, PerShareComparison>;
     profile: {
       review_status?: string;
       issuer?: { name: string };

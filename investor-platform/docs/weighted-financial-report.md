@@ -12,6 +12,10 @@ The report includes gross, operating, consolidated net, common-shareholder net, 
 
 Every JSON result pins the input snapshot, coherent publication IDs, company calculation versions, observation IDs, source IDs, source documents, financial periods and weighting formula version. The reader-facing Markdown retains financial dates, scopes, coverage, source links and brief missing-data explanations. Internal IDs, formula versions and source hashes stay in the companion JSON. Source publication dates remain distinct from holdings dates. Synthetic input values produce an explicit **SYNTHETIC WEIGHTS — not actual portfolio exposure** label. The pilot's financial observations are real sourced company disclosures; its market values are an explicit validation fixture.
 
+The annual API attaches prior-year values and changes for the two per-share measures. Weighted amounts use `comparison`; company rows use `per_share_comparisons` keyed by `basic_eps` and `allocated_fcf_after_disclosed_capex_per_basic_share`. Each comparison contains `prior_year`, `prior_value`, `status`, `percent_change` and `reason`. `percent_change` is the Decimal fraction `current / prior − 1`. A zero or negative prior value is `not_meaningful`; missing or incompatible inputs are `unavailable`. Prior amounts remain visible when a rate is unavailable. FY2023 has no collected FY2022 baseline.
+
+Changes require the same common classes and split-adjustment date; year-specific source locators may differ. Weighted changes also require identical contributors and normalized equity weights. Proportional market-value scaling alone does not change weights. Current and prior profiles are read in one read-only transaction; `comparison_inputs` pins the prior report, publications, source evidence and weight snapshot. No new data is collected by a request.
+
 ## References
 
 - [Annual financial observation contract](annual-financial-contract.md) — metric scope, missingness and reporting-period policy.

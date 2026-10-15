@@ -333,6 +333,127 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
     }
 
 
+def change_result(current: Json, prior: Json, year: int, reason: str | None) -> Record:
+    """Compare available annual values; a nonpositive baseline has no meaningful rate."""
+    result: Record = {
+        "prior_year": year,
+        "prior_value": prior,
+        "status": "unavailable",
+        "percent_change": None,
+        "reason": reason,
+        "formula": "current_value / prior_value - 1",
+        "formula_version": "annual-per-share-change-v1",
+    }
+    if reason is not None or current is None or prior is None:
+        result["reason"] = reason or "Current or prior annual measure is unavailable"
+        return result
+    baseline: Decimal = decimal_string(prior)
+    if baseline <= 0:
+        result.update(status="not_meaningful", reason="Prior annual value is zero or negative")
+        return result
+    context: Context
+    with localcontext() as context:
+        context.prec = 64
+        result.update(
+            status="calculated",
+            percent_change=format(decimal_string(current) / baseline - 1, "f"),
+            reason=None,
+        )
+    return result
+
+
+def share_comparison_reason(current: Record, prior: Record, metric: str) -> str | None:
+    """Require compatible classes and an explicitly common split-adjustment basis."""
+    basis_key: str = "basic_eps" if metric == "basic_eps" else "basic_weighted_average_shares"
+    current_basis: Record = record(record(record(current["facts"])[basis_key])["share_basis"])
+    prior_basis: Record = record(record(record(prior["facts"])[basis_key])["share_basis"])
+    if sorted(str(c) for c in current_basis["classes"]) != sorted(
+        str(c) for c in prior_basis["classes"]
+    ) or current_basis.get("split_adjusted_through") != prior_basis.get("split_adjusted_through"):
+        return "Comparable common-class and stock-split bases are not established"
+    return None
+
+
+def add_per_share_comparisons(current: Record, prior: Record) -> None:
+    """Attach bounded company and weighted changes while retaining the full prior evidence."""
+    year: int = int(str(current["calendar_year"])) - 1
+    if prior["calendar_year"] != year:
+        raise ValueError("Comparison requires the immediately preceding calendar year")
+    current["comparison_inputs"] = prior
+    prior_companies: dict[str, Record] = {
+        str(c["issuer_key"]): c for c in records(prior["companies"])
+    }
+    company: Record
+    for company in records(current["companies"]):
+        previous: Record = prior_companies.get(str(company["issuer_key"]), {})
+        comparisons: Record = {}
+        metric: str
+        for label, metric in PER_SHARE_METRICS.values():
+            value: Decimal | None = None
+            old_value: Decimal | None = None
+            reason: str | None = None
+            selected: Record = record(company.get("profile") or {})
+            old: Record = record(previous.get("profile") or {})
+            if company["financial_status"] == "eligible":
+                value, reason = (
+                    reported_basic_eps(selected)
+                    if metric == "basic_eps"
+                    else ratio_value(selected, metric)
+                )
+            else:
+                reason = "Current reviewed annual company profile is unavailable"
+            prior_reason: str | None = None
+            if previous.get("financial_status") == "eligible":
+                old_value, prior_reason = (
+                    reported_basic_eps(old) if metric == "basic_eps" else ratio_value(old, metric)
+                )
+            else:
+                prior_reason = "Prior reviewed annual company profile is unavailable"
+            reason = reason or prior_reason
+            if reason is None:
+                reason = share_comparison_reason(selected, old, metric)
+            comparisons[metric] = change_result(
+                format(value, "f") if value is not None else None,
+                format(old_value, "f") if old_value is not None else None,
+                year,
+                reason,
+            )
+        company["per_share_comparisons"] = comparisons
+    key: str
+    current_weights: dict[str, Json] = {
+        str(c["issuer_key"]): c["equity_weight"] for c in records(current["companies"])
+    }
+    prior_weights: dict[str, Json] = {
+        str(c["issuer_key"]): c["equity_weight"] for c in records(prior["companies"])
+    }
+    for key, (label, metric) in PER_SHARE_METRICS.items():
+        result: Record = record(record(current["weighted_company_per_share"])[key])
+        previous_result: Record = record(record(prior["weighted_company_per_share"])[key])
+        contributors: dict[str, Json] = {
+            str(c["issuer_key"]): current_weights[str(c["issuer_key"])]
+            for c in records(result["contributions"])
+        }
+        old_contributors: dict[str, Json] = {
+            str(c["issuer_key"]): prior_weights[str(c["issuer_key"])]
+            for c in records(previous_result["contributions"])
+        }
+        reason = None
+        if contributors != old_contributors:
+            reason = "Weighted comparison requires identical contributors and market-value weights"
+        elif result["status"] != "calculated" or previous_result["status"] != "calculated":
+            reason = "Current or prior weighted company measure is unavailable"
+        else:
+            for company in records(current["companies"]):
+                if str(company["issuer_key"]) in contributors:
+                    comparison: Record = record(record(company["per_share_comparisons"])[metric])
+                    if comparison["status"] == "unavailable":
+                        reason = str(comparison["reason"])
+                        break
+        result["comparison"] = change_result(
+            result["value"], previous_result["value"], year, reason
+        )
+
+
 def percent(value: Json) -> str:
     """Display a fraction as a percentage without changing stored precision."""
     return f"{decimal_string(value) * 100:.2f}%" if value is not None else "Unavailable"

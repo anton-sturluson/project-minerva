@@ -45,7 +45,7 @@ def financial_api(
         conn.close()
 
 
-def seed_profiles(engine: Engine, schema: str, count: int = 3) -> None:
+def seed_profiles(engine: Engine, schema: str, count: int = 3, *, year: int = 2025) -> None:
     """Import wholly synthetic reviewed statement values for the declared pilot identities."""
     bundle: Record = cast(
         Record,
@@ -64,6 +64,12 @@ def seed_profiles(engine: Engine, schema: str, count: int = 3) -> None:
         for issuer, ticker, weight in PILOT_HOLDINGS[:count]:
             candidate: Record = deepcopy(bundle)
             candidate["bundle_id"] = str(uuid4())
+            record(candidate["period"]).update(
+                start=f"{year}-01-01",
+                end=f"{year}-12-31",
+                fiscal_year=year,
+                fiscal_label=f"FY{year}",
+            )
             record(candidate["issuer"]).update(issuer_key=issuer, name="Synthetic " + ticker)
             records(candidate["sources"])[0]["content_sha256"] = hashlib.sha256(
                 b"Synthetic annual statement source"
@@ -190,3 +196,30 @@ def test_transport_failure_is_actionable_without_connection_details(
     finally:
         app.state.engine = engine
         unavailable.dispose()
+
+
+def test_api_reads_prior_year_and_pins_its_profile_evidence(
+    financial_api: tuple[TestClient, Engine, str],
+) -> None:
+    """The authenticated API compares actual stored synthetic years without collection or writes."""
+    client: TestClient
+    engine: Engine
+    schema: str
+    client, engine, schema = financial_api
+    seed_profiles(engine, schema)
+    seed_profiles(engine, schema, year=2024)
+    report: Record = client.get("/api/financials?year=2025").json()
+    comparison: Record = record(
+        record(record(report["weighted_company_per_share"])["weighted_company_eps"])["comparison"]
+    )
+    assert comparison["prior_year"] == 2024
+    assert comparison["status"] == "calculated" and comparison["percent_change"] == "0"
+    prior: Record = record(report["comparison_inputs"])
+    assert prior["calendar_year"] == 2024 and len(records(prior["companies"])) == 3
+    assert records(record(records(prior["companies"])[0]["profile"])["sources"])
+    company: Record = records(report["companies"])[0]
+    assert record(record(company["per_share_comparisons"])["basic_eps"])["prior_value"] == "0.80"
+    connection: SQLConnection
+    with engine.connect() as connection:
+        assert connection.scalar(text(f'SELECT count(*) FROM "{schema}".observations')) == 84
+        assert connection.scalar(text("SHOW transaction_read_only")) == "off"
