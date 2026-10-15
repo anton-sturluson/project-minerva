@@ -443,3 +443,97 @@ test("compact values preserve share direction and expose exact amounts", async (
     decreased.locator("tbody tr").first().locator("td").nth(1).locator("span"),
   ).toHaveAttribute("title", "+$8,781,829,133");
 });
+
+test("annual net change uses year selection and preserves quarterly comparison", async ({
+  page,
+}) => {
+  await page.route("**/api/research/managers", (route) =>
+    route.fulfill({ json: { managers: [manager] } }),
+  );
+  await page.route("**/api/research/managers/example-manager", (route) =>
+    route.fulfill({
+      json: {
+        ...manager,
+        filings: ["2026-06-30", "2026-03-31", "2025-12-31", "2024-12-31"].map(
+          (quarter) => ({
+            quarter,
+            filed_date: "2026-08-14",
+            source_url: "https://example.com/filing",
+          }),
+        ),
+      },
+    }),
+  );
+  await page.route(
+    "**/api/research/managers/example-manager/changes?*",
+    (route) => route.fulfill({ json: comparison }),
+  );
+  await page.route(
+    "**/api/research/managers/example-manager/annual-changes?*",
+    (route) => {
+      const year = Number(
+        new URL(route.request().url()).searchParams.get("year"),
+      );
+      return route.fulfill({
+        json: {
+          ...comparison,
+          year,
+          quarter: year === 2026 ? "2026-06-30" : `${year}-12-31`,
+          previous_quarter: `${year - 1}-12-31`,
+          year_to_date: year === 2026,
+          status: year === 2025 ? "unavailable" : "available",
+          reason:
+            year === 2025
+              ? "2025-03-31: No original or restated holdings available"
+              : null,
+          changes: year === 2025 ? [] : comparison.changes,
+        },
+      });
+    },
+  );
+  await page.goto("/#research");
+  await page.getByRole("button", { name: manager.name }).click();
+  await expect(
+    page.getByRole("region", {
+      name: "Quarterly position changes",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByLabel("Comparison view").selectOption("annual");
+  await expect(page.getByLabel("Report year")).toHaveValue("2026");
+  await expect(page.getByLabel("Report quarter")).toHaveCount(0);
+  await expect(page.getByText("2025 Q4 → 2026 Q2 · YTD")).toBeVisible();
+  await expect(
+    page.getByRole("region", {
+      name: "Annual net position changes",
+      exact: true,
+    }),
+  ).toContainText("Example New Cloud");
+  await page.getByLabel("Report year").selectOption("2025");
+  await expect(
+    page.getByText(
+      "Comparison unavailable: 2025-03-31: No original or restated holdings available",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", {
+      name: "Annual net position changes",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page.getByLabel("Report year").selectOption("2024");
+  await expect(page.getByText("2023 Q4 → 2024 Q4")).toBeVisible();
+  await page.getByLabel("Comparison view").selectOption("quarterly");
+  await expect(page.getByLabel("Report quarter")).toHaveValue("2026-06-30");
+  await expect(
+    page.getByRole("region", {
+      name: "Quarterly position changes",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
