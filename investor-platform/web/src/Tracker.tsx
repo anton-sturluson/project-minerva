@@ -509,7 +509,7 @@ export function Tracker({
                         className="number"
                         title={
                           showEstimatedValue
-                            ? "Estimated stocks plus cash versus indexes never sold. Funding covers daily purchase shortfalls after recycled sales and estimated gross dividends on ex-dates; deposit history, dividend payment dates and taxes are unverified."
+                            ? "Estimated stocks plus cash versus indexes never sold. Recorded deposits fund the portfolio and each index once; minimum additional funding covers purchase shortfalls after recycled sales and estimated gross dividends on ex-dates. Other cash movements are not supported; dividend payment dates and taxes are unverified."
                             : "Value still invested after matching purchases and sales; cash and exited proceeds are excluded"
                         }
                       >

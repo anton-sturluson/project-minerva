@@ -1,10 +1,38 @@
-import { expect, test, performance } from "./fixtures";
+import { expect, test } from "@playwright/test";
+import { performance } from "./fixtures";
 
-test("inferred portfolio defaults to no-sale wealth estimate and preserves it across periods and retries", async ({
+const account = {
+  id: "00000000-0000-4000-8000-000000000099",
+  name: "Synthetic funding test",
+  base_currency: "USD",
+  created_at: "2024-01-01T00:00:00Z",
+};
+
+test("inferred portfolio with a deposit preserves its funding estimate across periods and retries", async ({
   page,
-  account,
 }, testInfo) => {
   await page.clock.install({ time: new Date("2026-10-04T16:00:00Z") });
+  await page.route("**/api/**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/statistics", (route) =>
+    route.fulfill({
+      json: {
+        closed: 0,
+        open: 1,
+        unknown: 0,
+        wins: 0,
+        losses: 0,
+        breakeven: 0,
+        win_rate: null,
+        average_win: null,
+        average_loss: null,
+        payoff_ratio: null,
+        episodes: [],
+      },
+    }),
+  );
+  await page.route("**/valuation", (route) =>
+    route.fulfill({ json: { ...performance, complete: true } }),
+  );
   await page.route("**/api/accounts", (route) =>
     route.fulfill({
       json: [
@@ -31,6 +59,15 @@ test("inferred portfolio defaults to no-sale wealth estimate and preserves it ac
         balance: "200",
         holdings: [],
         entries: [
+          {
+            id: 2,
+            kind: "deposit",
+            effective_date: "2024-01-02",
+            amount: "500",
+            currency: "USD",
+            note: "Synthetic deposit",
+            security: null,
+          },
           {
             id: 1,
             kind: "buy",
@@ -141,6 +178,13 @@ test("inferred portfolio defaults to no-sale wealth estimate and preserves it ac
   await expect(
     table.getByRole("columnheader", { name: "Estimated value (USD)" }),
   ).toBeVisible();
+  await expect(
+    table.getByRole("columnheader", { name: "Estimated value (USD)" }),
+  ).toHaveAttribute(
+    "title",
+    /Recorded deposits fund the portfolio and each index once/,
+  );
+  await expect(page.locator("#performance").getByRole("alert")).toHaveCount(0);
   await expect(
     table.getByRole("row", { name: /Your portfolio \+ cash/ }),
   ).toContainText("1,200.00");

@@ -65,14 +65,18 @@ The summary labels dollars **Estimated value (USD)** and the original account ro
 the interface does not add explanatory paragraphs. ([Funding model](../backend/src/investor_platform/funding_estimate.py))
 
 Start modeled cash at zero, ignoring only the explicitly identified inferred opening
-placeholder. For each effective calendar date, add net sale receipts and estimated
-gross stock dividends, subtract purchase costs, and inject fresh cash only for a
-remaining shortage. Carry positive cash to subsequent dates. Same-day cash is netted
+placeholder. Recorded deposits enter modeled cash and both index alternatives once.
+For each effective calendar date, add deposits, net sale receipts and estimated gross
+stock dividends, subtract purchase costs, and infer extra cash only for a remaining
+shortage. A deposit before the first stock purchase starts the modeled comparison;
+a later deposit cannot fund an earlier purchase. Carry positive cash to subsequent
+dates. Same-day cash is netted
 before mapping transactions to market sessions, so a Monday sale cannot fund an
 earlier weekend purchase. Dividends use provider gross amounts on ex-dates, not actual
 broker payment dates or after-tax amounts. Received assets contribute their first
 session closing market value once, without becoming actual spendable cash. Every
-fresh contribution buys SPY/QQQ at adjusted closing prices; benchmark distributions
+recorded deposit or inferred contribution buys SPY/QQQ at adjusted closing prices;
+benchmark distributions
 reinvest and stock sales never sell benchmark holdings. ([Funding model](../backend/src/investor_platform/funding_estimate.py))
 
 Actual estimated wealth is stock market value plus modeled cash. Both actual and
@@ -85,7 +89,13 @@ YTD or a later start rebases returns but does not reset ending wealth or inferre
 funding. Post-close transactions are excluded before security-price fetching.
 ([Performance endpoint](../backend/src/investor_platform/performance.py))
 
-This mode rejects recorded cash movements/income anywhere in the replay history,
+The `funding_estimate.fresh_cash` field is total recorded deposits plus inferred extra
+cash; `recorded_deposits` and `inferred_cash` show that split. `capital` also includes
+received assets. Recorded deposits do not establish that the remaining cash history
+is complete.
+
+This mode rejects recorded withdrawals, income and expenses anywhere in the replay
+history,
 including dividends earned before the cutoff with later payment, because combining
 those records requires a different funding policy. It rejects changed/real opening
 balances, stock exclusions, and positive starting wealth without inferable capital.
