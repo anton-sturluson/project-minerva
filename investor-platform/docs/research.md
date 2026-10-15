@@ -27,6 +27,10 @@ Each manager result reports `complete_filings` and `blocked_filings` across the 
 
 Imports are explicit, paced, and idempotent by manager and accession. An explicit blocked-filing retry retains the prior import evidence and replaces normalized rows atomically; complete filings stay unchanged. The API does not fetch SEC data during page requests. Registry loading updates public metadata without deleting filing records. Holdings are independent of portfolio transactions. SEC XML responses are parsed in memory; normalized evidence is stored in PostgreSQL, with source links retained. No downloaded XML files are saved.
 
+Source total checks retain the reported cover total, raw information-table row count, summed row values, reporting unit, difference, and allowed difference. A mismatch can pass only when its absolute difference is at most `(raw row count + 1) / 2` reporting units. This bound allows half a reporting unit for each row and for the cover total. The evidence labels this result `consistent_with_rounding`; it does not prove how the filer rounded. Reported holding values stay unchanged. Larger differences remain blocked. See the [reviewed filing examples](research-sources.md#reviewed-filing-reconciliation).
+
+A `NEW HOLDINGS` amendment can repeat the entire existing snapshot before adding positions. The comparison removes the repeated rows only when every existing position is present and each normalized position field is identical. It then retains each new position once and keeps both accession sources. Changed or partially repeated existing positions remain blocked. The [First Eagle source review](research-sources.md#reviewed-filing-reconciliation) records this case.
+
 ## Ingest quarterly history with Minerva
 
 From the repository root, use the main CLI with the existing database and SEC identity configuration:

@@ -72,15 +72,14 @@ def snapshot(
         rows: list[ResearchHolding] = list(
             session.scalars(select(ResearchHolding).where(ResearchHolding.filing_id == filing.id))
         )
+        additions: dict[HoldingKey, Position] = {}
         for holding in rows:
             key: HoldingKey = (
                 holding.cusip,
                 holding.put_call,
                 holding.share_type,
             )
-            if not replacement and key in positions:
-                reason = "Amendment overlaps an existing security; comparison needs review"
-            positions[key] = Position(
+            additions[key] = Position(
                 cusip=holding.cusip,
                 issuer=holding.issuer,
                 security_class=holding.security_class,
@@ -89,6 +88,14 @@ def snapshot(
                 quantity=holding.quantity,
                 value_usd=holding.value_usd,
             )
+        if not replacement:
+            overlaps: set[HoldingKey] = positions.keys() & additions.keys()
+            if overlaps and (
+                overlaps != positions.keys()
+                or any(additions[key] != positions[key] for key in overlaps)
+            ):
+                reason = "Amendment overlaps an existing security; comparison needs review"
+        positions.update(additions)
     return positions, reason, sources
 
 

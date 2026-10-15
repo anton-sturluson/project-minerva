@@ -73,6 +73,8 @@ The regulatory AUM entries below use each adviser's official Form ADV, Item 5.F 
 | Fundsmith | 18,508,143,977 | Regulatory AUM | 2026-06-26 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/160365/PDF/160365.pdf) |
 | Akre Capital | 11,821,915,481 | Regulatory AUM | 2026-06-04 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/109242/PDF/109242.pdf) |
 | Baillie Gifford | 143,996,422,525 | Group lower bound | 2026-07-13 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/110296/PDF/110296.pdf) |
+| Berkshire Hathaway | 111,718,023,582 | Group lower bound: NEAM adviser AUM | 2026-03-31 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/105900/PDF/105900.pdf) |
+| TCI Fund Management | 70,281,928,000 | Managed-fund gross-asset lower bound | 2026-06-29 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/269954/PDF/269954.pdf) |
 | Pershing Square | 25,061,606,673 | Regulatory AUM | 2026-06-03 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/132982/PDF/132982.pdf) |
 | Third Point | 28,732,008,681 | Regulatory AUM | 2026-05-01 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/137927/PDF/137927.pdf) |
 | Greenhaven Associates | 11,660,691,026 | Regulatory AUM | 2026-02-10 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/104729/PDF/104729.pdf) |
@@ -98,6 +100,10 @@ The regulatory AUM entries below use each adviser's official Form ADV, Item 5.F 
 
 
 Baillie Gifford's USD 143,996,422,525 lower bound uses the regulatory AUM of affiliated adviser Baillie Gifford Overseas Ltd (CRD 110296). The group 2026 Q2 cover page lists that adviser. This establishes a threshold floor for the group without claiming its full AUM. ([Affiliate Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/110296/PDF/110296.pdf); [group cover page](https://www.sec.gov/Archives/edgar/data/1088875/000108887526000057/primary_doc.xml))
+
+Berkshire's lower bound uses controlled adviser New England Asset Management, Inc. (NEAM, CRD 105900), not Berkshire's own securities portfolio or assets managed by Warren Buffett. NEAM's Form ADV Item 5.F.(2)(c), page 9, reports USD 111,718,023,582 in regulatory AUM. Schedule D Item 10.B, page 30, names Berkshire Hathaway Inc., CIK 1067983, as its controlling public parent; Schedules A and B, pages 32–33, show the ownership chain through General Re Corporation. This establishes group AUM above the threshold without claiming complete Berkshire group AUM. ([NEAM Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/105900/PDF/105900.pdf))
+
+TCI's lower bound uses the gross asset value of The Children's Investment Master Fund arrangement reported in Schedule D Section 7.B.(1), question 11, page 36. The same schedule names the master fund on page 34; questions 17 and 18 on page 37 identify TCI as the adviser, not a subadviser, and disclose no other adviser. This is an exempt reporting adviser disclosure, not Item 5.F regulatory AUM, full firm AUM, or net asset value. Feeder-fund assets are not added. The date is the filing date. ([TCI Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/269954/PDF/269954.pdf))
 
 Pershing's AUM disclosure is for the associated investment adviser Pershing Square Capital Management, L.P. (CRD 132982). Its current 13F reporter is the parent Pershing Square Inc. (CIK 2026053); the AUM measure applies to the adviser. SCGE's AUM source uses the business name Sequoia Global Equities for the matched 13F reporting entity, CIK 1537530. ([Pershing adviser ADV](https://reports.adviserinfo.sec.gov/reports/ADV/132982/PDF/132982.pdf); [SCGE adviser ADV](https://reports.adviserinfo.sec.gov/reports/ADV/157402/PDF/157402.pdf))
 
@@ -127,6 +133,19 @@ Form 13F gives delayed holdings snapshots, not a transaction ledger. It omits sh
 
 Pershing's legacy manager directs readers to its parent's holdings report. Track that change before classifying a missing holding as an exit. ([Legacy notice](https://www.sec.gov/Archives/edgar/data/1336528/000117266126003777/primary_doc.xml); [parent report](https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/0001172661-26-003790-index.html))
 
+## Reviewed filing reconciliation
+
+Reviewed on 2026-10-14, the following source information-table sums differ slightly from their cover totals. All values below are USD. These differences are consistent with the importer's bounded reporting-unit rounding check; the source documents do not prove the filers' rounding methods. The importer keeps the reported row values and records both totals and the difference.
+
+| Manager / report period | Raw rows | Cover total | Row sum | Row sum minus cover | Primary sources |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Himalaya / 2026-06-30 | 8 | 3,702,921,098 | 3,702,921,099 | +1 | [Cover](https://www.sec.gov/Archives/edgar/data/1709323/000204358526000022/primary_doc.xml), [table](https://www.sec.gov/Archives/edgar/data/1709323/000204358526000022/13fhciq226.xml) |
+| Tweedy, Browne / 2026-03-31 | 93 | 1,258,817,377 | 1,258,817,374 | -3 | [Cover](https://www.sec.gov/Archives/edgar/data/732905/000119312526208439/primary_doc.xml), [table](https://www.sec.gov/Archives/edgar/data/732905/000119312526208439/53280.xml) |
+| Yacktman / 2026-06-30 | 74 | 8,089,240,585 | 8,089,240,584 | -1 | [Cover](https://www.sec.gov/Archives/edgar/data/905567/000090556726000003/primary_doc.xml), [table](https://www.sec.gov/Archives/edgar/data/905567/000090556726000003/13F_XML_output_2026-06-30.xml) |
+| TCI / 2025-09-30 | 9 | 52,699,548,227 | 52,699,548,226 | -1 | [Cover](https://www.sec.gov/Archives/edgar/data/1647251/000164725125000014/primary_doc.xml), [table](https://www.sec.gov/Archives/edgar/data/1647251/000164725125000014/Form13fInfoTable.xml) |
+
+First Eagle's 2026-06-30 original has 614 raw rows, normalized to 424 positions worth USD 59,922,860,164. The amendment has 616 raw rows, normalized to 425 positions worth USD 60,750,982,695. It repeats all 424 original normalized positions with identical quantities and values and adds one new position. Its cover marks `NEW HOLDINGS`, despite the full repeated table. The comparison removes the exact repeated snapshot and retains the new position once; it does not relabel the filing as a legal restatement. Changed or partially repeated snapshots remain blocked. ([Original cover](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000020/primary_doc.xml), [original table](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000020/FEIM13F20260630.xml); [amendment cover](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000033/primary_doc.xml), [amendment table](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000033/13FEIM20260630revised.xml))
+
 ## References
 
 ### SEC filings and data
@@ -135,6 +154,14 @@ Pershing's legacy manager directs readers to its parent's holdings report. Track
 - [SEC submissions API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces): entity metadata, filing indexes and historical shards.
 - [SEC Form 13F FAQ](https://www.sec.gov/rules-regulations/staff-guidance/division-investment-management-frequently-asked-questions/frequently-asked-questions-about-form-13f): reporting scope and timing.
 - [Pershing legacy notice](https://www.sec.gov/Archives/edgar/data/1336528/000117266126003777/primary_doc.xml) and [parent report](https://www.sec.gov/Archives/edgar/data/2026053/000117266126003790/0001172661-26-003790-index.html): reporter transition.
+
+### Reviewed reconciliation filings
+
+- Himalaya: [2026 Q2 cover](https://www.sec.gov/Archives/edgar/data/1709323/000204358526000022/primary_doc.xml) and [table](https://www.sec.gov/Archives/edgar/data/1709323/000204358526000022/13fhciq226.xml); reported totals and USD 1 difference.
+- Tweedy, Browne: [2026 Q1 cover](https://www.sec.gov/Archives/edgar/data/732905/000119312526208439/primary_doc.xml) and [table](https://www.sec.gov/Archives/edgar/data/732905/000119312526208439/53280.xml); reported totals and USD 3 difference.
+- Yacktman: [2026 Q2 cover](https://www.sec.gov/Archives/edgar/data/905567/000090556726000003/primary_doc.xml) and [table](https://www.sec.gov/Archives/edgar/data/905567/000090556726000003/13F_XML_output_2026-06-30.xml); reported totals and USD 1 difference.
+- TCI: [2025 Q3 cover](https://www.sec.gov/Archives/edgar/data/1647251/000164725125000014/primary_doc.xml) and [table](https://www.sec.gov/Archives/edgar/data/1647251/000164725125000014/Form13fInfoTable.xml); reported totals and USD 1 difference.
+- First Eagle: [2026 Q2 original cover](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000020/primary_doc.xml) and [table](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000020/FEIM13F20260630.xml), [amendment cover](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000033/primary_doc.xml) and [table](https://www.sec.gov/Archives/edgar/data/1325447/000132544726000033/13FEIM20260630revised.xml); amendment type, complete repeated positions, and one added position.
 
 ### Manager websites and letters
 
@@ -182,3 +209,6 @@ Pershing's legacy manager directs readers to its parent's holdings report. Track
 - GQG Partners: [Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/283720/PDF/283720.pdf); Item 5.F total regulatory AUM, filed 2026-03-30.
 
 - Baillie Gifford: [affiliated adviser Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/110296/PDF/110296.pdf); Baillie Gifford Overseas Ltd regulatory AUM, filed 2026-07-13, retained as a group lower bound rather than the group total; [group cover page](https://www.sec.gov/Archives/edgar/data/1088875/000108887526000057/primary_doc.xml) verifies the adviser relationship.
+
+- Berkshire Hathaway: [NEAM Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/105900/PDF/105900.pdf); controlled-adviser regulatory AUM and parent ownership mapping, filed 2026-03-31, used only as a group lower bound.
+- TCI Fund Management: [Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/269954/PDF/269954.pdf); master-fund arrangement gross asset value and adviser relationship, filed 2026-06-29, used only as a managed-fund lower bound.
