@@ -61,6 +61,9 @@ export function Financials() {
       digits,
     })),
   ];
+  const priorYear =
+    report?.weighted_company_per_share?.weighted_company_eps?.comparison
+      ?.prior_year ?? year - 1;
   return (
     <section
       className="annual-financials"
@@ -122,7 +125,13 @@ export function Financials() {
                   <tr>
                     <th scope="col">Measure</th>
                     <th scope="col" className="number">
-                      Value
+                      FY{report.calendar_year}
+                    </th>
+                    <th scope="col" className="number">
+                      FY{priorYear}
+                    </th>
+                    <th scope="col" className="number">
+                      % change
                     </th>
                   </tr>
                 </thead>
@@ -132,19 +141,13 @@ export function Financials() {
                       <th
                         scope="row"
                         aria-describedby={
-                          [
-                            digits !== null ? "weighted-share-basis" : "",
-                            metric?.exclusions.length
-                              ? `${key}-exclusions`
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ") || undefined
+                          metric?.exclusions.length
+                            ? `${key}-exclusions`
+                            : undefined
                         }
                       >
                         {label}
-                        {(digits !== null ||
-                          Boolean(metric?.exclusions.length)) && <sup>*</sup>}
+                        {Boolean(metric?.exclusions.length) && <sup>*</sup>}
                       </th>
                       <td className="number">
                         {metric?.value == null
@@ -157,6 +160,30 @@ export function Financials() {
                                 minimumFractionDigits: digits,
                                 maximumFractionDigits: digits,
                               })}
+                      </td>
+                      <td className="number">
+                        {digits === null
+                          ? "—"
+                          : metric?.comparison?.prior_value == null
+                            ? "Unavailable"
+                            : Number(
+                                metric.comparison.prior_value,
+                              ).toLocaleString("en-US", {
+                                style: "currency",
+                                currency: "USD",
+                                minimumFractionDigits: digits,
+                                maximumFractionDigits: digits,
+                              })}
+                      </td>
+                      <td className="number">
+                        {digits === null
+                          ? "—"
+                          : metric?.comparison?.status === "not_meaningful"
+                            ? "N/M"
+                            : metric?.comparison?.status === "calculated" &&
+                                metric.comparison.percent_change != null
+                              ? percent(metric.comparison.percent_change)
+                              : "Unavailable"}
                       </td>
                     </tr>
                   ))}
@@ -188,9 +215,6 @@ export function Financials() {
                   .
                 </p>
               ))}
-            <p className="form-note" id="weighted-share-basis">
-              * Per-share figures are market-value-weighted company averages.
-            </p>
             <details>
               <summary>Company details</summary>
               <div
@@ -203,57 +227,95 @@ export function Financials() {
                   <thead>
                     <tr>
                       <th scope="col">Company</th>
+                      <th scope="col">Measure</th>
                       <th scope="col" className="number">
-                        EPS (basic)
+                        FY{report.calendar_year}
                       </th>
                       <th scope="col" className="number">
-                        FCF/share
+                        FY{priorYear}
+                      </th>
+                      <th scope="col" className="number">
+                        % change
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {report.companies.map((company) => {
+                    {report.companies.flatMap((company) => {
                       const profile = company.profile;
                       const reviewed =
                         company.financial_status === "eligible" &&
                         profile?.review_status === "reviewed";
-                      const eps = profile?.facts?.basic_eps;
-                      const fcf =
-                        profile?.calculations
-                          ?.allocated_fcf_after_disclosed_capex_per_basic_share;
-                      return (
-                        <tr key={company.issuer_key}>
-                          <th scope="row">
-                            {tickers.get(company.issuer_key) ||
-                              profile?.issuer?.name ||
-                              "Company"}
-                          </th>
-                          <td className="number">
-                            {reviewed &&
-                            eps?.status === "reported" &&
-                            eps.value != null
-                              ? Number(eps.value).toLocaleString("en-US", {
-                                  style: "currency",
-                                  currency: "USD",
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })
-                              : "Unavailable"}
-                          </td>
-                          <td className="number">
-                            {reviewed &&
-                            fcf?.status === "calculated" &&
-                            fcf.value != null
-                              ? Number(fcf.value).toLocaleString("en-US", {
-                                  style: "currency",
-                                  currency: "USD",
-                                  minimumFractionDigits: 4,
-                                  maximumFractionDigits: 4,
-                                })
-                              : "Unavailable"}
-                          </td>
-                        </tr>
-                      );
+                      return [
+                        {
+                          key: "basic_eps",
+                          label: "EPS (basic)",
+                          value: profile?.facts?.basic_eps,
+                          status: "reported",
+                          digits: 2,
+                        },
+                        {
+                          key: "allocated_fcf_after_disclosed_capex_per_basic_share",
+                          label: "FCF/share",
+                          value:
+                            profile?.calculations
+                              ?.allocated_fcf_after_disclosed_capex_per_basic_share,
+                          status: "calculated",
+                          digits: 4,
+                        },
+                      ].map((measure) => {
+                        const comparison =
+                          company.per_share_comparisons?.[measure.key];
+                        const available =
+                          reviewed &&
+                          measure.value?.status === measure.status &&
+                          measure.value.value != null;
+                        return (
+                          <tr key={`${company.issuer_key}:${measure.key}`}>
+                            <th scope="row">
+                              {tickers.get(company.issuer_key) ||
+                                profile?.issuer?.name ||
+                                "Company"}
+                            </th>
+                            <td>{measure.label}</td>
+                            <td className="number">
+                              {available
+                                ? Number(measure.value?.value).toLocaleString(
+                                    "en-US",
+                                    {
+                                      style: "currency",
+                                      currency: "USD",
+                                      minimumFractionDigits: measure.digits,
+                                      maximumFractionDigits: measure.digits,
+                                    },
+                                  )
+                                : "Unavailable"}
+                            </td>
+                            <td className="number">
+                              {comparison?.prior_value != null
+                                ? Number(comparison.prior_value).toLocaleString(
+                                    "en-US",
+                                    {
+                                      style: "currency",
+                                      currency: "USD",
+                                      minimumFractionDigits: measure.digits,
+                                      maximumFractionDigits: measure.digits,
+                                    },
+                                  )
+                                : "Unavailable"}
+                            </td>
+                            <td className="number">
+                              {!available
+                                ? "Unavailable"
+                                : comparison?.status === "not_meaningful"
+                                  ? "N/M"
+                                  : comparison?.status === "calculated" &&
+                                      comparison.percent_change != null
+                                    ? percent(comparison.percent_change)
+                                    : "Unavailable"}
+                            </td>
+                          </tr>
+                        );
+                      });
                     })}
                   </tbody>
                 </table>

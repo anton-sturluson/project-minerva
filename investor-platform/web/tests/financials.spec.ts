@@ -1,7 +1,21 @@
 import { expect, test } from "@playwright/test";
-import type { FinancialReport } from "../src/financialApi";
+import type { FinancialReport, PerShareComparison } from "../src/financialApi";
 
 function report(year = 2025): FinancialReport {
+  const comparison = (
+    prior: string,
+    change: string | null,
+  ): PerShareComparison => ({
+    prior_year: year - 1,
+    prior_value: year === 2023 ? null : prior,
+    status:
+      year === 2023
+        ? "unavailable"
+        : change === null
+          ? "not_meaningful"
+          : "calculated",
+    percent_change: year === 2023 ? null : change,
+  });
   return {
     synthetic: true,
     calendar_year: year,
@@ -18,6 +32,13 @@ function report(year = 2025): FinancialReport {
         issuer_key: "example:issuer",
         equity_weight: "0.75",
         financial_status: "eligible",
+        per_share_comparisons: {
+          basic_eps: comparison("2.00", "0.17"),
+          allocated_fcf_after_disclosed_capex_per_basic_share: comparison(
+            year === 2025 ? "0.15432" : "-0.00321",
+            year === 2025 ? "-0.2" : null,
+          ),
+        },
         profile: {
           review_status: "reviewed",
           issuer: { name: "Example Company" },
@@ -31,7 +52,12 @@ function report(year = 2025): FinancialReport {
           calculations: {
             allocated_fcf_after_disclosed_capex_per_basic_share: {
               status: "calculated",
-              value: year === 2023 ? "-0.00321" : "0.123456",
+              value:
+                year === 2023
+                  ? "-0.00321"
+                  : year === 2024
+                    ? "0.15432"
+                    : "0.123456",
             },
           },
           sources: [
@@ -47,6 +73,13 @@ function report(year = 2025): FinancialReport {
         issuer_key: "example:excluded",
         equity_weight: "0.25",
         financial_status: "eligible",
+        per_share_comparisons: {
+          basic_eps: comparison("6.00", "0.13"),
+          allocated_fcf_after_disclosed_capex_per_basic_share: comparison(
+            "1.125",
+            "-0.2",
+          ),
+        },
         profile: {
           review_status: "reviewed",
           issuer: { name: "Other Example Company" },
@@ -124,12 +157,14 @@ function report(year = 2025): FinancialReport {
       weighted_company_eps: {
         label: "Weighted company EPS",
         value: "3.45",
+        comparison: comparison("3.00", "0.15"),
         coverage: "1",
         exclusions: [],
       },
       weighted_company_fcf_per_share: {
         label: "Weighted company FCF/share",
         value: year === 2023 ? "0.2225925" : "0.317592",
+        comparison: comparison("0.39699", "-0.2"),
         coverage: "1",
         exclusions: [],
       },
@@ -164,24 +199,92 @@ test("main weighted company values lead and company details stay collapsed", asy
   await expect(page.locator(".financial-per-share-table")).toBeHidden();
   await page.getByText("Company details", { exact: true }).click();
   const table = page.getByRole("region", { name: "Company per-share figures" });
-  await expect(table.getByRole("row", { name: /^EXM / })).toContainText(
-    "$2.34",
-  );
+  await expect(
+    table.getByRole("row", { name: /^EXM EPS \(basic\)/ }),
+  ).toContainText("$2.34");
   await expect(table.getByText("$0.1235", { exact: true })).toBeVisible();
   await page.getByLabel("Financial year").selectOption("2023");
   await page.getByText("Company details", { exact: true }).click();
   await expect(table.getByText("-$0.0032", { exact: true })).toBeVisible();
   await expect(table.getByText("-$0.00", { exact: true })).toHaveCount(0);
-  expect(
-    await summary.evaluate(
-      (element) => element.scrollWidth <= element.clientWidth,
-    ),
-  ).toBe(true);
+
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("per-share comparisons show prior values, changes and nonpositive-base states", async ({
+  page,
+}) => {
+  await page.route("**/api/financials?year=*", (route) =>
+    route.fulfill({
+      json: report(
+        Number(new URL(route.request().url()).searchParams.get("year")),
+      ),
+    }),
+  );
+  await page.goto("/#post-mortem");
+  const summary = page.getByRole("region", {
+    name: "Portfolio-weighted metrics",
+  });
+  await expect(
+    summary.getByRole("columnheader", { name: "FY2025" }),
+  ).toBeVisible();
+  await expect(
+    summary.getByRole("columnheader", { name: "FY2024" }),
+  ).toBeVisible();
+  const eps = summary.getByRole("row", { name: /^Weighted company EPS/ });
+  await expect(eps.getByText("$3.00", { exact: true })).toBeVisible();
+  await expect(eps.getByText("15.00%", { exact: true })).toBeVisible();
+  await expect(
+    summary
+      .getByRole("row", { name: /^Weighted company FCF/ })
+      .getByText("-20.00%", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    summary
+      .getByRole("row", { name: /^Gross margin/ })
+      .getByText("—", { exact: true }),
+  ).toHaveCount(2);
+  await page.getByText("Company details", { exact: true }).click();
+  const detail = page.getByRole("region", {
+    name: "Company per-share figures",
+  });
+  await expect(
+    detail
+      .getByRole("row", { name: /^EXM EPS/ })
+      .getByText("17.00%", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    detail
+      .getByRole("row", { name: /^EXM FCF/ })
+      .getByText("$0.1543", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Financial year").selectOption("2024");
+  await page.getByText("Company details", { exact: true }).click();
+  await expect(
+    detail
+      .getByRole("row", { name: /^EXM FCF/ })
+      .getByText("N/M", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    detail
+      .getByRole("row", { name: /^EXM FCF/ })
+      .getByText("-$0.0032", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Financial year").selectOption("2023");
+  await expect(
+    summary.getByRole("columnheader", { name: "FY2022" }),
+  ).toBeVisible();
+  await expect(eps.getByText("Unavailable", { exact: true })).toHaveCount(2);
+  await page.getByText("Company details", { exact: true }).click();
+  await expect(
+    detail
+      .getByRole("row", { name: /^EXM EPS/ })
+      .getByText("Unavailable", { exact: true }),
+  ).toHaveCount(2);
 });
 
 test("unreviewed and unavailable company values stay unavailable", async ({
@@ -205,7 +308,7 @@ test("unreviewed and unavailable company values stay unavailable", async ({
   await page.getByText("Company details", { exact: true }).click();
   const row = page
     .getByRole("region", { name: "Company per-share figures" })
-    .getByRole("row", { name: /^EXM / });
+    .getByRole("row", { name: /^EXM EPS \(basic\)/ });
   await expect(row.getByText("Unavailable", { exact: true })).toHaveCount(2);
   await expect(row.getByText("$2.34", { exact: true })).toHaveCount(0);
   await page.getByLabel("Financial year").selectOption("2024");
@@ -257,13 +360,13 @@ test("summary omits extra columns and explains exclusions from response weights"
   ).toBeVisible();
   await expect(
     financials.getByRole("rowheader", { name: /^Weighted company EPS/ }),
-  ).toHaveAttribute("aria-describedby", "weighted-share-basis");
+  ).not.toHaveAttribute("aria-describedby");
   await expect(
     financials.getByText(
       "* Per-share figures are market-value-weighted company averages.",
       { exact: true },
     ),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     financials.getByRole("columnheader", {
       name: /^(Coverage|Missing data|Sources)$/,

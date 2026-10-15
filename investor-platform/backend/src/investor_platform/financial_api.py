@@ -9,8 +9,8 @@ from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from .db import Actor, get_actor
-from .financial import Record, Row, check_schema, records, relation, show
-from .weighted_financial import build_weighted_report
+from .financial import Record, Row, check_schema, record, records, relation, show
+from .weighted_financial import add_per_share_comparisons, build_weighted_report
 
 router: APIRouter = APIRouter()
 PILOT_HOLDINGS: tuple[tuple[str, str, str], ...] = (
@@ -36,7 +36,9 @@ def pilot_snapshot(year: int) -> Record:
     }
 
 
-def read_profiles(engine: Engine, schema: str, year: int) -> list[Record]:
+def read_profiles(
+    engine: Engine, schema: str, year: int, *, include_prior: bool = False
+) -> list[Record]:
     """Read one consistent read-only snapshot using the application's existing engine."""
     relation(schema, "publications")
     profiles: list[Record] = []
@@ -52,11 +54,13 @@ def read_profiles(engine: Engine, schema: str, year: int) -> list[Record]:
                 issuer: str
                 ticker: str
                 value: str
-                for issuer, ticker, value in PILOT_HOLDINGS:
-                    try:
-                        profiles.append(show(conn, schema, issuer, year))
-                    except ValueError:
-                        continue
+                selected_year: int
+                for selected_year in (year, year - 1) if include_prior else (year,):
+                    for issuer, ticker, value in PILOT_HOLDINGS:
+                        try:
+                            profiles.append(show(conn, schema, issuer, selected_year))
+                        except ValueError:
+                            continue
             finally:
                 conn.row_factory = prior_factory
     return profiles
@@ -76,7 +80,7 @@ def financials(
         reason = "Annual financial data is not configured. Set the reviewed pilot namespace."
     else:
         try:
-            profiles = read_profiles(request.app.state.engine, schema, year)
+            profiles = read_profiles(request.app.state.engine, schema, year, include_prior=True)
         except ValueError:
             reason = "The configured financial namespace is missing or unsupported. "
             reason += "Import reviewed annual data into an explicit financial namespace."
@@ -86,7 +90,12 @@ def financials(
                 detail="Annual financial records are temporarily unavailable. "
                 "Check the database connection and read permissions, then retry.",
             ) from error
-    result: Record = build_weighted_report(pilot_snapshot(year), profiles)
+    selected: list[Record] = [
+        p for p in profiles if str(record(p["period"])["end"])[:4] == str(year)
+    ]
+    previous: list[Record] = [p for p in profiles if p not in selected]
+    result: Record = build_weighted_report(pilot_snapshot(year), selected)
+    add_per_share_comparisons(result, build_weighted_report(pilot_snapshot(year - 1), previous))
     eligible: int = sum(
         company["financial_status"] == "eligible" for company in records(result["companies"])
     )
