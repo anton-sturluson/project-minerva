@@ -140,6 +140,13 @@ test("switches both indexes, retains mode across periods, and recovers from fail
   ).toHaveCount(0);
   expect(requests.at(-1)?.benchmark_mode).toBe("matched");
   expect(requests.at(-1)?.scope).toBe("account");
+  await control.selectOption("buy_hold");
+  await expect(page.getByLabel("Performance measure")).toHaveValue("account");
+  await expect(summary).toBeVisible();
+  expect(requests.at(-1)?.scope).toBe("account");
+  await control.selectOption("matched");
+  await expect(page.getByLabel("Performance measure")).toHaveValue("account");
+  await expect(summary).toBeVisible();
   fail = true;
   await page
     .getByRole("button", { name: "Compare performance", exact: true })

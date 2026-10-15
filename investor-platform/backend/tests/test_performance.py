@@ -3,9 +3,13 @@ from decimal import Decimal as D
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from helpers import DAYS, cash, dividend, ledger, report, trade
+from httpx import Response
+from sqlalchemy import Engine
 
 from investor_platform import market
+from investor_platform.financial import Record
 from investor_platform.market import History
 
 
@@ -521,9 +525,13 @@ def test_cash_expenses_reduce_return_while_withdrawals_do_not(db_client, portfol
 
 
 @pytest.mark.parametrize("baseline", ["history", "recorded"])
-def test_inferred_funding_withholds_returns_and_scenarios_until_reconciled(
-    db_client, portfolio, database, baseline
-):
+def test_inferred_funding_models_returns_but_rejects_account_exclusions(
+    db_client: TestClient,
+    portfolio: tuple[str, dict[str, History]],
+    database: Engine,
+    baseline: str,
+) -> None:
+    """Inferred funding supports modeled returns while account exclusions need reconciled cash."""
     from uuid import UUID
 
     from sqlalchemy.orm import Session
@@ -531,21 +539,23 @@ def test_inferred_funding_withholds_returns_and_scenarios_until_reconciled(
     from investor_platform.domain import FundingStatus
     from investor_platform.models import Account
 
-    aid, _ = portfolio
-    # Legacy imports have no status field, so they must fail closed too.
+    aid: str = portfolio[0]
+    # Legacy imports also use the purchase-date funding model.
+    session: Session
     with Session(database) as session:
         session.get(Account, UUID(aid)).reconstruction = {"opening_cash": "1000"}
         session.commit()
-    before = ledger(db_client, aid)
-    sid = before["holdings"][0]["security"]["id"]
-    result = scenario(db_client, aid, [sid], baseline=baseline).json()
+    before: Record = ledger(db_client, aid)
+    sid: str = before["holdings"][0]["security"]["id"]
+    excluded: Response = scenario(db_client, aid, [sid], baseline=baseline)
+    assert excluded.status_code == 422
+    assert "exclusions" in excluded.json()["detail"]
+    result: Record = scenario(db_client, aid, [], baseline=baseline).json()
     assert result["funding_status"] == FundingStatus.INFERRED
-    assert result["return"] is None
-    assert result["cagr"]["portfolio"] is None
-    assert result["excess_spy"] is None and result["excess_qqq"] is None
-    assert all(p["portfolio"] is None for p in result["series"])
+    assert D(result["return"]) == D(".21")
+    assert D(result["funding_estimate"]["fresh_cash"]) == 1000
     assert result["scenario"] is None
-    assert "cash history" in result["scenario_error"]
+    assert result["scenario_error"] is None
     assert result["SPY"] == "0.02" and result["QQQ"] == "0.04"
     assert ledger(db_client, aid) == before
     with Session(database) as session:

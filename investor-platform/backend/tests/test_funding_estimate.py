@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 from helpers import DAYS, cash, dividend, ledger, stock_report, trade
+from httpx import Response
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
@@ -27,7 +28,9 @@ def inferred(portfolio, database):
 
 
 def estimated(client, aid, **extra):
-    response = stock_report(client, aid, benchmark_mode="funded_hold", **extra)
+    response = stock_report(
+        client, aid, benchmark_mode="funded_hold", **{"scope": "account", **extra}
+    )
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -339,7 +342,9 @@ def test_rejects_exclusions_real_opening_balances_and_changed_placeholders(
         session.commit()
     assert stock_report(db_client, aid, benchmark_mode="funded_hold").status_code == 422
     sid = ledger(db_client, aid)["holdings"][0]["security"]["id"]
-    r = stock_report(db_client, aid, benchmark_mode="funded_hold", exclude_security_ids=[sid])
+    r = stock_report(
+        db_client, aid, scope="account", benchmark_mode="funded_hold", exclude_security_ids=[sid]
+    )
     assert r.status_code == 422 and "exclusions" in r.json()["detail"]
 
 
@@ -405,3 +410,122 @@ def test_deposit_before_first_trade_starts_benchmark_before_stock_purchase(
     assert D(result["series"][0]["value"]) == 1000
     assert D(result["funding_estimate"]["inferred_cash"]) == 0
     assert float(result["benchmark_values"]["SPY"]["value"]) == pytest.approx(1000 * 102 / 90)
+
+
+@pytest.mark.parametrize("scope", ["account", "stocks"])
+@pytest.mark.parametrize("recent", [False, True])
+def test_benchmark_choice_preserves_portfolio_and_ledger(
+    db_client: TestClient,
+    inferred: tuple[str, dict[str, History]],
+    scope: str,
+    recent: bool,
+) -> None:
+    """Index choices preserve portfolio wealth, returns, dates, scope and recorded data."""
+    aid: str = inferred[0]
+    assert (
+        trade(
+            db_client,
+            aid,
+            "sell",
+            "4",
+            "120",
+            ticker="AAA",
+            exchange="NYSE",
+            effective_date=str(DAYS[1]),
+        ).status_code
+        == 201
+    )
+    assert cash(db_client, aid, amount="200", day=str(DAYS[1])).status_code == 201
+    before: Record = ledger(db_client, aid)
+    options: dict[str, str] = {
+        "scope": scope,
+        "start": str(DAYS[1] if recent else DAYS[0]),
+        "baseline": "recorded" if recent else "history",
+    }
+    regular_response: Response = stock_report(db_client, aid, benchmark_mode="buy_hold", **options)
+    matched_response: Response = stock_report(
+        db_client, aid, benchmark_mode="funded_hold", **options
+    )
+    assert regular_response.status_code == matched_response.status_code == 200
+    regular: Record = regular_response.json()
+    matched: Record = matched_response.json()
+    field: str
+    for field in ("scope", "start", "end", "value", "cash", "return", "holdings", "attribution"):
+        assert regular[field] == matched[field], field
+    assert regular["cagr"]["portfolio"] == matched["cagr"]["portfolio"]
+    assert [
+        {field: point[field] for field in ("date", "portfolio", "value", "cash", "receivables")}
+        for point in regular["series"]
+    ] == [
+        {field: point[field] for field in ("date", "portfolio", "value", "cash", "receivables")}
+        for point in matched["series"]
+    ]
+    assert "benchmark_values" not in regular
+    assert D(matched["benchmark_values"]["SPY"]["value"]) > 1200
+    assert D(matched["funding_estimate"]["recorded_deposits"]) == 200
+    if scope == "account":
+        assert regular["funding_estimate"] == matched["funding_estimate"]
+    assert ledger(db_client, aid) == before
+
+
+def test_stock_benchmark_switch_keeps_days_before_first_trade(
+    db_client: TestClient, inferred: tuple[str, dict[str, History]], database: Engine
+) -> None:
+    """An earlier placeholder must not shift or truncate the stock return series."""
+    aid: str = inferred[0]
+    data: dict[str, History] = inferred[1]
+    prior: date = date(2025, 12, 31)
+    session: Session
+    with Session(database) as session:
+        opening: LedgerEntry = session.scalar(
+            select(LedgerEntry).where(
+                LedgerEntry.account_id == UUID(aid), LedgerEntry.kind == EntryKind.OPENING_CASH
+            )
+        )
+        opening.effective_date = prior
+        session.commit()
+    symbol: str
+    for symbol in ("SPY", "QQQ"):
+        data[symbol].close[prior] = D(90)
+        data[symbol].adjusted[prior] = D(90)
+    regular: Record = stock_report(db_client, aid, start=str(prior)).json()
+    matched: Record = estimated(db_client, aid, scope="stocks", start=str(prior))
+    assert [(point["date"], point["portfolio"]) for point in regular["series"]] == [
+        (point["date"], point["portfolio"]) for point in matched["series"]
+    ]
+    assert matched["start"] == str(prior)
+    assert D(matched["series"][0]["SPY"]) == 0
+
+
+@pytest.mark.parametrize("mode", ["buy_hold", "funded_hold"])
+def test_modeled_account_cash_guards_apply_to_both_index_choices(
+    db_client: TestClient, inferred: tuple[str, dict[str, History]], database: Engine, mode: str
+) -> None:
+    """Unsupported cash history cannot silently select a different account return model."""
+    aid: str = inferred[0]
+    enlarge_placeholder(database, aid, 1001)
+    assert cash(db_client, aid, "withdrawal", "1", day=str(DAYS[0])).status_code == 201
+    response: Response = stock_report(db_client, aid, scope="account", benchmark_mode=mode)
+    assert response.status_code == 422
+    assert "recorded cash" in response.json()["detail"]
+
+
+def test_stock_exclusions_keep_the_same_scenario_when_indexes_change(
+    db_client: TestClient, inferred: tuple[str, dict[str, History]], database: Engine
+) -> None:
+    """Matched index funding follows original trades while stock exclusions retain their returns."""
+    aid: str = inferred[0]
+    data: dict[str, History] = inferred[1]
+    data["BBB"] = data["AAA"]
+    enlarge_placeholder(database, aid, 1200)
+    assert trade(db_client, aid, quantity="2", ticker="BBB", exchange="NYSE").status_code == 201
+    holdings: list[Record] = ledger(db_client, aid)["holdings"]
+    excluded: list[str] = [
+        holding["security"]["id"] for holding in holdings if holding["security"]["ticker"] == "BBB"
+    ]
+    regular: Record = stock_report(db_client, aid, exclude_security_ids=excluded).json()
+    matched: Record = estimated(db_client, aid, scope="stocks", exclude_security_ids=excluded)
+    assert matched["scenario_error"] is None
+    assert regular["scenario"]["return"] == matched["scenario"]["return"]
+    assert regular["scenario"]["value"] == matched["scenario"]["value"]
+    assert matched["scenario"]["benchmark_values"] == matched["benchmark_values"]

@@ -95,6 +95,7 @@ test("inferred portfolio with a deposit preserves its funding estimate across pe
     scope: string;
     start: string;
     baseline?: string;
+    exclude_security_ids?: string[];
   }[] = [];
   const points = [
     {
@@ -130,14 +131,6 @@ test("inferred portfolio with a deposit preserves its funding estimate across pe
         status: 503,
         json: { detail: "Synthetic price outage" },
       });
-    if (body.benchmark_mode !== "funded_hold")
-      return route.fulfill({
-        json: {
-          ...performance,
-          scope: body.scope,
-          benchmark_mode: body.benchmark_mode,
-        },
-      });
     const selected = points.filter((point) => point.date >= body.start);
     const series = selected.map((point) => ({
       ...point,
@@ -153,15 +146,21 @@ test("inferred portfolio with a deposit preserves its funding estimate across pe
         ...performance,
         start: series[0].date,
         end: "2026-10-02",
-        scope: "account",
-        benchmark_mode: "funded_hold",
+        scope: body.scope,
+        benchmark_mode: body.benchmark_mode,
         baseline: "history",
         provisional: true,
         return: series.at(-1)!.portfolio,
         SPY: series.at(-1)!.SPY,
         QQQ: series.at(-1)!.QQQ,
-        benchmark_values: { SPY: { value: "1300" }, QQQ: { value: "1400" } },
-        funding_estimate: { capital: "1000", estimated_dividends: "50" },
+        benchmark_values:
+          body.benchmark_mode === "funded_hold"
+            ? { SPY: { value: "1300" }, QQQ: { value: "1400" } }
+            : undefined,
+        funding_estimate:
+          body.scope === "account"
+            ? { capital: "1000", estimated_dividends: "50" }
+            : undefined,
         series,
       },
     });
@@ -171,19 +170,16 @@ test("inferred portfolio with a deposit preserves its funding estimate across pe
   const table = page.getByLabel("Performance summary", { exact: true });
   await expect(control).toHaveValue("funded_hold");
   await expect(
-    page.getByRole("heading", { name: "Portfolio vs. buy & hold" }),
+    page.getByRole("heading", { name: "Account vs. the market" }),
   ).toBeVisible();
   await expect(page.getByLabel("Performance measure")).toHaveValue("account");
-  await expect(page.getByLabel("Performance measure")).toBeDisabled();
+  await expect(page.getByLabel("Performance measure")).toBeEnabled();
   await expect(
     table.getByRole("columnheader", { name: "Estimated value (USD)" }),
   ).toBeVisible();
   await expect(
     table.getByRole("columnheader", { name: "Estimated value (USD)" }),
-  ).toHaveAttribute(
-    "title",
-    /Recorded deposits fund the portfolio and each index once/,
-  );
+  ).toHaveAttribute("title", /Indexes invest the estimated funding/);
   await expect(page.locator("#performance").getByRole("alert")).toHaveCount(0);
   await expect(
     table.getByRole("row", { name: /Your portfolio \+ cash/ }),
@@ -198,9 +194,76 @@ test("inferred portfolio with a deposit preserves its funding estimate across pe
     page.getByText(/Indexes invest each stock purchase/),
   ).toHaveCount(0);
   await expect(page.getByText(/Index gains over displayed/)).toHaveCount(0);
+  await expect(control.locator("option")).toHaveText([
+    "Buy and hold",
+    "Match purchase funding",
+  ]);
+  const chart = page.getByRole("img", { name: /Cumulative portfolio/ });
+  const portfolioRow = table.getByRole("row", {
+    name: /Your portfolio \+ cash/,
+  });
+  const originalCells = await portfolioRow.locator("td").allTextContents();
+  const originalLine = await chart
+    .locator(".portfolio-line")
+    .getAttribute("points");
+  const originalYearly = await page
+    .getByRole("region", { name: "Yearly performance", exact: true })
+    .locator("tbody tr td:first-of-type")
+    .allTextContents();
+  await control.selectOption("buy_hold");
+  await expect(portfolioRow.locator("td")).toHaveText([
+    originalCells[0],
+    ...originalCells.slice(2),
+  ]);
+  await expect(chart.locator(".portfolio-line")).toHaveAttribute(
+    "points",
+    originalLine!,
+  );
   await expect(
-    page.getByRole("combobox", { name: "Excluded stocks" }),
-  ).toHaveCount(0);
+    page
+      .getByRole("region", { name: "Yearly performance", exact: true })
+      .locator("tbody tr td:first-of-type"),
+  ).toHaveText(originalYearly);
+  await expect(page.getByLabel("Performance measure")).toHaveValue("account");
+  expect(requests.at(-1)?.scope).toBe("account");
+  await expect(page.getByText("Estimated closing value (USD)")).toBeVisible();
+  await control.selectOption("funded_hold");
+  await expect(portfolioRow.locator("td")).toHaveText(originalCells);
+  await expect(chart.locator(".portfolio-line")).toHaveAttribute(
+    "points",
+    originalLine!,
+  );
+  await page.getByLabel("Performance measure").selectOption("stocks");
+  await expect(
+    table.getByRole("row", { name: /Stock portfolio return/ }),
+  ).toBeVisible();
+  await page.getByText("Excluded stocks", { exact: true }).click();
+  await page.getByRole("checkbox", { name: "AAA · NYSE" }).check();
+  const stocksLine = await chart
+    .locator(".portfolio-line")
+    .getAttribute("points");
+  await control.selectOption("buy_hold");
+  await expect(page.getByLabel("Performance measure")).toHaveValue("stocks");
+  await expect(
+    table.getByRole("row", { name: /Stock portfolio return/ }),
+  ).toBeVisible();
+  await expect(chart.locator(".portfolio-line")).toHaveAttribute(
+    "points",
+    stocksLine!,
+  );
+  expect(requests.at(-1)?.exclude_security_ids).toEqual([
+    "00000000-0000-4000-8000-000000000003",
+  ]);
+  await expect(
+    page.getByRole("checkbox", { name: "AAA · NYSE" }),
+  ).toBeChecked();
+  await page.getByLabel("Performance measure").selectOption("account");
+  await expect(table).toBeVisible();
+  expect(requests.at(-1)?.exclude_security_ids).toBeUndefined();
+  await expect(page.getByText("Excluded stocks", { exact: true })).toHaveCount(
+    0,
+  );
+  await control.selectOption("funded_hold");
   await page.getByRole("button", { name: "YTD", exact: true }).click();
   await expect(control).toHaveValue("funded_hold");
   await expect(
