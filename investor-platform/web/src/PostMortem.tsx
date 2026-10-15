@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage, type Account } from "./api";
 import { number, percent } from "./format";
+import { Financials } from "./Financials";
 import { completedMarketDate, today, type Ledger } from "./records";
 
 type Stock = {
@@ -44,7 +45,9 @@ export function PostMortem({
   ledger: Ledger;
 }) {
   const [reports, setReports] = useState<Attribution[]>([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(() =>
+    completedMarketDate().slice(0, 4),
+  );
   const [measureOverride, setMeasureOverride] = useState<Measure | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -74,11 +77,6 @@ export function PostMortem({
         if (!active) return;
         const periods = report.attribution ?? [];
         setReports(periods);
-        setSelected((current) =>
-          periods.some((p) => p.period === current)
-            ? current
-            : (periods.at(-1)?.period ?? ""),
-        );
       })
       .catch((e) => {
         if (active) setError(errorMessage(e));
@@ -90,6 +88,12 @@ export function PostMortem({
       active = false;
     };
   }, [account.id, account.base_currency, first, ledger, revision]);
+  const latestYear = Number(completedMarketDate().slice(0, 4));
+  const firstYear = first ? Number(first.slice(0, 4)) : latestYear;
+  const years = Array.from(
+    { length: Math.max(1, latestYear - firstYear + 1) },
+    (_, i) => String(latestYear - i),
+  );
   const report = reports.find((p) => p.period === selected);
   const label = (p: Attribution) =>
     p.period === "all"
@@ -114,6 +118,34 @@ export function PostMortem({
       className="post-mortem-content"
       aria-label="Stock contribution analysis"
     >
+      <div className="post-mortem-period">
+        <label>
+          Year
+          <select
+            aria-label="Post-mortem year"
+            value={selected}
+            onChange={(e) => {
+              setSelected(e.target.value);
+              setMeasureOverride(null);
+            }}
+          >
+            {years.map((year) => {
+              const period = reports.find((p) => p.period === year);
+              return (
+                <option key={year} value={year}>
+                  {period ? label(period) : year}
+                </option>
+              );
+            })}
+            <option value="all">Full history</option>
+          </select>
+        </label>
+      </div>
+      <Financials
+        key={`${account.id}:${selected}`}
+        accountId={account.id}
+        year={selected === "all" ? null : Number(selected)}
+      />
       {!first && <p>No stock history yet.</p>}
       {account.base_currency !== "USD" && (
         <p>Contributions currently support USD accounts only.</p>
@@ -130,23 +162,6 @@ export function PostMortem({
       {report && (
         <>
           <div className="post-mortem-period">
-            <label>
-              Year
-              <select
-                aria-label="Post-mortem year"
-                value={selected}
-                onChange={(e) => {
-                  setSelected(e.target.value);
-                  setMeasureOverride(null);
-                }}
-              >
-                {[...reports].reverse().map((p) => (
-                  <option key={p.period} value={p.period}>
-                    {label(p)}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label>
               Measure
               <select

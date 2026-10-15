@@ -3,11 +3,58 @@ from decimal import Decimal as D
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from helpers import trade
 
 from investor_platform import market, valuation
 from investor_platform.domain import Currency
 from investor_platform.market import History
+
+
+@pytest.mark.parametrize("failure", [None, "identity", "split"])
+def test_fallback_keeps_as_traded_prices_and_identity_split_guards(
+    db_client: TestClient,
+    portfolio: tuple[str, dict[str, History]],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+) -> None:
+    """A provider outage can recover without bypassing listing or share-unit checks."""
+    from investor_platform import tiingo
+
+    aid: str = portfolio[0]
+    end: date = date(2026, 1, 30)
+    monkeypatch.setattr(valuation, "completed_market_date", lambda: end)
+    monkeypatch.setenv("TIINGO_API_KEY", "synthetic-test-key")
+
+    def unavailable(*args: str, **kwargs: str) -> History:
+        """Represent an unavailable primary quote provider."""
+        raise OSError("offline")
+
+    def provider(path: str, key: str) -> dict[str, str] | list[dict[str, str]]:
+        """Return realistic fallback data with distinct adjusted and actual closes."""
+        if "/prices?" not in path:
+            return {"ticker": "AAA", "exchangeCode": "NASDAQ" if failure == "identity" else "NYSE"}
+        return [
+            {
+                "date": end.isoformat(),
+                "close": "50",
+                "adjClose": "25",
+                "divCash": "0",
+                "splitFactor": "2" if failure == "split" else "1",
+            }
+        ]
+
+    monkeypatch.setattr(market, "history", unavailable)
+    monkeypatch.setattr(tiingo, "get", provider)
+    result: dict = db_client.get(f"/api/accounts/{aid}/valuation").json()
+    if failure:
+        assert not result["complete"]
+        assert result["holdings"][0]["value"] is None
+        assert result["holdings"][0]["price_error"]
+    else:
+        assert result["complete"]
+        assert D(result["holdings"][0]["close"]) == 50
+        assert D(result["holdings"][0]["value"]) == 500
 
 
 def test_old_held_split_withholds_values_liquidation_and_collection(
