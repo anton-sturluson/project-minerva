@@ -91,9 +91,10 @@ test("manager panels scroll independently and selection preserves the directory 
     .getByRole("button", { name: "Example Manager 1", exact: true })
     .click();
   await expect(detail.getByRole("table")).toBeVisible();
-  await page
-    .locator(".research-layout")
-    .evaluate((element) => element.scrollIntoView({ block: "start" }));
+  const bounds = await page.locator(".research-layout").boundingBox();
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(
+    await page.evaluate(() => innerHeight),
+  );
   await directory.hover();
   await page.mouse.wheel(0, 550);
   await expect
@@ -143,6 +144,16 @@ test("manager panels scroll independently and selection preserves the directory 
   );
   expect(await detail.evaluate((element) => element.scrollTop)).toBe(0);
   expect(await page.evaluate(() => scrollY)).toBe(pageOffset);
+  await directory.hover();
+  await page.mouse.wheel(0, 10000);
+  await expect(
+    directory.getByRole("button", { name: "Example Manager 18", exact: true }),
+  ).toBeInViewport({ ratio: 1 });
+  await detail.hover();
+  await page.mouse.wheel(0, 10000);
+  await expect(
+    detail.getByText("Source notes", { exact: true }),
+  ).toBeInViewport({ ratio: 1 });
 });
 
 test("mobile selection reaches detail without trapping the manager list", async ({

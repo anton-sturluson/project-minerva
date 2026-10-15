@@ -862,7 +862,26 @@ summary:focus-visible {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 28px;
   margin-top: 20px;
-  height: calc(100dvh - var(--header-height) - 32px);
+}
+@media (min-width: 801px) {
+  #research {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--header-height) - 36px);
+  }
+  #research > section {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #research > section > .form-note {
+    flex: 0 0 auto;
+  }
+  .research-layout {
+    flex: 1;
+    min-height: 0;
+  }
 }
 .research-directory,
 .research-detail {
@@ -1014,7 +1033,6 @@ summary:focus-visible {
 @media (max-width: 800px) {
   .research-layout {
     grid-template-columns: 1fr;
-    height: auto;
   }
   .research-directory,
   .research-detail {
