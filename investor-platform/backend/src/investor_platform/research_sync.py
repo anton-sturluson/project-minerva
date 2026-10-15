@@ -160,10 +160,16 @@ def element_text(element: ET.Element, name: str) -> str:
     return ""
 
 
+def reporting_unit(filed_date: date) -> Decimal:
+    """Return the USD value of one reported unit under the filing-date convention."""
+    return Decimal(1) if filed_date >= date(2023, 1, 3) else Decimal(1000)
+
+
 def parse_holdings(payload: bytes, filed_date: date) -> list[Position]:
     """Normalize table rows and aggregate duplicate identities using exact arithmetic."""
     root: ET.Element = ET.fromstring(payload)
     positions: dict[HoldingKey, Position] = {}
+    multiplier: Decimal = reporting_unit(filed_date)
     row: ET.Element
     for row in root.iter():
         if row.tag.rsplit("}", 1)[-1].lower() != "infotable":
@@ -173,7 +179,6 @@ def parse_holdings(payload: bytes, filed_date: date) -> list[Position]:
         put_call: str = element_text(row, "putCall").upper()
         share_type: str = element_text(row, "sshPrnamtType").upper()
         quantity: Decimal = Decimal(element_text(row, "sshPrnamt"))
-        multiplier: Decimal = Decimal(1) if filed_date >= date(2023, 1, 3) else Decimal(1000)
         value: Decimal = Decimal(element_text(row, "value")) * multiplier
         if (
             len(cusip) != 9
@@ -240,6 +245,8 @@ def store_filing(
     filed: date = date.fromisoformat(metadata["filed_date"])
     positions: list[Position] = []
     error: str | None = None
+    reconciliation: dict[str, str] = {}
+    multiplier: Decimal = reporting_unit(filed)
     try:
         positions = parse_holdings(table, filed)
         declared: str = element_text(root, "tableEntryTotal")
@@ -256,12 +263,26 @@ def store_filing(
                 error = "Primary filing report period differs from the SEC index"
         declared_value: str = element_text(root, "tableValueTotal")
         if declared_value:
-            multiplier: Decimal = Decimal(1) if filed >= date(2023, 1, 3) else Decimal(1000)
             actual_value: Decimal = sum(
                 (position["value_usd"] for position in positions), Decimal(0)
             )
-            if Decimal(declared_value) * multiplier != actual_value:
-                error = "Reported table value does not match imported rows"
+            reported_value: Decimal = Decimal(declared_value) * multiplier
+            difference: Decimal = actual_value - reported_value
+            # Independently rounded rows and summary can differ by half a unit each.
+            limit: Decimal = Decimal(row_count + 1) * Decimal("0.5") * multiplier
+            reconciliation = {
+                "declared_value_usd": str(reported_value),
+                "imported_value_usd": str(actual_value),
+                "difference_usd": str(difference),
+                "rounding_limit_usd": str(limit),
+                "status": "exact"
+                if difference == 0
+                else "consistent_with_rounding"
+                if abs(difference) <= limit
+                else "outside_rounding_limit",
+            }
+            if not reported_value.is_finite() or reported_value < 0 or abs(difference) > limit:
+                error = "Reported table value does not match imported rows within rounding bounds"
         if not quarter_end(period):
             error = "Report period is not a calendar quarter end"
         if element_text(root, "isConfidentialOmitted").lower() in {"true", "1"}:
@@ -272,7 +293,8 @@ def store_filing(
         "primary_url": source_url,
         "table_url": table_url,
         "table_entry_total": element_text(root, "tableEntryTotal"),
-        "value_unit": "USD" if filed >= date(2023, 1, 3) else "USD thousands",
+        "value_unit": "USD" if multiplier == 1 else "USD thousands",
+        "value_reconciliation": reconciliation,
     }
     filing: ResearchFiling
     if existing is None:

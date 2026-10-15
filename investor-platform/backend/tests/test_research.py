@@ -510,3 +510,130 @@ def test_value_ranking_preserves_decimal_cents_beyond_default_precision() -> Non
     changes: list[dict] = compare_positions(current, {})
     assert [item["cusip"] for item in changes] == ["222222222", "111111111"]
     assert changes[0]["value_change_usd"] == "1234567890123456789012345678.02"
+
+
+@pytest.mark.parametrize("filed", ["2022-08-01", "2026-08-01"])
+@pytest.mark.parametrize(
+    ("declared_value", "declared_count", "complete"),
+    [
+        ("298", 3, True),
+        ("302", 3, True),
+        ("297.9", 3, False),
+        ("302.1", 3, False),
+        ("300", 3, True),
+        ("298", 2, False),
+    ],
+)
+def test_value_reconciliation_uses_raw_rows_and_reporting_units(
+    database: Engine,
+    tmp_path: Path,
+    filed: str,
+    declared_value: str,
+    declared_count: int,
+    complete: bool,
+) -> None:
+    """Bound independently rounded totals without changing rows or relaxing count validation."""
+    manager_id: UUID = registry(database, tmp_path)
+    table: bytes = f"<informationTable>{row('2', '100') * 3}</informationTable>".encode()
+    primary: bytes = (
+        f"<edgarSubmission><tableEntryTotal>{declared_count}</tableEntryTotal>"
+        f"<tableValueTotal>{declared_value}</tableValueTotal></edgarSubmission>"
+    ).encode()
+    metadata: FilingMetadata = {
+        "accession": "rounding",
+        "report_period": f"{filed[:4]}-06-30",
+        "filed_date": filed,
+        "form": "13F-HR",
+        "primary_document": "primary.xml",
+    }
+    multiplier: Decimal = Decimal(1000) if filed.startswith("2022") else Decimal(1)
+    with Session(database) as session:
+        manager: ResearchManager = session.get(ResearchManager, manager_id)
+        result: ResearchFiling = store_filing(
+            session,
+            manager,
+            metadata,
+            primary,
+            table,
+            "https://www.sec.gov/example/primary.xml",
+            "https://www.sec.gov/example/table.xml",
+        )
+        evidence: dict[str, str] = result.evidence["value_reconciliation"]
+        assert (result.status == "complete") is complete
+        assert Decimal(evidence["declared_value_usd"]) == Decimal(declared_value) * multiplier
+        assert Decimal(evidence["imported_value_usd"]) == 300 * multiplier
+        assert Decimal(evidence["difference_usd"]) == (300 - Decimal(declared_value)) * multiplier
+        assert Decimal(evidence["rounding_limit_usd"]) == 2 * multiplier
+        if declared_value == "300":
+            assert evidence["status"] == "exact"
+        elif abs(300 - Decimal(declared_value)) <= 2:
+            assert evidence["status"] == "consistent_with_rounding"
+        else:
+            assert evidence["status"] == "outside_rounding_limit"
+        if declared_count != 3:
+            assert "count" in result.reason
+        holding: ResearchHolding = session.scalar(
+            select(ResearchHolding).where(ResearchHolding.filing_id == result.id)
+        )
+        assert holding.quantity == 6
+        assert holding.value_usd == 300 * multiplier
+
+
+@pytest.mark.parametrize(
+    ("variant", "available"),
+    [
+        ("exact", True),
+        ("quantity", False),
+        ("value", False),
+        ("issuer", False),
+        ("class", False),
+        ("partial", False),
+        ("disjoint", True),
+    ],
+)
+def test_amendment_repeated_positions_require_complete_exact_existing_snapshot(
+    database: Engine,
+    db_client: TestClient,
+    tmp_path: Path,
+    variant: str,
+    available: bool,
+) -> None:
+    """Accept a complete unchanged repetition once; partial or changed overlaps remain blocked."""
+    manager_id: UUID = registry(database, tmp_path)
+    original: str = row("5", "50") + row("2", "20", cusip="987654321")
+    filing(database, manager_id, "2026-03-31", "previous", original, count=2)
+    filing(database, manager_id, "2026-06-30", "original", original, count=2)
+    repeated: str = original
+    if variant == "quantity":
+        repeated = repeated.replace("<sshPrnamt>5", "<sshPrnamt>6")
+    elif variant == "value":
+        repeated = repeated.replace("<value>50", "<value>51")
+    elif variant == "issuer":
+        repeated = repeated.replace("<nameOfIssuer>Example", "<nameOfIssuer>Other", 1)
+    elif variant == "class":
+        repeated = repeated.replace("<titleOfClass>COM", "<titleOfClass>COMMON", 1)
+    elif variant == "partial":
+        repeated = row("5", "50")
+    elif variant == "disjoint":
+        repeated = ""
+    addition: str = row("3", "30", cusip="111111111")
+    filing(
+        database,
+        manager_id,
+        "2026-06-30",
+        "z-amendment",
+        repeated + addition,
+        amendment="NEW HOLDINGS",
+        count=repeated.count("<infoTable>") + 1,
+    )
+    result: dict = db_client.get("/api/research/managers/example/changes?quarter=2026-06-30").json()
+    coverage: dict = db_client.get("/api/research/managers/example").json()["coverage"]
+    assert result["status"] == ("available" if available else "unavailable")
+    assert coverage["quarters"] == (2 if available else 1)
+    if available:
+        assert len(result["changes"]) == 3
+        unchanged: list[dict] = [item for item in result["changes"] if item["kind"] == "unchanged"]
+        assert sorted(Decimal(item["current_quantity"]) for item in unchanged) == [2, 5]
+        assert len(result["source_urls"]) == 3
+    else:
+        assert "overlaps" in result["reason"]

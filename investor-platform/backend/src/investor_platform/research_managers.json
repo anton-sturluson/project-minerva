@@ -336,7 +336,12 @@
       "https://www.sec.gov/Archives/edgar/data/1067983/000095014899001187/0000950148-99-001187-index.html",
       "https://www.berkshirehathaway.com/",
       "https://www.berkshirehathaway.com/letters/letters.html"
-    ]
+    ],
+    "aum_usd": "111718023582",
+    "aum_as_of": "2026-03-31",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/105900/PDF/105900.pdf",
+    "aum_measurement": "verified_lower_bound",
+    "notes": "Group AUM lower bound uses controlled adviser New England Asset Management, Inc. (NEAM), CRD 105900: Form ADV Item 5.F.(2)(c) regulatory AUM. The same filing identifies Berkshire Hathaway Inc., CIK 1067983, as its controlling public parent through General Re Corporation. This is NEAM client AUM, not Berkshire's own securities portfolio or assets managed by Warren Buffett."
   },
   {
     "slug": "pershing-square",
@@ -408,7 +413,12 @@
       "https://data.sec.gov/submissions/CIK0001647251.json",
       "https://www.sec.gov/Archives/edgar/data/1647251/000136259815000006/0001362598-15-000006-index.html",
       "https://www.tcifund.com/"
-    ]
+    ],
+    "aum_usd": "70281928000",
+    "aum_as_of": "2026-06-29",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/269954/PDF/269954.pdf",
+    "aum_measurement": "verified_lower_bound",
+    "notes": "Managed-fund AUM lower bound uses TCI Fund Management Limited, CRD 269954, Form ADV Schedule D Section 7.B.(1), question 11: gross asset value of The Children's Investment Master Fund arrangement. This is an exempt reporting adviser disclosure, not full firm AUM, regulatory AUM or net asset value. No feeder-fund values are added. Questions 17 and 18 identify TCI as the adviser rather than a subadviser and disclose no other adviser."
   },
   {
     "slug": "greenhaven",
