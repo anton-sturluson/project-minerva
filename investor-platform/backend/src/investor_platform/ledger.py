@@ -79,6 +79,7 @@ class SecurityView(BaseModel):
     ticker: str
     exchange: str
     currency: Currency
+    market_identity: dict | None = Field(default=None, exclude=True)
 
 
 class HoldingView(BaseModel):

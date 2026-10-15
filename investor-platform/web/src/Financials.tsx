@@ -13,8 +13,13 @@ const perShareMetrics = [
   ["weighted_company_fcf_per_share", "Weighted company FCF/share", 1],
 ] as const;
 
-export function Financials() {
-  const [year, setYear] = useState(2025);
+export function Financials({
+  accountId,
+  year,
+}: {
+  accountId: string;
+  year: number | null;
+}) {
   const [retry, setRetry] = useState(0);
   const [report, setReport] = useState<FinancialReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,10 +29,18 @@ export function Financials() {
     setLoading(true);
     setError(false);
     setReport(null);
-    annualFinancials(year)
+    if (year === null) {
+      setLoading(false);
+      return;
+    }
+    annualFinancials(accountId, year)
       .then((data) => {
         if (!active) return;
-        if (data.calendar_year !== year || data.synthetic !== true)
+        if (
+          data.account_id !== accountId ||
+          data.calendar_year !== year ||
+          data.synthetic !== false
+        )
           throw new Error("Unexpected report");
         setReport(data);
       })
@@ -40,7 +53,7 @@ export function Financials() {
     return () => {
       active = false;
     };
-  }, [year, retry]);
+  }, [accountId, year, retry]);
   const tickers = new Map(
     report?.market_value_snapshot?.holdings.map((holding) => [
       holding.issuer_key,
@@ -63,37 +76,18 @@ export function Financials() {
   ];
   const priorYear =
     report?.weighted_company_per_share?.weighted_company_eps?.comparison
-      ?.prior_year ?? year - 1;
+      ?.prior_year ?? (year === null ? null : year - 1);
   return (
     <section
       className="annual-financials"
       aria-labelledby="financials-heading"
       aria-busy={loading}
     >
-      <div className="section-heading">
-        <h2 id="financials-heading">Annual financials</h2>
-        <label>
-          Fiscal year{" "}
-          <select
-            aria-label="Financial year"
-            value={year}
-            onChange={(event) => {
-              setReport(null);
-              setYear(Number(event.target.value));
-            }}
-          >
-            {[2025, 2024, 2023].map((value) => (
-              <option key={value} value={value}>
-                FY{value}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <p className="financial-illustration">
-        <strong>Illustrative weights</strong>
-      </p>
-      {loading && <p role="status">Loading FY{year} financials…</p>}
+      <h2 id="financials-heading">Portfolio financials</h2>
+      {year === null && (
+        <p role="status">Choose a year to view portfolio financials.</p>
+      )}
+      {loading && <p role="status">Loading {year} financials…</p>}
       {error && (
         <p className="error" role="alert">
           Could not load annual figures.{" "}
@@ -106,12 +100,7 @@ export function Financials() {
         !error &&
         report &&
         (report.api_status === "unavailable" ? (
-          <p role="status">
-            Annual figures aren't available yet.{" "}
-            <button onClick={() => setRetry((value) => value + 1)}>
-              Retry financials
-            </button>
-          </p>
+          <p role="status">Table unavailable.</p>
         ) : (
           <>
             <div
@@ -125,10 +114,10 @@ export function Financials() {
                   <tr>
                     <th scope="col">Measure</th>
                     <th scope="col" className="number">
-                      FY{report.calendar_year}
+                      {report.calendar_year}
                     </th>
                     <th scope="col" className="number">
-                      FY{priorYear}
+                      {priorYear}
                     </th>
                     <th scope="col" className="number">
                       % change
@@ -201,8 +190,9 @@ export function Financials() {
                         (item) => item.issuer_key === excluded.issuer_key,
                       );
                       const name =
+                        company?.ticker ||
                         tickers.get(excluded.issuer_key || "") ||
-                        company?.profile?.issuer?.name ||
+                        company?.name ||
                         "Company";
                       const why =
                         /insurer/i.test(excluded.reason) &&
@@ -229,10 +219,10 @@ export function Financials() {
                       <th scope="col">Company</th>
                       <th scope="col">Measure</th>
                       <th scope="col" className="number">
-                        FY{report.calendar_year}
+                        {report.calendar_year}
                       </th>
                       <th scope="col" className="number">
-                        FY{priorYear}
+                        {priorYear}
                       </th>
                       <th scope="col" className="number">
                         % change
@@ -241,53 +231,38 @@ export function Financials() {
                   </thead>
                   <tbody>
                     {report.companies.flatMap((company) => {
-                      const profile = company.profile;
-                      const reviewed =
-                        company.financial_status === "eligible" &&
-                        profile?.review_status === "reviewed";
                       return [
+                        { key: "basic_eps", label: "EPS (basic)", digits: 1 },
                         {
-                          key: "basic_eps",
-                          label: "EPS (basic)",
-                          value: profile?.facts?.basic_eps,
-                          status: "reported",
-                          digits: 1,
-                        },
-                        {
-                          key: "allocated_fcf_after_disclosed_capex_per_basic_share",
+                          key: "fcf_per_basic_share",
                           label: "FCF/share",
-                          value:
-                            profile?.calculations
-                              ?.allocated_fcf_after_disclosed_capex_per_basic_share,
-                          status: "calculated",
                           digits: 1,
                         },
                       ].map((measure) => {
                         const comparison =
                           company.per_share_comparisons?.[measure.key];
+                        const value = company.per_share_metrics?.[measure.key];
                         const available =
-                          reviewed &&
-                          measure.value?.status === measure.status &&
-                          measure.value.value != null;
+                          company.financial_status === "eligible" &&
+                          value?.status === "available" &&
+                          value.value != null;
                         return (
                           <tr key={`${company.issuer_key}:${measure.key}`}>
                             <th scope="row">
-                              {tickers.get(company.issuer_key) ||
-                                profile?.issuer?.name ||
+                              {company.ticker ||
+                                tickers.get(company.issuer_key) ||
+                                company.name ||
                                 "Company"}
                             </th>
                             <td>{measure.label}</td>
                             <td className="number">
                               {available
-                                ? Number(measure.value?.value).toLocaleString(
-                                    "en-US",
-                                    {
-                                      style: "currency",
-                                      currency: "USD",
-                                      minimumFractionDigits: measure.digits,
-                                      maximumFractionDigits: measure.digits,
-                                    },
-                                  )
+                                ? Number(value?.value).toLocaleString("en-US", {
+                                    style: "currency",
+                                    currency: "USD",
+                                    minimumFractionDigits: measure.digits,
+                                    maximumFractionDigits: measure.digits,
+                                  })
                                 : "Unavailable"}
                             </td>
                             <td className="number">

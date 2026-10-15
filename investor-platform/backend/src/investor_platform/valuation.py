@@ -1,7 +1,8 @@
-"""Current recorded holdings priced independently of historical performance."""
+"""Recorded holdings priced independently of historical performance."""
 
+import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
 from uuid import UUID
 
@@ -103,14 +104,23 @@ def quote_holding(
                 price *= rate.close[day]
         else:
             symbol = market.symbol_for(security, provisional=provisional)
-            history = market.cached_history(
-                symbol,
-                start,
-                end,
-                engine=engine,
-                workspace_id=workspace_id,
-                refresh_after=refresh_after,
-            )
+            try:
+                history = market.cached_history(
+                    symbol,
+                    start,
+                    end,
+                    engine=engine,
+                    workspace_id=workspace_id,
+                    refresh_after=refresh_after,
+                )
+            except (OSError, KeyError, TypeError, IndexError):
+                if engine is None or not os.environ.get("TIINGO_API_KEY"):
+                    raise
+                from .tiingo import stock_history
+
+                history = stock_history(
+                    security, start, end, engine, workspace_id, refresh_after=refresh_after
+                )
             market.verify_exchange(security, history, provisional=provisional)
             day, price = latest(history, end)
         split = next(
@@ -139,9 +149,17 @@ def quote_holding(
 
 
 def value_records(
-    records, base_currency, provisional, *, engine=None, workspace_id=None, refresh_after=None
+    records,
+    base_currency,
+    provisional,
+    *,
+    engine=None,
+    workspace_id=None,
+    refresh_after=None,
+    end: date | None = None,
 ):
-    end = completed_market_date()
+    """Value supplied holdings at a selected date, defaulting to the latest close."""
+    end = end or completed_market_date()
     starts = current_position_starts(records.entries)
     fx = {}
     for currency in {

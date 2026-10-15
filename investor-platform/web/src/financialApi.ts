@@ -1,10 +1,10 @@
 import { api } from "./api";
 
 export type PerShareMeasure = {
-  status: string;
-  value?: string | null;
-  source_id?: string;
-  inputs?: { source_id?: string }[];
+  status: "available" | "unavailable";
+  value: string | null;
+  reason?: string | null;
+  method?: string;
 };
 
 export type PerShareComparison = {
@@ -24,6 +24,7 @@ type SummaryMeasure = {
 };
 
 export type FinancialReport = {
+  account_id: string;
   synthetic: boolean;
   calendar_year: number;
   holdings_date: string;
@@ -33,20 +34,16 @@ export type FinancialReport = {
   };
   companies: {
     issuer_key: string;
+    ticker: string;
+    name: string;
     equity_weight?: string | null;
-    financial_status?: string;
+    financial_status: "eligible" | "unavailable";
     per_share_comparisons?: Record<string, PerShareComparison>;
-    profile: {
-      review_status?: string;
-      issuer?: { name: string };
-      facts?: Record<string, PerShareMeasure>;
-      calculations?: Record<string, PerShareMeasure>;
-      sources: { source_id: string; url: string; published_on: string }[];
-    } | null;
+    per_share_metrics?: Record<string, PerShareMeasure>;
   }[];
   weighted_ratios: Record<string, SummaryMeasure>;
   weighted_company_per_share?: Record<string, SummaryMeasure>;
 };
 
-export const annualFinancials = (year: number) =>
-  api<FinancialReport>(`/financials?year=${year}`);
+export const annualFinancials = (accountId: string, year: number) =>
+  api<FinancialReport>(`/accounts/${accountId}/financials?year=${year}`);

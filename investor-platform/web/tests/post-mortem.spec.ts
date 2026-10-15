@@ -36,6 +36,20 @@ const period = {
 test("post-mortem ranks contributions, switches years, recovers and isolates accounts", async ({
   page,
 }) => {
+  await page.route("**/api/accounts/*/financials?year=*", (route) =>
+    route.fulfill({
+      json: {
+        account_id: new URL(route.request().url()).pathname.split("/")[3],
+        calendar_year: Number(
+          new URL(route.request().url()).searchParams.get("year"),
+        ),
+        synthetic: false,
+        api_status: "unavailable",
+        companies: [],
+        weighted_ratios: {},
+      },
+    }),
+  );
   let empty = false;
   await page.route("**/ledger", (route) =>
     route.fulfill({
@@ -90,6 +104,7 @@ test("post-mortem ranks contributions, switches years, recovers and isolates acc
   await expect(
     page.getByRole("heading", { name: "Post-mortem", exact: true }),
   ).toBeVisible();
+  await page.getByLabel("Post-mortem year").selectOption("2025");
   const analysis = page.getByRole("region", {
     name: "Stock contribution analysis",
     exact: true,
@@ -157,6 +172,7 @@ test("post-mortem ranks contributions, switches years, recovers and isolates acc
   await page
     .getByRole("button", { name: "Retry post-mortem", exact: true })
     .click();
+  await page.getByLabel("Post-mortem year").selectOption("2025");
   await expect(table).toContainText("+15.00 pp");
   const original = await page
     .getByLabel("Portfolio", { exact: true })
