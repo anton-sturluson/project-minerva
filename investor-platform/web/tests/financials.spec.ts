@@ -192,21 +192,20 @@ test("main weighted company values lead and company details stay collapsed", asy
   });
   await expect(
     summary.getByRole("row", { name: /^Weighted company EPS/ }),
-  ).toContainText("$3.45");
+  ).toContainText("$3.5");
   await expect(
     summary.getByRole("row", { name: /^Weighted company FCF\/share/ }),
-  ).toContainText("$0.3176");
+  ).toContainText("$0.3");
   await expect(page.locator(".financial-per-share-table")).toBeHidden();
   await page.getByText("Company details", { exact: true }).click();
   const table = page.getByRole("region", { name: "Company per-share figures" });
   await expect(
     table.getByRole("row", { name: /^EXM EPS \(basic\)/ }),
-  ).toContainText("$2.34");
-  await expect(table.getByText("$0.1235", { exact: true })).toBeVisible();
+  ).toContainText("$2.3");
+  await expect(table.getByText("$0.1", { exact: true })).toBeVisible();
   await page.getByLabel("Financial year").selectOption("2023");
   await page.getByText("Company details", { exact: true }).click();
-  await expect(table.getByText("-$0.0032", { exact: true })).toBeVisible();
-  await expect(table.getByText("-$0.00", { exact: true })).toHaveCount(0);
+  await expect(table.getByText("-$0.0", { exact: true })).toBeVisible();
 
   expect(
     await page.evaluate(
@@ -236,12 +235,12 @@ test("per-share comparisons show prior values, changes and nonpositive-base stat
     summary.getByRole("columnheader", { name: "FY2024" }),
   ).toBeVisible();
   const eps = summary.getByRole("row", { name: /^Weighted company EPS/ });
-  await expect(eps.getByText("$3.00", { exact: true })).toBeVisible();
-  await expect(eps.getByText("15.00%", { exact: true })).toBeVisible();
+  await expect(eps.getByText("$3.0", { exact: true })).toBeVisible();
+  await expect(eps.getByText("15.0%", { exact: true })).toBeVisible();
   await expect(
     summary
       .getByRole("row", { name: /^Weighted company FCF/ })
-      .getByText("-20.00%", { exact: true }),
+      .getByText("-20.0%", { exact: true }),
   ).toBeVisible();
   await expect(
     summary
@@ -255,12 +254,12 @@ test("per-share comparisons show prior values, changes and nonpositive-base stat
   await expect(
     detail
       .getByRole("row", { name: /^EXM EPS/ })
-      .getByText("17.00%", { exact: true }),
+      .getByText("17.0%", { exact: true }),
   ).toBeVisible();
   await expect(
     detail
       .getByRole("row", { name: /^EXM FCF/ })
-      .getByText("$0.1543", { exact: true }),
+      .getByText("$0.2", { exact: true }),
   ).toBeVisible();
   await page.getByLabel("Financial year").selectOption("2024");
   await page.getByText("Company details", { exact: true }).click();
@@ -272,7 +271,7 @@ test("per-share comparisons show prior values, changes and nonpositive-base stat
   await expect(
     detail
       .getByRole("row", { name: /^EXM FCF/ })
-      .getByText("-$0.0032", { exact: true }),
+      .getByText("-$0.0", { exact: true }),
   ).toBeVisible();
   await page.getByLabel("Financial year").selectOption("2023");
   await expect(
@@ -310,11 +309,11 @@ test("unreviewed and unavailable company values stay unavailable", async ({
     .getByRole("region", { name: "Company per-share figures" })
     .getByRole("row", { name: /^EXM EPS \(basic\)/ });
   await expect(row.getByText("Unavailable", { exact: true })).toHaveCount(2);
-  await expect(row.getByText("$2.34", { exact: true })).toHaveCount(0);
+  await expect(row.getByText("$2.3", { exact: true })).toHaveCount(0);
   await page.getByLabel("Financial year").selectOption("2024");
   await page.getByText("Company details", { exact: true }).click();
   await expect(row.getByText("Unavailable", { exact: true })).toHaveCount(2);
-  await expect(row.getByText("$0.1235", { exact: true })).toHaveCount(0);
+  await expect(row.getByText("$0.1", { exact: true })).toHaveCount(0);
 });
 
 test("summary omits extra columns and explains exclusions from response weights", async ({
@@ -343,18 +342,21 @@ test("summary omits extra columns and explains exclusions from response weights"
   await expect(
     financials.getByText("Illustrative weights", { exact: true }),
   ).toBeVisible();
-  await expect(financials.getByText("-12.50%", { exact: true })).toBeVisible();
+  await expect(financials.getByText("-12.5%", { exact: true })).toBeVisible();
   await expect(
     financials.getByRole("row", { name: /^Gross margin/ }),
   ).toContainText("Gross margin*");
   await expect(
-    financials.getByText("* Gross margin excludes OTH (25% weight; insurer).", {
-      exact: true,
-    }),
+    financials.getByText(
+      "* Gross margin excludes OTH (25.0% weight; insurer).",
+      {
+        exact: true,
+      },
+    ),
   ).toBeVisible();
   await expect(
     financials.getByText(
-      "* Operating margin excludes OTH (25% weight; data unavailable).",
+      "* Operating margin excludes OTH (25.0% weight; data unavailable).",
       { exact: true },
     ),
   ).toBeVisible();
@@ -488,15 +490,15 @@ test("changing financial year ignores an older late response", async ({
   await requested;
   await page.getByLabel("Financial year").selectOption("2023");
   await expect(
-    page.locator(".annual-financials").getByText("23.00%", { exact: true }),
+    page.locator(".annual-financials").getByText("23.0%", { exact: true }),
   ).toBeVisible();
   release();
   await finished;
   await expect(
-    page.locator(".annual-financials").getByText("23.00%", { exact: true }),
+    page.locator(".annual-financials").getByText("23.0%", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.locator(".annual-financials").getByText("24.00%", { exact: true }),
+    page.locator(".annual-financials").getByText("24.0%", { exact: true }),
   ).toHaveCount(0);
 });
 

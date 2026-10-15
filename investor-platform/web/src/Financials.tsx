@@ -9,8 +9,8 @@ const metrics = [
   ["fcf_margin_after_disclosed_capex", "FCF margin"],
 ] as const;
 const perShareMetrics = [
-  ["weighted_company_eps", "Weighted company EPS", 2],
-  ["weighted_company_fcf_per_share", "Weighted company FCF/share", 4],
+  ["weighted_company_eps", "Weighted company EPS", 1],
+  ["weighted_company_fcf_per_share", "Weighted company FCF/share", 1],
 ] as const;
 
 export function Financials() {
@@ -153,7 +153,7 @@ export function Financials() {
                         {metric?.value == null
                           ? "Unavailable"
                           : digits === null
-                            ? percent(metric.value)
+                            ? percent(metric.value, 1)
                             : Number(metric.value).toLocaleString("en-US", {
                                 style: "currency",
                                 currency: "USD",
@@ -182,7 +182,7 @@ export function Financials() {
                             ? "N/M"
                             : metric?.comparison?.status === "calculated" &&
                                 metric.comparison.percent_change != null
-                              ? percent(metric.comparison.percent_change)
+                              ? percent(metric.comparison.percent_change, 1)
                               : "Unavailable"}
                       </td>
                     </tr>
@@ -209,7 +209,7 @@ export function Financials() {
                         /not applicable/i.test(excluded.reason)
                           ? "insurer"
                           : "data unavailable";
-                      return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 0)} weight` : "weight unavailable"}; ${why})`;
+                      return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 1)} weight` : "weight unavailable"}; ${why})`;
                     })
                     .join(", ")}
                   .
@@ -251,7 +251,7 @@ export function Financials() {
                           label: "EPS (basic)",
                           value: profile?.facts?.basic_eps,
                           status: "reported",
-                          digits: 2,
+                          digits: 1,
                         },
                         {
                           key: "allocated_fcf_after_disclosed_capex_per_basic_share",
@@ -260,7 +260,7 @@ export function Financials() {
                             profile?.calculations
                               ?.allocated_fcf_after_disclosed_capex_per_basic_share,
                           status: "calculated",
-                          digits: 4,
+                          digits: 1,
                         },
                       ].map((measure) => {
                         const comparison =
@@ -310,7 +310,7 @@ export function Financials() {
                                   ? "N/M"
                                   : comparison?.status === "calculated" &&
                                       comparison.percent_change != null
-                                    ? percent(comparison.percent_change)
+                                    ? percent(comparison.percent_change, 1)
                                     : "Unavailable"}
                             </td>
                           </tr>
