@@ -1,12 +1,16 @@
+from datetime import date
 from decimal import Decimal as D
 from uuid import UUID
 
 import pytest
+from fastapi.testclient import TestClient
 from helpers import DAYS, cash, dividend, ledger, stock_report, trade
-from sqlalchemy import select
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from investor_platform.domain import EntryKind
+from investor_platform.financial import Record
+from investor_platform.market import History
 from investor_platform.models import Account, LedgerEntry
 
 
@@ -262,7 +266,7 @@ def test_recent_period_rebases_returns_without_resetting_wealth(db_client, infer
     assert recent["cagr"]["SPY"] is None
 
 
-@pytest.mark.parametrize("kind", ["deposit", "withdrawal", "income", "expense"])
+@pytest.mark.parametrize("kind", ["withdrawal", "income", "expense"])
 def test_unsupported_cash_records_are_checked_before_displayed_period(
     db_client,
     inferred,
@@ -337,3 +341,67 @@ def test_rejects_exclusions_real_opening_balances_and_changed_placeholders(
     sid = ledger(db_client, aid)["holdings"][0]["security"]["id"]
     r = stock_report(db_client, aid, benchmark_mode="funded_hold", exclude_security_ids=[sid])
     assert r.status_code == 422 and "exclusions" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("deposit", ["1000", "400"])
+def test_recorded_deposit_covers_buys_before_inferred_shortages(
+    db_client: TestClient, inferred: tuple[str, dict[str, History]], deposit: str
+) -> None:
+    """Known deposits count once; only the uncovered initial purchase needs inferred cash."""
+    aid: str = inferred[0]
+    assert cash(db_client, aid, amount=deposit, day=str(DAYS[0])).status_code == 201
+    before: Record = ledger(db_client, aid)
+    result: Record = estimated(db_client, aid)
+    assert D(result["funding_estimate"]["fresh_cash"]) == 1000
+    assert D(result["funding_estimate"]["recorded_deposits"]) == D(deposit)
+    assert D(result["funding_estimate"]["inferred_cash"]) == 1000 - D(deposit)
+    assert D(result["funding_estimate"]["capital"]) == 1000
+    assert D(result["cash"]) == 0 and D(result["value"]) == 1210
+    assert D(result["benchmark_values"]["SPY"]["value"]) == 1020
+    assert ledger(db_client, aid) == before
+
+
+def test_later_deposit_is_new_index_money_once_and_cannot_fund_earlier_buys(
+    db_client: TestClient, inferred: tuple[str, dict[str, History]]
+) -> None:
+    """A later deposit adds cash and benchmark units without replacing earlier inferred capital."""
+    aid: str = inferred[0]
+    assert cash(db_client, aid, amount="200", day=str(DAYS[1])).status_code == 201
+    result: Record = estimated(db_client, aid)
+    assert D(result["funding_estimate"]["inferred_cash"]) == 1000
+    assert D(result["funding_estimate"]["recorded_deposits"]) == 200
+    assert D(result["funding_estimate"]["fresh_cash"]) == 1200
+    assert D(result["cash"]) == 200 and D(result["value"]) == 1410
+    assert float(result["benchmark_values"]["SPY"]["value"]) == pytest.approx(
+        1020 + 200 * 102 / 101
+    )
+
+
+def test_deposit_before_first_trade_starts_benchmark_before_stock_purchase(
+    db_client: TestClient, inferred: tuple[str, dict[str, History]], database: Engine
+) -> None:
+    """A known early deposit establishes the estimate before the first stock exposure."""
+    aid: str
+    data: dict[str, History]
+    aid, data = inferred
+    prior: date = date(2025, 12, 31)
+    session: Session
+    with Session(database) as session:
+        opening: LedgerEntry = session.scalar(
+            select(LedgerEntry).where(
+                LedgerEntry.account_id == UUID(aid), LedgerEntry.kind == EntryKind.OPENING_CASH
+            )
+        )
+        opening.effective_date = date(2025, 12, 30)
+        session.commit()
+    symbol: str
+    for symbol in ("SPY", "QQQ"):
+        data[symbol].close[prior] = D(90)
+        data[symbol].adjusted[prior] = D(90)
+    assert cash(db_client, aid, amount="1000", day=str(prior)).status_code == 201
+    result: Record = estimated(db_client, aid, start=str(prior))
+    assert result["start"] == str(prior)
+    assert D(result["series"][0]["cash"]) == 1000
+    assert D(result["series"][0]["value"]) == 1000
+    assert D(result["funding_estimate"]["inferred_cash"]) == 0
+    assert float(result["benchmark_values"]["SPY"]["value"]) == pytest.approx(1000 * 102 / 90)

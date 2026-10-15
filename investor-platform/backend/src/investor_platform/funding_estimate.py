@@ -2,11 +2,13 @@
 
 from bisect import bisect_left
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 from . import market
 from .domain import IN_KIND_ENTRIES, EntryKind, IncomeKind
 from .income import market_dividends
+from .models import LedgerEntry
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -31,7 +33,7 @@ def estimate(entries, histories, stock_report, start, *, provisional=False, infe
         if entry.kind == EntryKind.OPENING_CASH:
             if inferred_opening is None or entry.amount != inferred_opening:
                 raise ValueError("Funding estimate requires an explicitly inferred opening balance")
-        elif entry.security_id is None:
+        elif entry.security_id is None and entry.kind != EntryKind.DEPOSIT:
             raise ValueError(
                 "Funding estimate unavailable: recorded cash movements or income "
                 "need a separate cash-flow comparison"
@@ -39,7 +41,10 @@ def estimate(entries, histories, stock_report, start, *, provisional=False, infe
     active = [e for e in entries if e.security_id is not None and e.effective_date <= end]
     if not active:
         raise ValueError("Funding estimate needs recorded stocks or trades")
-    beginning = min(e.effective_date for e in active)
+    deposits: list[LedgerEntry] = [
+        e for e in entries if e.kind == EntryKind.DEPOSIT and e.effective_date <= end
+    ]
+    beginning = min(e.effective_date for e in [*active, *deposits])
     points = [p for p in points if p["date"] >= beginning]
     days = [p["date"] for p in points]
     securities = {e.security_id: e.security for e in active}
@@ -54,6 +59,10 @@ def estimate(entries, histories, stock_report, start, *, provisional=False, infe
             flows[entry.effective_date] -= entry.amount
         elif entry.kind == EntryKind.SELL:
             flows[entry.effective_date] += entry.amount
+    recorded: defaultdict[date, Decimal] = defaultdict(Decimal)
+    for entry in deposits:
+        recorded[entry.effective_date] += entry.amount
+        flows[entry.effective_date] += entry.amount
     for (_, exdate), amount in dividends.items():
         flows[exdate] += amount
 
@@ -69,6 +78,7 @@ def estimate(entries, histories, stock_report, start, *, provisional=False, infe
     # Net within each calendar date BEFORE mapping to sessions. A later Monday sale
     # cannot retroactively fund a Saturday purchase.
     for day, change in sorted(flows.items()):
+        fresh[session(day)] += recorded[day]
         cash += change
         if cash < 0:
             fresh[session(day)] -= cash
@@ -165,13 +175,16 @@ def estimate(entries, histories, stock_report, start, *, provisional=False, infe
             "start": days[0],
             "capital": capital,
             "fresh_cash": sum(fresh.values(), ZERO),
+            "recorded_deposits": sum(recorded.values(), ZERO),
+            "inferred_cash": sum(fresh.values(), ZERO) - sum(recorded.values(), ZERO),
             "received_assets": sum(receipts.values(), ZERO),
             "estimated_dividends": sum(dividends.values(), ZERO),
             "income_policy": "provider_gross_on_ex_date",
         },
         "assumptions": [
             "Minimum funding: same-day net sales and estimated gross dividends fund buys first.",
-            "Fresh cash covers remaining shortages; inferred opening cash is ignored.",
+            "Recorded deposits contribute once; inferred cash covers only remaining shortages.",
+            "The explicitly inferred opening cash placeholder is ignored.",
             "Gross dividends are estimated cash on ex-dates; payment dates and taxes are unknown.",
             "Received shares contribute their closing market value once.",
             "Each index invests only that fresh capital and never sells; distributions reinvest.",
