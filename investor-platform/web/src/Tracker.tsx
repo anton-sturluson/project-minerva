@@ -231,7 +231,8 @@ export function Tracker({
     report?.scope === "stocks" &&
     report.benchmark_mode === "matched" &&
     !!report.matched_benchmarks;
-  const estimated = benchmarkMode === "funded_hold";
+  const modeledPortfolio =
+    report?.scope === "account" && !!report.funding_estimate;
   const showEstimatedValue =
     report?.benchmark_mode === "funded_hold" && !!report.benchmark_values;
   const showValue = showInvestedValue || showEstimatedValue;
@@ -257,11 +258,9 @@ export function Tracker({
         aria-labelledby="performance-heading"
       >
         <h2 id="performance-heading">
-          {estimated
-            ? "Portfolio vs. buy & hold"
-            : scope === "stocks"
-              ? "Stocks vs. the market"
-              : "Account vs. the market"}
+          {scope === "stocks"
+            ? "Stocks vs. the market"
+            : "Account vs. the market"}
         </h2>
         <p className="period-shortcuts">
           <button
@@ -298,15 +297,18 @@ export function Tracker({
             <select
               aria-label="Performance measure"
               value={scope}
-              disabled={busy || estimated}
+              disabled={busy}
               onChange={(e) => {
                 const next = e.target.value as Scope;
+                const nextExcluded =
+                  canEstimate && next === "account" ? [] : excluded;
                 setScope(next);
+                setExcluded(nextExcluded);
                 setReport(null);
                 void compare(
                   start,
                   end,
-                  excluded,
+                  nextExcluded,
                   baseline,
                   next,
                   anchor,
@@ -323,6 +325,13 @@ export function Tracker({
             <select
               aria-label="Index comparison"
               value={benchmarkMode}
+              title={
+                benchmarkMode === "funded_hold"
+                  ? "Indexes invest the estimated purchase funding on each deposit date and are never sold. Your portfolio uses the same calculation in both index comparisons."
+                  : benchmarkMode === "matched"
+                    ? "Indexes match stock purchases and sales. Your portfolio calculation stays the same."
+                    : "Indexes are bought at the start of the selected period and held. Your portfolio calculation stays the same."
+              }
               disabled={
                 busy ||
                 !ledger.entries.length ||
@@ -330,18 +339,24 @@ export function Tracker({
               }
               onChange={(e) => {
                 const next = e.target.value as BenchmarkMode;
-                const nextScope = next === "funded_hold" ? "account" : "stocks";
                 setBenchmarkMode(next);
-                setScope(nextScope);
-                setExcluded([]);
                 setReport(null);
-                void compare(start, end, [], baseline, nextScope, anchor, next);
+                void compare(
+                  start,
+                  end,
+                  excluded,
+                  baseline,
+                  scope,
+                  anchor,
+                  next,
+                );
               }}
             >
               <option value="buy_hold">Buy and hold</option>
-              <option value="matched">Match buys &amp; sales</option>
-              {canEstimate && (
-                <option value="funded_hold">Estimated buy &amp; hold</option>
+              {canEstimate ? (
+                <option value="funded_hold">Match purchase funding</option>
+              ) : (
+                <option value="matched">Match buys &amp; sales</option>
               )}
             </select>
           </label>
@@ -403,7 +418,7 @@ export function Tracker({
                 ? "Retry comparison"
                 : "Compare performance"}
           </button>
-          {!estimated && securities.length > 0 && (
+          {!(canEstimate && scope === "account") && securities.length > 0 && (
             <StockExclusions
               stocks={securities.filter(
                 (security) =>
@@ -462,7 +477,13 @@ export function Tracker({
             )}
             {!showValue && (
               <p>
-                <span>
+                <span
+                  title={
+                    modeledPortfolio
+                      ? "Estimated stocks plus cash. Deposits cover purchase shortfalls after available cash, sale proceeds, and estimated dividends. The imported opening cash is ignored."
+                      : undefined
+                  }
+                >
                   {report.scope === "stocks"
                     ? "Stock value (USD)"
                     : report.provisional
@@ -509,7 +530,7 @@ export function Tracker({
                         className="number"
                         title={
                           showEstimatedValue
-                            ? "Estimated stocks plus cash versus indexes never sold. Recorded deposits fund the portfolio and each index once; minimum additional funding covers purchase shortfalls after recycled sales and estimated gross dividends on ex-dates. Other cash movements are not supported; dividend payment dates and taxes are unverified."
+                            ? "Indexes invest the estimated funding on each deposit date and are never sold. Portfolio value uses the selected measure."
                             : "Value still invested after matching purchases and sales; cash and exited proceeds are excluded"
                         }
                       >
@@ -529,8 +550,14 @@ export function Tracker({
                 </thead>
                 <tbody>
                   <tr>
-                    <td>
-                      {showEstimatedValue
+                    <td
+                      title={
+                        modeledPortfolio
+                          ? "Estimated stocks plus cash. Deposits cover purchase shortfalls after available cash, sale proceeds, and estimated dividends. The imported opening cash is ignored."
+                          : undefined
+                      }
+                    >
+                      {modeledPortfolio
                         ? "Your portfolio + cash"
                         : report.scope === "stocks"
                           ? "Stock portfolio return"
@@ -684,7 +711,7 @@ function ReturnChart({
       <figcaption>
         Cumulative return
         {benchmarkMode === "funded_hold"
-          ? " · estimated buy & hold"
+          ? " · indexes match purchase funding"
           : benchmarkMode === "matched"
             ? " · matched buys & sales"
             : ""}{" "}

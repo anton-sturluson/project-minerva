@@ -36,7 +36,7 @@ In a recorded-baseline view, exclusions apply within that period: prior trades r
 
 ## Funding reconciliation
 
-An inferred minimum opening cash balance is a bookkeeping placeholder, not evidence that all future capital was present at inception. Imported accounts default to `funding_status: inferred`, including legacy imports without a status field. Whole-account return, CAGR, excess returns and stock-exclusion scenarios are withheld in both full-history and recorded-period views. The stocks-only calculation is independent of these cash records. Benchmark curves remain available; any reconstructed closing value is explicitly estimated.
+An inferred minimum opening cash balance is a bookkeeping placeholder, not evidence that all future capital was present at inception. Imported accounts default to `funding_status: inferred`, including legacy imports without a status field. The recorded-ledger whole-account return remains withheld until cash history is reconciled. For eligible imported accounts, the tracker uses the minimum-funding estimate below for whole-account performance under both index choices. Stock-exclusion scenarios remain unavailable for this modeled account. The stocks-only calculation is independent of cash records. Any modeled account value and return are estimates.
 
 Mark a reconstruction `reconciled` only after reviewing dated deposits/withdrawals, transfers within the portfolio boundary, income, fees, opening balances and closing cash. A current cash override cannot establish historical funding dates. Keep source rows, transfer matches and unresolved allocations in ignored private storage. Accounts entered directly use `recorded` funding status; that is not independent broker certification.
 
@@ -54,15 +54,26 @@ Search by ticker or exchange in **Excluded stocks**, select multiple stocks, the
 
 ## Index comparison modes
 
-### Estimated buy & hold
+### Portfolio funding and index selection
 
 Accounts explicitly marked with inferred funding and a matching inferred opening
-cash balance default to **Estimated buy & hold**. This estimates the fresh capital
-needed by the original trading strategy and compares total estimated wealth with
-never-sold SPY/QQQ holdings. It is a funding assumption, not verified deposit history.
-The summary labels dollars **Estimated value (USD)** and the original account row
-**Your portfolio + cash**. The header tooltip explains the funding and income policy;
-the interface does not add explanatory paragraphs. ([Funding model](../backend/src/investor_platform/funding_estimate.py))
+cash balance have two index choices: **Buy and hold** and **Match purchase funding**.
+Both use the same portfolio calculation for the selected measurement and dates.
+Changing the index choice preserves the measurement, dates and exclusions.
+Whole-account performance uses the minimum fresh funding needed by the original
+trading strategy, including cash retained after sales. Stocks-only performance
+continues to exclude cash. The funding model is an assumption, not verified deposit
+history.
+
+**Buy and hold** shows SPY/QQQ adjusted-close returns between displayed dates.
+**Match purchase funding** invests recorded deposits and inferred additional funding
+on their dates, then holds the index shares even after stock sales. Recycled sale
+proceeds and estimated dividends reduce the extra funding required for later stock
+purchases; they do not cause another index purchase. This choice adds estimated
+index dollar values. Time-weighted index percentage returns can equal ordinary buy
+and hold because the return measure removes deposits. Dollar values reflect the
+contribution amounts and dates. The summary tooltip explains the funding and
+income policy; the interface does not add explanatory paragraphs. ([Funding model](../backend/src/investor_platform/funding_estimate.py))
 
 Start modeled cash at zero, ignoring only the explicitly identified inferred opening
 placeholder. Recorded deposits enter modeled cash and both index alternatives once.
@@ -94,16 +105,20 @@ cash; `recorded_deposits` and `inferred_cash` show that split. `capital` also in
 received assets. Recorded deposits do not establish that the remaining cash history
 is complete.
 
-This mode rejects recorded withdrawals, income and expenses anywhere in the replay
-history,
-including dividends earned before the cutoff with later payment, because combining
-those records requires a different funding policy. It rejects changed/real opening
-balances, stock exclusions, and positive starting wealth without inferable capital.
+The minimum-funding calculation rejects recorded withdrawals, income and expenses
+anywhere in the replay history, including dividends earned before the cutoff with
+later payment, because combining those records requires a different funding policy.
+It rejects changed/real opening balances and positive starting wealth without
+inferable capital. Stock exclusions remain unavailable for modeled whole accounts;
+stocks-only exclusions retain the original portfolio funding for the index comparison.
 Existing price/FX/split guards still apply. It creates no ledger records. Actual deposit
 dates, missing broker cash income, tax withholding and intraday funding remain
-unverified. The legacy comparisons remain selectable. ([Funding model](../backend/src/investor_platform/funding_estimate.py), [Integration checks](../backend/tests/test_funding_estimate.py))
+unverified. These funding checks apply to both index choices in the modeled
+whole-account view. The legacy **Match buys & sales** comparison remains available
+for other accounts and through the API; it is not a third choice for inferred-funding
+accounts. ([Funding model](../backend/src/investor_platform/funding_estimate.py), [Integration checks](../backend/tests/test_funding_estimate.py))
 
-### Existing comparisons
+### Legacy matched sales comparison
 
 **Buy and hold** shows the existing SPY/QQQ adjusted-close
 returns between displayed dates. **Match buys & sales** replaces both benchmark

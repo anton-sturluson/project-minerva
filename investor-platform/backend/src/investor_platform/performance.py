@@ -536,14 +536,19 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     ]
     if period.anchor_date is not None and period.anchor_date >= period.end:
         raise HTTPException(422, "The comparison boundary must precede the ending date")
-    estimated = period.benchmark_mode == BenchmarkMode.FUNDED_HOLD
-    if estimated and (
-        not provisional
-        or funding_status != FundingStatus.INFERRED
-        or account.reconstruction.get("opening_cash") is None
-    ):
+    funding_eligible: bool = (
+        provisional
+        and funding_status == FundingStatus.INFERRED
+        and account.reconstruction.get("opening_cash") is not None
+    )
+    estimated: bool = period.benchmark_mode == BenchmarkMode.FUNDED_HOLD or (
+        funding_eligible
+        and period.scope == PerformanceScope.ACCOUNT
+        and period.benchmark_mode == BenchmarkMode.BUY_HOLD
+    )
+    if estimated and not funding_eligible:
         raise HTTPException(422, "Minimum-funding estimates require an inferred-funding portfolio")
-    if estimated and period.exclude_security_ids:
+    if estimated and period.scope == PerformanceScope.ACCOUNT and period.exclude_security_ids:
         raise HTTPException(
             422, "Stock exclusions are unavailable in the minimum-funding comparison"
         )
@@ -622,6 +627,61 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                     provisional=provisional,
                     inferred_opening=Decimal(account.reconstruction["opening_cash"]),
                 )
+                if period.scope == PerformanceScope.STOCKS:
+                    # Funding determines the index dollars, never the portfolio scope.
+                    stock_result: dict = calculate(
+                        entries,
+                        fetched,
+                        calculation_start,
+                        price_end,
+                        provisional=provisional,
+                        baseline=period.baseline,
+                        funding_status=funding_status,
+                        scope=period.scope,
+                    )
+                    funded_points: dict[date, dict] = {
+                        point["date"]: point for point in result["series"]
+                    }
+                    stock_point: dict
+                    funded_point: dict | None
+                    symbol: str
+                    for stock_point in stock_result["series"]:
+                        funded_point = funded_points.get(stock_point["date"])
+                        for symbol in market.BENCHMARKS:
+                            stock_point[symbol] = funded_point[symbol] if funded_point else ZERO
+                        stock_point["benchmark_values"] = (
+                            funded_point["benchmark_values"]
+                            if funded_point
+                            else dict.fromkeys(market.BENCHMARKS, ZERO)
+                        )
+                    field: str
+                    for field in ("SPY", "QQQ", "benchmark_values", "funding_estimate"):
+                        stock_result[field] = result[field]
+                    result = stock_result
+                result["benchmark_mode"] = period.benchmark_mode
+                if period.benchmark_mode == BenchmarkMode.BUY_HOLD:
+                    point: dict
+                    symbol: str
+                    for point in result["series"]:
+                        for symbol in market.BENCHMARKS:
+                            point[symbol] = (
+                                fetched[symbol].adjusted[point["date"]]
+                                / fetched[symbol].adjusted[result["start"]]
+                                - ONE
+                            )
+                        point.pop("benchmark_values", None)
+                    for symbol in market.BENCHMARKS:
+                        result[symbol] = result["series"][-1][symbol]
+                    result.pop("benchmark_values", None)
+                    result["assumptions"] = [
+                        assumption
+                        for assumption in result["assumptions"]
+                        if not assumption.startswith("Each index invests only")
+                    ] + ["Each index is held from the displayed start; distributions reinvest."]
+                for symbol in market.BENCHMARKS:
+                    result[f"excess_{symbol.lower()}"] = (
+                        None if result["return"] is None else result["return"] - result[symbol]
+                    )
                 result["cagr"] = {
                     key: annualized_return(
                         result[key] if key != "portfolio" else result["return"],
@@ -670,13 +730,17 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                         },
                     )
                     # Benchmark lines always describe the original stock deployments.
-                    if period.benchmark_mode == BenchmarkMode.MATCHED:
+                    if period.benchmark_mode in {BenchmarkMode.MATCHED, BenchmarkMode.FUNDED_HOLD}:
                         scenario = result["scenario"]
                         scenario["benchmark_mode"] = period.benchmark_mode
                         scenario["matched_benchmarks"] = result["matched_benchmarks"]
+                        if "benchmark_values" in result:
+                            scenario["benchmark_values"] = result["benchmark_values"]
                         for original, alternative in zip(result["series"], scenario["series"]):
                             for symbol in market.BENCHMARKS:
                                 alternative[symbol] = original[symbol]
+                            if "benchmark_values" in original:
+                                alternative["benchmark_values"] = original["benchmark_values"]
                         for symbol in market.BENCHMARKS:
                             scenario[symbol] = result[symbol]
                             scenario["cagr"][symbol] = result["cagr"][symbol]
