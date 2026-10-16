@@ -339,6 +339,59 @@ test("zero-revenue convention and reported diluted EPS stay visible", async ({
   ).toBeVisible();
 });
 
+test("issuer non-reporting differs from missing data and cash share basis is explicit", async ({
+  page,
+}) => {
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const data = report();
+    const reason =
+      "EPS not reported: issuer does not present earnings per share";
+    data.companies[1].financial_status = "eligible";
+    data.companies[1].per_share_metrics = {
+      basic_eps: { status: "unavailable", value: null, reason },
+    };
+    data.companies[1].per_share_comparisons = {
+      basic_eps: {
+        prior_year: 2025,
+        prior_value: null,
+        status: "unavailable",
+        percent_change: null,
+        reason,
+      },
+    };
+    data.companies[0].per_share_metrics!.fcf_per_basic_share.share_denominator_basis =
+      "diluted_weighted_average";
+    data.weighted_company_per_share!.weighted_company_eps.exclusions = [
+      { issuer_key: "example:excluded", reason },
+    ];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  await expect(
+    page.getByText(
+      "3 Weighted company EPS excludes OTH (25.0% weight; not reported).",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.getByText("Company details", { exact: true }).click();
+  const details = page.getByRole("region", {
+    name: "Company per-share figures",
+  });
+  const eps = details
+    .getByRole("row")
+    .filter({ hasText: "OTH" })
+    .filter({ hasText: "EPS (basic)" });
+  await expect(
+    eps.getByRole("cell", { name: "Not reported", exact: true }),
+  ).toHaveCount(2);
+  await expect(
+    details.getByRole("cell", {
+      name: "FCF/share (diluted shares)",
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
 test("prior headline matches the prior portfolio and names its own omitted holdings", async ({
   page,
 }) => {

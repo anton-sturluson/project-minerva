@@ -127,6 +127,13 @@ def validate_release(release: Record) -> None:
             for metric_key, metric_value in metrics.items():
                 metric: Record = record(metric_value)
                 eps_basis: Json = metric.get("eps_basis")
+                denominator_basis: Json = metric.get("share_denominator_basis")
+                if denominator_basis is not None and (
+                    metric_key != "fcf_per_basic_share"
+                    or denominator_basis
+                    not in ("basic_weighted_average", "diluted_weighted_average", "period_end")
+                ):
+                    raise ValueError("Share denominator basis applies only to FCF/share")
                 if eps_basis is not None and (
                     metric_key != "basic_eps" or eps_basis not in ("basic", "diluted")
                 ):

@@ -13,7 +13,14 @@ const perShareMetrics = [
   ["weighted_company_fcf_per_share", "Weighted company FCF/share", 1],
 ] as const;
 
+function isNotReported(reason?: string | null) {
+  return /^(EPS|Gross margin|Operating margin) not reported:/.test(
+    reason || "",
+  );
+}
+
 function omissionReason(reason: string) {
+  if (isNotReported(reason)) return "not reported";
   if (
     /revenue/i.test(reason) &&
     /zero|negative|nonpositive|non-positive/i.test(reason)
@@ -331,7 +338,11 @@ export function Financials({
                               {measure.key === "basic_eps" &&
                               value?.eps_basis === "diluted"
                                 ? "EPS (diluted)"
-                                : measure.label}
+                                : measure.key === "fcf_per_basic_share" &&
+                                    value?.share_denominator_basis ===
+                                      "diluted_weighted_average"
+                                  ? "FCF/share (diluted shares)"
+                                  : measure.label}
                             </td>
                             <td className="number">
                               {available
@@ -341,7 +352,9 @@ export function Financials({
                                     minimumFractionDigits: measure.digits,
                                     maximumFractionDigits: measure.digits,
                                   })
-                                : "Unavailable"}
+                                : isNotReported(value?.reason)
+                                  ? "Not reported"
+                                  : "Unavailable"}
                             </td>
                             <td className="number">
                               {comparison?.prior_value != null
@@ -354,7 +367,9 @@ export function Financials({
                                       maximumFractionDigits: measure.digits,
                                     },
                                   )
-                                : "Unavailable"}
+                                : isNotReported(comparison?.reason)
+                                  ? "Not reported"
+                                  : "Unavailable"}
                             </td>
                             <td className="number">
                               {!available
