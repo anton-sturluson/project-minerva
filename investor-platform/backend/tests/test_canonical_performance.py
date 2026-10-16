@@ -244,3 +244,107 @@ def test_canonical_share_receipt_is_neutralized_at_close_in_both_comparisons(
         (10 + 200 / 101) * 102
     )
     assert float(funded["SPY"]) == pytest.approx(0.02)
+
+
+@pytest.fixture
+def zero_dividend_portfolio(
+    canonical_portfolio: tuple[str, dict[str, History]], database: Engine
+) -> tuple[str, dict[str, History]]:
+    """Enable the explicit temporary assumption for one synthetic imported account."""
+    session: Session
+    with Session(database) as session:
+        account: Account = session.get(Account, UUID(canonical_portfolio[0]))
+        account.reconstruction = account.reconstruction | {"dividend_policy": "unrecorded_zero"}
+        session.commit()
+    return canonical_portfolio
+
+
+def test_zero_unrecorded_dividends_is_explicit_and_index_independent(
+    db_client: TestClient, zero_dividend_portfolio: tuple[str, dict[str, History]]
+) -> None:
+    """Missing dividends add no wealth or cash and the same assumption applies to scenarios."""
+    account_id: str = zero_dividend_portfolio[0]
+    zero_dividend_portfolio[1]["AAA"].dividends[DAYS[1]] = Decimal(1)
+    before: dict = ledger(db_client, account_id)
+    sid: str = before["holdings"][0]["security"]["id"]
+    reports: list[dict] = []
+    mode: str
+    for mode in ("buy_hold", "funded_hold"):
+        response: Response = stock_report(
+            db_client, account_id, scope="account", benchmark_mode=mode, exclude_security_ids=[sid]
+        )
+        assert response.status_code == 200, response.text
+        result: dict = response.json()
+        assert result["warnings"] == []
+        assert result["dividend_policy"] == "unrecorded_zero"
+        assert any("unrecorded dividends are zero" in item for item in result["assumptions"])
+        assert Decimal(result["return"]) == Decimal(".21")
+        assert Decimal(result["value"]) == 1210 and Decimal(result["cash"]) == 0
+        assert Decimal(result["receivables"]) == 0
+        assert result["scenario"]["dividend_policy"] == "unrecorded_zero"
+        assert Decimal(result["scenario"]["return"]) == 0
+        reports.append(result)
+    assert reports[0]["series"][1]["portfolio"] == reports[1]["series"][1]["portfolio"]
+    assert reports[0]["return"] == reports[1]["return"]
+    assert reports[0]["cagr"]["portfolio"] == reports[1]["cagr"]["portfolio"]
+    assert ledger(db_client, account_id) == before
+    account: dict = db_client.get("/api/accounts").json()[0]
+    assert account["reconstruction"]["dividend_policy"] == "unrecorded_zero"
+
+
+def test_zero_policy_retains_actual_dividends_and_receivables(
+    db_client: TestClient, zero_dividend_portfolio: tuple[str, dict[str, History]]
+) -> None:
+    """Recorded dividends count once while another missing distribution contributes zero."""
+    account_id: str = zero_dividend_portfolio[0]
+    zero_dividend_portfolio[1]["AAA"].dividends[DAYS[1]] = Decimal(1)
+    zero_dividend_portfolio[1]["AAA"].dividends[DAYS[2]] = Decimal(2)
+    assert dividend(db_client, account_id, pay=str(DAYS[2]), ex=str(DAYS[1])).status_code == 201
+    before: dict = ledger(db_client, account_id)
+    result: dict = stock_report(db_client, account_id, scope="account").json()
+    assert result["warnings"] == []
+    assert Decimal(result["series"][1]["receivables"]) == 10
+    assert Decimal(result["series"][1]["cash"]) == 0
+    assert Decimal(result["return"]) == Decimal(".22")
+    assert Decimal(result["cash"]) == 10 and Decimal(result["value"]) == 1220
+    assert ledger(db_client, account_id) == before
+
+
+@pytest.mark.parametrize("problem", ["amount", "unmatched", "unclassified"])
+def test_zero_policy_does_not_hide_problematic_recorded_income(
+    db_client: TestClient,
+    zero_dividend_portfolio: tuple[str, dict[str, History]],
+    problem: str,
+) -> None:
+    """The assumption cannot bypass actual income mismatches or missing attribution."""
+    account_id: str = zero_dividend_portfolio[0]
+    zero_dividend_portfolio[1]["AAA"].dividends[DAYS[1]] = Decimal(1)
+    if problem == "amount":
+        assert dividend(db_client, account_id, amount="9").status_code == 201
+    elif problem == "unmatched":
+        assert dividend(db_client, account_id, ex=str(DAYS[0])).status_code == 201
+    else:
+        assert cash(db_client, account_id, "income", "5", day=str(DAYS[2])).status_code == 201
+    mode: str
+    for mode in ("buy_hold", "funded_hold"):
+        response: Response = stock_report(
+            db_client, account_id, scope="account", benchmark_mode=mode
+        )
+        assert response.status_code == 200, response.text
+        result: dict = response.json()
+        assert result["warnings"]
+        assert result["return"] is None and result["cagr"]["portfolio"] is None
+        assert all(point["portfolio"] is None for point in result["series"])
+        assert result["dividend_policy"] == "unrecorded_zero"
+
+
+def test_account_zero_policy_does_not_relabel_the_analytic_stock_sleeve(
+    db_client: TestClient, zero_dividend_portfolio: tuple[str, dict[str, History]]
+) -> None:
+    """Analytic stocks retain their provider-estimated distributions and their own disclosure."""
+    account_id: str = zero_dividend_portfolio[0]
+    zero_dividend_portfolio[1]["AAA"].dividends[DAYS[1]] = Decimal(1)
+    result: dict = stock_report(db_client, account_id).json()
+    assert "dividend_policy" not in result
+    assert not any("unrecorded dividends are zero" in item for item in result["assumptions"])
+    assert float(result["return"]) == pytest.approx((111 / 100) * (121 / 110) - 1)

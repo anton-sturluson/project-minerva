@@ -12,11 +12,11 @@ Start reconstructed cash at zero. Use existing cash first, including retained sa
 
 Use the ordinary whole-account daily time-weighted return for both index choices. Include cash and recorded dividend receivables. Treat deposits as beginning-of-session flows and withdrawals as end-of-session flows; geometrically link daily factors. Date-only records require a stated timing convention, not a claim of exact intraday measurement. This follows [Portfolio Performance's daily method](https://help.portfolio-performance.info/en/concepts/performance/time-weighted/).
 
-Offer ordinary index buy and hold, or index purchases using the same dated contributions with no sales. These change only the benchmark. Do not invent dividend payment dates or waive missing-income checks to display a return. Inferred funding remains unverified.
+Offer ordinary index buy and hold, or index purchases using the same dated contributions with no sales. These change only the benchmark. Do not invent dividend payment dates. Missing-income checks withhold return by default. An explicit temporary assumption may value unrecorded dividends at zero, with a visible label that these dividends are excluded; actual recorded income and mismatch checks remain. Inferred funding remains unverified.
 
 ## Consequences
 
-One ledger determines account cash and performance. Sale proceeds are reused without counting them as new contributions. There is no active opening cash placeholder for these accounts. The historical funding dates remain assumptions, and source order matters for same-day purchases and sales. Missing income can withhold total return until evidence is entered. Index purchases at the close can produce a different time-weighted return from continuous index exposure because new cash is idle during that session.
+One ledger determines account cash and performance. Sale proceeds are reused without counting them as new contributions. There is no active opening cash placeholder for these accounts. The historical funding dates remain assumptions, and source order matters for same-day purchases and sales. Missing income withholds total return until evidence is entered, unless the owner explicitly selects the labeled zero assumption for unrecorded dividends. Index purchases at the close can produce a different time-weighted return from continuous index exposure because new cash is idle during that session.
 
 ## Related ADRs
 
