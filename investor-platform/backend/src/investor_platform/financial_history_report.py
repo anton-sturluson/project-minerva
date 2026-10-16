@@ -153,7 +153,10 @@ def _build_report(
             metrics[key] = present
             if key in SHARES:
                 values[key] = present
-                comparisons[key] = comparison(now, before, year)
+                compared: Record = comparison(now, before, year)
+                if before is None and old.get("reason"):
+                    compared["reason"] = old["reason"]
+                comparisons[key] = compared
         companies.append(
             {
                 "issuer_key": issuer,

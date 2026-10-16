@@ -6,6 +6,8 @@ export type PerShareMeasure = {
   reason?: string | null;
   method?: string;
   eps_basis?: "basic" | "diluted";
+  share_denominator_basis?:
+    "basic_weighted_average" | "diluted_weighted_average" | "period_end";
 };
 
 export type PerShareComparison = {

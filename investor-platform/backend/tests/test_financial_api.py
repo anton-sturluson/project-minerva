@@ -788,3 +788,52 @@ def test_eps_basis_does_not_change_cash_flow_denominators(key: str, basis: str) 
     record(record(row["metrics"])[key])["eps_basis"] = basis
     with pytest.raises(ValueError, match="EPS basis applies only"):
         validate_release(release_payload([row]))
+
+
+def test_unreported_prior_eps_preserves_issuer_reason() -> None:
+    """The issuer's non-reporting reason is distinct from an uncollected prior figure."""
+    row: Record = release_row()
+    reason: str = "EPS not reported: issuer does not present earnings per share"
+    record(record(row["prior_metrics"])["basic_eps"]).update(
+        status="unavailable", value=None, reason=reason
+    )
+    result: Record = build_report(
+        release_payload([row]),
+        snapshot(("AAA", "100")),
+        2025,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    compared: Record = record(
+        record(records(result["companies"])[0]["per_share_comparisons"])["basic_eps"]
+    )
+    assert compared["prior_value"] is None and compared["reason"] == reason
+
+
+@pytest.mark.parametrize(
+    "basis", ["basic_weighted_average", "diluted_weighted_average", "period_end"]
+)
+def test_verified_cash_share_denominator_metadata_is_preserved(basis: str) -> None:
+    """A supported cash/share denominator stays explicit without altering the source amount."""
+    row: Record = release_row()
+    record(record(row["metrics"])["fcf_per_basic_share"])["share_denominator_basis"] = basis
+    release: Record = release_payload([row])
+    validate_release(release)
+    result: Record = build_report(
+        release, snapshot(("AAA", "100")), 2025, "synthetic-account", {"USD": Decimal(1)}
+    )
+    measure: Record = record(
+        record(records(result["companies"])[0]["per_share_metrics"])["fcf_per_basic_share"]
+    )
+    assert measure["share_denominator_basis"] == basis and measure["value"] == "2"
+
+
+@pytest.mark.parametrize(
+    "key,basis", [("basic_eps", "period_end"), ("fcf_per_basic_share", "unknown")]
+)
+def test_invalid_cash_share_denominator_basis_is_rejected(key: str, basis: str) -> None:
+    """A cash/share basis cannot relabel EPS or use an unsupported denominator."""
+    row: Record = release_row()
+    record(record(row["metrics"])[key])["share_denominator_basis"] = basis
+    with pytest.raises(ValueError, match="Share denominator basis"):
+        validate_release(release_payload([row]))
