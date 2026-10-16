@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import market
@@ -32,6 +32,7 @@ from .ledger import entries_for
 from .matched_benchmarks import matched_series
 from .models import LedgerEntry
 from .performance_math import daily_return_factor
+from .post_mortem_cache import CacheKey, cache_key, cached_report, remember_report
 
 router = APIRouter(prefix="/api/accounts")
 ZERO = Decimal(0)
@@ -579,6 +580,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         if e.effective_date <= period.end
         or (e.income_kind == IncomeKind.DIVIDEND and e.accrual_date <= period.end)
     ]
+    report_key: CacheKey | None = None
     canonical_funding: bool = (account.reconstruction or {}).get(
         "cash_method"
     ) == "purchase_shortfall"
@@ -648,6 +650,19 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 f"This tracker supports up to {market.MAX_SECURITIES} securities "
                 "and ten years of ledger history"
             )
+        if (
+            period.scope == PerformanceScope.STOCKS
+            and period.benchmark_mode == BenchmarkMode.BUY_HOLD
+            and period.baseline == Baseline.HISTORY
+            and period.anchor_date is None
+            and not period.exclude_security_ids
+        ):
+            report_key = cache_key(
+                session, actor, account, entries, period.model_dump_json(), completed_market_date()
+            )
+            body: bytes | None = cached_report(report_key)
+            if body is not None:
+                return Response(body, media_type="application/json")
         # Full-history mode validates from inception; recorded mode trusts opening share units.
         fetched = market.security_histories(
             securities.values(),
@@ -827,7 +842,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                     ]
                 except ValueError as exc:
                     result["scenario_error"] = str(exc)
-        return wire(
+        response: JSONResponse = wire(
             {
                 **result,
                 "fetched_at": datetime.now(UTC),
@@ -836,6 +851,13 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 ),
             }
         )
+        if (
+            report_key is not None
+            and not result.get("scenario_error")
+            and not result.get("warnings")
+        ):
+            remember_report(report_key, bytes(response.body))
+        return response
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except market.MarketDataError as exc:

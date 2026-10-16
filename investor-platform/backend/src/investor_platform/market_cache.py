@@ -1,4 +1,4 @@
-"""Private provider cache; ledger-derived values are always recalculated."""
+"""Private provider cache used by live calculations and revision-keyed Post-mortem reports."""
 
 import hashlib
 from datetime import UTC, datetime, timedelta
