@@ -837,3 +837,35 @@ def test_invalid_cash_share_denominator_basis_is_rejected(key: str, basis: str) 
     record(record(row["metrics"])[key])["share_denominator_basis"] = basis
     with pytest.raises(ValueError, match="Share denominator basis"):
         validate_release(release_payload([row]))
+
+
+def test_gross_cost_basis_note_reaches_summary_without_changing_weighted_value() -> None:
+    """An admitted issuer cost definition remains visible even without exclusions."""
+    row: Record = release_row()
+    note: str = "excludes separately reported depreciation and amortization"
+    record(record(row["metrics"])["gross_margin"])["basis_note"] = note
+    release: Record = release_payload([row])
+    validate_release(release)
+    result: Record = build_report(
+        release, snapshot(("AAA", "100")), 2025, "synthetic-account", {"USD": Decimal(1)}
+    )
+    gross: Record = record(record(result["weighted_ratios"])["gross_margin"])
+    assert gross["value"] == "0.4" and gross["exclusions"] == []
+    assert gross["basis_notes"] == [{"ticker": "AAA", "note": note}]
+    assert "basis_notes" not in record(record(result["weighted_ratios"])["operating_margin"])
+
+
+@pytest.mark.parametrize(
+    "key,status,note",
+    [
+        ("operating_margin", "available", "cost basis"),
+        ("gross_margin", "unavailable", "cost basis"),
+        ("gross_margin", "available", " "),
+    ],
+)
+def test_invalid_gross_cost_basis_note_is_rejected(key: str, status: str, note: str) -> None:
+    """Cost qualifications apply to a supported gross-margin amount only."""
+    row: Record = release_row()
+    record(record(row["metrics"])[key]).update(status=status, basis_note=note)
+    with pytest.raises(ValueError, match="Gross-margin basis notes"):
+        validate_release(release_payload([row]))

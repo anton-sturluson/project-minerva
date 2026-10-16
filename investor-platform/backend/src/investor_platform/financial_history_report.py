@@ -185,6 +185,7 @@ def _build_report(
         )
         exclusions: list[Record] = []
         conventions: list[Record] = []
+        basis_notes: list[Record] = []
         company: Record
         for company in companies:
             metric: Record = record(record(company["metrics"])[key])
@@ -197,6 +198,8 @@ def _build_report(
                         "convention": "zero_revenue_margin",
                     }
                 )
+            if metric["status"] == "available" and metric.get("basis_note"):
+                basis_notes.append({"ticker": company["ticker"], "note": metric["basis_note"]})
             if metric["status"] != "available":
                 exclusions.append(
                     {
@@ -217,6 +220,8 @@ def _build_report(
             "conventions": conventions,
             "unit": "fraction" if key in RATIOS else "USD_per_company_share",
         }
+        if basis_notes:
+            output["basis_notes"] = basis_notes
         if key in SHARES:
             output["comparison"] = comparison(value, None, year)
             shares[SHARES[key]] = output

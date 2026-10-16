@@ -32,6 +32,7 @@ type SummaryMeasure = {
   coverage: string | null;
   exclusions: FinancialExclusion[];
   conventions?: { issuer_key: string; ticker: string }[];
+  basis_notes?: { ticker: string; note: string }[];
   comparison?: PerShareComparison;
 };
 
