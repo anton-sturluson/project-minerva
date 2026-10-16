@@ -211,7 +211,7 @@ test("selected portfolio financials lead contributors with one shared year and f
   );
   await expect(
     financials.getByText(
-      "* Gross margin excludes OTH (25.0% weight; insurer).",
+      "1 Gross margin excludes OTH (25.0% weight; insurer).",
       { exact: true },
     ),
   ).toBeVisible();
@@ -308,6 +308,20 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
         reason: "Prior market prices unavailable",
       };
     } else if (year === 2025) {
+      data.companies.push({
+        issuer_key: "example:zero",
+        ticker: "ZERO",
+        name: "Pre-revenue company",
+        equity_weight: "0.05",
+        financial_status: "eligible",
+      });
+      data.companies[0].equity_weight = "0.70";
+      data.weighted_ratios.fcf_margin_after_disclosed_capex.exclusions = [
+        {
+          issuer_key: "example:zero",
+          reason: "Revenue denominator is zero or negative",
+        },
+      ];
       eps.comparison = {
         ...eps.comparison!,
         prior_value: "7.25",
@@ -350,14 +364,34 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
   await expect(eps.getByRole("cell").nth(1)).toHaveText("Unavailable");
   await page.getByLabel("Post-mortem year").selectOption("2025");
   const fcf = summary.getByRole("row", { name: /^Weighted company FCF/ });
-  await expect(eps.getByRole("cell").nth(1)).toHaveText("$7.3*");
+  await expect(eps.getByRole("cell").nth(1)).toHaveText("$7.34");
   await expect(fcf.getByRole("cell").nth(1)).toHaveText("$1.8");
   await expect(
     page.getByText(
-      "* 2024 Weighted company EPS excludes OLD (40.0% weight; data unavailable).",
+      "4 2024 Weighted company EPS excludes OLD (40.0% weight; data unavailable).",
       { exact: true },
     ),
   ).toBeVisible();
+  await expect(
+    page.getByText(
+      "3 FCF margin excludes ZERO (5.0% weight; zero or negative revenue).",
+      {
+        exact: true,
+      },
+    ),
+  ).toBeVisible();
+  const notes = page.locator(".annual-financials .form-note");
+  await expect(notes.locator("sup")).toHaveText(["1", "2", "3", "4"]);
+  await expect(
+    summary.getByRole("rowheader", { name: /^FCF margin/ }),
+  ).toHaveAttribute(
+    "aria-describedby",
+    "fcf_margin_after_disclosed_capex-exclusions",
+  );
+  await expect(eps.getByRole("cell").nth(1)).toHaveAttribute(
+    "aria-describedby",
+    "weighted_company_eps-prior-exclusions",
+  );
   await expect(eps.getByRole("cell").nth(2)).toHaveText("-52.4%");
   await page.screenshot({
     path: test.info().outputPath("prior-omissions.png"),
