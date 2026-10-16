@@ -12,6 +12,7 @@ for (const canonical of [false, true]) {
   test(`${canonical ? "purchase-funded" : "legacy inferred"} portfolio preserves its calculation across periods and retries`, async ({
     page,
   }, testInfo) => {
+    let zeroDividends = false;
     await page.clock.install({ time: new Date("2026-10-04T16:00:00Z") });
     await page.route("**/api/**", (route) => route.fulfill({ json: [] }));
     await page.route("**/statistics", (route) =>
@@ -40,6 +41,7 @@ for (const canonical of [false, true]) {
           {
             ...account,
             reconstruction: {
+              ...(zeroDividends ? { dividend_policy: "unrecorded_zero" } : {}),
               ...(canonical
                 ? { cash_method: "purchase_shortfall" }
                 : { funding_status: "inferred", opening_cash: "1000" }),
@@ -131,6 +133,7 @@ for (const canonical of [false, true]) {
     ];
     await page.route("**/performance", (route) => {
       const body = route.request().postDataJSON();
+      const withheld = missingIncome && !zeroDividends;
       requests.push(body);
       if (failure)
         return route.fulfill({
@@ -158,14 +161,14 @@ for (const canonical of [false, true]) {
           benchmark_mode: body.benchmark_mode,
           baseline: "history",
           provisional: true,
+          dividend_policy: zeroDividends ? "unrecorded_zero" : undefined,
           cash_method: canonical ? "purchase_shortfall" : undefined,
           cagr: {
-            portfolio:
-              missingIncome || body.baseline === "recorded" ? null : ".08",
+            portfolio: withheld || body.baseline === "recorded" ? null : ".08",
             SPY: null,
             QQQ: null,
           },
-          return: missingIncome ? null : series.at(-1)!.portfolio,
+          return: withheld ? null : series.at(-1)!.portfolio,
           SPY: series.at(-1)!.SPY,
           QQQ: series.at(-1)!.QQQ,
           benchmark_values:
@@ -176,10 +179,10 @@ for (const canonical of [false, true]) {
             body.scope === "account" && !canonical
               ? { capital: "1000", estimated_dividends: "50" }
               : undefined,
-          warnings: missingIncome
+          warnings: withheld
             ? ["AAA: recorded dividend income is missing."]
             : [],
-          series: missingIncome
+          series: withheld
             ? series.map((point) => ({ ...point, portfolio: null }))
             : series,
         },
@@ -386,6 +389,46 @@ for (const canonical of [false, true]) {
       await expect(portfolioRow.locator("td").nth(3)).toHaveText("—");
       await expect(control).toHaveValue("funded_hold");
       await expect(page.getByLabel("Performance measure")).toHaveCount(0);
+      await expect(
+        page.getByText("Unrecorded dividends assumed zero", { exact: true }),
+      ).toHaveCount(0);
+      zeroDividends = true;
+      await page
+        .getByRole("button", { name: "Compare performance", exact: true })
+        .click();
+      const assumption = page.getByText("Unrecorded dividends assumed zero", {
+        exact: true,
+      });
+      await expect(assumption).toBeVisible();
+      await expect(assumption).toHaveAttribute(
+        "title",
+        /Recorded dividends still count/,
+      );
+      await expect(page.locator("#performance").getByRole("alert")).toHaveCount(
+        0,
+      );
+      await expect(portfolioRow.locator("td").nth(2)).toHaveText("20.00%");
+      await expect(portfolioRow.locator("td").nth(3)).toHaveText("8.00%");
+      const zeroPolicyLine = await chart
+        .locator(".portfolio-line")
+        .getAttribute("points");
+      await control.selectOption("buy_hold");
+      await expect(assumption).toBeVisible();
+      await expect(portfolioRow.locator("td").nth(1)).toHaveText("20.00%");
+      await expect(portfolioRow.locator("td").nth(2)).toHaveText("8.00%");
+      await expect(chart.locator(".portfolio-line")).toHaveAttribute(
+        "points",
+        zeroPolicyLine!,
+      );
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath("zero-dividends-policy.png"),
+        fullPage: true,
+      });
     }
   });
 }

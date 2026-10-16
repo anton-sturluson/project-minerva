@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal, DecimalException, localcontext
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -272,6 +273,7 @@ def calculate(
     scope=PerformanceScope.ACCOUNT,
     benchmark_mode=BenchmarkMode.BUY_HOLD,
     cash_method: str | None = None,
+    dividend_policy: Literal["unrecorded_zero"] | None = None,
 ):
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
     include_opening_gain = (
@@ -279,6 +281,7 @@ def calculate(
     )
     stock_only = scope == PerformanceScope.STOCKS
     if stock_only:
+        dividend_policy = None
         entries = funded_stock_entries(entries)
         if not entries:
             raise ValueError("Choose at least one stock with recorded holdings or trades")
@@ -336,6 +339,7 @@ def calculate(
             securities,
             days,
             validation_start=start if baseline == Baseline.RECORDED else None,
+            assume_unrecorded_zero=dividend_policy == "unrecorded_zero",
         )
         warnings.extend(income_warnings)
     latest_holdings = []
@@ -472,8 +476,9 @@ def calculate(
                 symbol: funded[row["date"]][symbol]["value"] for symbol in market.BENCHMARKS
             }
     last = values[-1]
-    return {
+    result: dict = {
         **({"cash_method": cash_method} if cash_method else {}),
+        **({"dividend_policy": dividend_policy} if dividend_policy else {}),
         **({"benchmark_values": funded[days[-1]]} if funded is not None else {}),
         "benchmark_mode": benchmark_mode,
         "matched_benchmarks": matched[days[-1]] if matched is not None else None,
@@ -501,9 +506,16 @@ def calculate(
             ),
             "Assumes no missing trades or external flows; excluded import rows are not included.",
             "Uses exchange-specific listings and dated USD FX; confirm security identity.",
-            "Dividends accrue on their recorded ex-dates and become cash on payment dates. "
-            "Missing or mismatched distributions withhold returns; "
-            "interest is recognized when posted.",
+            (
+                "Recorded dividends accrue on ex-dates and become cash on payment dates. "
+                "Mismatched recorded income withholds returns; interest is recognized when posted."
+                if dividend_policy
+                else (
+                    "Dividends accrue on their recorded ex-dates and become cash on payment dates. "
+                    "Missing or mismatched distributions withhold returns; "
+                    "interest is recognized when posted."
+                )
+            ),
             "No unrecorded fees or taxes. Benchmarks reinvest distributions.",
         ]
         if provisional
@@ -525,6 +537,12 @@ def calculate(
         "excess_spy": None if warnings else last["portfolio"] - last["SPY"],
         "excess_qqq": None if warnings else last["portfolio"] - last["QQQ"],
     }
+    if dividend_policy:
+        result["assumptions"].append(
+            "Temporary assumption: unrecorded dividends are zero. "
+            "Actual recorded dividends still count; returns may understate total return."
+        )
+    return result
 
 
 @router.post("/{account_id}/performance")
@@ -564,6 +582,12 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
     canonical_funding: bool = (account.reconstruction or {}).get(
         "cash_method"
     ) == "purchase_shortfall"
+    dividend_policy: Literal["unrecorded_zero"] | None = (
+        "unrecorded_zero"
+        if canonical_funding
+        and (account.reconstruction or {}).get("dividend_policy") == "unrecorded_zero"
+        else None
+    )
     if canonical_funding and any(entry.kind == EntryKind.OPENING_CASH for entry in entries):
         raise HTTPException(
             422, "Purchase-date funding requires removal of the opening placeholder"
@@ -655,6 +679,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 scope=PerformanceScope.STOCKS if estimated else period.scope,
                 benchmark_mode=BenchmarkMode.BUY_HOLD if estimated else period.benchmark_mode,
                 cash_method="purchase_shortfall" if canonical_funding else None,
+                dividend_policy=dividend_policy,
             )
             if estimated:
                 result = estimate(
@@ -768,6 +793,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                             if e.kind in IN_KIND_ENTRIES and e.security_id in excluded
                         },
                         cash_method="purchase_shortfall" if canonical_funding else None,
+                        dividend_policy=dividend_policy,
                     )
                     # Benchmark lines always describe the original stock deployments.
                     if period.benchmark_mode in {BenchmarkMode.MATCHED, BenchmarkMode.FUNDED_HOLD}:

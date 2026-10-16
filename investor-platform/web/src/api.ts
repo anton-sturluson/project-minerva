@@ -37,6 +37,7 @@ export type Account = {
   reconstruction?: {
     funding_status?: "recorded" | "inferred" | "reconciled";
     cash_method?: "purchase_shortfall";
+    dividend_policy?: "unrecorded_zero" | null;
     warning: string;
     source_sha256: string;
     imported_trades: number;

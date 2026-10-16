@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,6 +31,7 @@ class ReconstructionView(BaseModel):
     skipped: list[dict]
     opening_cash: str | None = None
     cash_method: str | None = None
+    dividend_policy: Literal["unrecorded_zero"] | None = None
     opening_positions: dict[str, str]
     price_discrepancies: list[int]
 

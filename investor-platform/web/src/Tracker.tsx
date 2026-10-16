@@ -34,6 +34,7 @@ type CAGR = {
 };
 export type Report = {
   cash_method?: "purchase_shortfall";
+  dividend_policy?: "unrecorded_zero";
   benchmark_values?: Record<"SPY" | "QQQ", { value: string }>;
   funding_estimate?: { capital: string; estimated_dividends: string };
   benchmark_mode?: BenchmarkMode;
@@ -570,6 +571,14 @@ export function Tracker({
                 {report.scope === "stocks"
                   ? "remaining stocks only"
                   : "unused cash retained"}
+              </p>
+            )}
+            {report.dividend_policy === "unrecorded_zero" && (
+              <p
+                className="form-note"
+                title="Recorded dividends still count. Unrecorded dividends add no cash or receivable; this is a temporary account assumption."
+              >
+                Unrecorded dividends assumed zero
               </p>
             )}
             <div

@@ -27,7 +27,16 @@ def market_dividends(entries, prices, through, *, validation_start=None):
     return expected
 
 
-def dividend_receivables(entries, prices, securities, days, *, validation_start=None):
+def dividend_receivables(
+    entries,
+    prices,
+    securities,
+    days,
+    *,
+    validation_start=None,
+    assume_unrecorded_zero: bool = False,
+):
+    """Accrue recorded income; optionally assume zero only for absent dividend records."""
     dividends = [e for e in entries if e.income_kind == IncomeKind.DIVIDEND]
     warnings = []
     if any(e.kind == EntryKind.INCOME and e.income_kind is None for e in entries):
@@ -45,6 +54,8 @@ def dividend_receivables(entries, prices, securities, days, *, validation_start=
         sid, exdate = key
         security = securities.get(sid)
         label = security.ticker if security is not None else "Dividend"
+        if assume_unrecorded_zero and key in expected and key not in recorded:
+            continue
         if key not in expected:
             warnings.append(
                 f"{label}: dividend on {exdate} needs matching holding and market evidence."
