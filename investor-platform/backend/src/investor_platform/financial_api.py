@@ -17,7 +17,7 @@ from .accounts import DB, Identity, owned_account
 from .domain import completed_market_date
 from .financial import Record, Row, records
 from .financial_history import fund_listings, read_release
-from .financial_history_report import build_report
+from .financial_history_report import add_portfolio_comparisons, build_report
 from .ledger import LedgerView, entries_for, ledger_view
 from .models import Account, LedgerEntry
 from .valuation import latest, value_records
@@ -43,7 +43,7 @@ def load_release(engine: Engine, schema: str) -> Record | None:
 def reporting_rates(
     currencies: set[str], end: date, engine: Engine, workspace_id: UUID
 ) -> tuple[dict[str, Decimal], Record]:
-    """Use the same snapshot-date FX for both periods' company-share amounts."""
+    """Use this snapshot's dated FX; company detail comparisons use the same rate."""
     result: dict[str, Decimal] = {"USD": Decimal(1)}
     proof: Record = {"USD": {"rate": "1", "quote_date": end.isoformat(), "source": "USD identity"}}
     currency: str
@@ -104,9 +104,7 @@ def financials(
     if year > today.year:
         raise HTTPException(422, "Select a completed or current calendar year")
     end: date = min(date(year, 12, 31), today)
-    entries: list[LedgerEntry] = [
-        e for e in entries_for(session, account_id) if e.effective_date <= end
-    ]
+    entries: list[LedgerEntry] = list(entries_for(session, account_id))
     schema: str | None = getattr(request.app.state, "financial_schema", None)
     release: Record | None = None
     if schema:
@@ -116,6 +114,35 @@ def financials(
             pass
         except (Error, SQLAlchemyError) as error:
             raise HTTPException(503, "Financial records are temporarily unavailable") from error
+    engine: Engine = request.app.state.engine
+    result: Record = account_report(
+        entries, account, release, year, end, engine, actor.workspace_id
+    )
+    prior: Record | None = None
+    reason: str | None = None
+    try:
+        prior = account_report(
+            entries, account, release, year - 1, date(year - 1, 12, 31), engine, actor.workspace_id
+        )
+    except HTTPException as error:
+        if error.status_code != 503:
+            raise
+        reason = "Prior portfolio market prices unavailable"
+    add_portfolio_comparisons(result, prior, year, reason=reason)
+    return result
+
+
+def account_report(
+    entries: list[LedgerEntry],
+    account: Account,
+    release: Record | None,
+    year: int,
+    end: date,
+    engine: Engine,
+    workspace_id: UUID,
+) -> Record:
+    """Calculate one calendar snapshot using that year's actual holdings and FX."""
+    entries = [entry for entry in entries if entry.effective_date <= end]
     ledger: LedgerView = ledger_view(entries, account.base_currency)
     funds: set[tuple[str, str]] = fund_listings(release)
     ledger = ledger.model_copy(
@@ -146,15 +173,15 @@ def financials(
                 "holdings": [],
             },
             year,
-            str(account_id),
+            str(account.id),
             {"USD": Decimal(1)},
         )
     valuation: dict = value_records(
         ledger,
         account.base_currency,
         False,
-        engine=request.app.state.engine,
-        workspace_id=actor.workspace_id,
+        engine=engine,
+        workspace_id=workspace_id,
         end=end,
     )
     if not valuation["complete"]:
@@ -184,7 +211,7 @@ def financials(
     )
     rates: dict[str, Decimal]
     fx_proof: Record
-    rates, fx_proof = reporting_rates(currencies, end, request.app.state.engine, actor.workspace_id)
+    rates, fx_proof = reporting_rates(currencies, end, engine, workspace_id)
     result: Record = build_report(
         release,
         {
@@ -194,7 +221,7 @@ def financials(
             "holdings": holdings,
         },
         year,
-        str(account_id),
+        str(account.id),
         rates,
     )
     result["reporting_fx"] = fx_proof

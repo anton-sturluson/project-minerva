@@ -289,6 +289,88 @@ test("shared year updates current, prior and changes; all history withholds annu
   expect(requested.length).toBe(count);
 });
 
+test("prior headline matches the prior portfolio and names its own omitted holdings", async ({
+  page,
+}) => {
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const year = Number(
+      new URL(route.request().url()).searchParams.get("year"),
+    );
+    const data = report(main, year);
+    const eps = data.weighted_company_per_share!.weighted_company_eps;
+    const fcf = data.weighted_company_per_share!.weighted_company_fcf_per_share;
+    if (year === 2026) {
+      eps.comparison = {
+        ...eps.comparison!,
+        prior_value: null,
+        status: "unavailable",
+        percent_change: null,
+        reason: "Prior market prices unavailable",
+      };
+    } else if (year === 2025) {
+      eps.comparison = {
+        ...eps.comparison!,
+        prior_value: "7.25",
+        percent_change: "-0.524137931",
+      };
+      fcf.comparison = {
+        ...fcf.comparison!,
+        prior_value: "1.75",
+        percent_change: "-0.818518857",
+      };
+      eps.comparison.exclusions = [
+        {
+          ticker: "OLD",
+          issuer_key: "example:old",
+          equity_weight: "0.4",
+          reason: "Prior EPS unavailable",
+        },
+      ];
+    } else if (year === 2024) {
+      data.companies = [
+        {
+          issuer_key: "example:previous",
+          ticker: "PREV",
+          name: "Previous holding",
+          equity_weight: "0.6",
+          financial_status: "eligible",
+        },
+      ];
+      eps.value = "7.25";
+      fcf.value = "1.75";
+    }
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  const summary = page.getByRole("region", {
+    name: "Portfolio-weighted metrics",
+  });
+  const eps = summary.getByRole("row", { name: /^Weighted company EPS/ });
+  await expect(eps.getByRole("cell").nth(0)).toHaveText("$3.5");
+  await expect(eps.getByRole("cell").nth(1)).toHaveText("Unavailable");
+  await page.getByLabel("Post-mortem year").selectOption("2025");
+  const fcf = summary.getByRole("row", { name: /^Weighted company FCF/ });
+  await expect(eps.getByRole("cell").nth(1)).toHaveText("$7.3*");
+  await expect(fcf.getByRole("cell").nth(1)).toHaveText("$1.8");
+  await expect(
+    page.getByText(
+      "* 2024 Weighted company EPS excludes OLD (40.0% weight; data unavailable).",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(eps.getByRole("cell").nth(2)).toHaveText("-52.4%");
+  await page.screenshot({
+    path: test.info().outputPath("prior-omissions.png"),
+    fullPage: true,
+  });
+  await page.getByLabel("Post-mortem year").selectOption("2024");
+  await expect(eps.getByRole("cell").nth(0)).toHaveText("$7.3");
+  await expect(fcf.getByRole("cell").nth(0)).toHaveText("$1.8");
+  await expect(
+    page.getByText(/2024 Weighted company EPS excludes OLD/),
+  ).toHaveCount(0);
+});
+
 test("financial table remains independent when attribution fails and retries its own error", async ({
   page,
 }) => {

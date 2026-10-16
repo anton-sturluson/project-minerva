@@ -13,13 +13,21 @@ export type PerShareComparison = {
   status: "calculated" | "not_meaningful" | "unavailable";
   percent_change: string | null;
   reason?: string | null;
+  exclusions?: FinancialExclusion[];
+};
+
+type FinancialExclusion = {
+  issuer_key?: string;
+  ticker?: string;
+  equity_weight?: string | null;
+  reason: string;
 };
 
 type SummaryMeasure = {
   label: string;
   value: string | null;
   coverage: string | null;
-  exclusions: { issuer_key?: string; reason: string }[];
+  exclusions: FinancialExclusion[];
   comparison?: PerShareComparison;
 };
 

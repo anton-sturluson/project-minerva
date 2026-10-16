@@ -150,7 +150,14 @@ export function Financials({
                                 maximumFractionDigits: digits,
                               })}
                       </td>
-                      <td className="number">
+                      <td
+                        className="number"
+                        aria-describedby={
+                          metric?.comparison?.exclusions?.length
+                            ? `${key}-prior-exclusions`
+                            : undefined
+                        }
+                      >
                         {digits === null
                           ? "—"
                           : metric?.comparison?.prior_value == null
@@ -163,6 +170,9 @@ export function Financials({
                                 minimumFractionDigits: digits,
                                 maximumFractionDigits: digits,
                               })}
+                        {Boolean(metric?.comparison?.exclusions?.length) && (
+                          <sup>*</sup>
+                        )}
                       </td>
                       <td className="number">
                         {digits === null
@@ -201,6 +211,24 @@ export function Financials({
                           : "data unavailable";
                       return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 1)} weight` : "weight unavailable"}; ${why})`;
                     })
+                    .join(", ")}
+                  .
+                </p>
+              ))}
+            {rows
+              .filter(({ metric }) => metric?.comparison?.exclusions?.length)
+              .map(({ key, label, metric }) => (
+                <p
+                  className="form-note"
+                  id={`${key}-prior-exclusions`}
+                  key={`${key}-prior`}
+                >
+                  * {priorYear} {label} excludes{" "}
+                  {metric!
+                    .comparison!.exclusions!.map(
+                      (excluded) =>
+                        `${excluded.ticker || "Company"} (${excluded.equity_weight != null ? `${percent(excluded.equity_weight, 1)} weight` : "weight unavailable"}; data unavailable)`,
+                    )
                     .join(", ")}
                   .
                 </p>
