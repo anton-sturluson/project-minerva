@@ -10,7 +10,7 @@ from uuid import UUID
 from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
 
-from .financial import Record, Row, check_schema, digest, record, records
+from .financial import Json, Record, Row, check_schema, digest, record, records
 
 VERSION: str = "portfolio-financial-history-v1"
 METRICS: tuple[str, ...] = (
@@ -42,7 +42,7 @@ def number(value: object) -> Decimal:
     return Decimal(value)
 
 
-def resolve(document: Record, identifier: str) -> None:
+def resolve(document: Record, identifier: str) -> Record:
     """Resolve a source observation/calculation ID or an exact JSON pointer."""
     if identifier.startswith("#/"):
         value: object = document
@@ -54,13 +54,13 @@ def resolve(document: Record, identifier: str) -> None:
                 value = value[token]
             else:
                 raise ValueError("Invalid financial evidence pointer")
-        return
+        return record(value)
     group: str
     for group in ("observations", "calculated_metrics"):
         item: Record
         for item in records(document.get(group, [])):
             if item.get("id", item.get("observation_id", item.get("calculation_id"))) == identifier:
-                return
+                return item
     raise ValueError("Unresolved financial evidence reference")
 
 
@@ -122,8 +122,25 @@ def validate_release(release: Record) -> None:
             metrics: Record = record(row[key])
             if set(metrics) != set(METRICS):
                 raise ValueError("Financial history requires exactly five bounded measures")
-            metric: Record
-            for metric in (record(value) for value in metrics.values()):
+            metric_key: str
+            metric_value: Json
+            for metric_key, metric_value in metrics.items():
+                metric: Record = record(metric_value)
+                eps_basis: Json = metric.get("eps_basis")
+                if eps_basis is not None and (
+                    metric_key != "basic_eps" or eps_basis not in ("basic", "diluted")
+                ):
+                    raise ValueError("EPS basis applies only to the company EPS measure")
+                convention: Json = metric.get("convention")
+                if convention is not None and (
+                    convention != "zero_revenue_margin"
+                    or metric_key not in METRICS[:3]
+                    or metric.get("status") != "available"
+                    or number(metric.get("value")) != 0
+                ):
+                    raise ValueError(
+                        "Zero-revenue convention applies only to available zero margins"
+                    )
                 if metric.get("status") == "unavailable":
                     if metric.get("value") is not None or not metric.get("reason"):
                         raise ValueError("Unavailable financial measures need a reason")
@@ -134,6 +151,10 @@ def validate_release(release: Record) -> None:
                 inputs: list[Record] = records(metric["inputs"])
                 if not inputs or not metric.get("method"):
                     raise ValueError("Available financial measures need input proof and method")
+                zero_revenue_proof: bool = False
+                expected_period: Record = record(
+                    row["period" if key == "metrics" else "prior_period"]
+                )
                 proof: Record
                 for proof in inputs:
                     document: Record = documents[str(proof["packet_sha256"])]
@@ -141,7 +162,19 @@ def validate_release(release: Record) -> None:
                     if not isinstance(identifiers, list) or not identifiers:
                         raise ValueError("Financial evidence needs exact input IDs")
                     for identifier in identifiers:
-                        resolve(document, str(identifier))
+                        node: Record = resolve(document, str(identifier))
+                        if convention is not None and (
+                            node.get("metric") == "revenue"
+                            and node.get("value") is not None
+                            and number(node["value"]) == 0
+                            and node.get("period_start") == expected_period["start"]
+                            and node.get("period_end") == expected_period["end"]
+                        ):
+                            zero_revenue_proof = True
+                if convention is not None and not zero_revenue_proof:
+                    raise ValueError(
+                        "Zero-revenue convention needs exact-period verified zero revenue"
+                    )
 
 
 def history_table(schema: str) -> sql.Composed:

@@ -289,6 +289,56 @@ test("shared year updates current, prior and changes; all history withholds annu
   expect(requested.length).toBe(count);
 });
 
+test("zero-revenue convention and reported diluted EPS stay visible", async ({
+  page,
+}) => {
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const data = report();
+    data.weighted_ratios.fcf_margin_after_disclosed_capex.value = "0";
+    data.weighted_ratios.fcf_margin_after_disclosed_capex.conventions = [
+      { issuer_key: "example:issuer", ticker: "EXM" },
+    ];
+    data.weighted_ratios.operating_margin.conventions = [
+      { issuer_key: "example:issuer", ticker: "EXM" },
+    ];
+    data.weighted_company_per_share!.weighted_company_eps.value = "0";
+    data.companies[0].per_share_metrics!.basic_eps = {
+      status: "available",
+      value: "2.34",
+      eps_basis: "diluted",
+    };
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  const summary = page.getByRole("region", {
+    name: "Portfolio-weighted metrics",
+  });
+  await expect(
+    summary
+      .getByRole("row", { name: /^FCF margin/ })
+      .getByRole("cell")
+      .nth(0),
+  ).toHaveText("0.0%");
+  await expect(
+    summary
+      .getByRole("row", { name: /^Weighted company EPS/ })
+      .getByRole("cell")
+      .nth(0),
+  ).toHaveText("$0.0");
+  await expect(
+    page.getByText("3 FCF margin: EXM included at 0% (no revenue).", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Operating margin excludes OTH.*EXM included at 0%/),
+  ).toBeVisible();
+  await page.getByText("Company details", { exact: true }).click();
+  await expect(
+    page.getByRole("cell", { name: "EPS (diluted)", exact: true }),
+  ).toBeVisible();
+});
+
 test("prior headline matches the prior portfolio and names its own omitted holdings", async ({
   page,
 }) => {
