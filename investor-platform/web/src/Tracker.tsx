@@ -33,6 +33,7 @@ type CAGR = {
   QQQ: string | null;
 };
 export type Report = {
+  cash_method?: "purchase_shortfall";
   benchmark_values?: Record<"SPY" | "QQQ", { value: string }>;
   funding_estimate?: { capital: string; estimated_dividends: string };
   benchmark_mode?: BenchmarkMode;
@@ -96,9 +97,12 @@ export function Tracker({
   account: Account;
   ledger: Ledger;
 }) {
+  const purchaseFunding =
+    account.reconstruction?.cash_method === "purchase_shortfall";
   const canEstimate =
-    account.reconstruction?.funding_status === "inferred" &&
-    account.reconstruction.opening_cash !== undefined;
+    purchaseFunding ||
+    (account.reconstruction?.funding_status === "inferred" &&
+      account.reconstruction.opening_cash != null);
   const [scope, setScope] = useState<Scope>(canEstimate ? "account" : "stocks");
   const [benchmarkMode, setBenchmarkMode] = useState<BenchmarkMode>(
     canEstimate ? "funded_hold" : "buy_hold",
@@ -121,6 +125,18 @@ export function Tracker({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const lastComparison = useRef<
+    | [
+        string,
+        string,
+        string[],
+        Baseline,
+        Scope,
+        string | undefined,
+        BenchmarkMode,
+      ]
+    | null
+  >(null);
   const compare = useCallback(
     async (
       from: string,
@@ -131,6 +147,16 @@ export function Tracker({
       anchor?: string,
       indexes: BenchmarkMode = "buy_hold",
     ) => {
+      if (purchaseFunding) measurement = "account";
+      lastComparison.current = [
+        from,
+        through,
+        exclusions,
+        basis,
+        measurement,
+        anchor,
+        indexes,
+      ];
       const version = ++generation.current;
       setBusy(true);
       setError("");
@@ -169,10 +195,18 @@ export function Tracker({
         if (version === generation.current) setBusy(false);
       }
     },
-    [account.id],
+    [account.id, purchaseFunding],
   );
   useEffect(() => {
-    // Always open the full recorded history; recent comparisons are explicitly selected.
+    if (purchaseFunding && lastComparison.current) {
+      setScope("account");
+      setReport(null);
+      void compare(...lastComparison.current);
+      return () => {
+        generation.current += 1;
+      };
+    }
+    // Open full history initially; purchase-funded ledger refreshes retain the comparison.
     const through = completedMarketDate();
     const from = ledger.entries[0]?.effective_date ?? through;
     setAnchor(undefined);
@@ -208,6 +242,7 @@ export function Tracker({
     account.base_currency,
     account.reconstruction,
     canEstimate,
+    purchaseFunding,
     ledger,
     compare,
   ]);
@@ -232,7 +267,11 @@ export function Tracker({
     report.benchmark_mode === "matched" &&
     !!report.matched_benchmarks;
   const modeledPortfolio =
-    report?.scope === "account" && !!report.funding_estimate;
+    report?.scope === "account" &&
+    (purchaseFunding || !!report.funding_estimate);
+  const fundingDescription = purchaseFunding
+    ? "Whole-account time-weighted return. Inferred deposits cover purchase cash shortfalls; recorded sale proceeds remain as cash. Cash history is unverified. Dividends require recorded income."
+    : "Estimated stocks plus cash. Deposits cover purchase shortfalls after available cash, sale proceeds, and estimated dividends. The imported opening cash is ignored.";
   const showEstimatedValue =
     report?.benchmark_mode === "funded_hold" && !!report.benchmark_values;
   const showValue = showInvestedValue || showEstimatedValue;
@@ -292,34 +331,36 @@ export function Tracker({
           </button>
         </p>
         <form className="entry-form performance-controls" onSubmit={submit}>
-          <label>
-            Measure
-            <select
-              aria-label="Performance measure"
-              value={scope}
-              disabled={busy}
-              onChange={(e) => {
-                const next = e.target.value as Scope;
-                const nextExcluded =
-                  canEstimate && next === "account" ? [] : excluded;
-                setScope(next);
-                setExcluded(nextExcluded);
-                setReport(null);
-                void compare(
-                  start,
-                  end,
-                  nextExcluded,
-                  baseline,
-                  next,
-                  anchor,
-                  benchmarkMode,
-                );
-              }}
-            >
-              <option value="stocks">Stocks only</option>
-              <option value="account">Whole account</option>
-            </select>
-          </label>
+          {!purchaseFunding && (
+            <label>
+              Measure
+              <select
+                aria-label="Performance measure"
+                value={scope}
+                disabled={busy}
+                onChange={(e) => {
+                  const next = e.target.value as Scope;
+                  const nextExcluded =
+                    canEstimate && next === "account" ? [] : excluded;
+                  setScope(next);
+                  setExcluded(nextExcluded);
+                  setReport(null);
+                  void compare(
+                    start,
+                    end,
+                    nextExcluded,
+                    baseline,
+                    next,
+                    anchor,
+                    benchmarkMode,
+                  );
+                }}
+              >
+                <option value="stocks">Stocks only</option>
+                <option value="account">Whole account</option>
+              </select>
+            </label>
+          )}
           <label>
             Index comparison
             <select
@@ -371,12 +412,23 @@ export function Tracker({
               max={end}
               onChange={(e) => {
                 setAnchor(undefined);
-                setStart(e.target.value);
-                setBaseline(
-                  e.target.value === ledger.entries[0]?.effective_date
+                const from = e.target.value;
+                const basis =
+                  from === ledger.entries[0]?.effective_date
                     ? "history"
-                    : "recorded",
-                );
+                    : "recorded";
+                setStart(from);
+                setBaseline(basis);
+                if (purchaseFunding)
+                  lastComparison.current = [
+                    from,
+                    end,
+                    [],
+                    basis,
+                    "account",
+                    undefined,
+                    benchmarkMode,
+                  ];
                 setExcluded([]);
                 setReport(null);
                 setError("");
@@ -396,6 +448,16 @@ export function Tracker({
               onChange={(e) => {
                 setAnchor(undefined);
                 setEnd(e.target.value);
+                if (purchaseFunding)
+                  lastComparison.current = [
+                    start,
+                    e.target.value,
+                    [],
+                    baseline,
+                    "account",
+                    undefined,
+                    benchmarkMode,
+                  ];
                 setExcluded([]);
                 setReport(null);
                 setError("");
@@ -477,13 +539,7 @@ export function Tracker({
             )}
             {!showValue && (
               <p>
-                <span
-                  title={
-                    modeledPortfolio
-                      ? "Estimated stocks plus cash. Deposits cover purchase shortfalls after available cash, sale proceeds, and estimated dividends. The imported opening cash is ignored."
-                      : undefined
-                  }
-                >
+                <span title={modeledPortfolio ? fundingDescription : undefined}>
                   {report.scope === "stocks"
                     ? "Stock value (USD)"
                     : report.provisional
@@ -542,7 +598,7 @@ export function Tracker({
                     <th className="number">Cumulative</th>
                     <th
                       className="number"
-                      title="Annualized return; requires at least one year"
+                      title="Annualized time-weighted return (ACT/365.25); requires at least one year"
                     >
                       CAGR
                     </th>
@@ -551,11 +607,7 @@ export function Tracker({
                 <tbody>
                   <tr>
                     <td
-                      title={
-                        modeledPortfolio
-                          ? "Estimated stocks plus cash. Deposits cover purchase shortfalls after available cash, sale proceeds, and estimated dividends. The imported opening cash is ignored."
-                          : undefined
-                      }
+                      title={modeledPortfolio ? fundingDescription : undefined}
                     >
                       {modeledPortfolio
                         ? "Your portfolio + cash"

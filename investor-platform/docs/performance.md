@@ -4,7 +4,13 @@
 
 USD-settled long-only equities/ETFs, immutable recorded cash/trades, and daily closing observations. SPY and QQQ are investable S&P 500 and Nasdaq-100 proxies, not the index series themselves. Their fund costs and tracking differences remain in their returns. ([SPY](https://www.ssga.com/us/en/institutional/etfs/state-street-spdr-sp-500-etf-trust-spy), [QQQ](https://www.invesco.com/qqq-etf/en/home.html))
 
-## Stock portfolio return (default)
+## Primary portfolio performance
+
+Imported accounts marked `cash_method: purchase_shortfall` use one whole-account time-weighted return (TWR), including cash and recorded dividend receivables. Opening cash starts at zero. Inferred deposits are active ledger records dated immediately before purchases that need more cash; they are assumptions about funding, not verified broker deposits. Sales and income already received provide cash for later purchases. The interface has no stock/account measurement switch for these accounts. Both index choices use the same portfolio values, cumulative return, CAGR, yearly returns and dates. ([Funding rules](../backend/src/investor_platform/funding.py), [funding synchronization](../backend/src/investor_platform/purchase_funding.py), [performance calculation](../backend/src/investor_platform/performance.py))
+
+The standard whole-account income, price, FX and split checks below still apply. Inferred purchase funding does not reconcile missing dividends or certify the source history. Missing or mismatched recorded dividend income withholds portfolio return and CAGR; provider dividends are never inserted as spendable cash. Other accounts retain their existing measurement controls.
+
+## Legacy stock-sleeve measure
 
 The **Stocks only** view measures the invested stock positions from recorded purchases, sales and share receipts. It is an estimated daily time-weighted stock return, not the return of the entire brokerage account. Idle cash, cash-currency translation, interest, lending income, withholding and account-level expenses are excluded. Native stock prices still use dated USD FX. Recorded trading fees remain in purchase costs and net sale proceeds.
 
@@ -30,13 +36,15 @@ Shares held across a provider-reported split block the report until split accoun
 
 ## Recent and full-history views
 
-All portfolios open to **Full history**. Ordinary accounts select **Stocks only**; inferred-funding reconstructions select **Estimated buy & hold**. The following cash treatment applies to **Whole account**. **YTD** and **1 year** use recorded starting balances. YTD anchors to the prior year-end closing session; 1 year anchors to the close on or before the date one calendar year before the requested ending date. An account opened later starts at its first available close. Earlier closed positions require no price lookup, but their sale proceeds and original FIFO lots remain in accounting. Earlier missing income and split adjustments are not reconstructed in this mode, so the opening balance must be treated as provisional. Dates remain editable. **Full history** retains inception reconciliation and can still fail if a delisted price series is unavailable. Neither mode replaces missing prices with zero or trade prices. See [ADR 0005](decisions/0005-recorded-period-baselines.md).
+All portfolios open to **Full history**. Purchase-funded imports use the primary whole-account measure; ordinary accounts initially select **Stocks only**. **YTD** and **1 year** use existing ledger balances at the selected boundary. Purchase-funded accounts retain their selected dates and index choice when ledger records refresh. Their historical deposits remain in accounting; selecting a later window does not create new funding or bypass the income checks. YTD anchors to the prior year-end closing session; 1 year anchors to the close on or before the date one calendar year before the requested ending date. An account opened later starts at its first available close. Legacy recorded-baseline views require no price lookup for earlier closed positions, but their sale proceeds and original FIFO lots remain in accounting. Earlier missing income and split adjustments are not reconstructed in that legacy mode, so its opening balance remains provisional. Purchase-funded accounts fetch full history for both index choices to preserve funding and received-share benchmark consistency; earlier missing prices or income can still make a recent comparison unavailable. Dates remain editable. **Full history** retains inception reconciliation and can still fail if a delisted price series is unavailable. Neither mode replaces missing prices with zero or trade prices. See [ADR 0005](decisions/0005-recorded-period-baselines.md).
 
 In a recorded-baseline view, exclusions apply within that period: prior trades remain, and excluded opening shares become cash at the first session close. The all-history trade scorecard and current holdings are independent of this choice.
 
 ## Funding reconciliation
 
-An inferred minimum opening cash balance is a bookkeeping placeholder, not evidence that all future capital was present at inception. Imported accounts default to `funding_status: inferred`, including legacy imports without a status field. The recorded-ledger whole-account return remains withheld until cash history is reconciled. For eligible imported accounts, the tracker uses the minimum-funding estimate below for whole-account performance under both index choices. Stock-exclusion scenarios remain unavailable for this modeled account. The stocks-only calculation is independent of cash records. Any modeled account value and return are estimates.
+A new transaction reconstruction has no opening-cash placeholder. It starts with zero cash and adds only the shortfall immediately before each purchase, after using preceding cash movements in effective-date and source order. A later same-day sale or deposit cannot fund an earlier purchase. Recorded trade amounts and existing cash records are retained. Opening/received shares do not create spendable cash. ([Import](../backend/src/investor_platform/import_transactions.py), [shortfall calculation](../backend/src/investor_platform/funding.py))
+
+Existing portfolios require a reviewed migration: only explicitly selected opening-cash or deposit placeholders are voided; originals remain in correction history. The preview checks the active-record revision and confirms that holdings and basis stay unchanged. Later trades, cash entries and corrections recalculate generated deposits atomically under the account lock, using active cash records and preserved purchase order. Backdated records can change or remove earlier inferred deposits; the correction history remains. `funding_status` remains `inferred`. An unreviewed legacy reconstruction is not silently migrated. ([Migration and synchronization](../backend/src/investor_platform/purchase_funding.py))
 
 Mark a reconstruction `reconciled` only after reviewing dated deposits/withdrawals, transfers within the portfolio boundary, income, fees, opening balances and closing cash. A current cash override cannot establish historical funding dates. Keep source rows, transfer matches and unresolved allocations in ignored private storage. Accounts entered directly use `recorded` funding status; that is not independent broker certification.
 
@@ -54,110 +62,17 @@ Search by ticker or exchange in **Excluded stocks**, select multiple stocks, the
 
 ## Index comparison modes
 
-### Portfolio funding and index selection
+### Primary purchase-funded comparison
 
-Accounts explicitly marked with inferred funding and a matching inferred opening
-cash balance have two index choices: **Buy and hold** and **Match purchase funding**.
-Both use the same portfolio calculation for the selected measurement and dates.
-Changing the index choice preserves the measurement, dates and exclusions.
-Whole-account performance uses the minimum fresh funding needed by the original
-trading strategy, including cash retained after sales. Stocks-only performance
-continues to exclude cash. The funding model is an assumption, not verified deposit
-history.
+Purchase-funded accounts have two choices. **Buy and hold** shows SPY/QQQ adjusted-close returns between the displayed dates. **Match purchase funding** invests the canonical ledger's external deposits in each index at that session's adjusted close, includes close-valued share receipts once, and holds the index shares after stock sales. Existing sale proceeds fund later stock purchases without another external deposit or index purchase. Both benchmark funds reinvest distributions. The matched view also shows index dollar values; it does not calculate another portfolio return or another deposit schedule. ([Funded index replay](../backend/src/investor_platform/funded_benchmarks.py))
 
-**Buy and hold** shows SPY/QQQ adjusted-close returns between displayed dates.
-**Match purchase funding** invests recorded deposits and inferred additional funding
-on their dates, then holds the index shares even after stock sales. Recycled sale
-proceeds and estimated dividends reduce the extra funding required for later stock
-purchases; they do not cause another index purchase. This choice adds estimated
-index dollar values. Time-weighted index percentage returns can equal ordinary buy
-and hold because the return measure removes deposits. Dollar values reflect the
-contribution amounts and dates. The summary tooltip explains the funding and
-income policy; the interface does not add explanatory paragraphs. ([Funding model](../backend/src/investor_platform/funding_estimate.py))
+Both the portfolio and funded indexes link daily factors using beginning-of-session cash deposits, end-of-session cash withdrawals, and close-valued share receipts. The index holds each new deposit as cash until its closing purchase. That cash earns no index price change on its purchase session, so contribution timing can affect the matched index's TWR as well as its dollar value. Its percentage return need not equal period-start buy and hold. The first displayed close establishes the baseline. A never-sold index simulation rejects recorded cash withdrawals rather than inventing index sales. ([Shared daily return factor](../backend/src/investor_platform/performance_math.py), [funded index replay](../backend/src/investor_platform/funded_benchmarks.py))
 
-Start modeled cash at zero, ignoring only the explicitly identified inferred opening
-placeholder. Recorded deposits enter modeled cash and both index alternatives once.
-For each effective calendar date, add deposits, net sale receipts and estimated gross
-stock dividends, subtract purchase costs, and infer extra cash only for a remaining
-shortage. A deposit before the first stock purchase starts the modeled comparison;
-a later deposit cannot fund an earlier purchase. Carry positive cash to subsequent
-dates. Same-day cash is netted
-before mapping transactions to market sessions, so a Monday sale cannot fund an
-earlier weekend purchase. Dividends use provider gross amounts on ex-dates, not actual
-broker payment dates or after-tax amounts. Received assets contribute their first
-session closing market value once, without becoming actual spendable cash. Every
-recorded deposit or inferred contribution buys SPY/QQQ at adjusted closing prices;
-benchmark distributions
-reinvest and stock sales never sell benchmark holdings. ([Funding model](../backend/src/investor_platform/funding_estimate.py))
+### Legacy compatibility
 
-Actual estimated wealth is stock market value plus modeled cash. Both actual and
-benchmark daily returns use `(ending wealth − close-valued asset receipts) / (previous wealth + fresh cash)`;
-cash is available for the session and index purchases execute at the close. The first
-displayed close establishes the baseline. Cumulative returns, CAGR and yearly results
-use these same cash-inclusive return series; stock-only contribution attribution is
-not reused. Full ledger replay is preserved for every reporting window, so selecting
-YTD or a later start rebases returns but does not reset ending wealth or inferred
-funding. Post-close transactions are excluded before security-price fetching.
-([Performance endpoint](../backend/src/investor_platform/performance.py))
+Legacy inferred accounts with an identified opening placeholder retain the separate minimum-funding estimator until reviewed migration. It ignores that placeholder, estimates gross dividend cash on provider ex-dates, reuses sales, and accepts recorded deposits. It rejects recorded withdrawals, income and expenses. These are legacy modeling assumptions, not the primary account return or verified cash history. ([Legacy estimator](../backend/src/investor_platform/funding_estimate.py))
 
-The `funding_estimate.fresh_cash` field is total recorded deposits plus inferred extra
-cash; `recorded_deposits` and `inferred_cash` show that split. `capital` also includes
-received assets. Recorded deposits do not establish that the remaining cash history
-is complete.
-
-The minimum-funding calculation rejects recorded withdrawals, income and expenses
-anywhere in the replay history, including dividends earned before the cutoff with
-later payment, because combining those records requires a different funding policy.
-It rejects changed/real opening balances and positive starting wealth without
-inferable capital. Stock exclusions remain unavailable for modeled whole accounts;
-stocks-only exclusions retain the original portfolio funding for the index comparison.
-Existing price/FX/split guards still apply. It creates no ledger records. Actual deposit
-dates, missing broker cash income, tax withholding and intraday funding remain
-unverified. These funding checks apply to both index choices in the modeled
-whole-account view. The legacy **Match buys & sales** comparison remains available
-for other accounts and through the API; it is not a third choice for inferred-funding
-accounts. ([Funding model](../backend/src/investor_platform/funding_estimate.py), [Integration checks](../backend/tests/test_funding_estimate.py))
-
-### Legacy matched sales comparison
-
-**Buy and hold** shows the existing SPY/QQQ adjusted-close
-returns between displayed dates. **Match buys & sales** replaces both benchmark
-series with independent, read-only index investments matching the original stock
-deployments. It also updates the cumulative, annualized and yearly benchmark results
-and their portfolio-minus-benchmark differences. ([Calculation](../backend/src/investor_platform/matched_benchmarks.py), [Performance endpoint](../backend/src/investor_platform/performance.py))
-
-Each stock purchase invests its recorded USD cost, including recorded trading fees,
-at that session's benchmark adjusted close. A sale exits the benchmark units attached
-to the corresponding FIFO stock quantity, including partial lots; the hypothetical
-index sale proceeds leave the measured sleeve. Actual stock sale dollars do not
-determine the index withdrawal. Later purchases use their actual recorded amounts
-as new contributions. Benchmarks reinvest distributions and charge no extra
-simulated transaction fees. Non-session entries move to the next benchmark session,
-consistent with the performance ledger convention. ([Matched index replay](../backend/src/investor_platform/matched_benchmarks.py))
-
-The plot uses estimated daily time-weighted returns: daily factors are
-`(ending index value + hypothetical sale proceeds − close-valued receipts) / (previous index value + stock purchase costs)`.
-Purchase execution uses closing prices, so newly invested benchmark money has no
-gain on its purchase session. An empty sleeve stays flat until reinvestment. With
-continuous exposure and no added purchases, the percentage curve can equal buy and
-hold despite different dollar amounts. In **Stocks only**, the matched comparison
-shows an **Invested value (USD)** column for the original stocks, SPY and QQQ. The
-index values are their remaining holdings after matching purchases and FIFO exits;
-cash and exited proceeds are excluded, as the column tooltip states. They are not
-the total wealth of a self-funded all-index account. The interface omits explanatory
-paragraphs and the previous dollar-gain note; definitions remain here. A
-whole-account index-value comparison would require explicit hypothetical cash
-accounting and funding-shortfall checks. ([Matched index replay](../backend/src/investor_platform/matched_benchmarks.py), [Performance interface](../web/src/Tracker.tsx))
-
-Full-history mode replays recorded stock purchases before rebasing to the displayed
-first close. Opening/received shares with no acquisition date contribute their
-closing market value when received. Recorded-period mode instead seeds the first
-close with the actual market value of existing stock holdings and then matches new
-purchases and sales. This does not infer earlier acquisition timing. Idle account
-cash, interest and account expenses are excluded from these benchmark sleeves,
-including when **Whole account** is selected. Exclusion scenarios retain the original
-portfolio's benchmark deployments. Switching modes writes no ledger records and
-preserves the selected period, measurement and exclusions. ([Matched index replay](../backend/src/investor_platform/matched_benchmarks.py), [Performance endpoint](../backend/src/investor_platform/performance.py))
+Other accounts retain **Match buys & sales**, which matches stock purchases and FIFO sales with separate index units. Sale proceeds leave the index sleeve; remaining invested value excludes withdrawn proceeds. Recorded-period comparisons seed existing holdings at the first displayed close. Stock-exclusion scenarios retain the original benchmark deployments. This compatibility mode does not change the new primary whole-account method. ([Matched index replay](../backend/src/investor_platform/matched_benchmarks.py))
 
 ## Chart dates
 
@@ -196,8 +111,11 @@ The UI shows the actual quote dates: this is not an executable intraday quote. N
 
 ### Market data and benchmarks
 
-- [Minimum-funding model](../backend/src/investor_platform/funding_estimate.py) — assumed fresh contributions, dividend cash, never-sold index wealth and return boundaries.
-- [Minimum-funding integration tests](../backend/tests/test_funding_estimate.py) — recycling, dividend reuse, receipts, calendar dates, cutoff and unchanged records.
+- [Purchase shortfall rules](../backend/src/investor_platform/funding.py) and [migration/synchronization](../backend/src/investor_platform/purchase_funding.py) — dated inferred deposits, preserved source order and correction history.
+- [Transaction import](../backend/src/investor_platform/import_transactions.py) — zero opening cash and new import funding.
+- [Performance calculation](../backend/src/investor_platform/performance.py) and [shared daily factor](../backend/src/investor_platform/performance_math.py) — standard whole-account return and income guards.
+- [Funded index replay](../backend/src/investor_platform/funded_benchmarks.py) — canonical deposits invested at closes, never-sold index holdings and TWR timing.
+- [Legacy minimum-funding estimator](../backend/src/investor_platform/funding_estimate.py) — compatibility assumptions before reviewed migration.
 
 - [Matched index replay](../backend/src/investor_platform/matched_benchmarks.py) — project purchase, FIFO exit, return and dollar-gain conventions.
 - [Yahoo adjusted close](https://in.help.yahoo.com/kb/adjusted-close-sln28256.html) — split/distribution-adjusted prices.

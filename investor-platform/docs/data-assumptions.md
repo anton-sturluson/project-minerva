@@ -10,7 +10,7 @@ This is the living register of reconstruction assumptions. Change it with the im
 | Original rows and discrepancies are retained privately. | Use import provenance and correction history for reconciliation. |
 | Dividends need both the ex-date and actual cash payment date, linked to the security. | Recorded receivables enter value on the ex-date and leave receivables when cash arrives. Missing or mismatched gross distributions withhold whole-account returns. Stock-only estimates use provider gross distributions; neither mode adds synthetic ledger income. |
 | Unrecorded fees and taxes are absent. | Estimates are not after-tax returns. |
-| Recent comparisons use recorded opening cash and share quantities. | Missing pre-period income and corporate actions are not reconstructed; verify opening balances. Full history retains its stricter data requirements. |
+| Legacy recent comparisons use recorded opening cash and share quantities. Purchase-funded accounts retain full ledger funding and income checks. | Legacy opening balances remain provisional. Purchase-funded recent views can still require historical prices and recorded income. |
 | Prices and FX may come from different providers. | Values are not independently verified and may be revised. |
 
 See [transaction import](transaction-import.md) for ingestion rules, [performance](performance.md) for calculation conventions and [hit rate](hit-rate.md) for exclusions. The UI retains provisional status and errors that prevent a valid calculation; import details are available from the private account metadata/API.

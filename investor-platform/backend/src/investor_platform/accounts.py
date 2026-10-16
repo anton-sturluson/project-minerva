@@ -29,7 +29,8 @@ class ReconstructionView(BaseModel):
     source_sha256: str
     imported_trades: int
     skipped: list[dict]
-    opening_cash: str
+    opening_cash: str | None = None
+    cash_method: str | None = None
     opening_positions: dict[str, str]
     price_discrepancies: list[int]
 

@@ -68,7 +68,7 @@ def test_atomic_cash_reconstruction_preserves_trades_and_retries(database, db_cl
         "2026-01-02",
         "2026-01-05",
     ]
-    assert after["corrections"][0]["original"]["kind"] == "opening_cash"
+    assert all(c["original"]["kind"] == "deposit" for c in after["corrections"])
     assert reconcile(database, aid, plan, apply=True)["already_applied"] is True
     assert ledger(db_client, aid) == after
     with Session(database) as session:
