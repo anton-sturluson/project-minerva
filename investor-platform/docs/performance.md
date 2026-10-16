@@ -103,6 +103,8 @@ The scorecard toggle simulates selling every currently open position at its late
 
 The UI shows the actual quote dates: this is not an executable intraday quote. New sale fees, slippage and taxes are omitted. No trade, cash balance, holding, or benchmark hit-rate record is changed. Switching back restores the recorded-only scorecard.
 
+Post-mortem's full-history stock contribution response has a private process-memory cache for five minutes, capped at 16 reports. Every request still checks account ownership, dates, and the active ledger revision. The key includes the active ordered ledger IDs, listing identity evidence, account funding policy and currency, request parameters, completed market date, and the sorted revision timestamps for every workspace provider-cache entry. A correction, cancellation, new relevant transaction, price refresh, or date change therefore selects a new result. The result is stored under its pre-calculation price revision, so a concurrent refresh cannot label old prices as new. Reports with warnings or errors are not cached. This does not change the browser's `no-store` privacy policy; restarts discard cached responses.
+
 ## References
 
 ### Methodology
