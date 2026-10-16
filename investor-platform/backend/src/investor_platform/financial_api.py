@@ -16,7 +16,7 @@ from . import market
 from .accounts import DB, Identity, owned_account
 from .domain import completed_market_date
 from .financial import Record, Row, records
-from .financial_history import read_release
+from .financial_history import fund_listings, read_release
 from .financial_history_report import build_report
 from .ledger import LedgerView, entries_for, ledger_view
 from .models import Account, LedgerEntry
@@ -117,6 +117,16 @@ def financials(
         except (Error, SQLAlchemyError) as error:
             raise HTTPException(503, "Financial records are temporarily unavailable") from error
     ledger: LedgerView = ledger_view(entries, account.base_currency)
+    funds: set[tuple[str, str]] = fund_listings(release)
+    ledger = ledger.model_copy(
+        update={
+            "holdings": [
+                holding
+                for holding in ledger.holdings
+                if (holding.security.ticker, holding.security.exchange) not in funds
+            ]
+        }
+    )
     held_identities: set[tuple[str, str]] = {
         (holding.security.ticker, holding.security.exchange) for holding in ledger.holdings
     }

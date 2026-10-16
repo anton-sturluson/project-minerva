@@ -22,6 +22,19 @@ METRICS: tuple[str, ...] = (
 )
 
 
+def fund_listings(release: Record | None) -> set[tuple[str, str]]:
+    """Identify funds only from the reviewed release's explicit classifications."""
+    return (
+        {
+            (str(row["ticker"]), str(row["exchange"]))
+            for row in records(release["records"])
+            if row["instrument_type"] == "fund"
+        }
+        if release
+        else set()
+    )
+
+
 def number(value: object) -> Decimal:
     """Require a finite decimal string without silently rounding source data."""
     if not isinstance(value, str) or not re.fullmatch(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?", value):
