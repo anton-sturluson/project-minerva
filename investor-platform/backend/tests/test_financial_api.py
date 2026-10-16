@@ -23,7 +23,13 @@ from investor_platform import financial_api, market
 from investor_platform.app import app
 from investor_platform.db import Actor, get_actor
 from investor_platform.financial import Json, Record, Row, check_schema, record, records
-from investor_platform.financial_history import METRICS, VERSION, import_release, read_release
+from investor_platform.financial_history import (
+    METRICS,
+    VERSION,
+    import_release,
+    read_release,
+    validate_release,
+)
 from investor_platform.financial_history_report import (
     SHARES,
     add_portfolio_comparisons,
@@ -629,3 +635,156 @@ def test_api_compares_actual_previous_portfolio_and_preserves_current_on_prior_f
             == "AAA"
         )
     assert ledger(client, account) == before
+
+
+def zero_revenue_release(revenue: str = "0", *, proof_end: str = "2025-12-31") -> Record:
+    """Pin exact-period synthetic revenue proof for the explicit margin convention."""
+    zero: Record = release_row("ZERO")
+    key: str
+    for key in METRICS[:3]:
+        record(record(zero["metrics"])[key]).update(
+            value="0",
+            convention="zero_revenue_margin",
+            method="Explicit user convention: zero margin for verified zero revenue",
+        )
+    release: Record = release_payload([release_row(), zero])
+    packet: str = json.dumps(
+        {
+            "observations": [
+                {"id": "input", "value": "synthetic evidence"},
+                {
+                    "id": "zero-revenue",
+                    "metric": "revenue",
+                    "value": revenue,
+                    "period_start": "2025-01-01",
+                    "period_end": proof_end,
+                },
+            ]
+        }
+    )
+    sha: str = hashlib.sha256(packet.encode()).hexdigest()
+    receipt: str = json.dumps({"packet_sha256": sha})
+    release["review_receipts"] = [
+        {"content": receipt, "sha256": hashlib.sha256(receipt.encode()).hexdigest()}
+    ]
+    release["evidence"] = {"packets": {sha: packet}}
+    row: Record
+    for row in records(release["records"]):
+        group: str
+        for group in ("metrics", "prior_metrics"):
+            metric: Record
+            for metric in (record(v) for v in record(row[group]).values()):
+                metric["inputs"] = [
+                    {
+                        "packet_sha256": sha,
+                        "ids": ["zero-revenue" if metric.get("convention") else "input"],
+                    }
+                ]
+    return release
+
+
+def test_verified_zero_revenue_margins_count_as_zero_in_weighted_company_metrics() -> None:
+    """The explicit convention includes company weight and carries a distinct note."""
+    release: Record = zero_revenue_release()
+    validate_release(release)
+    result: Record = build_report(
+        release,
+        snapshot(("AAA", "600"), ("ZERO", "400")),
+        2025,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    key: str
+    for key in METRICS[:3]:
+        metric: Record = weighted(result, key)
+        assert Decimal(str(metric["value"])) == Decimal("0.24")
+        assert Decimal(str(metric["coverage"])) == 1 and not metric["exclusions"]
+        assert records(metric["conventions"]) == [
+            {
+                "issuer_key": "example:ZERO",
+                "ticker": "ZERO",
+                "equity_weight": "0.4",
+                "convention": "zero_revenue_margin",
+            }
+        ]
+    assert (
+        Decimal(
+            str(
+                record(record(result["weighted_company_per_share"])["weighted_company_eps"])[
+                    "value"
+                ]
+            )
+        )
+        == 2
+    )
+
+
+@pytest.mark.parametrize(
+    "revenue,proof_end",
+    [
+        ("1", "2025-12-31"),
+        ("-1", "2025-12-31"),
+        ("0", "2024-12-31"),
+    ],
+)
+def test_zero_revenue_convention_rejects_nonzero_or_wrong_period_proof(
+    revenue: str,
+    proof_end: str,
+) -> None:
+    """Neither losses, a positive denominator nor a different period justify the convention."""
+    with pytest.raises(ValueError, match="exact-period verified zero revenue"):
+        validate_release(zero_revenue_release(revenue, proof_end=proof_end))
+
+
+@pytest.mark.parametrize(
+    "key,value,status",
+    [
+        ("basic_eps", "0", "available"),
+        ("gross_margin", "0.1", "available"),
+        ("gross_margin", None, "unavailable"),
+    ],
+)
+def test_zero_revenue_convention_cannot_change_other_metrics_or_missing_data(
+    key: str,
+    value: str | None,
+    status: str,
+) -> None:
+    """The marker is bounded to available zero margins and never becomes an imputation rule."""
+    release: Record = zero_revenue_release()
+    zero: Record = records(release["records"])[1]
+    record(record(zero["metrics"])[key]).update(
+        convention="zero_revenue_margin",
+        value=value,
+        status=status,
+        reason="Synthetic missing data",
+    )
+    with pytest.raises(ValueError, match="only to available zero margins"):
+        validate_release(release)
+
+
+def test_verified_diluted_eps_retains_explicit_basis() -> None:
+    """A verified diluted fallback is displayed as such without inventing basic EPS."""
+    row: Record = release_row()
+    record(record(row["metrics"])["basic_eps"])["eps_basis"] = "diluted"
+    record(record(row["prior_metrics"])["basic_eps"])["eps_basis"] = "diluted"
+    release: Record = release_payload([row])
+    validate_release(release)
+    result: Record = build_report(
+        release, snapshot(("AAA", "100")), 2025, "synthetic-account", {"USD": Decimal(1)}
+    )
+    company: Record = records(result["companies"])[0]
+    assert record(record(company["per_share_metrics"])["basic_eps"])["eps_basis"] == "diluted"
+    compared: Record = record(record(company["per_share_comparisons"])["basic_eps"])
+    assert compared["status"] == "calculated"
+    assert compared["percent_change"] == "1"
+
+
+@pytest.mark.parametrize(
+    "key,basis", [("fcf_per_basic_share", "diluted"), ("basic_eps", "unknown")]
+)
+def test_eps_basis_does_not_change_cash_flow_denominators(key: str, basis: str) -> None:
+    """A diluted EPS fallback cannot relabel the basic FCF/share denominator."""
+    row: Record = release_row()
+    record(record(row["metrics"])[key])["eps_basis"] = basis
+    with pytest.raises(ValueError, match="EPS basis applies only"):
+        validate_release(release_payload([row]))

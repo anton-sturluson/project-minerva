@@ -5,6 +5,7 @@ export type PerShareMeasure = {
   value: string | null;
   reason?: string | null;
   method?: string;
+  eps_basis?: "basic" | "diluted";
 };
 
 export type PerShareComparison = {
@@ -28,6 +29,7 @@ type SummaryMeasure = {
   value: string | null;
   coverage: string | null;
   exclusions: FinancialExclusion[];
+  conventions?: { issuer_key: string; ticker: string }[];
   comparison?: PerShareComparison;
 };
 

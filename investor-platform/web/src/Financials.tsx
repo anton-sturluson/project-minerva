@@ -93,7 +93,10 @@ export function Financials({
   const footnotes = new Map(
     [
       ...rows
-        .filter(({ metric }) => metric?.exclusions.length)
+        .filter(
+          ({ metric }) =>
+            metric?.exclusions.length || metric?.conventions?.length,
+        )
         .map(({ key }) => `${key}-exclusions`),
       ...rows
         .filter(({ metric }) => metric?.comparison?.exclusions?.length)
@@ -153,15 +156,17 @@ export function Financials({
                       <th
                         scope="row"
                         aria-describedby={
-                          metric?.exclusions.length
+                          metric?.exclusions.length ||
+                          metric?.conventions?.length
                             ? `${key}-exclusions`
                             : undefined
                         }
                       >
                         {label}
-                        {Boolean(metric?.exclusions.length) && (
-                          <sup>{footnotes.get(`${key}-exclusions`)}</sup>
-                        )}
+                        {Boolean(
+                          metric?.exclusions.length ||
+                          metric?.conventions?.length,
+                        ) && <sup>{footnotes.get(`${key}-exclusions`)}</sup>}
                       </th>
                       <td className="number">
                         {metric?.value == null
@@ -215,26 +220,43 @@ export function Financials({
               </table>
             </div>
             {rows
-              .filter(({ metric }) => metric?.exclusions.length)
+              .filter(
+                ({ metric }) =>
+                  metric?.exclusions.length || metric?.conventions?.length,
+              )
               .map(({ key, label, metric }) => (
                 <p className="form-note" id={`${key}-exclusions`} key={key}>
-                  <sup>{footnotes.get(`${key}-exclusions`)}</sup> {label}{" "}
-                  excludes{" "}
-                  {metric!.exclusions
-                    .map((excluded) => {
-                      const company = report.companies.find(
-                        (item) => item.issuer_key === excluded.issuer_key,
-                      );
-                      const name =
-                        company?.ticker ||
-                        tickers.get(excluded.issuer_key || "") ||
-                        company?.name ||
-                        "Company";
-                      const why = omissionReason(excluded.reason);
-                      return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 1)} weight` : "weight unavailable"}; ${why})`;
-                    })
-                    .join(", ")}
-                  .
+                  <sup>{footnotes.get(`${key}-exclusions`)}</sup> {label}
+                  {metric!.exclusions.length ? " " : ": "}
+                  {Boolean(metric!.exclusions.length) && (
+                    <>
+                      excludes{" "}
+                      {metric!.exclusions
+                        .map((excluded) => {
+                          const company = report.companies.find(
+                            (item) => item.issuer_key === excluded.issuer_key,
+                          );
+                          const name =
+                            company?.ticker ||
+                            tickers.get(excluded.issuer_key || "") ||
+                            company?.name ||
+                            "Company";
+                          const why = omissionReason(excluded.reason);
+                          return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 1)} weight` : "weight unavailable"}; ${why})`;
+                        })
+                        .join(", ")}
+                      .
+                    </>
+                  )}
+                  {Boolean(metric!.conventions?.length) && (
+                    <>
+                      {" "}
+                      {metric!
+                        .conventions!.map((item) => item.ticker || "Company")
+                        .join(", ")}{" "}
+                      included at 0% (no revenue).
+                    </>
+                  )}
                 </p>
               ))}
             {rows
@@ -305,7 +327,12 @@ export function Financials({
                                 company.name ||
                                 "Company"}
                             </th>
-                            <td>{measure.label}</td>
+                            <td>
+                              {measure.key === "basic_eps" &&
+                              value?.eps_basis === "diluted"
+                                ? "EPS (diluted)"
+                                : measure.label}
+                            </td>
                             <td className="number">
                               {available
                                 ? Number(value?.value).toLocaleString("en-US", {

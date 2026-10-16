@@ -181,9 +181,19 @@ def _build_report(
             else None
         )
         exclusions: list[Record] = []
+        conventions: list[Record] = []
         company: Record
         for company in companies:
             metric: Record = record(record(company["metrics"])[key])
+            if metric.get("convention") == "zero_revenue_margin":
+                conventions.append(
+                    {
+                        "issuer_key": company["issuer_key"],
+                        "ticker": company["ticker"],
+                        "equity_weight": company["equity_weight"],
+                        "convention": "zero_revenue_margin",
+                    }
+                )
             if metric["status"] != "available":
                 exclusions.append(
                     {
@@ -201,6 +211,7 @@ def _build_report(
             "value": format(value, "f") if value is not None else None,
             "coverage": format(covered, "f") if complete else None,
             "exclusions": exclusions,
+            "conventions": conventions,
             "unit": "fraction" if key in RATIOS else "USD_per_company_share",
         }
         if key in SHARES:
@@ -253,6 +264,7 @@ def add_portfolio_comparisons(
             )
             compared: Record = comparison(now, before, year)
             compared["exclusions"] = old["exclusions"] if old else []
+            compared["conventions"] = old.get("conventions", []) if old else []
             if reason:
                 compared["reason"] = reason
             metric["comparison"] = compared
