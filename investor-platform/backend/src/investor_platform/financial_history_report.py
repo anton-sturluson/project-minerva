@@ -3,7 +3,7 @@
 from decimal import Decimal, localcontext
 
 from .financial import Record, record, records
-from .financial_history import METRICS, number
+from .financial_history import METRICS, fund_listings, number
 
 RATIOS: dict[str, str] = {
     "gross_margin": "Gross margin",
@@ -107,12 +107,13 @@ def _build_report(
         if release
         else {}
     )
-    funds: set[tuple[str, str]] = {
-        (str(row["ticker"]), str(row["exchange"]))
-        for row in available.values()
-        if row["instrument_type"] == "fund"
-    }
-    holdings: list[Record] = records(snapshot["holdings"])
+    funds: set[tuple[str, str]] = fund_listings(release)
+    holdings: list[Record] = [
+        holding
+        for holding in records(snapshot["holdings"])
+        if (str(holding["ticker"]), str(holding["exchange"])) not in funds
+    ]
+    snapshot = {**snapshot, "holdings": holdings}
     total: Decimal = sum(
         (number(h["market_value"]) for h in holdings if h.get("market_value") is not None),
         Decimal(0),
@@ -146,8 +147,6 @@ def _build_report(
         for key in METRICS:
             present: Record = measure(source, key, False, rates)
             old: Record = measure(source, key, True, rates)
-            if identity in funds:
-                present = old = {"status": "unavailable", "value": None, "reason": "Fund excluded"}
             now: Decimal | None = amount(present)
             before: Decimal | None = amount(old)
             if now is not None:

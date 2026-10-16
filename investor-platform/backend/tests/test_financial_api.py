@@ -19,7 +19,7 @@ from psycopg.rows import dict_row
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from investor_platform import financial_api
+from investor_platform import financial_api, market
 from investor_platform.app import app
 from investor_platform.db import Actor, get_actor
 from investor_platform.financial import Json, Record, Row, check_schema, record, records
@@ -27,6 +27,15 @@ from investor_platform.financial_history import METRICS, VERSION, import_release
 from investor_platform.financial_history_report import build_report
 from investor_platform.ledger import LedgerView
 from investor_platform.models import Owner, Workspace
+
+FUND: Record = {
+    "ticker": "FUND",
+    "exchange": "NYSE",
+    "year": 2025,
+    "issuer_key": "example:FUND",
+    "instrument_type": "fund",
+    "currency": "USD",
+}
 
 
 def release_row(ticker: str = "AAA", *, currency: str = "USD", factor: str = "1") -> Record:
@@ -109,26 +118,24 @@ def weighted(report: Record, key: str = "gross_margin") -> Record:
     return record(record(report["weighted_ratios"])[key])
 
 
-def test_native_ratios_usd_share_conversion_and_fund_coverage() -> None:
-    """Foreign common shares convert once while a fund stays in selected equity coverage."""
+@pytest.mark.parametrize("fund_value", ["400", None])
+def test_native_ratios_usd_share_conversion_excludes_funds(fund_value: str | None) -> None:
+    """Funds leave company weights, details and notes even without a market quote."""
     company: Record = release_row(currency="EUR", factor="2")
-    fund: Record = {
-        "ticker": "FUND",
-        "exchange": "NYSE",
-        "year": 2025,
-        "issuer_key": "example:FUND",
-        "instrument_type": "fund",
-        "currency": "USD",
-    }
     result: Record = build_report(
-        release_payload([company, fund]),
-        snapshot(("AAA", "600"), ("FUND", "400")),
+        release_payload([company, FUND]),
+        snapshot(("AAA", "600"), ("FUND", fund_value)),
         2025,
         "synthetic-account",
         {"USD": Decimal(1), "EUR": Decimal("1.5")},
     )
     assert Decimal(str(weighted(result)["value"])) == Decimal("0.4")
-    assert Decimal(str(weighted(result)["coverage"])) == Decimal("0.6")
+    assert Decimal(str(weighted(result)["coverage"])) == 1
+    assert records(result["companies"])[0]["equity_weight"] == "1"
+    assert [c["ticker"] for c in records(result["companies"])] == ["AAA"]
+    assert [h["ticker"] for h in records(record(result["market_value_snapshot"])["holdings"])] == [
+        "AAA"
+    ]
     per_share: Record = record(record(result["weighted_company_per_share"])["weighted_company_eps"])
     assert Decimal(str(per_share["value"])) == Decimal("6")
     assert Decimal(str(record(per_share["comparison"])["prior_value"])) == Decimal("3")
@@ -136,8 +143,24 @@ def test_native_ratios_usd_share_conversion_and_fund_coverage() -> None:
         record(records(result["companies"])[0]["per_share_metrics"])["basic_eps"]
     )
     assert measure["native_value"] == "2" and measure["currency"] == "EUR" and measure["inputs"]
-    assert records(weighted(result)["exclusions"])[0]["reason"] == "Fund excluded"
-    assert result["synthetic"] is False and result["api_status"] == "partial"
+    assert not weighted(result)["exclusions"]
+    assert result["synthetic"] is False and result["api_status"] == "available"
+
+
+def test_unknown_companies_remain_in_company_weights_and_omissions() -> None:
+    """Absent company data is not an implicit fund classification."""
+    result: Record = build_report(
+        release_payload([release_row(), FUND]),
+        snapshot(("AAA", "600"), ("UNKNOWN", "400"), ("FUND", "500")),
+        2025,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    assert Decimal(str(weighted(result)["coverage"])) == Decimal("0.6")
+    assert [c["ticker"] for c in records(result["companies"])] == ["AAA", "UNKNOWN"]
+    assert records(result["companies"])[0]["equity_weight"] == "0.6"
+    assert len(records(weighted(result)["exclusions"])) == 1
+    assert result["api_status"] == "partial"
 
 
 def test_missing_fx_does_not_withhold_native_currency_ratios() -> None:
@@ -244,7 +267,7 @@ def admitted_history(
     )
     check_schema(conn, schema, create=True)
     conn.commit()
-    import_release(conn, schema, release_payload(), reviewed=True)
+    import_release(conn, schema, release_payload([release_row(), FUND]), reviewed=True)
     try:
         yield db_client, conn, schema
     finally:
@@ -398,6 +421,48 @@ def test_unknown_account_no_history_and_auth_boundaries(
         assert (
             unauthenticated.get(f"/api/accounts/{account}/financials?year=2025").status_code == 403
         )
+
+
+def test_unpriced_fund_does_not_block_company_report(
+    admitted_history: tuple[TestClient, Connection[Row], str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fund provider outage cannot block the real company valuation path."""
+    client: TestClient = admitted_history[0]
+    account: str = client.post(
+        "/api/accounts", json={"name": "Synthetic mixed account", "base_currency": "USD"}
+    ).json()["id"]
+    assert cash(client, account, "opening_cash", "1000", day="2025-01-02").status_code == 201
+    ticker: str
+    for ticker in ("AAA", "FUND"):
+        assert (
+            trade(
+                client,
+                account,
+                quantity="1",
+                price="100",
+                ticker=ticker,
+                exchange="NYSE",
+                effective_date="2025-01-02",
+            ).status_code
+            == 201
+        )
+    before: Record = ledger(client, account)
+
+    def prices(symbol: str, start: date, end: date) -> market.History:
+        """Return a company close while the fund's provider is unavailable."""
+        if symbol == "FUND":
+            raise OSError("Fund quote unavailable")
+        return market.History({end: Decimal(120)}, {end: Decimal(120)}, exchange="NYQ")
+
+    monkeypatch.setattr(market, "history", prices)
+    response: Response = client.get(f"/api/accounts/{account}/financials?year=2025")
+    assert response.status_code == 200, response.text
+    result: Record = response.json()
+    assert result["api_status"] == "available"
+    assert [c["ticker"] for c in records(result["companies"])] == ["AAA"]
+    assert records(result["companies"])[0]["equity_weight"] == "1"
+    assert not weighted(result)["exclusions"]
+    assert ledger(client, account) == before
 
 
 def test_zero_and_tiny_converted_per_share_values_remain_plain_decimals() -> None:

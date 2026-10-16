@@ -12,7 +12,7 @@ Post-mortem needs the selected account's financial metrics for each held year. T
 
 Append independently reviewed history releases as immutable JSONB documents in the explicitly configured financial namespace. Each release contains five bounded measures, native units, traded-share conversion evidence, exact original packets, and review receipt hashes. Import validates references and hashes; requests read the stored release and do not read research files. This is a reviewed data release, not automatic source collection.
 
-The account route checks ownership and values corrected holdings at year-end, or the latest completed market date for the current year. Cash is excluded from the equity denominator. Funds and companies without a metric remain in its coverage denominator. Missing held-security prices withhold the report and permit retry.
+The account route checks ownership and values corrected holdings at year-end, or the latest completed market date for the current year. Cash and confirmed funds are excluded from company financials, including quote requests and the equity denominator. Companies without a metric remain in its coverage denominator. Missing company-security prices withhold the report and permit retry.
 
 Native ratios need no currency conversion. Company-share amounts use verified traded-share units and dated USD FX. Current and prior amounts use the same holdings, weights, share conversion, and FX rate. Weighted changes require the same contributor set; nonpositive prior amounts have no percentage change. These amounts remain weighted company averages.
 
