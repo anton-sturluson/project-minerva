@@ -432,3 +432,194 @@ for (const canonical of [false, true]) {
     }
   });
 }
+
+test("cash reconciliation retains whole-account controls through partial and complete recorded funding", async ({
+  page,
+}, testInfo) => {
+  await page.clock.install({ time: new Date("2026-10-04T16:00:00Z") });
+  let stage: "purchase" | "partial" | "complete" = "purchase";
+  const requests: {
+    scope: string;
+    benchmark_mode: string;
+    start: string;
+    end: string;
+  }[] = [];
+  await page.route("**/api/**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/accounts", (route) =>
+    route.fulfill({
+      json: [
+        {
+          ...account,
+          reconstruction: {
+            cash_method:
+              stage === "purchase" ? "purchase_shortfall" : "recorded",
+            funding_status: stage === "complete" ? "reconciled" : "inferred",
+            dividend_policy: "unrecorded_zero",
+            warning: "Synthetic reconciliation",
+            source_sha256: "synthetic",
+            imported_trades: 1,
+            skipped: [],
+            opening_positions: {},
+            price_discrepancies: [],
+          },
+        },
+      ],
+    }),
+  );
+  await page.route("**/ledger", (route) =>
+    route.fulfill({
+      json: {
+        currency: "USD",
+        balance: "200",
+        holdings: [],
+        entries: [
+          {
+            id: 1,
+            kind: "deposit",
+            effective_date: "2024-01-02",
+            amount: "1000",
+            currency: "USD",
+            note: "Synthetic funding",
+            security: null,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/valuation", (route) =>
+    route.fulfill({ json: { ...performance, complete: true } }),
+  );
+  await page.route("**/statistics", (route) =>
+    route.fulfill({
+      json: {
+        closed: 0,
+        open: 0,
+        unknown: 0,
+        wins: 0,
+        losses: 0,
+        breakeven: 0,
+        win_rate: null,
+        average_win: null,
+        average_loss: null,
+        payoff_ratio: null,
+        episodes: [],
+      },
+    }),
+  );
+  await page.route("**/performance", (route) => {
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    const withheld = stage === "partial";
+    return route.fulfill({
+      json: {
+        ...performance,
+        scope: body.scope,
+        start: body.start,
+        end: body.end,
+        benchmark_mode: body.benchmark_mode,
+        cash_method: stage === "purchase" ? "purchase_shortfall" : "recorded",
+        dividend_policy: "unrecorded_zero",
+        provisional: true,
+        return: withheld ? null : ".20",
+        cagr: { portfolio: withheld ? null : ".08", SPY: null, QQQ: null },
+        warnings: withheld
+          ? [
+              "Cash history needs reconciliation; starting funding was inferred.",
+            ]
+          : [],
+        benchmark_values:
+          body.benchmark_mode === "funded_hold"
+            ? { SPY: { value: "1300" }, QQQ: { value: "1400" } }
+            : undefined,
+        series: performance.series.map((point, index) => ({
+          ...point,
+          date: index ? body.end : body.start,
+          portfolio: withheld ? null : point.portfolio,
+        })),
+      },
+    });
+  });
+  await page.goto("/#performance");
+  const indexes = page.getByLabel("Index comparison");
+  const summary = page.getByLabel("Performance summary", { exact: true });
+  const portfolio = summary.getByRole("row", {
+    name: /Your portfolio \+ cash/,
+  });
+  await expect(summary).toBeVisible();
+  await expect(page.getByLabel("Performance measure")).toHaveCount(0);
+  await page.getByLabel("Performance start").fill("2025-01-02");
+  await page.getByLabel("Performance end").fill("2026-10-02");
+  await page
+    .getByRole("button", { name: "Compare performance", exact: true })
+    .click();
+  await expect(portfolio).toContainText("20.00%");
+  const selectedPeriod = requests.at(-1);
+  stage = "partial";
+  await page
+    .getByRole("button", { name: "Compare performance", exact: true })
+    .click();
+  await expect(page.locator("#performance").getByRole("alert")).toContainText(
+    "Cash history needs reconciliation",
+  );
+  await expect(portfolio.locator("td").nth(2)).toHaveText("—");
+  await expect(indexes).toHaveValue("funded_hold");
+  await expect(indexes.locator("option")).toHaveText([
+    "Buy and hold",
+    "Match deposits",
+  ]);
+  await expect(portfolio.locator("td").first()).toHaveAttribute(
+    "title",
+    /using recorded cash entries/,
+  );
+  expect(requests.at(-1)).toEqual(selectedPeriod);
+  await expect(page.getByLabel("Performance start")).toHaveValue("2025-01-02");
+  await expect(page.getByLabel("Performance measure")).toHaveCount(0);
+  stage = "complete";
+  await page
+    .getByRole("button", { name: "Compare performance", exact: true })
+    .click();
+  await expect(portfolio).toContainText("20.00%");
+  await expect(portfolio).toContainText("8.00%");
+  expect(requests.at(-1)).toEqual(selectedPeriod);
+  await expect(
+    page.getByText("Unrecorded dividends assumed zero", { exact: true }),
+  ).toBeVisible();
+  await indexes.selectOption("buy_hold");
+  await expect(portfolio).toContainText("20.00%");
+  await expect(page.getByLabel("Performance start")).toHaveValue("2025-01-02");
+  await expect(page.getByLabel("Performance end")).toHaveValue("2026-10-02");
+  await indexes.selectOption("funded_hold");
+  for (const recordedStage of ["partial", "complete"] as const) {
+    stage = recordedStage;
+    await page.reload();
+    await expect(summary).toBeVisible();
+    await expect(indexes).toHaveValue("funded_hold");
+    await expect(indexes.locator("option")).toHaveText([
+      "Buy and hold",
+      "Match deposits",
+    ]);
+    await expect(page.getByLabel("Performance measure")).toHaveCount(0);
+    expect(requests.at(-1)?.scope).toBe("account");
+    await page.getByRole("link", { name: "[ Activity ]", exact: true }).click();
+    await expect(page.getByText("Cash balance", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Cash balance (inferred deposits)", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("Reconstructed balancing cash", { exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("link", { name: "[ Portfolio ]", exact: true })
+      .click();
+  }
+  await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("recorded-funding.png"),
+    fullPage: true,
+  });
+});

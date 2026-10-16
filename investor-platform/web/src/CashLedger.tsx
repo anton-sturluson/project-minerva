@@ -125,12 +125,14 @@ export function CashLedger({
           <div hidden={page !== "activity"}>
             <div className="balance-line">
               <span>
-                {account.reconstruction?.cash_method === "purchase_shortfall"
-                  ? "Cash balance (inferred deposits)"
-                  : account.reconstruction &&
-                      account.reconstruction.funding_status !== "reconciled"
-                    ? "Reconstructed balancing cash"
-                    : "Cash balance"}
+                {account.reconstruction?.cash_method === "recorded"
+                  ? "Cash balance"
+                  : account.reconstruction?.cash_method === "purchase_shortfall"
+                    ? "Cash balance (inferred deposits)"
+                    : account.reconstruction &&
+                        account.reconstruction.funding_status !== "reconciled"
+                      ? "Reconstructed balancing cash"
+                      : "Cash balance"}
               </span>
               <strong data-testid="cash-balance">
                 {account.base_currency}{" "}
