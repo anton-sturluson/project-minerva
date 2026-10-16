@@ -13,6 +13,19 @@ const perShareMetrics = [
   ["weighted_company_fcf_per_share", "Weighted company FCF/share", 1],
 ] as const;
 
+function omissionReason(reason: string) {
+  if (
+    /revenue/i.test(reason) &&
+    /zero|negative|nonpositive|non-positive/i.test(reason)
+  )
+    return /negative|nonpositive|non-positive/i.test(reason)
+      ? "zero or negative revenue"
+      : "no revenue";
+  return /insurer/i.test(reason) && /not applicable/i.test(reason)
+    ? "insurer"
+    : "data unavailable";
+}
+
 export function Financials({
   accountId,
   year,
@@ -77,6 +90,16 @@ export function Financials({
   const priorYear =
     report?.weighted_company_per_share?.weighted_company_eps?.comparison
       ?.prior_year ?? (year === null ? null : year - 1);
+  const footnotes = new Map(
+    [
+      ...rows
+        .filter(({ metric }) => metric?.exclusions.length)
+        .map(({ key }) => `${key}-exclusions`),
+      ...rows
+        .filter(({ metric }) => metric?.comparison?.exclusions?.length)
+        .map(({ key }) => `${key}-prior-exclusions`),
+    ].map((id, index) => [id, index + 1]),
+  );
   return (
     <section
       className="annual-financials"
@@ -136,7 +159,9 @@ export function Financials({
                         }
                       >
                         {label}
-                        {Boolean(metric?.exclusions.length) && <sup>*</sup>}
+                        {Boolean(metric?.exclusions.length) && (
+                          <sup>{footnotes.get(`${key}-exclusions`)}</sup>
+                        )}
                       </th>
                       <td className="number">
                         {metric?.value == null
@@ -171,7 +196,7 @@ export function Financials({
                                 maximumFractionDigits: digits,
                               })}
                         {Boolean(metric?.comparison?.exclusions?.length) && (
-                          <sup>*</sup>
+                          <sup>{footnotes.get(`${key}-prior-exclusions`)}</sup>
                         )}
                       </td>
                       <td className="number">
@@ -193,7 +218,8 @@ export function Financials({
               .filter(({ metric }) => metric?.exclusions.length)
               .map(({ key, label, metric }) => (
                 <p className="form-note" id={`${key}-exclusions`} key={key}>
-                  * {label} excludes{" "}
+                  <sup>{footnotes.get(`${key}-exclusions`)}</sup> {label}{" "}
+                  excludes{" "}
                   {metric!.exclusions
                     .map((excluded) => {
                       const company = report.companies.find(
@@ -204,11 +230,7 @@ export function Financials({
                         tickers.get(excluded.issuer_key || "") ||
                         company?.name ||
                         "Company";
-                      const why =
-                        /insurer/i.test(excluded.reason) &&
-                        /not applicable/i.test(excluded.reason)
-                          ? "insurer"
-                          : "data unavailable";
+                      const why = omissionReason(excluded.reason);
                       return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 1)} weight` : "weight unavailable"}; ${why})`;
                     })
                     .join(", ")}
@@ -223,11 +245,12 @@ export function Financials({
                   id={`${key}-prior-exclusions`}
                   key={`${key}-prior`}
                 >
-                  * {priorYear} {label} excludes{" "}
+                  <sup>{footnotes.get(`${key}-prior-exclusions`)}</sup>{" "}
+                  {priorYear} {label} excludes{" "}
                   {metric!
                     .comparison!.exclusions!.map(
                       (excluded) =>
-                        `${excluded.ticker || "Company"} (${excluded.equity_weight != null ? `${percent(excluded.equity_weight, 1)} weight` : "weight unavailable"}; data unavailable)`,
+                        `${excluded.ticker || "Company"} (${excluded.equity_weight != null ? `${percent(excluded.equity_weight, 1)} weight` : "weight unavailable"}; ${omissionReason(excluded.reason)})`,
                     )
                     .join(", ")}
                   .
