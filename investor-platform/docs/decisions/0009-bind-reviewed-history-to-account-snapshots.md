@@ -14,11 +14,11 @@ Append independently reviewed history releases as immutable JSONB documents in t
 
 The account route checks ownership and values corrected holdings at year-end, or the latest completed market date for the current year. Cash and confirmed funds are excluded from company financials, including quote requests and the equity denominator. Companies without a metric remain in its coverage denominator. Missing company-security prices withhold the report and permit retry.
 
-Native ratios need no currency conversion. Company-share amounts use verified traded-share units and dated USD FX. Current and prior amounts use the same holdings, weights, share conversion, and FX rate. Weighted changes require the same contributor set; nonpositive prior amounts have no percentage change. These amounts remain weighted company averages.
+Native ratios need no currency conversion. Company-share amounts use verified traded-share units and dated USD FX. The headline prior column uses the prior year's actual holdings, weights, financial records, and dated FX. It equals the standalone prior-year headline; changing constituents does not block comparison. Company details retain same-company comparisons at the selected snapshot FX. Nonpositive prior amounts have no percentage change. These amounts remain weighted company averages.
 
 ## Consequences
 
-The app can use reviewed history without weakening the annual store or adding account data to research releases. Imports remain explicit and source review remains necessary. Each request loads a bounded release document; collection and normalization updates still require a new reviewed import. Comparing periods at constant snapshot FX measures financial change rather than exchange-rate change.
+The app can use reviewed history without weakening the annual store or adding account data to research releases. Imports remain explicit and source review remains necessary. Each request loads a bounded release document; collection and normalization updates still require a new reviewed import. Headline changes include changes in portfolio composition, company financials, and currency rates.
 
 ## Related ADRs
 

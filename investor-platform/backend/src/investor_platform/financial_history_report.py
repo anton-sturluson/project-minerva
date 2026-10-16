@@ -127,7 +127,6 @@ def _build_report(
     )
     companies: list[Record] = []
     current: dict[str, dict[str, Decimal]] = {key: {} for key in METRICS}
-    previous: dict[str, dict[str, Decimal]] = {key: {} for key in METRICS}
     weights: dict[str, Decimal] = {}
     holding: Record
     for holding in holdings:
@@ -151,8 +150,6 @@ def _build_report(
             before: Decimal | None = amount(old)
             if now is not None:
                 current[key][listing] = now
-            if before is not None:
-                previous[key][listing] = before
             metrics[key] = present
             if key in SHARES:
                 values[key] = present
@@ -207,21 +204,7 @@ def _build_report(
             "unit": "fraction" if key in RATIOS else "USD_per_company_share",
         }
         if key in SHARES:
-            comparable: bool = current[key].keys() <= previous[key].keys()
-            old_value: Decimal | None = (
-                sum((previous[key][k] * weights[k] for k in current[key]), Decimal(0)) / covered
-                if complete and comparable and covered > 0
-                else None
-            )
-            compared: Record = comparison(value, old_value, year)
-            if not comparable:
-                compared.update(
-                    prior_value=None,
-                    status="unavailable",
-                    percent_change=None,
-                    reason="Prior financial data missing for current contributors",
-                )
-            output["comparison"] = compared
+            output["comparison"] = comparison(value, None, year)
             shares[SHARES[key]] = output
         else:
             ratios[key] = output
@@ -231,7 +214,7 @@ def _build_report(
         "account_id": account_id,
         "holdings_date": snapshot["holdings_date"],
         "reporting_fx": {currency: format(rate, "f") for currency, rate in rates.items()},
-        "comparison_basis": "Selected holdings, weights and snapshot FX for both periods",
+        "company_comparison_basis": "Same company, selected snapshot FX and traded-share units",
         "calendar_year": year,
         "synthetic": False,
         "release_id": release.get("release_id") if release else None,
@@ -250,3 +233,43 @@ def _build_report(
         if not count
         else None,
     }
+
+
+def add_portfolio_comparisons(
+    current: Record, prior: Record | None, year: int, *, reason: str | None = None
+) -> None:
+    """Compare independent portfolio snapshots, allowing holdings and weights to change."""
+    with localcontext() as context:
+        context.prec = 40
+        key: str
+        for key in SHARES.values():
+            metric: Record = record(record(current["weighted_company_per_share"])[key])
+            old: Record | None = (
+                record(record(prior["weighted_company_per_share"])[key]) if prior else None
+            )
+            now: Decimal | None = number(metric["value"]) if metric["value"] is not None else None
+            before: Decimal | None = (
+                number(old["value"]) if old and old["value"] is not None else None
+            )
+            compared: Record = comparison(now, before, year)
+            compared["exclusions"] = old["exclusions"] if old else []
+            if reason:
+                compared["reason"] = reason
+            metric["comparison"] = compared
+        current["comparison_basis"] = "Each portfolio's own dated holdings, weights and FX"
+        current["comparison_inputs"] = (
+            {
+                key: prior[key]
+                for key in (
+                    "calendar_year",
+                    "release_id",
+                    "market_value_snapshot",
+                    "reporting_fx",
+                    "weighted_company_per_share",
+                )
+            }
+            if prior
+            else None
+        )
+        if reason and current["api_status"] == "available":
+            current["api_status"] = "partial"

@@ -24,7 +24,11 @@ from investor_platform.app import app
 from investor_platform.db import Actor, get_actor
 from investor_platform.financial import Json, Record, Row, check_schema, record, records
 from investor_platform.financial_history import METRICS, VERSION, import_release, read_release
-from investor_platform.financial_history_report import build_report
+from investor_platform.financial_history_report import (
+    SHARES,
+    add_portfolio_comparisons,
+    build_report,
+)
 from investor_platform.ledger import LedgerView
 from investor_platform.models import Owner, Workspace
 
@@ -138,7 +142,14 @@ def test_native_ratios_usd_share_conversion_excludes_funds(fund_value: str | Non
     ]
     per_share: Record = record(record(result["weighted_company_per_share"])["weighted_company_eps"])
     assert Decimal(str(per_share["value"])) == Decimal("6")
-    assert Decimal(str(record(per_share["comparison"])["prior_value"])) == Decimal("3")
+    assert record(per_share["comparison"])["prior_value"] is None
+    assert Decimal(
+        str(
+            record(record(records(result["companies"])[0]["per_share_comparisons"])["basic_eps"])[
+                "prior_value"
+            ]
+        )
+    ) == Decimal("3")
     measure: Record = record(
         record(records(result["companies"])[0]["per_share_metrics"])["basic_eps"]
     )
@@ -198,38 +209,61 @@ def test_incomplete_quotes_withhold_all_weighted_results_and_weights() -> None:
             assert record(metric)["value"] is None and record(metric)["coverage"] is None
 
 
-@pytest.mark.parametrize("missing_side", [None, "metrics", "prior_metrics"])
-def test_comparisons_use_exact_current_contributors(missing_side: str | None) -> None:
-    """Prior-only data is ignored; missing prior data for a current contributor blocks growth."""
-    other: Record = release_row("BBB")
-    record(record(other["metrics"])["basic_eps"])["value"] = "10"
-    record(record(other["prior_metrics"])["basic_eps"])["value"] = "8"
-    if missing_side:
-        record(record(other[missing_side])["basic_eps"]).update(
-            status="unavailable", value=None, reason="Not collected"
-        )
-    result: Record = build_report(
-        release_payload([release_row(), other]),
-        snapshot(("AAA", "600"), ("BBB", "400")),
+@pytest.mark.parametrize("prior_ticker", ["AAA", "SOLD"])
+def test_portfolio_comparisons_use_independent_weights_fx_and_constituents(
+    prior_ticker: str,
+) -> None:
+    """Prior headlines equal the prior snapshot, not current holdings or embedded comparators."""
+    now: Record = release_row(currency="EUR")
+    record(record(now["prior_metrics"])["basic_eps"])["value"] = "999"
+    old: Record = release_row(prior_ticker, currency="EUR")
+    old["year"] = 2024
+    record(record(old["metrics"])["basic_eps"])["value"] = "8"
+    old_other: Record = release_row("OLD")
+    old_other["year"] = 2024
+    release: Record = release_payload([now, old, old_other])
+    current: Record = build_report(
+        release,
+        snapshot(("AAA", "100")),
         2025,
         "synthetic-account",
-        {"USD": Decimal(1)},
+        {"USD": Decimal(1), "EUR": Decimal(2)},
     )
-    aggregate: Record = record(record(result["weighted_company_per_share"])["weighted_company_eps"])
-    compared: Record = record(aggregate["comparison"])
-    if missing_side == "prior_metrics":
-        assert compared["prior_value"] is None and compared["status"] == "unavailable"
-        assert compared["percent_change"] is None
-    elif missing_side == "metrics":
-        assert Decimal(str(aggregate["coverage"])) == Decimal("0.6")
-        assert Decimal(str(aggregate["value"])) == 2
-        assert Decimal(str(compared["prior_value"])) == 1
-        assert Decimal(str(compared["percent_change"])) == 1
-    else:
-        assert Decimal(str(aggregate["coverage"])) == 1
-        assert Decimal(str(aggregate["value"])) == Decimal("5.2")
-        assert Decimal(str(compared["prior_value"])) == Decimal("3.8")
-        assert Decimal(str(compared["percent_change"])) > 0
+    previous: Record = build_report(
+        release,
+        snapshot((prior_ticker, "20"), ("OLD", "80")),
+        2024,
+        "synthetic-account",
+        {"USD": Decimal(1), "EUR": Decimal("1.5")},
+    )
+    add_portfolio_comparisons(current, previous, 2025)
+    metric: Record = record(record(current["weighted_company_per_share"])["weighted_company_eps"])
+    prior_metric: Record = record(
+        record(previous["weighted_company_per_share"])["weighted_company_eps"]
+    )
+    compared: Record = record(metric["comparison"])
+    assert Decimal(str(metric["value"])) == 4
+    assert compared["prior_value"] == prior_metric["value"]
+    assert Decimal(str(compared["prior_value"])) == 4
+    assert compared["status"] == "calculated" and Decimal(str(compared["percent_change"])) == 0
+    assert (
+        record(current["comparison_inputs"])["market_value_snapshot"]
+        == previous["market_value_snapshot"]
+    )
+
+
+def test_prior_price_failure_preserves_current_values_and_reports_reason() -> None:
+    """An unavailable prior snapshot must not erase admitted current figures."""
+    current: Record = build_report(
+        release_payload(), snapshot(("AAA", "100")), 2025, "synthetic-account", {"USD": Decimal(1)}
+    )
+    add_portfolio_comparisons(
+        current, None, 2025, reason="Prior portfolio market prices unavailable"
+    )
+    metric: Record = record(record(current["weighted_company_per_share"])["weighted_company_eps"])
+    assert metric["value"] == "2" and current["api_status"] == "partial"
+    assert record(metric["comparison"])["prior_value"] is None
+    assert record(metric["comparison"])["reason"] == "Prior portfolio market prices unavailable"
 
 
 @pytest.mark.parametrize("prior", ["0", "-1"])
@@ -244,6 +278,17 @@ def test_nonpositive_prior_amount_is_not_meaningful(prior: str) -> None:
         "synthetic-account",
         {"USD": Decimal(1)},
     )
+    old: Record = release_row()
+    old["year"] = 2024
+    record(record(old["metrics"])["basic_eps"])["value"] = prior
+    prior_report: Record = build_report(
+        release_payload([old]),
+        snapshot(("AAA", "600")),
+        2024,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    add_portfolio_comparisons(result, prior_report, 2025)
     compared: Record = record(
         record(record(result["weighted_company_per_share"])["weighted_company_eps"])["comparison"]
     )
@@ -484,3 +529,103 @@ def test_zero_and_tiny_converted_per_share_values_remain_plain_decimals() -> Non
     assert fcf["value"] == "0.0000000015325"
     assert "E" not in str(eps["value"])
     assert "E" not in str(fcf["value"])
+
+
+@pytest.mark.parametrize("prior_price_failure", [False, True])
+def test_api_compares_actual_previous_portfolio_and_preserves_current_on_prior_failure(
+    admitted_history: tuple[TestClient, Connection[Row], str],
+    monkeypatch: pytest.MonkeyPatch,
+    prior_price_failure: bool,
+) -> None:
+    """Turnover uses the prior standalone report; prior quote failure keeps current figures."""
+    client: TestClient = admitted_history[0]
+    old: Record = release_row()
+    old["year"] = 2024
+    record(record(old["metrics"])["basic_eps"])["value"] = "8"
+    now: Record = release_row()
+    record(record(now["prior_metrics"])["basic_eps"])["value"] = "999"
+    replacement: Record = release_row("BBB")
+    record(record(replacement["metrics"])["basic_eps"])["value"] = "10"
+    import_release(
+        admitted_history[1],
+        admitted_history[2],
+        release_payload([old, now, replacement, FUND]),
+        reviewed=True,
+    )
+    account: str = client.post(
+        "/api/accounts", json={"name": "Synthetic changing portfolio", "base_currency": "USD"}
+    ).json()["id"]
+    assert cash(client, account, "opening_cash", "10000", day="2024-01-02").status_code == 201
+    assert (
+        trade(
+            client,
+            account,
+            quantity="6",
+            ticker="AAA",
+            exchange="NYSE",
+            effective_date="2024-01-03",
+        ).status_code
+        == 201
+    )
+    assert (
+        trade(
+            client,
+            account,
+            kind="sell",
+            quantity="3",
+            ticker="AAA",
+            exchange="NYSE",
+            effective_date="2025-01-03",
+        ).status_code
+        == 201
+    )
+    assert (
+        trade(
+            client,
+            account,
+            quantity="4",
+            ticker="BBB",
+            exchange="NYSE",
+            effective_date="2025-01-03",
+        ).status_code
+        == 201
+    )
+    before: Record = ledger(client, account)
+
+    def dated_quotes(view: LedgerView, currency: str, provisional: bool, **options: object) -> dict:
+        """Price real replayed holdings with a bounded prior-year provider failure."""
+        result: dict = quote_values(view, currency, provisional, **options)
+        if prior_price_failure and options["end"] == date(2024, 12, 31):
+            result["complete"] = False
+        return result
+
+    monkeypatch.setattr(financial_api, "value_records", dated_quotes)
+    response: Response = client.get(f"/api/accounts/{account}/financials?year=2025")
+    assert response.status_code == 200, response.text
+    current: Record = response.json()
+    shares: Record = record(current["weighted_company_per_share"])
+    metric: Record = record(shares["weighted_company_eps"])
+    compared: Record = record(metric["comparison"])
+    assert abs(Decimal(str(metric["value"])) - Decimal(46) / Decimal(7)) < Decimal(
+        "0.00000000000000000000000001"
+    )
+    if prior_price_failure:
+        assert compared["prior_value"] is None and current["api_status"] == "partial"
+        assert compared["reason"] == "Prior portfolio market prices unavailable"
+    else:
+        previous: Record = client.get(f"/api/accounts/{account}/financials?year=2024").json()
+        prior_shares: Record = record(previous["weighted_company_per_share"])
+        key: str
+        for key in SHARES.values():
+            assert (
+                record(record(shares[key])["comparison"])["prior_value"]
+                == record(prior_shares[key])["value"]
+            )
+        assert compared["prior_value"] == "8"
+        assert (
+            records(
+                record(record(current["comparison_inputs"])["market_value_snapshot"])["holdings"]
+            )[0]["ticker"]
+            == "AAA"
+        )
+    assert ledger(client, account) == before
