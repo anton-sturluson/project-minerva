@@ -342,6 +342,10 @@ export function CashLedger({
                                   <dd>{e.note || "—"}</dd>
                                 </dl>
                               </details>
+                            ) : e.kind === "deposit" &&
+                              e.note ===
+                                "INFERRED purchase funding shortfall; historical deposit timing is assumed." ? (
+                              "—"
                             ) : (
                               e.note || "—"
                             )}
