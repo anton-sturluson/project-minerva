@@ -604,3 +604,32 @@ for (const mismatch of ["account", "year", "synthetic"] as const) {
     ).toHaveCount(0);
   });
 }
+
+test("gross margin keeps a numbered cost-basis note without exclusions", async ({
+  page,
+}) => {
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const data = report();
+    data.weighted_ratios.gross_margin.exclusions = [];
+    data.weighted_ratios.gross_margin.basis_notes = [
+      {
+        ticker: "EXM",
+        note: "excludes separately reported depreciation and amortization",
+      },
+    ];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  await expect(
+    page.getByText(
+      "1 Gross margin: EXM: excludes separately reported depreciation and amortization.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  const gross = page
+    .getByRole("region", { name: "Portfolio-weighted metrics", exact: true })
+    .getByRole("row")
+    .filter({ hasText: "Gross margin" });
+  await expect(gross.getByText("40.0%", { exact: true })).toBeVisible();
+  await expect(gross.locator("sup")).toHaveText("1");
+});

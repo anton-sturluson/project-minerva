@@ -126,6 +126,14 @@ def validate_release(release: Record) -> None:
             metric_value: Json
             for metric_key, metric_value in metrics.items():
                 metric: Record = record(metric_value)
+                basis_note: Json = metric.get("basis_note")
+                if basis_note is not None and (
+                    metric_key != "gross_margin"
+                    or metric.get("status") != "available"
+                    or not isinstance(basis_note, str)
+                    or not basis_note.strip()
+                ):
+                    raise ValueError("Gross-margin basis notes require an available gross margin")
                 eps_basis: Json = metric.get("eps_basis")
                 denominator_basis: Json = metric.get("share_denominator_basis")
                 if denominator_basis is not None and (

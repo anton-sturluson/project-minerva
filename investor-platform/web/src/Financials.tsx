@@ -102,7 +102,9 @@ export function Financials({
       ...rows
         .filter(
           ({ metric }) =>
-            metric?.exclusions.length || metric?.conventions?.length,
+            metric?.exclusions.length ||
+            metric?.conventions?.length ||
+            metric?.basis_notes?.length,
         )
         .map(({ key }) => `${key}-exclusions`),
       ...rows
@@ -164,7 +166,8 @@ export function Financials({
                         scope="row"
                         aria-describedby={
                           metric?.exclusions.length ||
-                          metric?.conventions?.length
+                          metric?.conventions?.length ||
+                          metric?.basis_notes?.length
                             ? `${key}-exclusions`
                             : undefined
                         }
@@ -172,7 +175,8 @@ export function Financials({
                         {label}
                         {Boolean(
                           metric?.exclusions.length ||
-                          metric?.conventions?.length,
+                          metric?.conventions?.length ||
+                          metric?.basis_notes?.length,
                         ) && <sup>{footnotes.get(`${key}-exclusions`)}</sup>}
                       </th>
                       <td className="number">
@@ -229,7 +233,9 @@ export function Financials({
             {rows
               .filter(
                 ({ metric }) =>
-                  metric?.exclusions.length || metric?.conventions?.length,
+                  metric?.exclusions.length ||
+                  metric?.conventions?.length ||
+                  metric?.basis_notes?.length,
               )
               .map(({ key, label, metric }) => (
                 <p className="form-note" id={`${key}-exclusions`} key={key}>
@@ -262,6 +268,17 @@ export function Financials({
                         .conventions!.map((item) => item.ticker || "Company")
                         .join(", ")}{" "}
                       included at 0% (no revenue).
+                    </>
+                  )}
+                  {Boolean(metric!.basis_notes?.length) && (
+                    <>
+                      {" "}
+                      {metric!
+                        .basis_notes!.map(
+                          (item) => `${item.ticker}: ${item.note}`,
+                        )
+                        .join("; ")}
+                      .
                     </>
                   )}
                 </p>
