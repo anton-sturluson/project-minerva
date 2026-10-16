@@ -28,12 +28,17 @@ def test_reconstruction_orders_dates_retains_evidence_and_marks_assumptions():
     assert {k: Decimal(v) for k, v in report["opening_positions"].items()} == {
         "AAA · NASDAQ": Decimal(3)
     }
-    assert Decimal(report["opening_cash"]) == Decimal("41")
+    assert "opening_cash" not in report
+    assert report["cash_method"] == "purchase_shortfall"
+    assert [(str(e.effective_date), e.amount) for e in entries if e.kind == "deposit"] == [
+        ("2024-07-21", Decimal("21")),
+        ("2024-07-23", Decimal("20")),
+    ]
     assert {k: Decimal(v) for k, v in report["holdings"].items()} == {"BBB · NYSE": Decimal(4)}
     assert report["price_discrepancies"] == [3]
     assert report["skipped"][0]["row"] == 5
     assert len(report["source_rows"]) == 4
-    assert entries[1].cost_basis is None
+    assert entries[0].cost_basis is None
     assert entries[2].price == Decimal("10.5")
     again, _ = reconstruct(CSV, LISTINGS)
     assert [e.request_key for e in entries] == [e.request_key for e in again]
@@ -42,7 +47,7 @@ def test_reconstruction_orders_dates_retains_evidence_and_marks_assumptions():
 def test_import_is_atomic_idempotent_and_preserves_existing_account(database, db_client):
     entries, report = reconstruct(CSV, LISTINGS)
     # Force a replay failure after inserts: the whole account must roll back.
-    entries[0].amount = Decimal(0)
+    entries[1].amount = Decimal(1)
     with pytest.raises(HTTPException):
         apply_import(database, "Synthetic import", entries, report)
     with Session(database) as session:
@@ -93,7 +98,7 @@ def test_unformatted_export_preserves_fractional_shares_and_precise_prices():
     assert entries[-1].price == Decimal("693.2")
     assert str(entries[-1].effective_date) == "2024-07-22"
     assert report["raw_source"] == raw.decode()
-    assert Decimal(report["opening_cash"]) >= entries[-1].price * entries[-1].quantity
+    assert Decimal(report["inferred_deposits_total"]) == entries[-1].price * entries[-1].quantity
 
 
 @pytest.mark.parametrize("google", [False, True])
@@ -126,7 +131,7 @@ def test_usd_total_import_preserves_reported_cash_and_basis(database, google):
     assert report["transaction_layout"] == "usd-totals"
     assert report["imported_trades"] == 2 and not report["skipped"]
     assert entries[1].price == Decimal("33.33333333")
-    assert Decimal(report["opening_cash"]) == Decimal("100.02")
+    assert Decimal(report["inferred_deposits_total"]) == Decimal("100.02")
     aid, created = apply_import(database, "Synthetic USD export", entries, report)
     assert created
     with Session(database) as session:

@@ -74,6 +74,12 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
         )
     session.add(entry)
     session.flush()
+    from .purchase_funding import sync_canonical_funding
+
+    try:
+        sync_canonical_funding(session, account, actor, data.request_key)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     replay(entries_for(session, account_id))
     session.commit()
     session.refresh(entry)

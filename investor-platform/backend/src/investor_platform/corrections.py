@@ -18,6 +18,7 @@ from .ledger import (
     build_cash,
     entries_for,
     fingerprint,
+    funding_purchase_key,
     ledger_view,
 )
 from .models import LedgerCorrection
@@ -68,6 +69,12 @@ def correct(
     original = next((e for e in entries if e.id == entry_id), None)
     if original is None:
         raise HTTPException(409, "Entry is no longer active in this account; reload records")
+    if funding_purchase_key(original) is not None:
+        raise HTTPException(
+            409,
+            "Inferred funding is derived from purchases; "
+            "correct a trade or record actual cash instead",
+        )
     revision = sha256(",".join(str(e.id) for e in entries).encode()).hexdigest()
     if not preview and data.expected_revision != revision:
         raise HTTPException(
@@ -95,6 +102,12 @@ def correct(
     )
     session.add(correction)
     session.flush()
+    from .purchase_funding import sync_canonical_funding
+
+    try:
+        sync_canonical_funding(session, account, actor, data.request_key)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     active = entries_for(session, account_id)
     if preview:
         projected = ledger_view(active, account.base_currency)

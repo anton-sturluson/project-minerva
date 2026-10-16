@@ -7,7 +7,7 @@ import io
 import json
 import re
 from datetime import date, datetime
-from decimal import ROUND_CEILING, Decimal, InvalidOperation, localcontext
+from decimal import Decimal, InvalidOperation, localcontext
 from enum import StrEnum
 from pathlib import Path
 from urllib.request import urlopen
@@ -19,18 +19,14 @@ from sqlalchemy.orm import Session
 from .accounting import replay
 from .accounts import AccountInput
 from .db import LOCAL_OWNER, LOCAL_WORKSPACE, Actor, make_engine
-from .domain import ACCOUNTING_PRECISION, Currency, EntryKind
+from .domain import ACCOUNTING_PRECISION, Currency, EntryKind, FundingStatus
+from .funding import FUNDING_WARNING as WARNING
+from .funding import CashMovement, PurchaseShortfall, infer_purchase_shortfalls, inferred_deposit
 from .ledger import CashInput, Money, entries_for, fingerprint
 from .models import Account, LedgerEntry, Workspace
 from .trades import TradeInput, build_trade
 
 MAX_EXPORT_BYTES = 5_000_000
-
-WARNING = (
-    "Incomplete transaction reconstruction for testing. Opening shares and cash are inferred "
-    "minimums, not broker balances. Fees, cash flows, distributions and corporate actions are "
-    "incomplete. Holdings, trade statistics and portfolio returns are provisional."
-)
 
 
 class TransactionLayout(StrEnum):
@@ -82,7 +78,7 @@ def source_rows(payload):
 
 
 def reconstruct(payload: bytes, listings: dict, *, portfolio: str | None = None):
-    """Keep raw evidence, reject ambiguous rows and infer only minimum opening balances."""
+    """Keep raw evidence and fund each purchase shortfall on its source date."""
     rows, source_format = source_rows(payload)
     columns = set(rows[0]) if rows else set()
     if not {"Date", "Type", "Symbol", "Shares"} <= columns:
@@ -181,28 +177,28 @@ def reconstruct(payload: bytes, listings: dict, *, portfolio: str | None = None)
         trades.sort(key=lambda item: (item[1].effective_date, item[0]))
         if not trades:
             raise ValueError("No importable transactions; confirm USD listings and inspect the CSV")
-        shares, minimum, cash, lowest = {}, {}, Decimal(0), Decimal(0)
+        shares, minimum = {}, {}
         for _, t in trades:
             key = (t.ticker, t.exchange)
             shares[key] = shares.get(key, Decimal(0)) + t.quantity * (
                 1 if t.kind == EntryKind.BUY else -1
             )
             minimum[key] = min(minimum.get(key, Decimal(0)), shares[key])
-            amount = t.reported_amount if isinstance(t, ImportedTrade) else t.quantity * t.price
-            cash += amount * (-1 if t.kind == EntryKind.BUY else 1)
-            lowest = min(lowest, cash)
         start = trades[0][1].effective_date
-        opening_cash = (-lowest).quantize(Decimal("0.01"), rounding=ROUND_CEILING)
-        entries = [
-            CashInput(
-                kind=EntryKind.OPENING_CASH,
-                amount=opening_cash,
-                currency=Currency.USD,
-                effective_date=start,
-                request_key=uuid5(NAMESPACE_URL, f"{identity}:opening-cash"),
-                note="INFERRED minimum starting cash for incomplete transaction reconstruction.",
+        movements: list[CashMovement] = [
+            CashMovement(
+                trade.effective_date,
+                EntryKind(trade.kind),
+                trade.reported_amount
+                if isinstance(trade, ImportedTrade)
+                else trade.quantity * trade.price,
             )
+            for _, trade in trades
         ]
+        shortfalls: dict[int, PurchaseShortfall] = {
+            item.index: item for item in infer_purchase_shortfalls(movements)
+        }
+        entries: list[TradeInput | CashInput] = []
         openings = {}
         for (ticker, exchange), low in sorted(minimum.items()):
             if low >= 0:
@@ -221,7 +217,13 @@ def reconstruct(payload: bytes, listings: dict, *, portfolio: str | None = None)
                     note="INFERRED minimum opening shares; acquisition date and basis unknown.",
                 )
             )
-        entries.extend(t for _, t in trades)
+        index: int
+        trade: TradeInput
+        for index, (_, trade) in enumerate(trades):
+            if index in shortfalls:
+                entries.append(inferred_deposit(shortfalls[index], trade.request_key, Currency.USD))
+            entries.append(trade)
+        funding_total: Decimal = sum((item.amount for item in shortfalls.values()), Decimal(0))
     summary = {
         "warning": WARNING,
         "source_sha256": digest,
@@ -235,7 +237,10 @@ def reconstruct(payload: bytes, listings: dict, *, portfolio: str | None = None)
         "listings": listings,
         "imported_trades": len(trades),
         "skipped": skipped,
-        "opening_cash": str(opening_cash),
+        "cash_method": "purchase_shortfall",
+        "funding_status": FundingStatus.INFERRED,
+        "inferred_deposit_count": len(shortfalls),
+        "inferred_deposits_total": str(funding_total),
         "opening_positions": openings,
         "price_discrepancies": differences,
         "holdings": {
@@ -288,7 +293,7 @@ def apply_import(engine, name, entries, summary):
                     account_id=account.id,
                     created_by=actor.owner_id,
                     request_body=body,
-                    **entry.model_dump(),
+                    **entry.model_dump(exclude={"cash_method", "purchase_request_key"}),
                 )
             )
             if isinstance(entry, ImportedTrade):

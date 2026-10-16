@@ -36,11 +36,12 @@ export type Account = {
   created_at: string;
   reconstruction?: {
     funding_status?: "recorded" | "inferred" | "reconciled";
+    cash_method?: "purchase_shortfall";
     warning: string;
     source_sha256: string;
     imported_trades: number;
     skipped: { row: number; reason: string }[];
-    opening_cash: string;
+    opening_cash?: string | null;
     opening_positions: Record<string, string>;
     price_discrepancies: number[];
   } | null;

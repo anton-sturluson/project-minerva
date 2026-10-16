@@ -1,6 +1,6 @@
 # ADR 0007: Measure stock transactions independently of brokerage cash
 
-Status: accepted
+Status: partially superseded by [ADR 0010](0010-fund-purchases-and-link-account-returns.md) for purchase-funded account defaults
 
 ## Decision
 
@@ -11,3 +11,7 @@ Stock purchases contribute their execution cost, sales remove their net proceeds
 ## Consequences
 
 Stock selection can be assessed without completing brokerage cash reconciliation. Its result must not be presented as the whole-account return. Actual trading fees are included only when present in recorded trade amounts. Market-price, identity and split checks remain; incomplete trade histories still produce provisional results. Exclusions remove the selected stocks and their invested capital rather than preserving unused cash. Whole-account statistics continue to require reconciled funding and distributions.
+
+## Related ADRs
+
+Preceded by [ADR 0010](0010-fund-purchases-and-link-account-returns.md) for purchase-funded whole-account defaults. The analytical stock-only method remains available.
