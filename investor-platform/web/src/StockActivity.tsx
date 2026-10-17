@@ -242,13 +242,6 @@ function StockRow({
               </button>
             </>
           )}
-          {market?.status === "available" && (
-            <small
-              title={`${market.session_count} sessions: ${market.first_session} – ${market.last_session}`}
-            >
-              {market.session_count} sessions
-            </small>
-          )}
         </td>
         <td className="number" title={closingRangeHelp}>
           {market?.status === "available"
