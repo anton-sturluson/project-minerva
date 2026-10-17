@@ -147,10 +147,27 @@ def manager_view(session: Session, manager: ResearchManager, *, detail: bool = F
             break
         streak += 1
         cursor = period
+    company_count: int | None = None
+    latest_period: date | None = periods[-1] if periods else None
+    if latest_period is not None and latest_period in usable:
+        latest_positions: dict[HoldingKey, Position] = snapshot(
+            session, [filing for filing in filings if filing.report_period == latest_period]
+        )[0]
+        company_count = len(
+            {
+                position["cusip"][:6]
+                for position in latest_positions.values()
+                if position["share_type"] == "SH"
+                and not position["put_call"]
+                and position["quantity"] > 0
+            }
+        )
     result: dict = {
         **manager.profile,
         "slug": manager.slug,
         "cik": manager.cik,
+        "portfolio_company_count": company_count,
+        "portfolio_company_count_quarter": latest_period.isoformat() if latest_period else None,
         "eligibility": manager_eligibility(manager.profile, date.today()),
         "coverage": {
             "quarters": len(usable),
