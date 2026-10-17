@@ -1,77 +1,84 @@
 """Deterministic chronological replay and FIFO lot allocation."""
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
+from uuid import UUID
 
 from fastapi import HTTPException
 
 from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, EntryKind
+from .models import LedgerEntry
 
-UNIT = Decimal("0.0000000000000001")
+UNIT: Decimal = Decimal("0.0000000000000001")
 
 
 @dataclass
 class Lot:
+    """Remaining recorded shares and their optional FIFO cost basis."""
+
     quantity: Decimal
     basis: Decimal | None
 
 
-def replay(entries):
-    # Products can contain 40 significant digits; never use the default 28-digit context.
-    with localcontext() as context:
-        context.prec = ACCOUNTING_PRECISION
-        cash = Decimal(0)
-        lots = {}
-        seen = set()
-        realized = {}
-        opening_date = next(
-            (e.effective_date for e in entries if e.kind == EntryKind.OPENING_CASH), None
-        )
-        if sum(e.kind == EntryKind.OPENING_CASH for e in entries) > 1:
-            raise HTTPException(409, "Only one opening cash entry is allowed")
-        if any(e.kind == EntryKind.OPENING_CASH for e in entries[1:]):
-            raise HTTPException(409, "Opening cash must be the first entry")
-        for index, e in enumerate(entries):
-            if opening_date and e.effective_date < opening_date:
+@dataclass
+class ReplayState:
+    """Apply ordered entries once for full-ledger and daily performance replay."""
+
+    cash: Decimal = Decimal(0)
+    lots: dict[UUID, list[Lot]] = field(default_factory=dict)
+    realized: dict[int, Decimal | None] = field(default_factory=dict)
+    seen: set[UUID] = field(default_factory=set)
+    opening_date: date | None = None
+    entry_count: int = 0
+
+    def apply(self, entry: LedgerEntry, *, day_end: bool) -> None:
+        """Apply one entry, checking cash only after its final same-day movement."""
+        with localcontext() as context:
+            context.prec = ACCOUNTING_PRECISION
+            if entry.kind == EntryKind.OPENING_CASH:
+                if self.opening_date is not None:
+                    raise HTTPException(409, "Only one opening cash entry is allowed")
+                if self.entry_count:
+                    raise HTTPException(409, "Opening cash must be the first entry")
+                self.opening_date = entry.effective_date
+            if self.opening_date and entry.effective_date < self.opening_date:
                 raise HTTPException(409, "Entries cannot precede the opening balance date")
-            if e.kind in {EntryKind.OPENING_CASH, EntryKind.DEPOSIT, EntryKind.INCOME}:
-                cash += e.amount
-            elif e.kind in {EntryKind.WITHDRAWAL, EntryKind.EXPENSE, EntryKind.BUY}:
-                cash -= e.amount
-            elif e.kind == EntryKind.SELL:
-                cash += e.amount
-            # Source records have dates, not reliable intraday ordering. Funding entered later
-            # may precede a same-day trade; never borrow from a subsequent day's cash.
-            day_end = (
-                index + 1 == len(entries) or entries[index + 1].effective_date != e.effective_date
-            )
-            if day_end and cash < 0:
+            if entry.kind in {EntryKind.OPENING_CASH, EntryKind.DEPOSIT, EntryKind.INCOME}:
+                self.cash += entry.amount
+            elif entry.kind in {EntryKind.WITHDRAWAL, EntryKind.EXPENSE, EntryKind.BUY}:
+                self.cash -= entry.amount
+            elif entry.kind == EntryKind.SELL:
+                self.cash += entry.amount
+            if day_end and self.cash < 0:
                 raise HTTPException(
                     409, "This entry would make cash negative in the account history"
                 )
-            if e.kind in IN_KIND_ENTRIES or e.kind == EntryKind.BUY:
-                if e.kind == EntryKind.OPENING_POSITION and e.security_id in seen:
+            if entry.kind in IN_KIND_ENTRIES or entry.kind == EntryKind.BUY:
+                if entry.kind == EntryKind.OPENING_POSITION and entry.security_id in self.seen:
                     raise HTTPException(
                         409, "An opening position must precede all trades in that security"
                     )
-                lots.setdefault(e.security_id, []).append(
+                self.lots.setdefault(entry.security_id, []).append(
                     Lot(
-                        e.quantity,
-                        e.cost_basis if e.kind in IN_KIND_ENTRIES else e.amount,
+                        entry.quantity,
+                        entry.cost_basis if entry.kind in IN_KIND_ENTRIES else entry.amount,
                     )
                 )
-            elif e.kind == EntryKind.SELL:
-                remaining = e.quantity
-                basis = Decimal(0)
-                unknown = False
-                for lot in lots.get(e.security_id, []):
-                    take = min(remaining, lot.quantity)
+            elif entry.kind == EntryKind.SELL:
+                remaining: Decimal = entry.quantity
+                basis: Decimal = Decimal(0)
+                unknown: bool = False
+                lot: Lot
+                for lot in self.lots.get(entry.security_id, []):
+                    take: Decimal = min(remaining, lot.quantity)
                     if take == 0:
                         continue
                     if lot.basis is None:
                         unknown = True
                     else:
-                        allocated = (
+                        allocated: Decimal = (
                             lot.basis
                             if take == lot.quantity
                             else (lot.basis * take / lot.quantity).quantize(
@@ -88,7 +95,23 @@ def replay(entries):
                     raise HTTPException(
                         409, "This sale would leave negative shares in the account history"
                     )
-                realized[e.id] = None if unknown else e.amount - basis
-            if e.security_id is not None:
-                seen.add(e.security_id)
-        return cash, lots, realized
+                self.realized[entry.id] = None if unknown else entry.amount - basis
+            if entry.security_id is not None:
+                self.seen.add(entry.security_id)
+            self.entry_count += 1
+
+
+def replay(
+    entries: Sequence[LedgerEntry],
+) -> tuple[Decimal, dict[UUID, list[Lot]], dict[int, Decimal | None]]:
+    """Replay immutable source entries without changing source quantities or basis."""
+    state: ReplayState = ReplayState()
+    index: int
+    entry: LedgerEntry
+    for index, entry in enumerate(entries):
+        state.apply(
+            entry,
+            day_end=index + 1 == len(entries)
+            or entries[index + 1].effective_date != entry.effective_date,
+        )
+    return state.cash, state.lots, state.realized
