@@ -552,6 +552,19 @@ def test_api_compares_actual_previous_portfolio_and_preserves_current_on_prior_f
     record(record(now["prior_metrics"])["basic_eps"])["value"] = "999"
     replacement: Record = release_row("BBB")
     record(record(replacement["metrics"])["basic_eps"])["value"] = "10"
+    ratio_key: str
+    old_value: str
+    current_value: str
+    replacement_value: str
+    for ratio_key, old_value, current_value, replacement_value in (
+        ("gross_margin", "0.25", "0.4", "0.8"),
+        ("operating_margin", "0.15", "0.3", "0.5"),
+        ("fcf_margin_after_disclosed_capex", "0.05", "0.1", "0.2"),
+    ):
+        record(record(old["metrics"])[ratio_key])["value"] = old_value
+        record(record(now["metrics"])[ratio_key])["value"] = current_value
+        record(record(now["prior_metrics"])[ratio_key])["value"] = "999"
+        record(record(replacement["metrics"])[ratio_key])["value"] = replacement_value
     import_release(
         admitted_history[1],
         admitted_history[2],
@@ -618,6 +631,10 @@ def test_api_compares_actual_previous_portfolio_and_preserves_current_on_prior_f
     if prior_price_failure:
         assert compared["prior_value"] is None and current["api_status"] == "partial"
         assert compared["reason"] == "Prior portfolio market prices unavailable"
+        ratio: Json
+        for ratio in record(current["weighted_ratios"]).values():
+            assert record(ratio)["value"] is not None
+            assert record(record(ratio)["comparison"])["prior_value"] is None
     else:
         previous: Record = client.get(f"/api/accounts/{account}/financials?year=2024").json()
         prior_shares: Record = record(previous["weighted_company_per_share"])
@@ -627,6 +644,20 @@ def test_api_compares_actual_previous_portfolio_and_preserves_current_on_prior_f
                 record(record(shares[key])["comparison"])["prior_value"]
                 == record(prior_shares[key])["value"]
             )
+        ratio_key: str
+        for ratio_key in METRICS[:3]:
+            current_ratio: Record = weighted(current, ratio_key)
+            prior_ratio: Record = weighted(previous, ratio_key)
+            ratio_comparison: Record = record(current_ratio["comparison"])
+            assert ratio_comparison["prior_value"] == prior_ratio["value"]
+            assert ratio_comparison["coverage"] == prior_ratio["coverage"]
+            expected_change: Decimal = (
+                Decimal(str(current_ratio["value"])) / Decimal(str(prior_ratio["value"])) - 1
+            )
+            assert abs(
+                Decimal(str(ratio_comparison["percent_change"])) - expected_change
+            ) < Decimal("0.00000000000000000000000001")
+        assert "weighted_ratios" in record(current["comparison_inputs"])
         assert compared["prior_value"] == "8"
         assert (
             records(
@@ -869,3 +900,92 @@ def test_invalid_gross_cost_basis_note_is_rejected(key: str, status: str, note: 
     record(record(row["metrics"])[key]).update(status=status, basis_note=note)
     with pytest.raises(ValueError, match="Gross-margin basis notes"):
         validate_release(release_payload([row]))
+
+
+@pytest.mark.parametrize("prior_value", ["0", "-0.1", None])
+def test_prior_margin_zero_loss_and_unavailable_preserve_current_ratios(
+    prior_value: str | None,
+) -> None:
+    """All three margin cells retain real zero/loss baselines and withhold undefined changes."""
+    current: Record = build_report(
+        release_payload(), snapshot(("AAA", "100")), 2025, "synthetic-account", {"USD": Decimal(1)}
+    )
+    old: Record = release_row("SOLD")
+    old["year"] = 2024
+    key: str
+    for key in METRICS[:3]:
+        record(record(old["metrics"])[key]).update(
+            value=prior_value,
+            status="available" if prior_value is not None else "unavailable",
+            reason="Synthetic unavailable",
+        )
+    previous: Record = build_report(
+        release_payload([old]),
+        snapshot(("SOLD", "100")),
+        2024,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    add_portfolio_comparisons(current, previous, 2025)
+    for key in METRICS[:3]:
+        metric: Record = weighted(current, key)
+        compared: Record = record(metric["comparison"])
+        assert metric["value"] == "0.4" and compared["prior_value"] == prior_value
+        assert compared["status"] == (
+            "not_meaningful" if prior_value is not None else "unavailable"
+        )
+        assert compared["percent_change"] is None
+
+
+def test_prior_margin_notes_and_exclusions_retain_previous_portfolio_identities() -> None:
+    """Prior cost-basis and coverage disclosures refer to sold holdings, not current companies."""
+    current: Record = build_report(
+        release_payload(), snapshot(("AAA", "100")), 2025, "synthetic-account", {"USD": Decimal(1)}
+    )
+    old: Record = release_row("SOLD")
+    old["year"] = 2024
+    record(record(old["metrics"])["gross_margin"])["basis_note"] = "Synthetic cost basis"
+    previous: Record = build_report(
+        release_payload([old]),
+        snapshot(("SOLD", "80"), ("UNKNOWN", "20")),
+        2024,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    add_portfolio_comparisons(current, previous, 2025)
+    compared: Record = record(weighted(current)["comparison"])
+    assert compared["coverage"] == "0.8"
+    assert compared["basis_notes"] == [{"ticker": "SOLD", "note": "Synthetic cost basis"}]
+    assert records(compared["exclusions"])[0]["ticker"] == "UNKNOWN"
+
+
+def test_missing_current_margin_keeps_available_actual_prior_value() -> None:
+    """Current missing data must not erase a real previous portfolio margin."""
+    row: Record = release_row()
+    key: str
+    for key in METRICS[:3]:
+        record(record(row["metrics"])[key]).update(
+            status="unavailable", value=None, reason="Synthetic missing current margin"
+        )
+    current: Record = build_report(
+        release_payload([row]),
+        snapshot(("AAA", "100")),
+        2025,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    prior_row: Record = release_row("SOLD")
+    prior_row["year"] = 2024
+    previous: Record = build_report(
+        release_payload([prior_row]),
+        snapshot(("SOLD", "100")),
+        2024,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+    add_portfolio_comparisons(current, previous, 2025)
+    for key in METRICS[:3]:
+        compared: Record = record(weighted(current, key)["comparison"])
+        assert compared["prior_value"] == "0.4" and compared["status"] == "unavailable"
+        assert compared["percent_change"] is None
+        assert compared["reason"] == "Current or prior financial data unavailable"
