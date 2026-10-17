@@ -133,6 +133,7 @@ async function financialRoute(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-17T16:00:00Z") });
   await page.route("**/api/accounts", (route) =>
     route.fulfill({
       json: [main, other].map((id, index) => ({
@@ -896,4 +897,73 @@ test("same-issuer listings keep their own omission weights and detail rows", asy
     path: test.info().outputPath("same-issuer-financials.png"),
     fullPage: true,
   });
+});
+
+test("financials disclose the holdings cutoff and linked current and prior filing periods", async ({
+  page,
+}) => {
+  await page.route("**/financials?year=*", (route) => {
+    const data = report();
+    data.holdings_date = "2026-10-16";
+    data.publication_policy =
+      "Retrospective: reviewed annual publications; no publication-date cutoff";
+    data.companies[0].period = {
+      start: "2025-07-01",
+      end: "2026-06-30",
+      fiscal_label: "FY2026",
+    };
+    data.companies[0].prior_period = {
+      start: "2024-07-01",
+      end: "2025-06-30",
+      fiscal_label: "FY2025",
+    };
+    data.companies[0].source_urls = [
+      "https://example.com/filings/exm-2026",
+      "https://example.com/filings/exm-2025",
+    ];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  await expect(page.getByText(/Holdings as of 2026-10-16/)).toBeVisible();
+  await expect(
+    page.getByText(/Retrospective figures; publication dates/),
+  ).toBeVisible();
+  await page.getByText("Company details", { exact: true }).click();
+  const sources = page.getByRole("region", {
+    name: "Financial sources and periods",
+  });
+  await expect(sources).toContainText(
+    "Current period: 2025-07-01 through 2026-06-30 (FY2026)",
+  );
+  await expect(sources).toContainText(
+    "Prior period: 2024-07-01 through 2025-06-30 (FY2025)",
+  );
+  await expect(
+    sources.getByRole("link", { name: "EXM filing source 1" }),
+  ).toHaveAttribute("href", "https://example.com/filings/exm-2026");
+  await expect(
+    sources.getByRole("link", { name: "EXM filing source 2" }),
+  ).toHaveAttribute("href", "https://example.com/filings/exm-2025");
+  await expect(sources).toContainText("No linked filing source available.");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("a valid cold financial request can finish after the ordinary API deadline", async ({
+  page,
+}) => {
+  await page.route("**/financials?year=*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 9_000));
+    await route.fulfill({ json: report() });
+  });
+  await page.goto("/#post-mortem");
+  await expect(
+    page.getByRole("region", { name: "Portfolio-weighted metrics" }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.locator(".annual-financials").getByRole("alert"),
+  ).toHaveCount(0);
 });

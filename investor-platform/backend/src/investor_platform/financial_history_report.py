@@ -1,9 +1,11 @@
 """Calculate the five reviewed measures using one account's dated equity weights."""
 
+import json
 from decimal import Decimal, localcontext
+from urllib.parse import SplitResult, urlsplit
 
-from .financial import Record, record, records
-from .financial_history import METRICS, fund_listings, number
+from .financial import Json, Record, record, records
+from .financial_history import METRICS, fund_listings, number, resolve
 
 RATIOS: dict[str, str] = {
     "gross_margin": "Gross margin",
@@ -74,6 +76,44 @@ def amount(metric: Record) -> Decimal | None:
     return number(metric["value"]) if metric.get("status") == "available" else None
 
 
+def source_urls(documents: dict[str, Record], source: Record | None) -> list[str]:
+    """Return document links tied to the company's current and prior input evidence."""
+    if source is None:
+        return []
+    urls: set[str] = set()
+    group: str
+    for group in ("metrics", "prior_metrics"):
+        metric: Record
+        for metric in records(list(record(source[group]).values())):
+            proof: Record
+            for proof in records(metric.get("inputs", [])):
+                packet: Record = documents[str(proof["packet_sha256"])]
+                identifier: Json
+                for identifier in proof["ids"]:
+                    node: Record = resolve(packet, str(identifier))
+                    candidates: list[Record] = [node] + [
+                        item
+                        for item in records(packet.get("sources", []))
+                        if item.get("source_id") == node.get("source_id") and node.get("source_id")
+                    ]
+                    candidate: Record
+                    for candidate in candidates:
+                        raw: Json = candidate.get("url", candidate.get("source_url"))
+                        if isinstance(raw, str):
+                            parts: SplitResult
+                            try:
+                                parts = urlsplit(raw)
+                            except ValueError:
+                                continue
+                            if (
+                                parts.scheme in {"https", "http"}
+                                and parts.hostname
+                                and not parts.username
+                            ):
+                                urls.add(raw)
+    return sorted(urls)
+
+
 def build_report(
     release: Record | None,
     snapshot: Record,
@@ -125,6 +165,14 @@ def _build_report(
             h.get("market_value") is not None and number(h["market_value"]) > 0 for h in holdings
         )
     )
+    documents: dict[str, Record] = (
+        {
+            sha: record(json.loads(str(payload)))
+            for sha, payload in record(record(release["evidence"])["packets"]).items()
+        }
+        if release
+        else {}
+    )
     companies: list[Record] = []
     current: dict[str, dict[str, Decimal]] = {key: {} for key in METRICS}
     weights: dict[str, Decimal] = {}
@@ -169,6 +217,7 @@ def _build_report(
                 "equity_weight": format(weight, "f") if weight is not None else None,
                 "period": source.get("period") if source else None,
                 "prior_period": source.get("prior_period") if source else None,
+                "source_urls": source_urls(documents, source),
                 "metrics": metrics,
                 "per_share_metrics": values,
                 "per_share_comparisons": comparisons,

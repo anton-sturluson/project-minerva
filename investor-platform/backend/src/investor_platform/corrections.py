@@ -20,6 +20,7 @@ from .ledger import (
     fingerprint,
     funding_purchase_key,
     ledger_view,
+    normalize_request_body,
 )
 from .models import LedgerCorrection
 from .trades import TradeInput, build_trade
@@ -62,7 +63,10 @@ def correct(
         )
     )
     if existing:
-        if existing.request_body != body or existing.original_id != entry_id:
+        if (
+            normalize_request_body(existing.request_body) != body
+            or existing.original_id != entry_id
+        ):
             raise HTTPException(409, "This retry key was already used for a different correction")
         return {"id": existing.id}
     entries = entries_for(session, account_id)

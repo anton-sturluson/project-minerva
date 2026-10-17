@@ -2,7 +2,7 @@
 
 import json
 from datetime import date, datetime
-from decimal import Decimal, localcontext
+from decimal import Context, Decimal, localcontext
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -182,27 +182,42 @@ def entries_for(session, account_id):
     return ledger_snapshot(session, account_id)[0]
 
 
-def fingerprint(data):
-    values = data.model_dump(mode="json", exclude={"request_key"})
+type RequestValue = (
+    str | int | float | Decimal | bool | None | list[RequestValue] | dict[str, RequestValue]
+)
+type RequestRecord = dict[str, RequestValue]
 
-    # Preserve retry fingerprints for cash/corrections created before income attribution existed.
-    def omit_empty_income(value):
-        if not isinstance(value, dict):
-            return
-        for key in ("income_kind", "income_security_id", "accrual_date"):
-            if value.get(key) is None:
-                value.pop(key, None)
-        for nested in value.values():
-            omit_empty_income(nested)
 
-    omit_empty_income(values)
-    # Equivalent decimal spellings have the same retry identity.
+def normalize_request_body(body: str) -> str:
+    """Canonicalize effective fields, including legacy nested correction amounts."""
+    values: RequestRecord = json.loads(body)
+    decimal_fields: frozenset[str] = frozenset(
+        {"amount", "quantity", "price", "fees", "cost_basis"}
+    )
+
+    def normalize(value: RequestRecord) -> None:
+        """Remove retry-only keys and normalize money without changing notes or dates."""
+        value.pop("request_key", None)
+        key: str
+        nested: RequestValue
+        for key, nested in list(value.items()):
+            if key in {"income_kind", "income_security_id", "accrual_date"} and nested is None:
+                value.pop(key)
+            elif isinstance(nested, dict):
+                normalize(nested)
+            elif key in decimal_fields and nested is not None:
+                value[key] = format(Decimal(str(nested)).normalize(), "f")
+
+    context: Context
     with localcontext() as context:
         context.prec = ACCOUNTING_PRECISION
-        for key, value in data.model_dump().items():
-            if isinstance(value, Decimal):
-                values[key] = format(value.normalize(), "f")
+        normalize(values)
     return json.dumps(values, sort_keys=True, separators=(",", ":"))
+
+
+def fingerprint(data: BaseModel) -> str:
+    """Identify effective request values independent of nested decimal spelling."""
+    return normalize_request_body(data.model_dump_json())
 
 
 def ledger_view(entries, currency):
@@ -273,7 +288,7 @@ def record_cash(account_id: UUID, data: CashInput, session: DB, actor: Identity)
         )
     )
     if existing:
-        if existing.request_body != body:
+        if normalize_request_body(existing.request_body) != body:
             raise HTTPException(409, "This retry key was already used for different entries")
         return existing
     if data.currency != account.base_currency:

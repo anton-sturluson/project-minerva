@@ -5,7 +5,7 @@ import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
-from decimal import Decimal, localcontext
+from decimal import Decimal, DecimalException, localcontext
 from http.client import HTTPException as HTTPClientError
 from typing import Annotated, NotRequired, TypedDict
 from urllib.parse import quote
@@ -244,7 +244,15 @@ def price_context(
         )
         if history.exchange not in market.PROVIDER_EXCHANGES:
             raise ValueError("Unsupported US listing exchange")
-    except (OSError, HTTPClientError, ValueError, KeyError, TypeError, IndexError):
+    except (
+        OSError,
+        HTTPClientError,
+        ValueError,
+        DecimalException,
+        KeyError,
+        TypeError,
+        IndexError,
+    ):
         if not os.environ.get("TIINGO_API_KEY"):
             return unavailable(mapping, "Daily closing prices unavailable for this quarter")
         try:
@@ -254,7 +262,15 @@ def price_context(
             history = tiingo.parse_stock(body, symbol)
             if history.exchange not in market.PROVIDER_EXCHANGES:
                 raise ValueError("Unsupported US listing exchange")
-        except (OSError, HTTPClientError, ValueError, KeyError, TypeError, IndexError):
+        except (
+            OSError,
+            HTTPClientError,
+            ValueError,
+            DecimalException,
+            KeyError,
+            TypeError,
+            IndexError,
+        ):
             return unavailable(mapping, "Daily closing prices unavailable for this quarter")
     try:
         return summarize(history, start, end, mapping)

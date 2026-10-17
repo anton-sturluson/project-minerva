@@ -164,18 +164,29 @@ def account_report(
         for row in records(release["records"])
     )
     if not matching:
-        return build_report(
+        unavailable: Record = build_report(
             release,
             {
                 "holdings_date": end.isoformat(),
                 "base_currency": "USD",
                 "synthetic": False,
-                "holdings": [],
+                "holdings": [
+                    {
+                        "ticker": holding.security.ticker,
+                        "exchange": holding.security.exchange,
+                        "market_value": None,
+                        "quote_date": None,
+                    }
+                    for holding in ledger.holdings
+                ],
             },
             year,
             str(account.id),
             {"USD": Decimal(1)},
+            pricing_complete=not ledger.holdings,
         )
+        unavailable["availability_reason"] = "Reviewed financial data unavailable"
+        return unavailable
     valuation: dict = value_records(
         ledger,
         account.base_currency,

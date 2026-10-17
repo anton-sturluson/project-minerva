@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from investor_platform import financial_api, market
 from investor_platform.app import app
 from investor_platform.db import Actor, get_actor
-from investor_platform.financial import Json, Record, Row, check_schema, record, records
+from investor_platform.financial import Json, Record, Row, check_schema, digest, record, records
 from investor_platform.financial_history import (
     METRICS,
     VERSION,
@@ -84,17 +84,37 @@ def release_row(ticker: str = "AAA", *, currency: str = "USD", factor: str = "1"
 
 def release_payload(rows: list[Record] | None = None) -> Record:
     """Pin a wholly synthetic source packet and independent review receipt as exact bytes."""
-    packet: str = json.dumps({"observations": [{"id": "input", "value": "synthetic evidence"}]})
+    packet: str = json.dumps(
+        {
+            "observations": [
+                {
+                    "id": "input",
+                    "value": "synthetic evidence",
+                    "source_url": "https://example.org/synthetic-filing",
+                }
+            ]
+        }
+    )
     sha: str = hashlib.sha256(packet.encode()).hexdigest()
-    receipt: str = json.dumps({"status": "independent_source_review_passed", "packet_sha256": sha})
     selected: list[Record] = deepcopy(rows if rows is not None else [release_row()])
     row: Record
     for row in selected:
+        if row.get("instrument_type") == "company" and row.get("year") != 2025:
+            year: int = int(str(row["year"]))
+            row["period"] = {"start": f"{year}-01-01", "end": f"{year}-12-31"}
+            row["prior_period"] = {"start": f"{year - 1}-01-01", "end": f"{year - 1}-12-31"}
         group: str
         for group in ("metrics", "prior_metrics"):
             metric: Record
             for metric in (record(v) for v in record(row.get(group, {})).values()):
                 metric["inputs"] = [{"packet_sha256": sha, "ids": ["input"]}]
+    receipt: str = json.dumps(
+        {
+            "status": "independent_source_review_passed",
+            "packet_sha256": sha,
+            "records_sha256": digest({"records": selected}),
+        }
+    )
     return {
         "schema_version": VERSION,
         "release_id": str(uuid4()),
@@ -362,7 +382,7 @@ def test_release_replay_conflict_immutability_and_no_evidence_drift(
     assert import_release(conn, schema, payload, reviewed=True)["created"] is False
     changed: Record = deepcopy(payload)
     record(record(records(changed["records"])[0]["metrics"])["basic_eps"])["value"] = "99"
-    with pytest.raises(ValueError, match="UUID"):
+    with pytest.raises(ValueError, match="UUID|after independent review"):
         import_release(conn, schema, changed, reviewed=True)
     with pytest.raises(RaiseException):
         with conn.transaction():
@@ -465,7 +485,17 @@ def test_unknown_account_no_history_and_auth_boundaries(
     )
     missing: Record = client.get(f"/api/accounts/{account}/financials?year=2025").json()
     assert missing["api_status"] == "unavailable"
-    assert not any(c["ticker"] == "AAA" for c in records(missing["companies"]))
+    assert [c["ticker"] for c in records(missing["companies"])] == ["UNKNOWN"]
+    unknown: Record = records(missing["companies"])[0]
+    assert unknown["financial_status"] == "unavailable" and unknown["equity_weight"] is None
+    assert records(record(missing["market_value_snapshot"])["holdings"])[0]["ticker"] == "UNKNOWN"
+    previous_schema: str | None = app.state.financial_schema
+    app.state.financial_schema = None
+    try:
+        absent: Record = client.get(f"/api/accounts/{account}/financials?year=2025").json()
+        assert [c["ticker"] for c in records(absent["companies"])] == ["UNKNOWN"]
+    finally:
+        app.state.financial_schema = previous_schema
     assert client.get(f"/api/accounts/{account}/financials?year=1899").status_code == 422
     owner: UUID = uuid4()
     workspace: UUID = uuid4()
@@ -714,10 +744,6 @@ def zero_revenue_release(revenue: str = "0", *, proof_end: str = "2025-12-31") -
         }
     )
     sha: str = hashlib.sha256(packet.encode()).hexdigest()
-    receipt: str = json.dumps({"packet_sha256": sha})
-    release["review_receipts"] = [
-        {"content": receipt, "sha256": hashlib.sha256(receipt.encode()).hexdigest()}
-    ]
     release["evidence"] = {"packets": {sha: packet}}
     row: Record
     for row in records(release["records"]):
@@ -731,6 +757,16 @@ def zero_revenue_release(revenue: str = "0", *, proof_end: str = "2025-12-31") -
                         "ids": ["zero-revenue" if metric.get("convention") else "input"],
                     }
                 ]
+    receipt: str = json.dumps(
+        {
+            "status": "independent_source_review_passed",
+            "packet_sha256": sha,
+            "records_sha256": digest({"records": release["records"]}),
+        }
+    )
+    release["review_receipts"] = [
+        {"content": receipt, "sha256": hashlib.sha256(receipt.encode()).hexdigest()}
+    ]
     return release
 
 
@@ -1009,3 +1045,70 @@ def test_missing_current_margin_keeps_available_actual_prior_value() -> None:
         assert compared["prior_value"] == "0.4" and compared["status"] == "unavailable"
         assert compared["percent_change"] is None
         assert compared["reason"] == "Current or prior financial data unavailable"
+
+
+@pytest.mark.parametrize("field", ["value", "issuer", "method", "share_basis", "period"])
+def test_review_receipt_binds_admitted_record_content(field: str) -> None:
+    """An unchanged reviewer receipt cannot authorize edited values or their interpretation."""
+    release: Record = release_payload()
+    validate_release(release)
+    row: Record = records(release["records"])[0]
+    if field == "value":
+        record(record(row["metrics"])["gross_margin"])["value"] = "98765"
+    elif field == "issuer":
+        row["issuer_key"] = "example:OTHER"
+    elif field == "method":
+        record(record(row["metrics"])["gross_margin"])["method"] = "different formula"
+    elif field == "share_basis":
+        row["shares_per_traded_unit"] = "100"
+    else:
+        record(row["period"])["start"] = "2025-01-02"
+    with pytest.raises(ValueError, match="after independent review"):
+        validate_release(release)
+
+
+@pytest.mark.parametrize("status", ["failed", "independent_source_review_failed", None])
+def test_failed_or_missing_review_outcome_cannot_admit_release(status: str | None) -> None:
+    """A valid receipt hash proves bytes, while a failed outcome grants no admission."""
+    release: Record = release_payload()
+    receipt: Record = records(release["review_receipts"])[0]
+    review: Record = record(json.loads(str(receipt["content"])))
+    review["status"] = status
+    receipt["content"] = json.dumps(review)
+    receipt["sha256"] = hashlib.sha256(str(receipt["content"]).encode()).hexdigest()
+    with pytest.raises(ValueError, match="passed independent"):
+        validate_release(release)
+
+
+def test_financial_period_year_must_match_selected_release_year() -> None:
+    """A full annual duration cannot make unrelated historical periods fit a selected year."""
+    release: Record = release_payload()
+    row: Record = records(release["records"])[0]
+    row["period"] = {"start": "1999-01-01", "end": "1999-12-31"}
+    row["prior_period"] = {"start": "1998-01-01", "end": "1998-12-31"}
+    with pytest.raises(ValueError, match="selected calendar year"):
+        validate_release(release)
+
+
+def test_company_details_link_input_documents() -> None:
+    """The reader can open a company source document directly from report evidence."""
+    result: Record = build_report(
+        release_payload(), snapshot(("AAA", "100")), 2025, "synthetic-account", {"USD": Decimal(1)}
+    )
+    assert records(result["companies"])[0]["source_urls"] == [
+        "https://example.org/synthetic-filing"
+    ]
+
+
+@pytest.mark.parametrize("omitted", ["status", "records_sha256", "packet_sha256"])
+def test_legacy_or_unstructured_review_receipts_require_new_review(omitted: str) -> None:
+    """Unstructured hash mentions and legacy packet-only review cannot admit new records."""
+    release: Record = release_payload()
+    receipt: Record = records(release["review_receipts"])[0]
+    review: Record = record(json.loads(str(receipt["content"])))
+    review["unrelated_hash_note"] = review[omitted]
+    del review[omitted]
+    receipt["content"] = json.dumps(review)
+    receipt["sha256"] = hashlib.sha256(str(receipt["content"]).encode()).hexdigest()
+    with pytest.raises(ValueError, match="review|explicitly pin"):
+        validate_release(release)

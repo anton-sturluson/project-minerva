@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { MARKET_DATA_TIMEOUT, api } from "./api";
 
 export type PerShareMeasure = {
   status: "available" | "unavailable";
@@ -45,6 +45,7 @@ export type FinancialReport = {
   synthetic: boolean;
   calendar_year: number;
   holdings_date: string;
+  publication_policy?: string;
   api_status: "available" | "partial" | "unavailable";
   market_value_snapshot?: {
     holdings: { issuer_key: string; ticker?: string }[];
@@ -56,6 +57,9 @@ export type FinancialReport = {
     name: string;
     equity_weight?: string | null;
     financial_status: "eligible" | "unavailable";
+    period?: { start: string; end: string; fiscal_label?: string } | null;
+    prior_period?: { start: string; end: string; fiscal_label?: string } | null;
+    source_urls?: string[];
     per_share_comparisons?: Record<string, FinancialComparison>;
     per_share_metrics?: Record<string, PerShareMeasure>;
   }[];
@@ -64,4 +68,8 @@ export type FinancialReport = {
 };
 
 export const annualFinancials = (accountId: string, year: number) =>
-  api<FinancialReport>(`/accounts/${accountId}/financials?year=${year}`);
+  api<FinancialReport>(
+    `/accounts/${accountId}/financials?year=${year}`,
+    undefined,
+    MARKET_DATA_TIMEOUT,
+  );

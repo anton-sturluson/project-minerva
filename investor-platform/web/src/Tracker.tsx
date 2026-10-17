@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { api, errorMessage, type Account } from "./api";
+import { MARKET_DATA_TIMEOUT, api, errorMessage, type Account } from "./api";
 import { TradeScorecard } from "./TradeScorecard";
 import { number, percent } from "./format";
 import { HitRate } from "./HitRate";
@@ -182,7 +182,7 @@ export function Tracker({
                 : {}),
             }),
           },
-          60000,
+          MARKET_DATA_TIMEOUT,
         );
         if (version === generation.current) {
           setReport(r);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, type Account } from "./api";
+import { MARKET_DATA_TIMEOUT, api, errorMessage, type Account } from "./api";
 import { number, percent } from "./format";
 import { Financials } from "./Financials";
 import { completedMarketDate, today, type Ledger } from "./records";
@@ -71,7 +71,7 @@ export function PostMortem({
           scope: "stocks",
         }),
       },
-      60000,
+      MARKET_DATA_TIMEOUT,
     )
       .then((report) => {
         if (!active) return;
