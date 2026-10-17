@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 import { number, percent, quarterLabel } from "../format";
 
@@ -11,6 +11,8 @@ type Contributor = {
   previous_weight: string;
   current_weight: string;
   weight_change_pp: string;
+  quarter_end_price_usd: string | null;
+  price_as_of: string | null;
   source_urls: string[];
 };
 type ActivityRow = {
@@ -33,12 +35,48 @@ type Activity = {
   increased: ActivityRow[];
   decreased: ActivityRow[];
 };
+type MarketContext = {
+  status: "available" | "unavailable";
+  reason: string | null;
+  average_close_usd: string | null;
+  low_close_usd: string | null;
+  high_close_usd: string | null;
+  first_session: string | null;
+  last_session: string | null;
+  session_count: number;
+  source_urls: string[];
+};
+type MarketPrices = Record<string, MarketContext>;
+const averageWeightHelp =
+  "Equal mean of current 13F portfolio weights among managers in this direction.";
+const weightChangeHelp =
+  "Equal mean of portfolio weight changes among managers in this direction, in percentage points (pp): 2% to 3% is +1 pp.";
+const averageCloseHelp =
+  "Arithmetic mean of daily closing prices in the quarter; not a purchase price.";
+const closingRangeHelp =
+  "Minimum and maximum daily closing prices in the quarter; not intraday lows/highs or purchase prices.";
+function unavailablePrice(reason: string): MarketContext {
+  return {
+    status: "unavailable",
+    reason,
+    average_close_usd: null,
+    low_close_usd: null,
+    high_close_usd: null,
+    first_session: null,
+    last_session: null,
+    session_count: 0,
+    source_urls: [],
+  };
+}
 const labels: Record<string, string> = {
   new: "New position",
   exited: "Exited",
   increased: "Increased",
   decreased: "Decreased",
 };
+function shares(value: string) {
+  return Number(value).toLocaleString("en-US", { maximumFractionDigits: 8 });
+}
 function percentagePoints(value: string) {
   return `${Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -47,33 +85,205 @@ function percentagePoints(value: string) {
   })} pp`;
 }
 type SortColumn = "issuer" | "manager_count" | "weight" | "weight_change";
-const columns: { key: SortColumn; label: string }[] = [
+const columns: { key: SortColumn; label: string; help?: string }[] = [
   { key: "issuer", label: "Security" },
   { key: "manager_count", label: "Managers" },
-  { key: "weight", label: "Average 13F weight" },
-  { key: "weight_change", label: "Average weight change" },
+  { key: "weight", label: "Avg portfolio %", help: averageWeightHelp },
+  {
+    key: "weight_change",
+    label: "Avg change (pp)",
+    help: weightChangeHelp,
+  },
 ];
+function ContributorsTable({
+  contributors,
+  issuer,
+}: {
+  contributors: Contributor[];
+  issuer: string;
+}) {
+  const [limit, setLimit] = useState(10);
+  const ordered = [...contributors].sort(
+    (left, right) =>
+      Number(right.current_weight) - Number(left.current_weight) ||
+      left.name.localeCompare(right.name, "en") ||
+      left.slug.localeCompare(right.slug, "en"),
+  );
+  return (
+    <>
+      <div className="table-scroll" tabIndex={0}>
+        <table
+          className="activity-manager-table"
+          aria-label={`${issuer} managers`}
+        >
+          <thead>
+            <tr>
+              <th scope="col">Manager / change</th>
+              <th scope="col" className="number">
+                Shares
+              </th>
+              <th
+                scope="col"
+                className="number"
+                title="Share of this manager's reported 13F portfolio, previous quarter to current quarter."
+              >
+                13F weight: before → after
+              </th>
+              <th
+                scope="col"
+                className="number"
+                title="Portfolio weight difference in percentage points: 2% to 3% is +1 pp."
+              >
+                Weight change (pp)
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.slice(0, limit).map((manager) => (
+              <tr key={manager.slug}>
+                <th scope="row">
+                  {manager.name}
+                  <small>{labels[manager.kind] ?? manager.kind}</small>
+                </th>
+                <td className="number">
+                  {shares(manager.previous_quantity)} →{" "}
+                  {shares(manager.current_quantity)}
+                </td>
+                <td className="number">
+                  {percent(manager.previous_weight)} →{" "}
+                  {percent(manager.current_weight)}
+                </td>
+                <td className="number">
+                  {percentagePoints(manager.weight_change_pp)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {contributors.length > 10 && (
+        <div
+          className="activity-pagination"
+          aria-label={`${issuer} manager pages`}
+        >
+          <span>
+            {Math.min(limit, contributors.length)} of {contributors.length}{" "}
+            managers
+          </span>
+          {limit < contributors.length && (
+            <button
+              onClick={() =>
+                setLimit(Math.min(limit + 10, contributors.length))
+              }
+            >
+              Show 10 more
+            </button>
+          )}
+          {limit > 10 && (
+            <button onClick={() => setLimit(10)}>Show fewer</button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function StockRow({
+  row,
+  averageWeight,
+  market,
+  retryMarket,
+}: {
+  row: ActivityRow;
+  averageWeight: number;
+  market: MarketContext | undefined;
+  retryMarket: (cusip: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
+  return (
+    <>
+      <tr className="activity-stock-row">
+        <td>
+          <button
+            className="activity-stock-toggle"
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            onClick={() => setExpanded(!expanded)}
+          >
+            <span aria-hidden="true">{expanded ? "▾ " : "▸ "}</span>
+            {row.issuer}
+          </button>
+          <small>
+            {row.security_class} · {row.cusip}
+          </small>
+        </td>
+        <td className="number">{row.manager_count}</td>
+        <td className="number">{percent(String(averageWeight))}</td>
+        <td className="number">
+          {percentagePoints(row.average_weight_change_pp)}
+        </td>
+        <td
+          className="number activity-market-price"
+          title={market?.reason ?? averageCloseHelp}
+        >
+          {!market ? (
+            "Loading…"
+          ) : market.status === "available" ? (
+            `$${number(market.average_close_usd)}`
+          ) : (
+            <>
+              Unavailable{" "}
+              <button
+                onClick={() => retryMarket(row.cusip)}
+                aria-label={`Retry prices for ${row.issuer}`}
+              >
+                Retry
+              </button>
+            </>
+          )}
+        </td>
+        <td className="number" title={closingRangeHelp}>
+          {market?.status === "available"
+            ? `$${number(market.low_close_usd)} – $${number(market.high_close_usd)}`
+            : "—"}
+        </td>
+      </tr>
+      <tr className="activity-expanded-row" hidden={!expanded}>
+        <td colSpan={6} id={panelId}>
+          {expanded && (
+            <ContributorsTable
+              contributors={row.contributors}
+              issuer={row.issuer}
+            />
+          )}
+        </td>
+      </tr>
+    </>
+  );
+}
+
 function RankedActivity({
   title,
   rows,
+  prices,
+  reportVisible,
+  retryMarket,
 }: {
   title: string;
   rows: ActivityRow[];
+  prices: MarketPrices;
+  reportVisible: (title: string, cusips: string[]) => void;
+  retryMarket: (cusip: string) => void;
 }) {
-  const [showAll, setShowAll] = useState(false);
+  const [limit, setLimit] = useState(10);
   const [sort, setSort] = useState<{
     column: SortColumn;
     direction: "ascending" | "descending";
-  }>({ column: "weight", direction: "descending" });
+  }>({ column: "manager_count", direction: "descending" });
   const ordered = rows
     .map((row) => ({
       ...row,
-      contributors: [...row.contributors].sort(
-        (left, right) =>
-          Number(right.current_weight) - Number(left.current_weight) ||
-          left.name.localeCompare(right.name, "en") ||
-          left.slug.localeCompare(right.slug, "en"),
-      ),
       averageWeight:
         row.contributors.reduce(
           (sum, manager) => sum + Number(manager.current_weight),
@@ -98,8 +308,13 @@ function RankedActivity({
         left.security_class.localeCompare(right.security_class)
       );
     });
-  const visible = showAll ? ordered : ordered.slice(0, 20);
+  const visible = ordered.slice(0, limit);
+  const visibleKey = visible.map((row) => row.cusip).join(",");
+  useEffect(() => {
+    reportVisible(title, visibleKey ? visibleKey.split(",") : []);
+  }, [reportVisible, title, visibleKey]);
   function changeSort(column: SortColumn) {
+    setLimit(10);
     setSort({
       column,
       direction:
@@ -115,29 +330,32 @@ function RankedActivity({
   return (
     <section className="research-change-group" aria-label={title}>
       <h4>
-        {title}{" "}
-        <small>
-          {rows.length > 20 && !showAll
-            ? `Top 20 of ${rows.length}`
-            : `${rows.length} stocks`}
-        </small>
+        {title} <small>{rows.length} stocks</small>
       </h4>
       {rows.length === 0 ? (
         <p>No reported quantity changes in this direction.</p>
       ) : (
         <div className="table-scroll" tabIndex={0}>
-          <table className="stock-activity-table">
+          <table
+            className="stock-activity-table"
+            aria-label={`${title} stocks`}
+          >
             <thead>
               <tr>
                 {columns.map((column) => (
                   <th
                     key={column.key}
+                    scope="col"
+                    title={column.help}
                     className={column.key === "issuer" ? undefined : "number"}
                     aria-sort={
                       sort.column === column.key ? sort.direction : "none"
                     }
                   >
-                    <button onClick={() => changeSort(column.key)}>
+                    <button
+                      aria-description={column.help}
+                      onClick={() => changeSort(column.key)}
+                    >
                       {column.label}{" "}
                       <span aria-hidden="true">
                         {sort.column === column.key
@@ -149,72 +367,129 @@ function RankedActivity({
                     </button>
                   </th>
                 ))}
+                <th scope="col" className="number" title={averageCloseHelp}>
+                  Quarter avg close
+                </th>
+                <th scope="col" className="number" title={closingRangeHelp}>
+                  Closing range
+                </th>
               </tr>
             </thead>
             <tbody>
               {visible.map((row) => (
-                <tr key={`${row.cusip}|${row.security_class}`}>
-                  <td>
-                    <details>
-                      <summary>
-                        {row.issuer}
-                        <small>
-                          {row.security_class} · {row.cusip}
-                        </small>
-                      </summary>
-                      <ul className="activity-contributors">
-                        {row.contributors.map((manager) => (
-                          <li key={manager.slug}>
-                            <strong>{manager.name}</strong>
-                            <p>
-                              {labels[manager.kind] ?? manager.kind} ·{" "}
-                              {percent(manager.previous_weight)} →{" "}
-                              {percent(manager.current_weight)} ·{" "}
-                              {percentagePoints(manager.weight_change_pp)}
-                            </p>
-                            <p>
-                              Reported shares:{" "}
-                              {number(manager.previous_quantity, 0)} →{" "}
-                              {number(manager.current_quantity, 0)}
-                            </p>
-                            <div className="research-links">
-                              {manager.source_urls.map((url, index) => (
-                                <a
-                                  key={url}
-                                  href={url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  Filing source {index + 1}
-                                </a>
-                              ))}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </td>
-                  <td className="number">{row.manager_count}</td>
-                  <td className="number">
-                    {percent(String(row.averageWeight))}
-                  </td>
-                  <td className="number">
-                    {percentagePoints(row.average_weight_change_pp)}
-                  </td>
-                </tr>
+                <StockRow
+                  key={`${row.cusip}|${row.security_class}`}
+                  row={row}
+                  averageWeight={row.averageWeight}
+                  market={prices[row.cusip]}
+                  retryMarket={retryMarket}
+                />
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {rows.length > 20 && (
-        <p>
-          <button onClick={() => setShowAll(!showAll)} aria-expanded={showAll}>
-            {showAll ? "Show top 20" : "Show all"}
-          </button>
-        </p>
+      {rows.length > 10 && (
+        <div
+          className="activity-pagination"
+          aria-label={`${title} stock pages`}
+        >
+          <span>
+            {Math.min(limit, rows.length)} of {rows.length} stocks
+          </span>
+          {limit < rows.length && (
+            <button onClick={() => setLimit(Math.min(limit + 10, rows.length))}>
+              Show 10 more
+            </button>
+          )}
+          {limit > 10 && (
+            <button onClick={() => setLimit(10)}>Show fewer</button>
+          )}
+        </div>
       )}
     </section>
+  );
+}
+
+function ActivityTables({ data }: { data: Activity }) {
+  const [visible, setVisible] = useState<Record<string, string[]>>({});
+  const [prices, setPrices] = useState<MarketPrices>({});
+  const pending = useRef(new Set<string>());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const reportVisible = useCallback((title: string, cusips: string[]) => {
+    setVisible((previous) => ({ ...previous, [title]: cusips }));
+  }, []);
+  const visibleKey = [...new Set(Object.values(visible).flat())]
+    .sort()
+    .join(",");
+  useEffect(() => {
+    const missing = visibleKey
+      .split(",")
+      .filter(
+        (cusip) => cusip && !prices[cusip] && !pending.current.has(cusip),
+      );
+    for (let start = 0; start < missing.length; start += 20) {
+      const batch = missing.slice(start, start + 20);
+      batch.forEach((cusip) => pending.current.add(cusip));
+      api<{ quarter: string; prices: MarketPrices }>(
+        `/research/activity/market-context?quarter=${data.quarter}&cusips=${batch.join(",")}`,
+        undefined,
+        45000,
+      ).then(
+        (response) => {
+          if (!mounted.current) return;
+          const received: MarketPrices = {};
+          batch.forEach((cusip) => {
+            received[cusip] =
+              response.quarter === data.quarter && response.prices[cusip]
+                ? response.prices[cusip]
+                : unavailablePrice("Quarter prices unavailable");
+            pending.current.delete(cusip);
+          });
+          setPrices((previous) => ({ ...previous, ...received }));
+        },
+        (failure) => {
+          if (!mounted.current) return;
+          const unavailable: MarketPrices = {};
+          batch.forEach((cusip) => {
+            pending.current.delete(cusip);
+            unavailable[cusip] = unavailablePrice(errorMessage(failure));
+          });
+          setPrices((previous) => ({ ...previous, ...unavailable }));
+        },
+      );
+    }
+  }, [visibleKey, prices, data.quarter]);
+  function retryMarket(cusip: string) {
+    setPrices((previous) => {
+      const updated = { ...previous };
+      delete updated[cusip];
+      return updated;
+    });
+  }
+  return (
+    <>
+      <RankedActivity
+        title="Most increased"
+        rows={data.increased}
+        prices={prices}
+        reportVisible={reportVisible}
+        retryMarket={retryMarket}
+      />
+      <RankedActivity
+        title="Most decreased"
+        rows={data.decreased}
+        prices={prices}
+        reportVisible={reportVisible}
+        retryMarket={retryMarket}
+      />
+    </>
   );
 }
 
@@ -285,26 +560,6 @@ export function InstitutionalStockActivity() {
           <p>
             {data.included_managers} of {data.total_managers} managers included.
           </p>
-          <p className="form-note">
-            Default order: average current 13F weight, largest first. Select any
-            column heading to change the order.
-          </p>
-          <details>
-            <summary>How activity is measured</summary>
-            <p className="form-note">
-              Changes compare quarter-end share quantities, not individual
-              trades. Share changes can reflect stock splits. Price changes
-              alone do not count as increased or decreased positions. Weights
-              include all disclosed 13F positions, not the whole fund. Rankings
-              exclude options and principal positions; fund shares can be
-              included. Average weight changes use only contributing managers
-              and can have a different sign from share changes. Changes are in
-              percentage points (pp). Average 13F weight is the equal-weight
-              mean of current portfolio weights among contributing managers.
-              Expanded manager lists show current weights from largest to
-              smallest.
-            </p>
-          </details>
           {data.excluded_managers.length > 0 && (
             <details className="activity-coverage">
               <summary>
@@ -322,18 +577,7 @@ export function InstitutionalStockActivity() {
           {data.status === "unavailable" ? (
             <p role="status">Stock activity unavailable: {data.reason}</p>
           ) : (
-            <>
-              <RankedActivity
-                key={`${data.quarter}:increased`}
-                title="Most increased"
-                rows={data.increased}
-              />
-              <RankedActivity
-                key={`${data.quarter}:decreased`}
-                title="Most decreased"
-                rows={data.decreased}
-              />
-            </>
+            <ActivityTables key={data.quarter} data={data} />
           )}
         </>
       )}

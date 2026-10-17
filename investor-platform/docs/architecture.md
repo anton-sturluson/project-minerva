@@ -16,7 +16,7 @@ The backend groups code by the feature it owns. `app.py` composes routes and the
 | `performance/` | Return calculations, position episodes, statistics, attribution, valuations, benchmark policies and report caching. Routes collect inputs; calculators consume supplied records and prices. |
 | `market_data/` | Common history types, listing validation, Yahoo/Tiingo adapters, provider caching, dated FX conversion and daily collection. |
 | `financials/` | Annual bundle and reviewed-release admission, storage, company formulas, portfolio reports and shared arithmetic. Each admission/comparison policy remains explicit. |
-| `research/` | SEC imports, manager eligibility, disclosed snapshots and manager/activity routes. Selected filings and holdings are loaded in batches. |
+| `research/` | SEC imports, manager eligibility, disclosed snapshots, annual/quarterly changes, public security mappings and quarterly price context. Selected filings and holdings are loaded in batches. |
 
 The frontend follows `ledger/`, `performance/`, `financials/` and `research/`. `Portfolio` owns selection and creation; `AccountWorkspace` owns the selected ledger and page composition. `PortfolioOverview` composes holdings and scorecards; `PerformanceComparison` owns comparison state and `ReturnChart` draws it. Feature API contracts live beside their request functions rather than inside components. Shared API transport, formatting and New York market-date helpers stay at the source root.
 

@@ -221,13 +221,14 @@ def manager_comparison(
     manager: ResearchManager,
     quarter: date,
     *,
+    prior: date | None = None,
     filings: list[ResearchFiling] | None = None,
     holdings: dict[UUID, list[ResearchHolding]] | None = None,
 ) -> dict:
-    """Read adjacent filing snapshots and their common comparison response."""
+    """Read complete calendar-quarter snapshots between two comparison boundaries."""
     if not quarter_end(quarter):
         raise HTTPException(422, "Choose a calendar quarter end")
-    prior: date = previous_quarter(quarter)
+    prior = prior or previous_quarter(quarter)
     filings = (
         filings
         if filings is not None
@@ -235,32 +236,41 @@ def manager_comparison(
             session.scalars(
                 select(ResearchFiling).where(
                     ResearchFiling.manager_id == manager.id,
-                    ResearchFiling.report_period.in_([prior, quarter]),
+                    ResearchFiling.report_period.between(prior, quarter),
                 )
             )
         )
     )
     if holdings is None:
         holdings = load_holdings(session, filings)
-    current: dict[HoldingKey, Position]
-    current_error: str | None
-    current_sources: list[str]
-    previous: dict[HoldingKey, Position]
-    previous_error: str | None
-    previous_sources: list[str]
-    current, current_error, current_sources = snapshot(
-        session, [filing for filing in filings if filing.report_period == quarter], holdings
-    )
-    previous, previous_error, previous_sources = snapshot(
-        session, [filing for filing in filings if filing.report_period == prior], holdings
-    )
-    error: str | None = current_error or previous_error
+    current: dict[HoldingKey, Position] = {}
+    previous: dict[HoldingKey, Position] = {}
+    sources: list[str] = []
+    error: str | None = None
+    period: date = quarter
+    while period >= prior:
+        positions: dict[HoldingKey, Position]
+        reason: str | None
+        period_sources: list[str]
+        positions, reason, period_sources = snapshot(
+            session, [filing for filing in filings if filing.report_period == period], holdings
+        )
+        sources = period_sources + sources
+        if reason and error is None:
+            error = (
+                f"{period.isoformat()}: {reason}" if prior != previous_quarter(quarter) else reason
+            )
+        if period == quarter:
+            current = positions
+        if period == prior:
+            previous = positions
+        period = previous_quarter(period)
     changes: list[PositionChange] = compare_positions(current, previous) if error is None else []
     return {
         "quarter": quarter.isoformat(),
         "previous_quarter": prior.isoformat(),
         "status": "unavailable" if error else "available",
         "reason": error,
-        "source_urls": previous_sources + current_sources,
+        "source_urls": sources,
         "changes": changes,
     }

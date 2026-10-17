@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import type {
   FinancialReport,
-  PerShareComparison,
+  FinancialComparison,
 } from "../src/financials/financialApi";
 
 const main = "00000000-0000-4000-8000-000000000091";
@@ -11,7 +11,7 @@ function report(accountId = main, year = 2026): FinancialReport {
   const comparison = (
     prior: string,
     change: string | null,
-  ): PerShareComparison => ({
+  ): FinancialComparison => ({
     prior_year: year - 1,
     prior_value: year === 2023 ? null : prior,
     status:
@@ -38,6 +38,7 @@ function report(accountId = main, year = 2026): FinancialReport {
       {
         issuer_key: "example:issuer",
         ticker: "EXM",
+        exchange: "NYSE",
         name: "Example Company",
         equity_weight: "0.75",
         financial_status: "eligible",
@@ -60,6 +61,7 @@ function report(accountId = main, year = 2026): FinancialReport {
       {
         issuer_key: "example:excluded",
         ticker: "OTH",
+        exchange: "NYSE",
         name: "Other Example Company",
         equity_weight: "0.25",
         financial_status: "unavailable",
@@ -74,6 +76,8 @@ function report(accountId = main, year = 2026): FinancialReport {
         exclusions: [
           {
             issuer_key: "example:excluded",
+            ticker: "OTH",
+            equity_weight: "0.25",
             reason: "Gross margin is not applicable for an insurer.",
           },
         ],
@@ -86,6 +90,8 @@ function report(accountId = main, year = 2026): FinancialReport {
         exclusions: [
           {
             issuer_key: "example:excluded",
+            ticker: "OTH",
+            equity_weight: "0.25",
             reason: "Annual operating figure not collected.",
           },
         ],
@@ -206,7 +212,12 @@ test("selected portfolio financials lead contributors with one shared year and f
   await expect(
     summary.getByRole("row", { name: /^Weighted company FCF/ }),
   ).toContainText("$0.3");
-  await expect(financials.getByText("-12.5%", { exact: true })).toBeVisible();
+  await expect(
+    summary
+      .getByRole("row", { name: /^Operating margin/ })
+      .getByRole("cell")
+      .nth(0),
+  ).toHaveText("-12.5%2");
   await expect(page.locator(".financial-per-share-table")).toBeHidden();
   await page.getByText("Company details", { exact: true }).click();
   const table = page.getByRole("region", { name: "Company per-share figures" });
@@ -366,7 +377,12 @@ test("issuer non-reporting differs from missing data and cash share basis is exp
     data.companies[0].per_share_metrics!.fcf_per_basic_share.share_denominator_basis =
       "diluted_weighted_average";
     data.weighted_company_per_share!.weighted_company_eps.exclusions = [
-      { issuer_key: "example:excluded", reason },
+      {
+        issuer_key: "example:excluded",
+        ticker: "OTH",
+        equity_weight: "0.25",
+        reason,
+      },
     ];
     return route.fulfill({ json: data });
   });
@@ -418,6 +434,7 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
       data.companies.push({
         issuer_key: "example:zero",
         ticker: "ZERO",
+        exchange: "NYSE",
         name: "Pre-revenue company",
         equity_weight: "0.05",
         financial_status: "eligible",
@@ -426,6 +443,8 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
       data.weighted_ratios.fcf_margin_after_disclosed_capex.exclusions = [
         {
           issuer_key: "example:zero",
+          ticker: "ZERO",
+          equity_weight: "0.05",
           reason: "Revenue denominator is zero or negative",
         },
       ];
@@ -452,6 +471,7 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
         {
           issuer_key: "example:previous",
           ticker: "PREV",
+          exchange: "NYSE",
           name: "Previous holding",
           equity_weight: "0.6",
           financial_status: "eligible",
@@ -490,7 +510,10 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
   const notes = page.locator(".annual-financials .form-note");
   await expect(notes.locator("sup")).toHaveText(["1", "2", "3", "4"]);
   await expect(
-    summary.getByRole("rowheader", { name: /^FCF margin/ }),
+    summary
+      .getByRole("row", { name: /^FCF margin/ })
+      .getByRole("cell")
+      .nth(0),
   ).toHaveAttribute(
     "aria-describedby",
     "fcf_margin_after_disclosed_capex-exclusions",
@@ -634,8 +657,9 @@ test("gross margin keeps a numbered cost-basis note without exclusions", async (
     .getByRole("region", { name: "Portfolio-weighted metrics", exact: true })
     .getByRole("row")
     .filter({ hasText: "Gross margin" });
-  await expect(gross.getByText("40.0%", { exact: true })).toBeVisible();
-  await expect(gross.locator("sup")).toHaveText("1");
+  await expect(gross.getByRole("cell").nth(0)).toHaveText("40.0%1");
+  await expect(gross.getByRole("cell").nth(0).locator("sup")).toHaveText("1");
+  await expect(gross.getByRole("rowheader").locator("sup")).toHaveCount(0);
 });
 
 test("all prior margin cells show the actual previous portfolio and retain its disclosures", async ({
@@ -674,6 +698,7 @@ test("all prior margin cells show the actual previous portfolio and retain its d
       data.weighted_ratios.fcf_margin_after_disclosed_capex.comparison!.exclusions =
         [
           {
+            issuer_key: "example:sold",
             ticker: "SOLD",
             equity_weight: "0.2",
             reason: "Prior source unavailable",
@@ -684,6 +709,7 @@ test("all prior margin cells show the actual previous portfolio and retain its d
         {
           issuer_key: "example:old",
           ticker: "OLD",
+          exchange: "NYSE",
           name: "Previous holding",
           equity_weight: "1",
           financial_status: "eligible",
@@ -699,8 +725,8 @@ test("all prior margin cells show the actual previous portfolio and retain its d
     name: "Portfolio-weighted metrics",
   });
   const expected = [
-    ["Gross margin", "40.0%", "25.0%3", "60.0%"],
-    ["Operating margin", "20.0%", "10.0%", "100.0%"],
+    ["Gross margin", "40.0%1", "25.0%3", "60.0%"],
+    ["Operating margin", "20.0%2", "10.0%", "100.0%"],
     ["FCF margin", "12.0%", "8.0%4", "50.0%"],
   ];
   for (const [label, current, prior, change] of expected) {
@@ -726,11 +752,13 @@ test("all prior margin cells show the actual previous portfolio and retain its d
       .nth(1),
   ).toHaveAttribute("aria-describedby", "gross_margin-prior-exclusions");
   await page.getByLabel("Post-mortem year").selectOption("2025");
-  for (const [label, , prior] of expected) {
+  for (const [label, value] of [
+    ["Gross margin", "25.0%1"],
+    ["Operating margin", "10.0%2"],
+    ["FCF margin", "8.0%"],
+  ]) {
     const row = summary.getByRole("row", { name: new RegExp(`^${label}`) });
-    await expect(row.getByRole("cell").nth(0)).toHaveText(
-      prior.replace(/[34]$/, ""),
-    );
+    await expect(row.getByRole("cell").nth(0)).toHaveText(value);
   }
   await page.getByLabel("Post-mortem year").selectOption("2024");
   await expect(
@@ -745,6 +773,133 @@ test("all prior margin cells show the actual previous portfolio and retain its d
     await expect(row.getByRole("cell").nth(1)).toHaveText("Unavailable");
     await expect(row.getByRole("cell").nth(2)).toHaveText("Unavailable");
   }
+});
+
+test("same-issuer listings keep their own omission weights and detail rows", async ({
+  page,
+}) => {
+  const duplicateKeys: string[] = [];
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      /same key|unique.*key/i.test(message.text())
+    )
+      duplicateKeys.push(message.text());
+  });
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const year = Number(
+      new URL(route.request().url()).searchParams.get("year"),
+    );
+    const data = report(main, year);
+    const company = { ...data.companies[0], issuer_key: "example:shared" };
+    data.companies = [
+      { ...company, ticker: "CLASSA", exchange: "NYSE", equity_weight: "0.8" },
+      {
+        ...company,
+        ticker: "CLASSB",
+        exchange: "NASDAQ",
+        equity_weight: "0.2",
+      },
+    ].map((listing, index) => ({
+      ...listing,
+      per_share_metrics: {
+        ...company.per_share_metrics,
+        basic_eps: { status: "available", value: String(index * 2 + 1) },
+      },
+      per_share_comparisons: {
+        ...company.per_share_comparisons,
+        basic_eps: {
+          prior_year: year - 1,
+          prior_value: String(index * 2 + 1),
+          status: "calculated",
+          percent_change: "0",
+        },
+      },
+    }));
+    if (year === 2025) data.companies.reverse();
+    data.market_value_snapshot = {
+      holdings: data.companies.map(({ issuer_key, ticker }) => ({
+        issuer_key,
+        ticker,
+      })),
+    };
+    data.weighted_ratios.gross_margin.exclusions = [
+      {
+        issuer_key: "example:shared",
+        ticker: "CLASSB",
+        equity_weight: "0.2",
+        reason: "Gross margin source unavailable",
+      },
+    ];
+    data.weighted_ratios.operating_margin.exclusions = [];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  await expect(
+    page.getByText(
+      "1 Gross margin excludes CLASSB (20.0% weight; data unavailable).",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(/Gross margin excludes CLASSA/)).toHaveCount(0);
+  await expect(page.locator(".annual-financials details")).not.toHaveAttribute(
+    "open",
+  );
+  await page.getByText("Company details", { exact: true }).click();
+  const details = page.getByRole("region", {
+    name: "Company per-share figures",
+  });
+  for (const [ticker, value] of [
+    ["CLASSA", "$1.0"],
+    ["CLASSB", "$3.0"],
+  ]) {
+    const row = details
+      .getByRole("row")
+      .filter({
+        has: page.getByRole("rowheader", { name: ticker, exact: true }),
+      })
+      .filter({ hasText: "EPS (basic)" });
+    await expect(row.getByRole("cell")).toHaveText([
+      "EPS (basic)",
+      value,
+      value,
+      "0.0%",
+    ]);
+  }
+  await page.getByLabel("Post-mortem year").selectOption("2025");
+  await expect(
+    page.getByText(
+      "1 Gross margin excludes CLASSB (20.0% weight; data unavailable).",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(page.locator(".annual-financials details")).not.toHaveAttribute(
+    "open",
+  );
+  await page.getByText("Company details", { exact: true }).click();
+  for (const [ticker, value] of [
+    ["CLASSA", "$1.0"],
+    ["CLASSB", "$3.0"],
+  ]) {
+    const row = details
+      .getByRole("row")
+      .filter({
+        has: page.getByRole("rowheader", { name: ticker, exact: true }),
+      })
+      .filter({ hasText: "EPS (basic)" });
+    await expect(row.getByRole("cell")).toHaveText([
+      "EPS (basic)",
+      value,
+      value,
+      "0.0%",
+    ]);
+  }
+  expect(duplicateKeys).toEqual([]);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: test.info().outputPath("same-issuer-financials.png"),
+    fullPage: true,
+  });
 });
 
 test("financials disclose the holdings cutoff and linked current and prior filing periods", async ({

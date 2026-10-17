@@ -24,6 +24,8 @@ const manager = {
     minimum_aum_usd: "50000000",
     reason: null,
   },
+  portfolio_company_count: 5,
+  portfolio_company_count_quarter: "2026-06-30",
   coverage: {
     quarters: 2,
     first_quarter: "2026-03-31",
@@ -52,6 +54,7 @@ const comparison = {
       current_value_usd: "30000",
       value_change_usd: "30000",
       current_weight: "0.30",
+      weight_change: "0.30",
     },
     {
       cusip: "123456789",
@@ -67,6 +70,7 @@ const comparison = {
       current_value_usd: "12500",
       value_change_usd: "4500",
       current_weight: "0.125",
+      weight_change: "0.045",
     },
     {
       cusip: "123456781",
@@ -82,6 +86,7 @@ const comparison = {
       current_value_usd: "10000",
       value_change_usd: "-80000",
       current_weight: "0.10",
+      weight_change: "-0.8",
     },
     {
       cusip: "123456782",
@@ -97,6 +102,7 @@ const comparison = {
       current_value_usd: "0",
       value_change_usd: "-25000",
       current_weight: "0",
+      weight_change: "-0.25",
     },
     {
       cusip: "123456783",
@@ -112,6 +118,7 @@ const comparison = {
       current_value_usd: "8000",
       value_change_usd: "-1000",
       current_weight: "0.08",
+      weight_change: "-0.01",
     },
     {
       cusip: "123456784",
@@ -127,6 +134,7 @@ const comparison = {
       current_value_usd: "39500",
       value_change_usd: "500",
       current_weight: "0.395",
+      weight_change: "0.005",
     },
   ],
 };
@@ -185,15 +193,15 @@ test("research sources, quarter changes, coverage filter and missing comparison"
   await page.getByLabel("Find a manager").fill("software");
   await page.getByRole("button", { name: manager.name }).click();
   const increased = page.getByRole("region", {
-    name: "Increased positions",
+    name: "Quantity increased positions",
     exact: true,
   });
   const decreased = page.getByRole("region", {
-    name: "Decreased positions",
+    name: "Quantity decreased positions",
     exact: true,
   });
   const unchanged = page.getByRole("region", {
-    name: "Unchanged positions",
+    name: "Quantity unchanged positions",
     exact: true,
   });
   await expect(increased.locator("tbody tr")).toHaveCount(2);
@@ -203,7 +211,7 @@ test("research sources, quarter changes, coverage filter and missing comparison"
   await expect(increased.locator("tbody tr").nth(0)).toContainText(
     "New position",
   );
-  await expect(increased.locator("tbody tr").nth(0)).toContainText("+$30,000");
+  await expect(increased.locator("tbody tr").nth(0)).toContainText("+$30K");
   await expect(increased.locator("tbody tr").nth(0)).toContainText("30.00%");
   await expect(increased.locator("tbody tr").nth(1)).toContainText(
     "Example Software",
@@ -211,13 +219,13 @@ test("research sources, quarter changes, coverage filter and missing comparison"
   await expect(increased.locator("tbody tr").nth(1)).toContainText(
     "100 → 125 SH",
   );
-  await expect(increased.locator("tbody tr").nth(1)).toContainText("$12,500");
+  await expect(increased.locator("tbody tr").nth(1)).toContainText("$12K");
   await expect(increased.locator("tbody tr").nth(1)).toContainText("12.50%");
   await expect(decreased.locator("tbody tr")).toHaveCount(3);
   await expect(decreased.locator("tbody tr").nth(0)).toContainText(
     "Example Largest Reduction",
   );
-  await expect(decreased.locator("tbody tr").nth(0)).toContainText("-$80,000");
+  await expect(decreased.locator("tbody tr").nth(0)).toContainText("-$80K");
   await expect(decreased.locator("tbody tr").nth(1)).toContainText(
     "Example Exit",
   );
@@ -230,13 +238,17 @@ test("research sources, quarter changes, coverage filter and missing comparison"
   await expect(unchanged.locator("tbody tr").nth(0)).toContainText(
     "Example Unchanged Shares",
   );
-  await expect(unchanged.locator("tbody tr").nth(0)).toContainText("+$500");
+  await expect(unchanged.locator("tbody tr").nth(0)).toContainText("+$0.5K");
   await expect(unchanged.locator("tbody tr").nth(0)).toContainText(
     "10 → 10 SH",
   );
+  await expect(page.getByText(/Largest absolute reported/)).toHaveCount(0);
   await expect(
-    page.getByText(/Value changes include price effects/),
-  ).toBeVisible();
+    page.getByText(/Reported position changes, inferred/),
+  ).toHaveCount(0);
+  await expect(page.getByText(/quarters loaded/)).toHaveCount(0);
+  await expect(page.getByText("Portfolio companies: 5")).toBeVisible();
+  await expect(increased.locator("tbody tr").nth(0)).toContainText("+30.00 pp");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -338,12 +350,11 @@ test("verified AUM is the default and candidates retain explicit status and hist
   await expect(page.getByRole("button", { name: manager.name })).toBeVisible();
   await expect(page.getByRole("button", { name: below.name })).toHaveCount(0);
   await expect(page.getByRole("button", { name: unknown.name })).toHaveCount(0);
-  await expect(
-    page.getByText("Minimum verified AUM: $50,000,000."),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "$100,000,000 · source date 2026-01-01" }),
-  ).toHaveAttribute("href", "https://example.com/aum");
+  await expect(page.getByText("Minimum verified AUM: $50M.")).toBeVisible();
+  await expect(page.getByText("$100M · 2026-01-01")).toBeVisible();
+  await expect(page.locator('a[href="https://example.com/aum"]')).toHaveCount(
+    0,
+  );
   await page.getByLabel("Show unverified or below-minimum managers").check();
   await expect(page.getByRole("button", { name: below.name })).toBeVisible();
   await expect(page.getByRole("button", { name: unknown.name })).toBeVisible();
@@ -354,8 +365,189 @@ test("verified AUM is the default and candidates retain explicit status and hist
     page.getByLabel("Manager research").getByText(/AUM unverified/),
   ).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Increased positions", exact: true }),
+    page.getByRole("region", {
+      name: "Quantity increased positions",
+      exact: true,
+    }),
   ).toContainText("Example New Cloud");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("compact values preserve share direction and expose exact amounts", async ({
+  page,
+}) => {
+  await page.route("**/api/research/managers", (route) =>
+    route.fulfill({ json: { managers: [manager] } }),
+  );
+  await page.route("**/api/research/managers/example-manager", (route) =>
+    route.fulfill({
+      json: {
+        ...manager,
+        filings: [
+          {
+            quarter: "2026-06-30",
+            filed_date: "2026-08-14",
+            source_url: "https://example.com/filing",
+          },
+        ],
+      },
+    }),
+  );
+  const values = [
+    "8781829133",
+    "999999",
+    "1000000",
+    "-1200000",
+    "999",
+    "1",
+    "0",
+  ];
+  await page.route(
+    "**/api/research/managers/example-manager/changes?*",
+    (route) =>
+      route.fulfill({
+        json: {
+          ...comparison,
+          changes: values.map((value, index) => ({
+            ...comparison.changes[4],
+            cusip: String(index).padStart(9, "0"),
+            issuer: `Example price effect ${index}`,
+            value_change_usd: value,
+            weight_change: "0.0896595669",
+          })),
+        },
+      }),
+  );
+  await page.goto("/#research");
+  await page.getByRole("button", { name: manager.name }).click();
+  const decreased = page.getByRole("region", {
+    name: "Quantity decreased positions",
+    exact: true,
+  });
+  const expected = [
+    "+$8,781M",
+    "+$999K",
+    "+$1M",
+    "-$1M",
+    "+$0.999K",
+    "+$0.001K",
+    "$0K",
+  ];
+  for (let index = 0; index < values.length; index++) {
+    const row = decreased.locator("tbody tr").nth(index);
+    await expect(row).toContainText(expected[index]);
+    await expect(row).toContainText("90 → 80 SH");
+    await expect(row).toContainText("+8.97 pp");
+  }
+  await expect(
+    decreased.locator("tbody tr").first().locator("td").nth(1).locator("span"),
+  ).toHaveAttribute("title", "+$8,781,829,133");
+});
+
+test("annual net change uses year selection and preserves quarterly comparison", async ({
+  page,
+}) => {
+  let annualFailure = true;
+  await page.route("**/api/research/managers", (route) =>
+    route.fulfill({ json: { managers: [manager] } }),
+  );
+  await page.route("**/api/research/managers/example-manager", (route) =>
+    route.fulfill({
+      json: {
+        ...manager,
+        filings: ["2026-06-30", "2026-03-31", "2025-12-31", "2024-12-31"].map(
+          (quarter) => ({
+            quarter,
+            filed_date: "2026-08-14",
+            source_url: "https://example.com/filing",
+          }),
+        ),
+      },
+    }),
+  );
+  await page.route(
+    "**/api/research/managers/example-manager/changes?*",
+    (route) => route.fulfill({ json: comparison }),
+  );
+  await page.route(
+    "**/api/research/managers/example-manager/annual-changes?*",
+    (route) => {
+      const year = Number(
+        new URL(route.request().url()).searchParams.get("year"),
+      );
+      if (year === 2024 && annualFailure) {
+        annualFailure = false;
+        return route.fulfill({
+          status: 503,
+          json: { detail: "Annual data temporarily unavailable" },
+        });
+      }
+      return route.fulfill({
+        json: {
+          ...comparison,
+          year,
+          quarter: year === 2026 ? "2026-06-30" : `${year}-12-31`,
+          previous_quarter: `${year - 1}-12-31`,
+          year_to_date: year === 2026,
+          status: year === 2025 ? "unavailable" : "available",
+          reason:
+            year === 2025
+              ? "2025-03-31: No original or restated holdings available"
+              : null,
+          changes: year === 2025 ? [] : comparison.changes,
+        },
+      });
+    },
+  );
+  await page.goto("/#research");
+  await page.getByRole("button", { name: manager.name }).click();
+  await expect(
+    page.getByRole("region", {
+      name: "Quarterly position changes",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByLabel("Comparison view").selectOption("annual");
+  await expect(page.getByLabel("Report year")).toHaveValue("2026");
+  await expect(page.getByLabel("Report quarter")).toHaveCount(0);
+  await expect(page.getByText("2025 Q4 → 2026 Q2 · YTD")).toBeVisible();
+  await expect(
+    page.getByRole("region", {
+      name: "Annual net position changes",
+      exact: true,
+    }),
+  ).toContainText("Example New Cloud");
+  await page.getByLabel("Report year").selectOption("2025");
+  await expect(
+    page.getByText(
+      "Comparison unavailable: 2025-03-31: No original or restated holdings available",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", {
+      name: "Annual net position changes",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page.getByLabel("Report year").selectOption("2024");
+  await expect(page.getByRole("alert")).toContainText(
+    "Annual data temporarily unavailable",
+  );
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByLabel("Report year")).toHaveValue("2024");
+  await expect(page.getByText("2023 Q4 → 2024 Q4")).toBeVisible();
+  await page.getByLabel("Comparison view").selectOption("quarterly");
+  await expect(page.getByLabel("Report quarter")).toHaveValue("2026-06-30");
+  await expect(
+    page.getByRole("region", {
+      name: "Quarterly position changes",
+      exact: true,
+    }),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
