@@ -14,7 +14,7 @@ from investor_platform.db import Actor
 from investor_platform.ledger.import_transactions import apply_import, reconstruct
 from investor_platform.ledger.reconcile_cash import CashReconciliation, reconcile
 from investor_platform.ledger.schemas import CashInput, TradeInput
-from investor_platform.ledger.state import entries_for, funding_purchase_key
+from investor_platform.ledger.state import active_entries_for_account, funding_purchase_key
 from investor_platform.market_data.types import History
 from investor_platform.models import Account
 
@@ -194,7 +194,9 @@ def test_reconciliation_leaves_inference_and_preserves_recorded_cash_lifecycle(
     assert D(current["balance"]) == 1
     assert len(current["corrections"]) == len(after["corrections"])
     with Session(database) as session:
-        assert not any(funding_purchase_key(entry) for entry in entries_for(session, aid))
+        assert not any(
+            funding_purchase_key(entry) for entry in active_entries_for_account(session, aid)
+        )
     assert (
         trade(
             db_client,

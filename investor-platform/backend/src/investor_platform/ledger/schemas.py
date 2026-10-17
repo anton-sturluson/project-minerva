@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -23,10 +23,18 @@ from investor_platform.domain import (
     IncomeKind,
 )
 
+type LedgerValue = (
+    str | int | float | Decimal | bool | None | list[LedgerValue] | dict[str, LedgerValue]
+)
+type LedgerRecord = dict[str, LedgerValue]
+
+
 Money = Annotated[Decimal, Field(ge=0, max_digits=24, decimal_places=8, allow_inf_nan=False)]
 
 
 class EntryInput(BaseModel):
+    """Shared posted-entry identity, date and currency."""
+
     model_config = ConfigDict(extra="forbid")
     request_key: UUID
     effective_date: date
@@ -35,13 +43,16 @@ class EntryInput(BaseModel):
 
     @field_validator("effective_date")
     @classmethod
-    def no_future(cls, value):
+    def no_future(cls, value: date) -> date:
+        """Reject dates after the current New York posting date."""
         if value > datetime.now(MARKET_TIMEZONE).date():
             raise ValueError("Posted entries cannot be future dated (New York)")
         return value
 
 
 class CashInput(EntryInput):
+    """A cash movement with optional explicit income attribution."""
+
     kind: Literal[
         EntryKind.OPENING_CASH,
         EntryKind.DEPOSIT,
@@ -55,7 +66,8 @@ class CashInput(EntryInput):
     accrual_date: date | None = None
 
     @model_validator(mode="after")
-    def positive_amount(self):
+    def positive_amount(self) -> Self:
+        """Require positive cash flows and coherent income attribution."""
         if self.kind != EntryKind.OPENING_CASH and self.amount <= 0:
             raise ValueError("Cash entries other than opening cash must be positive")
         if self.kind != EntryKind.INCOME and any(
@@ -76,10 +88,17 @@ class CashInput(EntryInput):
         return self
 
 
-WireDecimal = Annotated[Decimal, PlainSerializer(lambda value: format(value, "f"), return_type=str)]
+def decimal_wire(value: Decimal) -> str:
+    """Serialize an exact decimal without scientific notation."""
+    return format(value, "f")
+
+
+WireDecimal = Annotated[Decimal, PlainSerializer(decimal_wire, return_type=str)]
 
 
 class SecurityView(BaseModel):
+    """Workspace listing identity without private provider review data."""
+
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     ticker: str
@@ -89,12 +108,16 @@ class SecurityView(BaseModel):
 
 
 class HoldingView(BaseModel):
+    """Remaining shares and their known or unknown recorded basis."""
+
     security: SecurityView
     quantity: WireDecimal
     cost_basis: WireDecimal | None
 
 
 class EntryView(BaseModel):
+    """One active or audited ledger entry with exact decimal serialization."""
+
     model_config = ConfigDict(from_attributes=True)
     id: int
     kind: EntryKind
@@ -116,6 +139,8 @@ class EntryView(BaseModel):
 
 
 class CorrectionView(BaseModel):
+    """Append-only correction provenance and its original and replacement entries."""
+
     id: int
     original: EntryView
     replacement: EntryView | None
@@ -125,6 +150,8 @@ class CorrectionView(BaseModel):
 
 
 class LedgerView(BaseModel):
+    """Active account cash, holdings and the complete correction audit."""
+
     currency: Currency
     balance: WireDecimal
     entries: list[EntryView]
@@ -136,6 +163,8 @@ Quantity = Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=8, allow
 
 
 class TradeInput(EntryInput):
+    """A purchase, sale or received position with an explicit listing identity."""
+
     kind: Literal[EntryKind.OPENING_POSITION, EntryKind.TRANSFER_IN, EntryKind.BUY, EntryKind.SELL]
     ticker: Annotated[
         str,
@@ -152,11 +181,13 @@ class TradeInput(EntryInput):
 
     @field_validator("ticker", "exchange", mode="before")
     @classmethod
-    def normalize_identity(cls, value):
+    def normalize_identity(cls, value: object) -> object:
+        """Normalize strings and leave other raw input for Pydantic to reject."""
         return value.strip().upper() if isinstance(value, str) else value
 
     @model_validator(mode="after")
-    def valid_trade(self):
+    def valid_trade(self) -> Self:
+        """Keep received-share basis separate from purchase and sale prices."""
         if self.kind in IN_KIND_ENTRIES:
             if self.price is not None or self.fees != 0:
                 raise ValueError(

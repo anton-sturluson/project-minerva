@@ -12,13 +12,14 @@ from psycopg.rows import RowFactory, dict_row
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from investor_platform.accounts import DB, Identity, owned_account
+from investor_platform.accounts import owned_account
+from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import completed_market_date
 from investor_platform.financials.portfolio_report import add_portfolio_comparisons, build_report
 from investor_platform.financials.reviewed_releases import fund_listings, read_release
 from investor_platform.financials.types import Record, Row, records
 from investor_platform.ledger.schemas import LedgerView
-from investor_platform.ledger.state import entries_for, ledger_view
+from investor_platform.ledger.state import active_entries_for_account, ledger_view
 from investor_platform.market_data import types as market_types
 from investor_platform.market_data import yahoo as market_yahoo
 from investor_platform.models import Account, LedgerEntry
@@ -96,8 +97,8 @@ def reporting_rates(
 def financials(
     account_id: UUID,
     request: Request,
-    session: DB,
-    actor: Identity,
+    session: DatabaseSession,
+    actor: CurrentActor,
     year: Annotated[int, Query(ge=1900, le=9999)],
 ) -> Record:
     """Read actual account weights without changing ledger or reviewed financial records."""
@@ -106,7 +107,7 @@ def financials(
     if year > today.year:
         raise HTTPException(422, "Select a completed or current calendar year")
     end: date = min(date(year, 12, 31), today)
-    entries: list[LedgerEntry] = list(entries_for(session, account_id))
+    entries: list[LedgerEntry] = list(active_entries_for_account(session, account_id))
     schema: str | None = getattr(request.app.state, "financial_schema", None)
     release: Record | None = None
     if schema:

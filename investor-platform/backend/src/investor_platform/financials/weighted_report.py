@@ -1,9 +1,9 @@
 """Build reproducible annual ratio reports from explicit values and saved profiles."""
 
-import re
 from datetime import date
 from decimal import Context, Decimal, localcontext
 
+from investor_platform.financials.arithmetic import comparison_values, decimal_string, weighted_mean
 from investor_platform.financials.bundles import validate_capital_spending
 from investor_platform.financials.calculations import FORMULA_VERSION, basic_share_reason
 from investor_platform.financials.calculations import calculations as company_calculations
@@ -31,13 +31,6 @@ COMPANY_LABELS: dict[str, str] = {
     "allocated_cfo_per_basic_share": "Allocated consolidated CFO per basic share",
     "allocated_fcf_after_ppe_per_basic_share": "Allocated FCF after cash PP&E per basic share",
 }
-
-
-def decimal_string(value: Json) -> Decimal:
-    """Read a finite unformatted decimal string without binary-float conversion."""
-    if not isinstance(value, str) or not re.fullmatch(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?", value):
-        raise ValueError("Use an unformatted finite decimal string")
-    return Decimal(value)
 
 
 def eligible_profile(profile: Record, year: int) -> str | None:
@@ -235,8 +228,7 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
         for key, (label, source_key) in (
             {k: (v, k) for k, v in RATIO_LABELS.items()} | PER_SHARE_METRICS
         ).items():
-            covered: Decimal = Decimal(0)
-            numerator: Decimal = Decimal(0)
+            metric_values: dict[str, Decimal] = {}
             contributions: list[Record] = []
             exclusions: list[Record] = []
             company: Record
@@ -254,8 +246,7 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                 if reason is not None:
                     exclusions.append({"issuer_key": issuer_key, "reason": reason})
                 elif ratio is not None and issuer_key in values:
-                    covered += values[issuer_key]
-                    numerator += values[issuer_key] * ratio
+                    metric_values[issuer_key] = ratio
                     selected: Record = record(company["profile"])
                     contributions.append(
                         {
@@ -272,11 +263,14 @@ def build_weighted_report(snapshot: Record, profiles: list[Record]) -> Record:
                             ),
                         }
                     )
-            available: bool = not valuation_errors and covered > 0
+            average: Decimal | None
+            covered: Decimal
+            average, covered = weighted_mean(metric_values, values, complete=not valuation_errors)
+            available: bool = average is not None
             result: Record = {
                 "label": label,
                 "status": "calculated" if available else "unavailable",
-                "value": format(numerator / covered, "f") if available else None,
+                "value": format(average, "f") if average is not None else None,
                 "coverage": format(covered / total, "f")
                 if not valuation_errors and total
                 else None,
@@ -341,17 +335,16 @@ def change_result(current: Json, prior: Json, year: int, reason: str | None) -> 
     if reason is not None or current is None or prior is None:
         result["reason"] = reason or "Current or prior annual measure is unavailable"
         return result
-    baseline: Decimal = decimal_string(prior)
-    if baseline <= 0:
-        result.update(status="not_meaningful", reason="Prior annual value is zero or negative")
-        return result
     context: Context
     with localcontext() as context:
         context.prec = 64
+        status: str
+        change: Decimal | None
+        status, change = comparison_values(decimal_string(current), decimal_string(prior))
         result.update(
-            status="calculated",
-            percent_change=format(decimal_string(current) / baseline - 1, "f"),
-            reason=None,
+            status=status,
+            percent_change=format(change, "f") if change is not None else None,
+            reason="Prior annual value is zero or negative" if status == "not_meaningful" else None,
         )
     return result
 

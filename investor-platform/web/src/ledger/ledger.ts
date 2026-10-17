@@ -42,16 +42,6 @@ export type Ledger = {
     created_by: string;
   }[];
 };
-export function exact(value: string, minimumDecimals = 2) {
-  const [whole, fraction = ""] = value.split(".");
-  const decimals = fraction.replace(/0+$/, "").padEnd(minimumDecimals, "0");
-  return (
-    whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") +
-    (decimals ? "." + decimals : "")
-  );
-}
-export const today = () =>
-  new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 export const labels = {
   opening_cash: "Opening cash",
   deposit: "Deposit",
@@ -94,17 +84,4 @@ export function incomeSecurities(entries: Entry[]) {
         .map((s) => [s.id, s]),
     ).values(),
   ];
-}
-
-export function completedMarketDate() {
-  const hour = Number(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      hour: "numeric",
-      hourCycle: "h23",
-    }).format(new Date()),
-  );
-  const d = new Date(today() + "T12:00:00Z");
-  if (hour < 17) d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
 }

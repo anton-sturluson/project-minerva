@@ -9,10 +9,10 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import ACCOUNTING_PRECISION
 from investor_platform.models import ResearchFiling, ResearchManager
 from investor_platform.research.eligibility import Eligibility, manager_eligibility
-from investor_platform.research.routes import DB, Identity
 from investor_platform.research.snapshots import (
     PositionChange,
     load_holdings,
@@ -221,7 +221,9 @@ def activity_for_quarter(
 
 
 @router.get("/activity")
-def get_activity(session: DB, actor: Identity, quarter: date | None = None) -> dict:
+def get_activity(
+    session: DatabaseSession, actor: CurrentActor, quarter: date | None = None
+) -> dict:
     """Select the newest usable common quarter, or inspect an explicit quarter."""
     if quarter is not None and not quarter_end(quarter):
         raise HTTPException(422, "Choose a calendar quarter end")

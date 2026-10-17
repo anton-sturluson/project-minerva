@@ -221,10 +221,6 @@ for (const canonical of [false, true]) {
     await expect(table.getByRole("row", { name: /Nasdaq-100/ })).toContainText(
       "1,400.00",
     );
-    await expect(
-      page.getByText(/Indexes invest each stock purchase/),
-    ).toHaveCount(0);
-    await expect(page.getByText(/Index gains over displayed/)).toHaveCount(0);
     await expect(control.locator("option")).toHaveText([
       "Buy and hold",
       "Match purchase funding",

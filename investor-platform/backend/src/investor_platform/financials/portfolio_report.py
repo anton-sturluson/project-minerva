@@ -1,9 +1,10 @@
 """Calculate the five reviewed measures using one account's dated equity weights."""
 
 import json
-from decimal import Decimal, localcontext
+from decimal import Context, Decimal, localcontext
 from urllib.parse import SplitResult, urlsplit
 
+from investor_platform.financials.arithmetic import comparison_values, weighted_mean
 from investor_platform.financials.reviewed_releases import METRICS, fund_listings, number, resolve
 from investor_platform.financials.types import Json, Record, record, records
 
@@ -20,15 +21,16 @@ SHARES: dict[str, str] = {
 
 def comparison(current: Decimal | None, prior: Decimal | None, year: int) -> Record:
     """Keep prior amounts while withholding meaningless percentage changes."""
-    status: str = "unavailable"
-    reason: str | None = "Current or prior financial data unavailable"
-    change: Decimal | None = None
-    if current is not None and prior is not None:
-        if prior <= 0:
-            status, reason = "not_meaningful", "Prior amount is not positive"
-        else:
-            status, reason = "calculated", None
-            change = current / prior - 1
+    status: str
+    change: Decimal | None
+    status, change = comparison_values(current, prior)
+    reason: str | None = (
+        "Current or prior financial data unavailable"
+        if status == "unavailable"
+        else "Prior amount is not positive"
+        if status == "not_meaningful"
+        else None
+    )
     return {
         "prior_year": year - 1,
         "prior_value": format(prior, "f") if prior is not None else None,
@@ -52,7 +54,7 @@ def measure(source: Record | None, key: str, prior: bool, rates: dict[str, Decim
     if result["status"] != "available" or key not in SHARES:
         return result
     currency: str = str(source["currency"])
-    factor: object = source.get("shares_per_traded_unit")
+    factor: Json = source.get("shares_per_traded_unit")
     if factor is None or currency not in rates:
         return {
             **result,
@@ -124,6 +126,7 @@ def build_report(
     pricing_complete: bool = True,
 ) -> Record:
     """Use all equities in coverage, and covered companies in each weighted mean."""
+    context: Context
     with localcontext() as context:
         context.prec = 40
         return _build_report(release, snapshot, year, account_id, rates, pricing_complete)
@@ -226,12 +229,9 @@ def _build_report(
     ratios: Record = {}
     shares: Record = {}
     for key in METRICS:
-        covered: Decimal = sum((weights.get(k, Decimal(0)) for k in current[key]), Decimal(0))
-        value: Decimal | None = (
-            sum((v * weights[k] for k, v in current[key].items()), Decimal(0)) / covered
-            if complete and covered > 0
-            else None
-        )
+        value: Decimal | None
+        covered: Decimal
+        value, covered = weighted_mean(current[key], weights, complete=complete)
         exclusions: list[Record] = []
         conventions: list[Record] = []
         basis_notes: list[Record] = []
@@ -307,6 +307,7 @@ def add_portfolio_comparisons(
     current: Record, prior: Record | None, year: int, *, reason: str | None = None
 ) -> None:
     """Compare independent portfolio snapshots, allowing holdings and weights to change."""
+    context: Context
     with localcontext() as context:
         context.prec = 40
         group: str

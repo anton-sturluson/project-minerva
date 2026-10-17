@@ -1,3 +1,5 @@
+"""Portfolio, market-cache and research database records."""
+
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -21,21 +23,29 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
+    """Declarative base for the portfolio database schema."""
+
     pass
 
 
 class Owner(Base):
+    """Local identity owning workspaces."""
+
     __tablename__ = "owners"
     id: Mapped[UUID] = mapped_column(primary_key=True)
 
 
 class Workspace(Base):
+    """Ownership boundary for accounts and shared securities."""
+
     __tablename__ = "workspaces"
     id: Mapped[UUID] = mapped_column(primary_key=True)
     owner_id: Mapped[UUID] = mapped_column(ForeignKey("owners.id"), unique=True)
 
 
 class Account(Base):
+    """One independently replayed portfolio ledger."""
+
     __tablename__ = "accounts"
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="account_workspace_name"),
@@ -54,6 +64,8 @@ class Account(Base):
 
 
 class LedgerEntry(Base):
+    """Immutable posted cash or share event."""
+
     __tablename__ = "ledger_entries"
     __table_args__ = (
         UniqueConstraint("account_id", "request_key", name="ledger_request_key"),
@@ -117,6 +129,8 @@ class LedgerEntry(Base):
 
 
 class Security(Base):
+    """Workspace-scoped traded listing identity."""
+
     __tablename__ = "securities"
     __table_args__ = (
         UniqueConstraint(
@@ -132,6 +146,8 @@ class Security(Base):
 
 
 class MarketCache(Base):
+    """Validated provider payload with a dated coverage range."""
+
     __tablename__ = "market_cache"
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
     provider: Mapped[str] = mapped_column(String(20), primary_key=True)
@@ -143,6 +159,8 @@ class MarketCache(Base):
 
 
 class LedgerCorrection(Base):
+    """Append-only replacement or void of one active entry."""
+
     __tablename__ = "ledger_corrections"
     __table_args__ = (UniqueConstraint("account_id", "request_key"),)
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -157,6 +175,8 @@ class LedgerCorrection(Base):
 
 
 class PriceRefreshRun(Base):
+    """Durable attempt and outcome of a daily workspace collection."""
+
     __tablename__ = "price_refresh_runs"
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
     scheduled_date: Mapped[date] = mapped_column(Date, primary_key=True)

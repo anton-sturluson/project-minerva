@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from investor_platform.ledger.import_transactions import apply_import, reconstruct
-from investor_platform.ledger.state import entries_for
+from investor_platform.ledger.state import active_entries_for_account
 from investor_platform.models import Account, LedgerEntry, Security
 
 CSV = b"""Date,Type,Symbol,Shares,Cost,Total Cost,Price,Market Value,Net
@@ -58,7 +58,7 @@ def test_import_is_atomic_idempotent_and_preserves_existing_account(database, db
     assert created
     assert apply_import(database, "Synthetic import", entries, report) == (account_id, False)
     with Session(database) as session:
-        records = entries_for(session, account_id)
+        records = active_entries_for_account(session, account_id)
         assert len(records) == len(entries)
         assert (
             session.get(Account, account_id).reconstruction["source_rows"] == report["source_rows"]
@@ -135,7 +135,7 @@ def test_usd_total_import_preserves_reported_cash_and_basis(database, google):
     aid, created = apply_import(database, "Synthetic USD export", entries, report)
     assert created
     with Session(database) as session:
-        records = entries_for(session, aid)
+        records = active_entries_for_account(session, aid)
         balance, lots, realized = replay(records)
         assert balance == Decimal("39.98")
         assert records[1].amount == Decimal("100.02")
@@ -184,7 +184,7 @@ def test_grouped_import_requires_ownership_and_isolates_shared_tickers(database)
         assert report["selected_portfolio"] == name
         assert apply_import(database, name, entries, report) == (aid, False)
         with Session(database) as session:
-            cash, lots, _ = replay(entries_for(session, aid))
+            cash, lots, _ = replay(active_entries_for_account(session, aid))
             assert cash == Decimal(expected_cash)
             assert sum(lot.quantity for sl in lots.values() for lot in sl) == Decimal(
                 expected_shares

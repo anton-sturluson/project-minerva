@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import ACCOUNTING_PRECISION, Currency
 from investor_platform.market_data import tiingo
 from investor_platform.market_data.cache import CACHE_TTL, cached_payload
@@ -23,7 +24,6 @@ from investor_platform.market_data.listings import PROVIDER_EXCHANGES
 from investor_platform.market_data.types import History
 from investor_platform.market_data.yahoo import cached_history
 from investor_platform.models import MarketCache, ResearchFiling, ResearchHolding, ResearchManager
-from investor_platform.research.routes import DB, Identity
 from investor_platform.research.snapshots import previous_quarter, quarter_end
 
 router: APIRouter = APIRouter(prefix="/api/research/activity")
@@ -286,8 +286,8 @@ def price_context(
 def get_market_context(
     quarter: date,
     cusips: Annotated[str, Query(min_length=9, max_length=199)],
-    session: DB,
-    actor: Identity,
+    session: DatabaseSession,
+    actor: CurrentActor,
 ) -> dict:
     """Price up to twenty ordinary-share identities already held in owned research filings."""
     requested: list[str] = cusips.split(",")

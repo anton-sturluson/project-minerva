@@ -1,7 +1,9 @@
-"""Calculate account and stock returns from supplied prices."""
+"""Calculate dated account and stock returns from supplied prices."""
 
+from datetime import date
 from decimal import Decimal
 from typing import Literal
+from uuid import UUID
 
 from fastapi import HTTPException
 
@@ -9,14 +11,15 @@ from investor_platform.domain import IN_KIND_ENTRIES, EntryKind, FundingStatus, 
 from investor_platform.ledger.accounting import ReplayState, replay
 from investor_platform.market_data import listings as market_listings
 from investor_platform.market_data import types as market_types
+from investor_platform.market_data.types import History
 from investor_platform.models import LedgerEntry
 from investor_platform.performance.attribution import StockAttribution
 from investor_platform.performance.daily_returns import daily_return_factor
-from investor_platform.performance.deposit_matched_benchmarks import funded_series
+from investor_platform.performance.deposit_matched_benchmarks import deposit_matched_series
 from investor_platform.performance.income import dividend_receivables, market_dividends
 from investor_platform.performance.positions import period_securities
 from investor_platform.performance.schemas import Baseline, BenchmarkMode, PerformanceScope
-from investor_platform.performance.trade_matched_benchmarks import matched_series
+from investor_platform.performance.trade_matched_benchmarks import trade_matched_series
 
 ZERO = Decimal(0)
 
@@ -30,7 +33,7 @@ DAYS_PER_YEAR = Decimal("365.25")
 ACCOUNT_CASH_METHODS: frozenset[str] = frozenset({"purchase_shortfall", "recorded"})
 
 
-def annualized_return(cumulative, start, end):
+def annualized_return(cumulative: Decimal | None, start: date, end: date) -> Decimal | None:
     """Annualize the linked return, never the raw balance change."""
     days = (end - start).days
     if cumulative is None or days < 365:
@@ -40,7 +43,14 @@ def annualized_return(cumulative, start, end):
     return (ONE + cumulative) ** (DAYS_PER_YEAR / Decimal(days)) - ONE
 
 
-def scenario_entries(entries, excluded, histories, *, provisional, start=None):
+def scenario_entries(
+    entries: list[LedgerEntry],
+    excluded: set[UUID],
+    histories: dict[str, History],
+    *,
+    provisional: bool,
+    start: date | None = None,
+) -> list[LedgerEntry]:
     """Build a read-only cash alternative; never mutate or attach ledger objects."""
     prefix = [] if start is None else [e for e in entries if e.effective_date < start]
     current = entries if start is None else [e for e in entries if e.effective_date >= start]
@@ -115,7 +125,7 @@ def scenario_entries(entries, excluded, histories, *, provisional, start=None):
     return result
 
 
-def funded_stock_entries(entries):
+def stock_sleeve_entries(entries: list[LedgerEntry]) -> list[LedgerEntry]:
     """Read-only stock sleeve: each purchase is funded and each sale removes proceeds.
 
     These balancing flows exist only for calculation, never in the stored ledger.
@@ -138,20 +148,20 @@ def funded_stock_entries(entries):
 
 
 def calculate(
-    entries,
-    histories,
-    start,
-    end,
+    entries: list[LedgerEntry],
+    histories: dict[str, History],
+    start: date,
+    end: date,
     *,
-    provisional=False,
-    baseline=Baseline.HISTORY,
-    funding_status=FundingStatus.RECORDED,
-    closing_cash_ids=frozenset(),
-    scope=PerformanceScope.ACCOUNT,
-    benchmark_mode=BenchmarkMode.BUY_HOLD,
+    provisional: bool = False,
+    baseline: Baseline = Baseline.HISTORY,
+    funding_status: FundingStatus = FundingStatus.RECORDED,
+    closing_cash_ids: frozenset[int] = frozenset(),
+    scope: PerformanceScope = PerformanceScope.ACCOUNT,
+    benchmark_mode: BenchmarkMode = BenchmarkMode.BUY_HOLD,
     cash_method: str | None = None,
     dividend_policy: Literal["unrecorded_zero"] | None = None,
-):
+) -> dict:
     """Link USD valuations on benchmark sessions; never zero-value missing positions."""
     include_opening_gain = (
         baseline == Baseline.HISTORY and bool(entries) and start <= entries[0].effective_date
@@ -159,7 +169,7 @@ def calculate(
     stock_only = scope == PerformanceScope.STOCKS
     if stock_only:
         dividend_policy = None
-        entries = funded_stock_entries(entries)
+        entries = stock_sleeve_entries(entries)
         if not entries:
             raise ValueError("Choose at least one stock with recorded holdings or trades")
     spy, qqq = histories["SPY"], histories["QQQ"]
@@ -344,7 +354,7 @@ def calculate(
             row["portfolio"] = None
     matched = None
     if benchmark_mode == BenchmarkMode.MATCHED:
-        matched = matched_series(
+        matched = trade_matched_series(
             entries,
             histories,
             days,
@@ -358,7 +368,7 @@ def calculate(
     if benchmark_mode == BenchmarkMode.FUNDED_HOLD:
         if not known_account_cash or stock_only:
             raise ValueError("Deposit-matched indexes require a dated account cash history")
-        funded = funded_series(entries, histories, days, provisional=provisional)
+        funded = deposit_matched_series(entries, histories, days, provisional=provisional)
         row: dict
         symbol: str
         for row in values:

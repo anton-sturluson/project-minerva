@@ -30,7 +30,6 @@ test("separates pages, folds activity and preserves an entry draft on back navig
   );
   await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   await expect(page.getByTestId("payoff-ratio")).toBeVisible();
-  await expect(page.getByText("Coming soon", { exact: true })).toBeHidden();
   await page.locator(".page-footer").scrollIntoViewIfNeeded();
   const header = await page.getByRole("banner").boundingBox();
   expect(header!.y).toBe(0);

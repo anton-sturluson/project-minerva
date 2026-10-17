@@ -4,12 +4,12 @@ import hashlib
 import json
 import re
 from datetime import date
-from decimal import Decimal
 from uuid import UUID
 
 from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
 
+from investor_platform.financials.arithmetic import decimal_string as number
 from investor_platform.financials.storage import check_schema
 from investor_platform.financials.types import Json, Record, Row, digest, record, records
 
@@ -36,17 +36,10 @@ def fund_listings(release: Record | None) -> set[tuple[str, str]]:
     )
 
 
-def number(value: object) -> Decimal:
-    """Require a finite decimal string without silently rounding source data."""
-    if not isinstance(value, str) or not re.fullmatch(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?", value):
-        raise ValueError("Financial values must be decimal strings")
-    return Decimal(value)
-
-
 def resolve(document: Record, identifier: str) -> Record:
     """Resolve a source observation/calculation ID or an exact JSON pointer."""
     if identifier.startswith("#/"):
-        value: object = document
+        value: Json = document
         for token in identifier[2:].split("/"):
             token = token.replace("~1", "/").replace("~0", "~")
             if isinstance(value, list):
@@ -191,9 +184,10 @@ def validate_release(release: Record) -> None:
                 proof: Record
                 for proof in inputs:
                     document: Record = documents[str(proof["packet_sha256"])]
-                    identifiers: object = proof["ids"]
+                    identifiers: Json = proof["ids"]
                     if not isinstance(identifiers, list) or not identifiers:
                         raise ValueError("Financial evidence needs exact input IDs")
+                    identifier: Json
                     for identifier in identifiers:
                         node: Record = resolve(document, str(identifier))
                         if convention is not None and (

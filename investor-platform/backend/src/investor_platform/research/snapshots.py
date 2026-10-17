@@ -1,4 +1,4 @@
-"""Disclosed filing snapshots and adjacent-quarter comparisons."""
+"""Reconstruct disclosed filing snapshots and adjacent-quarter changes."""
 
 from datetime import date, timedelta
 from decimal import Decimal, localcontext

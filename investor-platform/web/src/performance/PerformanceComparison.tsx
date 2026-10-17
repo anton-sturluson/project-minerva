@@ -5,71 +5,21 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { MARKET_DATA_TIMEOUT, api, errorMessage, type Account } from "../api";
-import { TradeScorecard } from "./TradeScorecard";
+import { errorMessage, type Account } from "../api";
 import { number, percent } from "../format";
-import { HitRate } from "./HitRate";
-import { Holdings } from "./Holdings";
 import { StockExclusions } from "./StockExclusions";
 import { BenchmarkReturn, YearlyPerformance } from "./YearlyPerformance";
-import { completedMarketDate, today, type Ledger } from "../ledger/ledger";
-
-type Scope = "stocks" | "account";
-type BenchmarkMode = "buy_hold" | "matched" | "funded_hold";
-
-type Baseline = "history" | "recorded";
-
-type Point = {
-  date: string;
-  value: string;
-  cash: string;
-  portfolio: string | null;
-  SPY: string;
-  QQQ: string;
-};
-type CAGR = {
-  portfolio: string | null;
-  SPY: string | null;
-  QQQ: string | null;
-};
-export type Report = {
-  cash_method?: "purchase_shortfall" | "recorded";
-  dividend_policy?: "unrecorded_zero";
-  benchmark_values?: Record<"SPY" | "QQQ", { value: string }>;
-  funding_estimate?: { capital: string; estimated_dividends: string };
-  benchmark_mode?: BenchmarkMode;
-  matched_benchmarks?: Record<
-    "SPY" | "QQQ",
-    {
-      value: string;
-    }
-  > | null;
-  scope?: Scope;
-  baseline?: Baseline;
-  security_ids?: string[];
-  cagr: CAGR;
-  scenario?:
-    | (Report & {
-        excluded: { id: string; ticker: string; exchange: string }[];
-      })
-    | null;
-  scenario_error?: string | null;
-  provisional?: boolean;
-  start: string;
-  end: string;
-  value: string;
-  cash: string;
-  receivables?: string;
-  return: string | null;
-  SPY: string;
-  QQQ: string;
-  excess_spy: string | null;
-  excess_qqq: string | null;
-  fetched_at: string;
-  source: string;
-  warnings: string[];
-  series: Point[];
-};
+import { ReturnChart } from "./ReturnChart";
+import { marketDataThroughDate, newYorkToday } from "../marketDates";
+import { type Ledger } from "../ledger/ledger";
+import {
+  fetchPerformance,
+  type PerformanceRequest,
+  type PerformanceScope,
+  type PerformanceBaseline,
+  type BenchmarkMode,
+  type PerformanceReport,
+} from "./performanceApi";
 
 type Shortcut = "ytd" | "year" | "history";
 
@@ -78,7 +28,7 @@ const shortcutDates = (ledger: Ledger, through: string, shortcut: Shortcut) => {
   if (shortcut === "history") return { from: first, anchor: undefined };
   const boundary = new Date(through + "T12:00:00Z");
   if (shortcut === "ytd") {
-    boundary.setUTCFullYear(Number(today().slice(0, 4)) - 1, 11, 31);
+    boundary.setUTCFullYear(Number(newYorkToday().slice(0, 4)) - 1, 11, 31);
   } else {
     const month = boundary.getUTCMonth();
     boundary.setUTCFullYear(boundary.getUTCFullYear() - 1);
@@ -91,7 +41,7 @@ const shortcutDates = (ledger: Ledger, through: string, shortcut: Shortcut) => {
   return { from: first > fetchFrom ? first : fetchFrom, anchor };
 };
 
-export function Tracker({
+export function PerformanceComparison({
   account,
   ledger,
 }: {
@@ -105,15 +55,17 @@ export function Tracker({
     standardAccount ||
     (account.reconstruction?.funding_status === "inferred" &&
       account.reconstruction.opening_cash != null);
-  const [scope, setScope] = useState<Scope>(canEstimate ? "account" : "stocks");
+  const [scope, setScope] = useState<PerformanceScope>(
+    canEstimate ? "account" : "stocks",
+  );
   const [benchmarkMode, setBenchmarkMode] = useState<BenchmarkMode>(
     canEstimate ? "funded_hold" : "buy_hold",
   );
-  const [baseline, setBaseline] = useState<Baseline>("history");
+  const [baseline, setBaseline] = useState<PerformanceBaseline>("history");
   const [start, setStart] = useState(
-    ledger.entries[0]?.effective_date ?? completedMarketDate(),
+    ledger.entries[0]?.effective_date ?? marketDataThroughDate(),
   );
-  const [end, setEnd] = useState(completedMarketDate());
+  const [end, setEnd] = useState(marketDataThroughDate());
   const [anchor, setAnchor] = useState<string | undefined>();
   const [excluded, setExcluded] = useState<string[]>([]);
   const securities = [
@@ -123,42 +75,18 @@ export function Tracker({
         .map((e) => [e.security!.id, e.security!]),
     ).values(),
   ];
-  const [report, setReport] = useState<Report | null>(null);
+  const [report, setReport] = useState<PerformanceReport | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
-  const lastComparison = useRef<
-    | [
-        string,
-        string,
-        string[],
-        Baseline,
-        Scope,
-        string | undefined,
-        BenchmarkMode,
-      ]
-    | null
-  >(null);
+  const lastComparison = useRef<PerformanceRequest | null>(null);
   const compare = useCallback(
-    async (
-      from: string,
-      through: string,
-      exclusions: string[] = [],
-      basis: Baseline = "history",
-      measurement: Scope = "stocks",
-      anchor?: string,
-      indexes: BenchmarkMode = "buy_hold",
-    ) => {
-      if (standardAccount) measurement = "account";
-      lastComparison.current = [
-        from,
-        through,
-        exclusions,
-        basis,
-        measurement,
-        anchor,
-        indexes,
-      ];
+    async (request: PerformanceRequest) => {
+      const comparison: PerformanceRequest = {
+        ...request,
+        scope: standardAccount ? "account" : request.scope,
+      };
+      lastComparison.current = comparison;
       const version = ++generation.current;
       setBusy(true);
       setError("");
@@ -166,27 +94,10 @@ export function Tracker({
         current ? { ...current, scenario: null, scenario_error: null } : null,
       );
       try {
-        const r = await api<Report>(
-          `/accounts/${account.id}/performance`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              scope: measurement,
-              benchmark_mode: indexes,
-              ...(anchor ? { anchor_date: anchor } : {}),
-              start: from,
-              end: through,
-              ...(basis === "recorded" ? { baseline: basis } : {}),
-              ...(exclusions.length
-                ? { exclude_security_ids: exclusions }
-                : {}),
-            }),
-          },
-          MARKET_DATA_TIMEOUT,
-        );
+        const r = await fetchPerformance(account.id, comparison);
         if (version === generation.current) {
           setReport(r);
-          if (anchor) setStart(r.start);
+          if (request.anchor_date) setStart(r.start);
         }
       } catch (e) {
         if (version === generation.current) {
@@ -203,13 +114,13 @@ export function Tracker({
     if (standardAccount && lastComparison.current) {
       setScope("account");
       setReport(null);
-      void compare(...lastComparison.current);
+      void compare(lastComparison.current);
       return () => {
         generation.current += 1;
       };
     }
     // Open full history initially; purchase-funded ledger refreshes retain the comparison.
-    const through = completedMarketDate();
+    const through = marketDataThroughDate();
     const from = ledger.entries[0]?.effective_date ?? through;
     setAnchor(undefined);
     const initialMode = canEstimate ? "funded_hold" : "buy_hold";
@@ -228,15 +139,15 @@ export function Tracker({
       from < through &&
       account.base_currency === "USD"
     )
-      void compare(
-        from,
-        through,
-        [],
-        "history",
-        initialScope,
-        undefined,
-        initialMode,
-      );
+      void compare({
+        start: from,
+        end: through,
+        exclude_security_ids: [],
+        baseline: "history",
+        scope: initialScope,
+        anchor_date: undefined,
+        benchmark_mode: initialMode,
+      });
     return () => {
       generation.current += 1;
     };
@@ -250,11 +161,20 @@ export function Tracker({
   ]);
   function submit(e: FormEvent) {
     e.preventDefault();
-    void compare(start, end, excluded, baseline, scope, anchor, benchmarkMode);
+    void compare({
+      start: start,
+      end: end,
+      exclude_security_ids: excluded,
+      baseline: baseline,
+      scope: scope,
+      anchor_date: anchor,
+      benchmark_mode: benchmarkMode,
+    });
   }
   function choosePeriod(shortcut: Shortcut) {
-    const through = completedMarketDate();
-    const basis: Baseline = shortcut === "history" ? "history" : "recorded";
+    const through = marketDataThroughDate();
+    const basis: PerformanceBaseline =
+      shortcut === "history" ? "history" : "recorded";
     const { from, anchor } = shortcutDates(ledger, through, shortcut);
     setAnchor(anchor);
     setBaseline(basis);
@@ -262,7 +182,15 @@ export function Tracker({
     setEnd(through);
     setExcluded([]);
     setReport(null);
-    void compare(from, through, [], basis, scope, anchor, benchmarkMode);
+    void compare({
+      start: from,
+      end: through,
+      exclude_security_ids: [],
+      baseline: basis,
+      scope: scope,
+      anchor_date: anchor,
+      benchmark_mode: benchmarkMode,
+    });
   }
   const showInvestedValue =
     report?.scope === "stocks" &&
@@ -286,17 +214,6 @@ export function Tracker({
     : report?.matched_benchmarks;
   return (
     <>
-      <div id="decisions" className="decisions">
-        <TradeScorecard account={account} ledger={ledger} />
-        {!account.reconstruction && (
-          <HitRate
-            key={`${account.id}:${ledger.entries.map((e) => e.id).join(",")}`}
-            accountId={account.id}
-          />
-        )}
-      </div>
-
-      <Holdings ledger={ledger} accountId={account.id} />
       <section
         id="performance"
         className="tracker"
@@ -345,21 +262,21 @@ export function Tracker({
                 value={scope}
                 disabled={busy}
                 onChange={(e) => {
-                  const next = e.target.value as Scope;
+                  const next = e.target.value as PerformanceScope;
                   const nextExcluded =
                     canEstimate && next === "account" ? [] : excluded;
                   setScope(next);
                   setExcluded(nextExcluded);
                   setReport(null);
-                  void compare(
-                    start,
-                    end,
-                    nextExcluded,
-                    baseline,
-                    next,
-                    anchor,
-                    benchmarkMode,
-                  );
+                  void compare({
+                    start: start,
+                    end: end,
+                    exclude_security_ids: nextExcluded,
+                    baseline: baseline,
+                    scope: next,
+                    anchor_date: anchor,
+                    benchmark_mode: benchmarkMode,
+                  });
                 }}
               >
                 <option value="stocks">Stocks only</option>
@@ -390,15 +307,15 @@ export function Tracker({
                 const next = e.target.value as BenchmarkMode;
                 setBenchmarkMode(next);
                 setReport(null);
-                void compare(
-                  start,
-                  end,
-                  excluded,
-                  baseline,
-                  scope,
-                  anchor,
-                  next,
-                );
+                void compare({
+                  start: start,
+                  end: end,
+                  exclude_security_ids: excluded,
+                  baseline: baseline,
+                  scope: scope,
+                  anchor_date: anchor,
+                  benchmark_mode: next,
+                });
               }}
             >
               <option value="buy_hold">Buy and hold</option>
@@ -430,15 +347,15 @@ export function Tracker({
                 setStart(from);
                 setBaseline(basis);
                 if (standardAccount)
-                  lastComparison.current = [
-                    from,
-                    end,
-                    [],
-                    basis,
-                    "account",
-                    undefined,
-                    benchmarkMode,
-                  ];
+                  lastComparison.current = {
+                    start: from,
+                    end: end,
+                    exclude_security_ids: [],
+                    baseline: basis,
+                    scope: "account",
+                    anchor_date: undefined,
+                    benchmark_mode: benchmarkMode,
+                  };
                 setExcluded([]);
                 setReport(null);
                 setError("");
@@ -454,20 +371,20 @@ export function Tracker({
               required
               value={end}
               min={start}
-              max={completedMarketDate()}
+              max={marketDataThroughDate()}
               onChange={(e) => {
                 setAnchor(undefined);
                 setEnd(e.target.value);
                 if (standardAccount)
-                  lastComparison.current = [
-                    start,
-                    e.target.value,
-                    [],
-                    baseline,
-                    "account",
-                    undefined,
-                    benchmarkMode,
-                  ];
+                  lastComparison.current = {
+                    start: start,
+                    end: e.target.value,
+                    exclude_security_ids: [],
+                    baseline: baseline,
+                    scope: "account",
+                    anchor_date: undefined,
+                    benchmark_mode: benchmarkMode,
+                  };
                 setExcluded([]);
                 setReport(null);
                 setError("");
@@ -717,166 +634,5 @@ export function Tracker({
         )}
       </section>
     </>
-  );
-}
-function ReturnChart({
-  series: actual,
-  scenario,
-  benchmarkMode,
-  cashMethod,
-}: {
-  series: Point[];
-  scenario?: Report | null;
-  benchmarkMode?: BenchmarkMode;
-  cashMethod?: Report["cash_method"];
-}) {
-  const series = actual.map((p, i) => ({
-    ...p,
-    scenario: scenario?.series[i]?.portfolio ?? null,
-  }));
-  const keys = ["portfolio", "SPY", "QQQ", "scenario"] as const;
-  const values = series.flatMap((p) =>
-    keys.flatMap((k) => (p[k] === null ? [] : [Number(p[k]) * 100])),
-  );
-  const low = Math.min(0, ...values),
-    high = Math.max(0.01, ...values),
-    span = high - low;
-  const elapsed =
-    (Date.parse(actual.at(-1)!.date) - Date.parse(actual[0].date)) / 86400000;
-  const bucket = (date: string) =>
-    elapsed > 730
-      ? date.slice(0, 4)
-      : elapsed > 180
-        ? `${date.slice(0, 4)}-${Math.floor((Number(date.slice(5, 7)) - 1) / 3)}`
-        : date.slice(0, 7);
-  const ticks = actual.flatMap((point, index) =>
-    index > 0 &&
-    index < actual.length - 1 &&
-    bucket(point.date) !== bucket(actual[index - 1].date)
-      ? [
-          {
-            index,
-            date: point.date,
-            label:
-              elapsed > 730
-                ? point.date.slice(0, 4)
-                : new Date(point.date + "T12:00:00Z").toLocaleDateString(
-                    "en-US",
-                    { month: "short", year: "2-digit", timeZone: "UTC" },
-                  ),
-          },
-        ]
-      : [],
-  );
-  if (!ticks.length && actual.length > 3) {
-    for (const fraction of [1 / 3, 2 / 3]) {
-      const index = Math.floor((actual.length - 1) * fraction);
-      if (!ticks.some((tick) => tick.index === index))
-        ticks.push({
-          index,
-          date: actual[index].date,
-          label: actual[index].date.slice(5),
-        });
-    }
-  }
-  return (
-    <figure className="return-chart">
-      <figcaption>
-        Cumulative return
-        {benchmarkMode === "funded_hold"
-          ? cashMethod === "recorded"
-            ? " · indexes match deposits"
-            : " · indexes match purchase funding"
-          : benchmarkMode === "matched"
-            ? " · matched buys & sales"
-            : ""}{" "}
-        · <span className="portfolio-key">Portfolio</span> /{" "}
-        <span className="spy-key">S&amp;P 500 (SPY)</span> /{" "}
-        <span className="qqq-key">Nasdaq-100 (QQQ)</span>
-        {scenario && (
-          <>
-            {" "}
-            / <span className="scenario-key">Without excluded stocks</span>
-          </>
-        )}
-      </figcaption>
-      <svg
-        viewBox="0 0 800 265"
-        role="img"
-        aria-label={`Cumulative portfolio and benchmark returns from ${actual[0]?.date} to ${actual.at(-1)?.date}`}
-      >
-        <text x="0" y="16">
-          {high.toFixed(1)}%
-        </text>
-        <text x="0" y="199">
-          {low.toFixed(1)}%
-        </text>
-        <line
-          x1="58"
-          x2="795"
-          y1={195 - ((0 - low) / span) * 175}
-          y2={195 - ((0 - low) / span) * 175}
-          stroke="currentColor"
-          opacity="0.3"
-        />
-        <g className="chart-dates" aria-label="Chart dates">
-          {ticks.map((tick) => {
-            const x = 58 + (tick.index / (actual.length - 1)) * 737;
-            return (
-              <g key={tick.date}>
-                <title>{tick.date}</title>
-                <line
-                  x1={x}
-                  x2={x}
-                  y1="200"
-                  y2="208"
-                  stroke="currentColor"
-                  opacity="0.4"
-                />
-                <text
-                  x={x}
-                  y="226"
-                  textAnchor={x < 100 ? "start" : x > 750 ? "end" : "middle"}
-                >
-                  {tick.label}
-                </text>
-              </g>
-            );
-          })}
-          <text x="58" y="256">
-            {actual[0]?.date}
-          </text>
-          <text x="795" y="256" textAnchor="end">
-            {actual.at(-1)?.date}
-          </text>
-        </g>
-        {keys.map(
-          (k, index) =>
-            series.every((p) => p[k] !== null) && (
-              <polyline
-                key={k}
-                className={`${k.toLowerCase()}-line`}
-                fill="none"
-                strokeWidth="2"
-                strokeDasharray={
-                  index === 1
-                    ? "7 4"
-                    : index === 2
-                      ? "2 4"
-                      : index === 3
-                        ? "10 3 2 3"
-                        : undefined
-                }
-                points={series
-                  .map(
-                    (p, i) =>
-                      `${58 + (i / (series.length - 1)) * 737},${195 - ((Number(p[k]) * 100 - low) / span) * 175}`,
-                  )
-                  .join(" ")}
-              />
-            ),
-        )}
-      </svg>
-    </figure>
   );
 }

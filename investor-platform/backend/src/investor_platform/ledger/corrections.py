@@ -8,30 +8,35 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import select
 
-from investor_platform.accounts import DB, Identity, owned_account
+from investor_platform.accounts import owned_account
+from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.ledger.accounting import replay
 from investor_platform.ledger.commands import build_cash, build_trade
+from investor_platform.ledger.purchase_funding import sync_canonical_funding
 from investor_platform.ledger.schemas import (
     CashInput,
     EntryView,
     HoldingView,
+    LedgerView,
     TradeInput,
     WireDecimal,
 )
 from investor_platform.ledger.state import (
-    entries_for,
+    active_entries_for_account,
     fingerprint,
     funding_purchase_key,
     ledger_view,
     normalize_request_body,
 )
-from investor_platform.models import LedgerCorrection
+from investor_platform.models import Account, LedgerCorrection, LedgerEntry
 
-router = APIRouter(prefix="/api/accounts")
+router: APIRouter = APIRouter(prefix="/api/accounts")
 Replacement = Annotated[CashInput | TradeInput, Field(discriminator="kind")]
 
 
 class CorrectionInput(BaseModel):
+    """A reasoned replacement or void bound to a previewed ledger revision."""
+
     model_config = ConfigDict(extra="forbid")
     request_key: UUID
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
@@ -40,6 +45,8 @@ class CorrectionInput(BaseModel):
 
 
 class CorrectionPreview(BaseModel):
+    """Projected cash and holdings before a correction is committed."""
+
     revision: str
     previous_balance: WireDecimal
     balance: WireDecimal
@@ -47,18 +54,19 @@ class CorrectionPreview(BaseModel):
     replacement: EntryView | None
 
 
-@router.post("/{account_id}/entries/{entry_id}/correction")
+@router.post("/{account_id}/entries/{entry_id}/correction", response_model=None)
 def correct(
     account_id: UUID,
     entry_id: int,
     data: CorrectionInput,
-    session: DB,
-    actor: Identity,
+    session: DatabaseSession,
+    actor: CurrentActor,
     preview: bool = False,
-):
-    account = owned_account(session, actor, account_id, lock=True)
-    body = fingerprint(data)
-    existing = session.scalar(
+) -> CorrectionPreview | dict[str, int]:
+    """Preview or append a correction while preserving originals and retry identity."""
+    account: Account = owned_account(session, actor, account_id, lock=True)
+    body: str = fingerprint(data)
+    existing: LedgerCorrection | None = session.scalar(
         select(LedgerCorrection).where(
             LedgerCorrection.account_id == account_id,
             LedgerCorrection.request_key == data.request_key,
@@ -71,8 +79,8 @@ def correct(
         ):
             raise HTTPException(409, "This retry key was already used for a different correction")
         return {"id": existing.id}
-    entries = entries_for(session, account_id)
-    original = next((e for e in entries if e.id == entry_id), None)
+    entries: list[LedgerEntry] = active_entries_for_account(session, account_id)
+    original: LedgerEntry | None = next((e for e in entries if e.id == entry_id), None)
     if original is None:
         raise HTTPException(409, "Entry is no longer active in this account; reload records")
     if funding_purchase_key(original) is not None:
@@ -81,14 +89,16 @@ def correct(
             "Inferred funding is derived from purchases; "
             "correct a trade or record actual cash instead",
         )
-    revision = sha256(",".join(str(e.id) for e in entries).encode()).hexdigest()
+    revision: str = sha256(",".join(str(e.id) for e in entries).encode()).hexdigest()
     if not preview and data.expected_revision != revision:
         raise HTTPException(
             409, "Records changed or were not previewed; preview the correction again"
         )
-    replacement = None
+    replacement: LedgerEntry | None = None
     if data.replacement is not None:
-        values = data.replacement.model_copy(update={"request_key": data.request_key})
+        values: CashInput | TradeInput = data.replacement.model_copy(
+            update={"request_key": data.request_key}
+        )
         if values.currency != account.base_currency:
             raise HTTPException(422, "Replacement currency must match the account")
         if isinstance(values, TradeInput):
@@ -97,7 +107,7 @@ def correct(
             replacement = build_cash(account, values, session, actor, fingerprint(values))
         session.add(replacement)
         session.flush()
-    correction = LedgerCorrection(
+    correction: LedgerCorrection = LedgerCorrection(
         account_id=account_id,
         original_id=entry_id,
         replacement_id=replacement.id if replacement else None,
@@ -108,16 +118,15 @@ def correct(
     )
     session.add(correction)
     session.flush()
-    from investor_platform.ledger.purchase_funding import sync_canonical_funding
 
     try:
         sync_canonical_funding(session, account, actor, data.request_key)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    active = entries_for(session, account_id)
+    active: list[LedgerEntry] = active_entries_for_account(session, account_id)
     if preview:
-        projected = ledger_view(active, account.base_currency)
-        result = CorrectionPreview(
+        projected: LedgerView = ledger_view(active, account.base_currency)
+        result: CorrectionPreview = CorrectionPreview(
             revision=revision,
             previous_balance=replay(entries)[0],
             balance=projected.balance,

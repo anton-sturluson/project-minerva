@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from pathlib import Path
@@ -15,7 +16,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import Response
 
 from investor_platform.accounts import router
 from investor_platform.db import make_engine
@@ -34,7 +37,8 @@ WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 
 
 @asynccontextmanager
-async def lifespan(app):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Own database and opt-in collector resources for the API lifetime."""
     if not hasattr(app.state, "engine"):
         app.state.engine = make_engine()
     stop, worker = Event(), None
@@ -53,11 +57,14 @@ async def lifespan(app):
 
 
 class Health(BaseModel):
+    """Identifiable local service health response."""
+
     status: str = "ok"
     service: str = "investor-platform"
 
 
 def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
+    """Build the API with the selected local or private access boundary."""
     mode = os.environ.get("INVESTOR_MODE", "local")
     if mode not in {"local", "tailscale"}:
         raise RuntimeError("Unknown INVESTOR_MODE; use local or tailscale")
@@ -95,15 +102,19 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     @app.exception_handler(SQLAlchemyError)
-    async def database_unavailable(request, exc):
+    async def database_unavailable(request: Request, exc: SQLAlchemyError) -> JSONResponse:
+        """Return a recoverable failure without exposing connection details."""
         return JSONResponse(
             {"detail": "Records are unavailable. Check the database and migrations, then retry."},
             status_code=503,
         )
 
     @app.middleware("http")
-    async def access_boundary(request: Request, call_next):
-        def deny(detail, status=403):
+    async def access_boundary(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Validate local or Tailscale access before passing requests to routes."""
+
+        def deny(detail: str, status: int = 403) -> JSONResponse:
+            """Build an uncached access denial."""
             return JSONResponse({"detail": detail}, status, headers={"Cache-Control": "no-store"})
 
         if remote:
@@ -146,6 +157,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
 
     @app.get("/api/health", response_model=Health)
     def health() -> Health:
+        """Return the service identity without querying portfolio records."""
         return Health()
 
     if remote:
@@ -157,6 +169,7 @@ app = create_app()
 
 
 def main() -> None:
+    """Start the loopback API using explicit environment configuration."""
     from dotenv import load_dotenv
 
     # Explicit working-directory configuration; shell variables retain precedence.

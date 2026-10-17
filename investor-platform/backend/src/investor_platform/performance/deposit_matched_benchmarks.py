@@ -13,7 +13,7 @@ ZERO: Decimal = Decimal(0)
 ONE: Decimal = Decimal(1)
 
 
-def funded_series(
+def deposit_matched_series(
     entries: list[LedgerEntry],
     histories: dict[str, market_types.History],
     days: list[date],

@@ -1,32 +1,56 @@
 """Collect provider histories and convert foreign listings using dated FX."""
 
+from __future__ import annotations
+
 import os
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from decimal import localcontext
+from datetime import date, datetime
+from decimal import Context, Decimal, localcontext
+from typing import TYPE_CHECKING, cast
+from uuid import UUID
+
+from sqlalchemy import Engine
 
 from investor_platform.domain import ACCOUNTING_PRECISION
 from investor_platform.market_data import yahoo as market_yahoo
 from investor_platform.market_data.listings import FOREIGN_LISTINGS, symbol_for
-from investor_platform.market_data.types import BENCHMARKS, MAX_CLOSE_AGE, History, MarketDataError
+from investor_platform.market_data.types import (
+    BENCHMARKS,
+    MAX_CLOSE_AGE,
+    History,
+    HistoryOptions,
+    MarketDataError,
+)
+
+if TYPE_CHECKING:
+    from investor_platform.ledger.schemas import SecurityView
+    from investor_platform.models import Security
 
 
-def usd_history(local, fx):
+def usd_history(local: History, fx: History) -> History:
     """Value a foreign listing on FX dates, using only already available local closes.
 
     A bounded previous close bridges different exchange holidays. The current day's
     FX still moves its USD value. Missing FX is never filled or replaced with today's rate.
     """
-    closes, adjusted, dividends = {}, {}, {}
-    local_days = sorted(local.close)
+    closes: dict[date, Decimal] = {}
+    adjusted: dict[date, Decimal] = {}
+    dividends: dict[date, Decimal] = {}
+    local_days: list[date] = sorted(local.close)
     if not local_days:
         raise ValueError("No foreign closing prices")
-    index = 0
+    index: int = 0
+    ctx: Context
+    day: date
+    rate: Decimal
+    amount: Decimal
     with localcontext() as ctx:
         ctx.prec = ACCOUNTING_PRECISION
         for day, rate in sorted(fx.close.items()):
             while index + 1 < len(local_days) and local_days[index + 1] <= day:
                 index += 1
-            previous = local_days[index]
+            previous: date = local_days[index]
             if previous > day or day - previous > MAX_CLOSE_AGE:
                 continue
             # Carrying a pre-split share price across a missing split-day quote is unsafe.
@@ -50,25 +74,30 @@ def usd_history(local, fx):
 
 
 def security_histories(
-    securities,
-    start,
-    end,
+    securities: Iterable[Security | SecurityView],
+    start: date,
+    end: date,
     *,
-    provisional=False,
-    convert_fx=True,
-    engine=None,
-    workspace_id=None,
-    windows=None,
-    refresh_after=None,
-):
+    provisional: bool = False,
+    convert_fx: bool = True,
+    engine: Engine | None = None,
+    workspace_id: UUID | None = None,
+    windows: Mapping[str, tuple[date, date]] | None = None,
+    refresh_after: datetime | None = None,
+) -> dict[str, History]:
     """Fetch each listing once; optionally convert valuation histories to USD."""
     securities = list(securities)
-    by_symbol = {symbol_for(s, provisional=provisional): s for s in securities}
-    requests = {b: {} for b in BENCHMARKS}
-    foreign = {}
+    by_symbol: dict[str, Security | SecurityView] = {
+        symbol_for(s, provisional=provisional): s for s in securities
+    }
+    requests: dict[str, HistoryOptions] = {b: {} for b in BENCHMARKS}
+    foreign: dict[str, str] = {}
+    security: Security | SecurityView
+    symbol: str
+    currency: str
     for security in securities:
         symbol = symbol_for(security, provisional=provisional)
-        listing = FOREIGN_LISTINGS.get(security.exchange)
+        listing: tuple[str, str, set[str]] | None = FOREIGN_LISTINGS.get(security.exchange)
         if listing:
             currency = listing[1]
             requests[symbol] = {"currency": currency}
@@ -78,7 +107,10 @@ def security_histories(
         else:
             requests[symbol] = {}
 
-    def fetch(symbol):
+    def fetch(symbol: str) -> tuple[str, History | None]:
+        """Read one bounded symbol history with the configured validated fallback."""
+        first: date
+        last: date
         first, last = (
             (start, end) if symbol in BENCHMARKS else (windows or {}).get(symbol, (start, end))
         )
@@ -121,14 +153,17 @@ def security_histories(
                     pass
             return symbol, None
 
+    pool: ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=6) as pool:
-        fetched = dict(pool.map(fetch, sorted(requests)))
-    missing = [symbol for symbol, result in fetched.items() if result is None]
+        fetched: dict[str, History | None] = dict(pool.map(fetch, sorted(requests)))
+    missing: list[str] = [symbol for symbol, result in fetched.items() if result is None]
     if missing:
         raise MarketDataError(
             f"Missing historical prices: {', '.join(missing)}. "
             "Daily returns need closing prices between trades; transaction records are intact."
         )
     for symbol, currency in foreign.items():
-        fetched[symbol] = usd_history(fetched[symbol], fetched[f"{currency}USD=X"])
-    return fetched
+        fetched[symbol] = usd_history(
+            cast(History, fetched[symbol]), cast(History, fetched[f"{currency}USD=X"])
+        )
+    return cast(dict[str, History], fetched)

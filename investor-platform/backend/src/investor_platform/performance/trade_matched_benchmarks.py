@@ -1,11 +1,16 @@
 """Read-only index investments matched to stock purchases and FIFO share exits."""
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from investor_platform.domain import IN_KIND_ENTRIES, EntryKind
 from investor_platform.market_data import listings as market_listings
 from investor_platform.market_data import types as market_types
+from investor_platform.market_data.types import History
+from investor_platform.models import LedgerEntry
+from investor_platform.performance.daily_returns import daily_return_factor
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -13,11 +18,20 @@ ONE = Decimal(1)
 
 @dataclass
 class IndexLot:
+    """Remaining stock quantity and matching hypothetical index units."""
+
     quantity: Decimal
     units: Decimal
 
 
-def matched_series(entries, histories, days, *, recorded=False, provisional=False):
+def trade_matched_series(
+    entries: list[LedgerEntry],
+    histories: dict[str, History],
+    days: list[date],
+    *,
+    recorded: bool = False,
+    provisional: bool = False,
+) -> dict[date, dict[str, dict[str, Decimal]]]:
     """Use adjusted closes as reinvesting units; exit the matching FIFO stock quantity.
 
     Closing execution is an explicit approximation. Buys fund the sleeve at session
@@ -39,7 +53,8 @@ def matched_series(entries, histories, days, *, recorded=False, provisional=Fals
     result = {d: {} for d in days}
     securities = {e.security_id: e.security for e in entries}
 
-    def receipt_value(sid, quantity, day):
+    def receipt_value(sid: UUID, quantity: Decimal, day: date) -> Decimal:
+        """Value a recorded share receipt at its matching session close."""
         symbol = market_listings.symbol_for(securities[sid], provisional=provisional)
         price = histories[symbol].close.get(day)
         if price is None:
@@ -111,8 +126,7 @@ def matched_series(entries, histories, days, *, recorded=False, provisional=Fals
             withdrawn += outgoing
             value = sum((lot.units * price for position in lots.values() for lot in position), ZERO)
             if previous is not None:
-                denominator = previous + incoming
-                growth *= (value + outgoing - receipts) / denominator if denominator else ONE
+                growth *= daily_return_factor(previous, value, incoming, outgoing, receipts)
             if day in result:
                 if baseline_growth is None:
                     baseline_growth = growth

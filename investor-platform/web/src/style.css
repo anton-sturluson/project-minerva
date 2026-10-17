@@ -127,28 +127,11 @@ h1 {
   border-bottom: 2px solid var(--ink);
   padding-bottom: 8px;
 }
-.directory {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 25px;
-  border-top: 3px double var(--rule);
-  margin-top: 25px;
-  padding-top: 16px;
-}
 .directory-heading {
   display: flex;
   align-items: baseline;
   gap: 12px;
   flex-wrap: wrap;
-}
-.directory h2 {
-  font-size: 20px;
-  color: var(--plum);
-}
-.planned {
-  font:
-    11px/1.4 Arial,
-    sans-serif;
 }
 .page-footer {
   display: flex;
@@ -162,7 +145,7 @@ h1 {
 }
 @media (max-width: 650px) {
   :root {
-    --header-height: 126px;
+    --header-height: 170px;
   }
   .site-header {
     flex-wrap: wrap;
@@ -177,14 +160,10 @@ h1 {
     padding: 0;
   }
   .main-nav {
-    gap: 4px 17px;
+    gap: 0 14px;
   }
   .main-nav a {
     padding: 6px 0;
-  }
-  .directory {
-    grid-template-columns: 1fr;
-    gap: 22px;
   }
   h1 {
     font-size: 23px;
@@ -639,10 +618,6 @@ summary:focus-visible {
   summary {
     padding-block: 6px;
   }
-  .stock-options fieldset label,
-  .scorecard-toggle {
-    min-height: 44px;
-  }
 }
 
 .stock-exclusions {
@@ -682,6 +657,12 @@ summary:focus-visible {
   align-items: center;
   gap: 8px;
   min-height: 36px;
+}
+@media (max-width: 650px) {
+  .stock-options fieldset label,
+  .scorecard-toggle {
+    min-height: 44px;
+  }
 }
 .stock-options input[type="checkbox"],
 .scorecard-toggle input {
@@ -811,12 +792,6 @@ summary:focus-visible {
   border-top: 2px solid var(--ink);
 }
 @media (max-width: 650px) {
-  :root {
-    --header-height: 170px;
-  }
-  .main-nav {
-    gap: 0 14px;
-  }
   .contribution-leaders {
     grid-template-columns: 1fr;
     gap: 12px;

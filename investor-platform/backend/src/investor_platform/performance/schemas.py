@@ -10,22 +10,30 @@ from investor_platform.market_data import types as market_types
 
 
 class Baseline(StrEnum):
+    """Starting valuation convention for a requested comparison."""
+
     HISTORY = "history"
     RECORDED = "recorded"
 
 
 class PerformanceScope(StrEnum):
+    """Whole-account or stock-sleeve measurement."""
+
     ACCOUNT = "account"
     STOCKS = "stocks"
 
 
 class BenchmarkMode(StrEnum):
+    """Independent index comparison funding convention."""
+
     BUY_HOLD = "buy_hold"
     MATCHED = "matched"
     FUNDED_HOLD = "funded_hold"
 
 
-class Period(BaseModel):
+class PerformanceRequest(BaseModel):
+    """Dates, scope and exclusions supplied to a performance request."""
+
     model_config = ConfigDict(extra="forbid")
     start: date
     end: date
