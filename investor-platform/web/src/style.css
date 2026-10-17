@@ -913,11 +913,11 @@ summary:focus-visible {
   font-weight: bold;
 }
 .stock-activity-table {
-  min-width: 620px;
+  min-width: 940px;
   table-layout: fixed;
 }
 .stock-activity-table > thead th:first-child {
-  width: 40%;
+  width: 28%;
 }
 .stock-activity-table > tbody > .activity-stock-row > td:first-child {
   white-space: normal;
@@ -952,7 +952,7 @@ summary:focus-visible {
   display: none;
 }
 .activity-manager-table {
-  min-width: 820px;
+  min-width: 620px;
 }
 .activity-manager-table th[scope="row"] {
   white-space: normal;
@@ -960,9 +960,10 @@ summary:focus-visible {
   font-weight: normal;
   color: var(--ink);
 }
-.activity-manager-table .research-links {
-  margin: 0;
-  gap: 4px;
+.activity-market-price button {
+  display: block;
+  margin: 3px 0 0 auto;
+  font-size: 11px;
 }
 .activity-pagination {
   display: flex;
