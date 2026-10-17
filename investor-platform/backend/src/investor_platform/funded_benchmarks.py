@@ -26,6 +26,11 @@ def funded_series(
     This index-only replay neither estimates cash shortages nor changes stock returns.
     """
     entry: LedgerEntry
+    if any(entry.kind == EntryKind.OPENING_CASH for entry in entries):
+        raise ValueError(
+            "Deposit-matched indexes require dated deposits; "
+            "recorded opening cash cannot be matched"
+        )
     if any(entry.kind == EntryKind.WITHDRAWAL for entry in entries):
         raise ValueError("Never-sold index comparisons do not support recorded cash withdrawals")
     timeline: list[date] = sorted(

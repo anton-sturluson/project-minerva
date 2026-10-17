@@ -33,7 +33,7 @@ type CAGR = {
   QQQ: string | null;
 };
 export type Report = {
-  cash_method?: "purchase_shortfall";
+  cash_method?: "purchase_shortfall" | "recorded";
   dividend_policy?: "unrecorded_zero";
   benchmark_values?: Record<"SPY" | "QQQ", { value: string }>;
   funding_estimate?: { capital: string; estimated_dividends: string };
@@ -98,10 +98,11 @@ export function Tracker({
   account: Account;
   ledger: Ledger;
 }) {
-  const purchaseFunding =
-    account.reconstruction?.cash_method === "purchase_shortfall";
+  const standardAccount =
+    account.reconstruction?.cash_method === "purchase_shortfall" ||
+    account.reconstruction?.cash_method === "recorded";
   const canEstimate =
-    purchaseFunding ||
+    standardAccount ||
     (account.reconstruction?.funding_status === "inferred" &&
       account.reconstruction.opening_cash != null);
   const [scope, setScope] = useState<Scope>(canEstimate ? "account" : "stocks");
@@ -148,7 +149,7 @@ export function Tracker({
       anchor?: string,
       indexes: BenchmarkMode = "buy_hold",
     ) => {
-      if (purchaseFunding) measurement = "account";
+      if (standardAccount) measurement = "account";
       lastComparison.current = [
         from,
         through,
@@ -196,10 +197,10 @@ export function Tracker({
         if (version === generation.current) setBusy(false);
       }
     },
-    [account.id, purchaseFunding],
+    [account.id, standardAccount],
   );
   useEffect(() => {
-    if (purchaseFunding && lastComparison.current) {
+    if (standardAccount && lastComparison.current) {
       setScope("account");
       setReport(null);
       void compare(...lastComparison.current);
@@ -243,7 +244,7 @@ export function Tracker({
     account.base_currency,
     account.reconstruction,
     canEstimate,
-    purchaseFunding,
+    standardAccount,
     ledger,
     compare,
   ]);
@@ -269,10 +270,14 @@ export function Tracker({
     !!report.matched_benchmarks;
   const modeledPortfolio =
     report?.scope === "account" &&
-    (purchaseFunding || !!report.funding_estimate);
-  const fundingDescription = purchaseFunding
-    ? "Whole-account time-weighted return. Inferred deposits cover purchase cash shortfalls; recorded sale proceeds remain as cash. Cash history is unverified. Dividends require recorded income."
-    : "Estimated stocks plus cash. Deposits cover purchase shortfalls after available cash, sale proceeds, and estimated dividends. The imported opening cash is ignored.";
+    (standardAccount || !!report.funding_estimate);
+  const cashMethod = report?.cash_method ?? account.reconstruction?.cash_method;
+  const recordedCash = cashMethod === "recorded";
+  const fundingDescription = recordedCash
+    ? "Whole-account time-weighted return using recorded cash entries. Funding reconciliation may still be incomplete."
+    : standardAccount
+      ? "Whole-account time-weighted return. Inferred deposits cover purchase cash shortfalls; recorded sale proceeds remain as cash. Cash history is unverified. Dividends require recorded income."
+      : "Estimated stocks plus cash. Deposits cover purchase shortfalls after available cash, sale proceeds, and estimated dividends. The imported opening cash is ignored.";
   const showEstimatedValue =
     report?.benchmark_mode === "funded_hold" && !!report.benchmark_values;
   const showValue = showInvestedValue || showEstimatedValue;
@@ -332,7 +337,7 @@ export function Tracker({
           </button>
         </p>
         <form className="entry-form performance-controls" onSubmit={submit}>
-          {!purchaseFunding && (
+          {!standardAccount && (
             <label>
               Measure
               <select
@@ -368,11 +373,13 @@ export function Tracker({
               aria-label="Index comparison"
               value={benchmarkMode}
               title={
-                benchmarkMode === "funded_hold"
-                  ? "Indexes invest the estimated purchase funding on each deposit date and are never sold. Your portfolio uses the same calculation in both index comparisons."
-                  : benchmarkMode === "matched"
-                    ? "Indexes match stock purchases and sales. Your portfolio calculation stays the same."
-                    : "Indexes are bought at the start of the selected period and held. Your portfolio calculation stays the same."
+                benchmarkMode === "funded_hold" && recordedCash
+                  ? "Indexes invest recorded deposits at session closes and are never sold. Your portfolio uses the same calculation in both index comparisons."
+                  : benchmarkMode === "funded_hold"
+                    ? "Indexes invest the estimated purchase funding on each deposit date and are never sold. Your portfolio uses the same calculation in both index comparisons."
+                    : benchmarkMode === "matched"
+                      ? "Indexes match stock purchases and sales. Your portfolio calculation stays the same."
+                      : "Indexes are bought at the start of the selected period and held. Your portfolio calculation stays the same."
               }
               disabled={
                 busy ||
@@ -396,7 +403,9 @@ export function Tracker({
             >
               <option value="buy_hold">Buy and hold</option>
               {canEstimate ? (
-                <option value="funded_hold">Match purchase funding</option>
+                <option value="funded_hold">
+                  {recordedCash ? "Match deposits" : "Match purchase funding"}
+                </option>
               ) : (
                 <option value="matched">Match buys &amp; sales</option>
               )}
@@ -420,7 +429,7 @@ export function Tracker({
                     : "recorded";
                 setStart(from);
                 setBaseline(basis);
-                if (purchaseFunding)
+                if (standardAccount)
                   lastComparison.current = [
                     from,
                     end,
@@ -449,7 +458,7 @@ export function Tracker({
               onChange={(e) => {
                 setAnchor(undefined);
                 setEnd(e.target.value);
-                if (purchaseFunding)
+                if (standardAccount)
                   lastComparison.current = [
                     start,
                     e.target.value,
@@ -701,6 +710,7 @@ export function Tracker({
               series={report.series}
               scenario={report.scenario}
               benchmarkMode={report.benchmark_mode}
+              cashMethod={cashMethod ?? undefined}
             />
             <YearlyPerformance report={report} requestedEnd={end} />
           </>
@@ -713,10 +723,12 @@ function ReturnChart({
   series: actual,
   scenario,
   benchmarkMode,
+  cashMethod,
 }: {
   series: Point[];
   scenario?: Report | null;
   benchmarkMode?: BenchmarkMode;
+  cashMethod?: Report["cash_method"];
 }) {
   const series = actual.map((p, i) => ({
     ...p,
@@ -772,7 +784,9 @@ function ReturnChart({
       <figcaption>
         Cumulative return
         {benchmarkMode === "funded_hold"
-          ? " · indexes match purchase funding"
+          ? cashMethod === "recorded"
+            ? " · indexes match deposits"
+            : " · indexes match purchase funding"
           : benchmarkMode === "matched"
             ? " · matched buys & sales"
             : ""}{" "}

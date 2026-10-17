@@ -38,6 +38,7 @@ router = APIRouter(prefix="/api/accounts")
 ZERO = Decimal(0)
 ONE = Decimal(1)
 DAYS_PER_YEAR = Decimal("365.25")
+ACCOUNT_CASH_METHODS: frozenset[str] = frozenset({"purchase_shortfall", "recorded"})
 
 
 def wire(value):
@@ -322,11 +323,16 @@ def calculate(
     previous = None
     previous_day = None
     warnings = []
+    known_account_cash: bool = cash_method in ACCOUNT_CASH_METHODS
     canonical_funding: bool = cash_method == "purchase_shortfall" and not any(
         entry.kind == EntryKind.OPENING_CASH for entry in entries
     )
     if not stock_only and funding_status == FundingStatus.INFERRED and not canonical_funding:
-        warnings.append("Cash history needs reconciliation; starting funding was inferred.")
+        warnings.append(
+            "Cash history needs reconciliation; funding completeness is not confirmed."
+            if cash_method == "recorded"
+            else "Cash history needs reconciliation; starting funding was inferred."
+        )
     distributions = {}
     if stock_only:
         # Estimated gross distributions are paid out of this stock sleeve on the ex-date.
@@ -465,8 +471,8 @@ def calculate(
                 row[symbol] = matched[row["date"]][symbol]["return"]
     funded: dict | None = None
     if benchmark_mode == BenchmarkMode.FUNDED_HOLD:
-        if not canonical_funding or stock_only:
-            raise ValueError("Deposit-matched indexes require canonical purchase-date funding")
+        if not known_account_cash or stock_only:
+            raise ValueError("Deposit-matched indexes require a dated account cash history")
         funded = funded_series(entries, histories, days, provisional=provisional)
         row: dict
         symbol: str
@@ -501,6 +507,8 @@ def calculate(
             "Purchase-date deposits are inferred from recorded cash shortages; "
             "broker funding is not verified."
             if canonical_funding
+            else "Recorded deposits and cash movements are used; no purchase funding is inferred."
+            if cash_method == "recorded"
             else (
                 "Testing estimate: opening shares and cash are inferred, "
                 "not verified broker balances."
@@ -581,12 +589,12 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         or (e.income_kind == IncomeKind.DIVIDEND and e.accrual_date <= period.end)
     ]
     report_key: CacheKey | None = None
-    canonical_funding: bool = (account.reconstruction or {}).get(
-        "cash_method"
-    ) == "purchase_shortfall"
+    cash_method: str | None = (account.reconstruction or {}).get("cash_method")
+    known_account_cash: bool = cash_method in ACCOUNT_CASH_METHODS
+    canonical_funding: bool = cash_method == "purchase_shortfall"
     dividend_policy: Literal["unrecorded_zero"] | None = (
         "unrecorded_zero"
-        if canonical_funding
+        if known_account_cash
         and (account.reconstruction or {}).get("dividend_policy") == "unrecorded_zero"
         else None
     )
@@ -601,7 +609,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         and funding_status == FundingStatus.INFERRED
         and account.reconstruction.get("opening_cash") is not None
     )
-    estimated: bool = not canonical_funding and (
+    estimated: bool = not known_account_cash and (
         period.benchmark_mode == BenchmarkMode.FUNDED_HOLD
         or (
             funding_eligible
@@ -615,7 +623,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         raise HTTPException(
             422, "Stock exclusions are unavailable in the minimum-funding comparison"
         )
-    recorded = period.baseline == Baseline.RECORDED and not estimated and not canonical_funding
+    recorded = period.baseline == Baseline.RECORDED and not estimated and not known_account_cash
     fetch_start = period.start if recorded else entries[0].effective_date
     excluded = set(period.exclude_security_ids)
     try:
@@ -693,7 +701,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 funding_status=funding_status,
                 scope=PerformanceScope.STOCKS if estimated else period.scope,
                 benchmark_mode=BenchmarkMode.BUY_HOLD if estimated else period.benchmark_mode,
-                cash_method="purchase_shortfall" if canonical_funding else None,
+                cash_method=cash_method if known_account_cash else None,
                 dividend_policy=dividend_policy,
             )
             if estimated:
@@ -807,7 +815,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                             for e in entries
                             if e.kind in IN_KIND_ENTRIES and e.security_id in excluded
                         },
-                        cash_method="purchase_shortfall" if canonical_funding else None,
+                        cash_method=cash_method if known_account_cash else None,
                         dividend_policy=dividend_policy,
                     )
                     # Benchmark lines always describe the original stock deployments.

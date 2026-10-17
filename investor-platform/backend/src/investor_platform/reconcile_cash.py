@@ -20,6 +20,11 @@ from .domain import MARKET_TIMEZONE, EntryKind, FundingStatus
 from .ledger import CashInput, Money, build_cash, entries_for, fingerprint, ledger_view
 from .models import LedgerCorrection
 
+RECORDED_CASH_WARNING: str = (
+    "Transaction history remains provisional. Cash uses dated recorded events; "
+    "missing trades, income, fees and corporate actions are not verified."
+)
+
 
 class CashReconciliation(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -107,7 +112,12 @@ def reconcile(engine, account_id, plan, *, apply=False, actor=None):
                 f"Closing cash does not reconcile: computed {balance:.2f}, "
                 f"reported {plan.reported_cash:.2f}"
             )
+        status: FundingStatus = (
+            FundingStatus.RECONCILED if plan.confirm_complete_funding else FundingStatus.INFERRED
+        )
         result = {
+            "cash_method": "recorded",
+            "funding_status": status,
             "account_id": str(account_id),
             "revision": revision,
             "as_of": str(plan.as_of),
@@ -121,12 +131,11 @@ def reconcile(engine, account_id, plan, *, apply=False, actor=None):
         if not apply:
             session.rollback()
             return result | {"applied": False}
-        status = (
-            FundingStatus.RECONCILED if plan.confirm_complete_funding else FundingStatus.INFERRED
-        )
         result = result | {"applied": True}
         receipts = receipts | {key: {"digest": digest, "source": body, "result": result}}
         account.reconstruction = account.reconstruction | {
+            "cash_method": "recorded",
+            "warning": RECORDED_CASH_WARNING,
             "funding_status": status,
             "cash_reconciliations": receipts,
         }

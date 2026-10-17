@@ -29,15 +29,19 @@ Run from the backend project with the intended private `DATABASE_URL`:
 uv run investor-reconcile-cash --account ACCOUNT_UUID --plan private-plan.json
 ```
 
-Preview performs the complete replacement and validation inside a rolled-back transaction. Review its balances, replaced/added record counts and source evidence. Copy its `revision` into the plan's `expected_revision`, then back up the database before applying:
+Preview performs the complete replacement and validation inside a rolled-back transaction. Review its balances, replaced/added record counts, intended cash method and funding status, and source evidence. Copy its `revision` into the plan's `expected_revision`, then back up the database before applying:
 
 ```sh
 uv run investor-reconcile-cash --account ACCOUNT_UUID --plan private-plan.json --apply
 ```
 
+Retries return the original receipt without changing account policy. If an older reconciliation retained `cash_method: purchase_shortfall`, apply a fresh reviewed plan with a new request key to enter recorded-cash mode; this fix does not rewrite historical receipts or account metadata automatically.
+
 The account lock, revision check, unique retry keys and transaction prevent partial imports, concurrent stale writes and duplicate retries. Closing cash must match the reported checkpoint to cents, and the checkpoint must cover all existing records. Cash is validated at each date's end because source timestamps are unavailable; funding from a later date cannot rescue an earlier deficit. Original same-day trade ordering remains intact for FIFO.
 
-`confirm_complete_funding` is an explicit evidence-review assertion, not a conclusion inferred from a matching cash total. Leave it false when dated external flows or portfolio allocation remain incomplete. True clears only the funding gate; missing dividends, prices, corporate actions and other calculation failures still withhold returns. The CLI does not download statements, guess cash dates, map private accounts automatically or certify completeness.
+Applying the plan changes the cash method to `recorded`, for both incomplete and complete reviews. This stops automatic purchase-shortfall deposits while keeping whole-account performance and the two index choices. Later cash changes and trades must be funded by the recorded cash history; no inferred deposits are added. Reload the account after applying a plan to update its cash labels.
+
+`confirm_complete_funding` is an explicit evidence-review assertion, not a conclusion inferred from a matching cash total. Leave it false when dated external flows or portfolio allocation remain incomplete. False keeps the whole-account return and CAGR withheld. True clears only the funding gate; prices, corporate actions and other calculation failures still withhold returns. The separate explicit zero-unrecorded-dividend policy is preserved when present. Without that policy, missing dividends still withhold returns; recorded income mismatches remain blocking in either case. The CLI does not download statements, guess cash dates, map private accounts automatically or certify completeness.
 
 ## References
 
