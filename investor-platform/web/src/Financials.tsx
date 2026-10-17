@@ -164,8 +164,9 @@ export function Financials({
                 <tbody>
                   {rows.map(({ key, label, metric, digits }) => (
                     <tr key={key}>
-                      <th
-                        scope="row"
+                      <th scope="row">{label}</th>
+                      <td
+                        className="number"
                         aria-describedby={
                           metric?.exclusions.length ||
                           metric?.basis_notes?.length
@@ -173,13 +174,6 @@ export function Financials({
                             : undefined
                         }
                       >
-                        {label}
-                        {Boolean(
-                          metric?.exclusions.length ||
-                          metric?.basis_notes?.length,
-                        ) && <sup>{footnotes.get(`${key}-exclusions`)}</sup>}
-                      </th>
-                      <td className="number">
                         {metric?.value == null
                           ? "Unavailable"
                           : digits === null
@@ -190,6 +184,10 @@ export function Financials({
                                 minimumFractionDigits: digits,
                                 maximumFractionDigits: digits,
                               })}
+                        {Boolean(
+                          metric?.exclusions.length ||
+                          metric?.basis_notes?.length,
+                        ) && <sup>{footnotes.get(`${key}-exclusions`)}</sup>}
                       </td>
                       <td
                         className="number"
