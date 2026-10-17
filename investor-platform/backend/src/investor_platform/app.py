@@ -26,6 +26,7 @@ from investor_platform.performance.hit_rate import router as hit_rate_router
 from investor_platform.performance.routes import router as performance_router
 from investor_platform.performance.valuation import router as valuation_router
 from investor_platform.research.activity import router as research_activity_router
+from investor_platform.research.market_context import router as research_market_router
 from investor_platform.research.routes import router as research_router
 
 LOCAL_ORIGINS = frozenset({"http://127.0.0.1:5173", "http://localhost:5173"})
@@ -88,6 +89,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.include_router(hit_rate_router)
     app.include_router(research_router)
     app.include_router(research_activity_router)
+    app.include_router(research_market_router)
     app.include_router(financial_router)
     app.state.financial_schema = os.environ.get("INVESTOR_FINANCIAL_SCHEMA")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)

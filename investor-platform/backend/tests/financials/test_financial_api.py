@@ -151,6 +151,26 @@ def weighted(report: Record, key: str = "gross_margin") -> Record:
     return record(record(report["weighted_ratios"])[key])
 
 
+def test_report_preserves_input_snapshot() -> None:
+    """Enrich the returned company snapshot without changing the caller's holdings."""
+    selected: Record = snapshot(("AAA", "600"), ("FUND", "400"))
+    records(selected["holdings"])[0].pop("issuer_key")
+    before: Record = deepcopy(selected)
+
+    result: Record = build_report(
+        release_payload([release_row(), FUND]),
+        selected,
+        2025,
+        "synthetic-account",
+        {"USD": Decimal(1)},
+    )
+
+    assert selected == before
+    reported: list[Record] = records(record(result["market_value_snapshot"])["holdings"])
+    assert [holding["ticker"] for holding in reported] == ["AAA"]
+    assert reported[0]["issuer_key"] == "example:AAA"
+
+
 @pytest.mark.parametrize("fund_value", ["400", None])
 def test_native_ratios_usd_share_conversion_excludes_funds(fund_value: str | None) -> None:
     """Funds leave company weights, details and notes even without a market quote."""
