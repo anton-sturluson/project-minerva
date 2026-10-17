@@ -65,6 +65,12 @@ The manager detail groups positions by reported quantity: Increased includes new
 
 Current 13F weight is current holding value divided by all disclosed current holdings value, including disclosed options and principal positions. It describes the reported 13F portfolio, not the manager's full fund. An exit has zero current weight when the current portfolio has a positive value; a zero-value portfolio has unavailable weights. Before/after fractions and their signed difference share one comparison calculation.
 
+### Annual net change
+
+The manager view can compare a calendar year with the prior December 31 snapshot. The latest loaded year uses its latest quarter and shows the endpoint range, marked YTD until Q4 is loaded. Earlier years require Q4. Missing or blocked boundaries or intervening quarters make the annual comparison unavailable; there is no fallback to another year or reporting entity.
+
+Annual results reuse the quarterly quantity and value calculation at the two boundaries. They show net change, not the sum of quarterly buys and sells: a position increased and later reduced to its opening quantity is unchanged for the year. Value changes include price effects; portfolio weights are calculated from the two endpoint portfolios, never summed. Filing links retain the evidence for the full interval. The annual API is `/api/research/managers/{slug}/annual-changes?year=2026`; the quarterly API is unchanged.
+
 ## Stock activity
 
 Research has two subsections: Managers and Stock activity (`#research/activity`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included managers and lists exclusions for missing, blocked, or zero-value snapshots.

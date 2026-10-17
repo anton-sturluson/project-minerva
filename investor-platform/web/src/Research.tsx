@@ -64,6 +64,8 @@ type Comparison = {
   reason: string | null;
   source_urls: string[];
   changes: Change[];
+  year?: number;
+  year_to_date?: boolean;
 };
 const changeLabels: Record<string, string> = {
   new: "New position",
@@ -141,10 +143,20 @@ function AumSummary({ manager }: { manager: Manager }) {
   );
 }
 
-function QuarterlyChanges({ changes }: { changes: Change[] }) {
+function QuarterlyChanges({
+  changes,
+  annual,
+}: {
+  changes: Change[];
+  annual: boolean;
+}) {
   const groups = ["increased", "decreased", "unchanged"] as const;
   return (
-    <section aria-label="Quarterly position changes">
+    <section
+      aria-label={
+        annual ? "Annual net position changes" : "Quarterly position changes"
+      }
+    >
       {groups.map((group) => {
         const rows = changes.filter((change) => change.category === group);
         return (
@@ -433,6 +445,8 @@ function ManagersDirectory() {
 function ManagerDetail({ slug }: { slug: string }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [quarter, setQuarter] = useState("");
+  const [period, setPeriod] = useState("quarterly");
+  const [year, setYear] = useState("");
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -446,6 +460,9 @@ function ManagerDetail({ slug }: { slug: string }) {
         if (active) {
           setDetail(data);
           setQuarter(data.filings[0]?.quarter ?? "");
+          setYear(
+            (current) => current || data.filings[0]?.quarter.slice(0, 4) || "",
+          );
         }
       },
       (failure) => {
@@ -459,10 +476,12 @@ function ManagerDetail({ slug }: { slug: string }) {
   useEffect(() => {
     let active = true;
     setComparison(null);
-    if (!quarter) return;
+    if (period === "annual" ? !year : !quarter) return;
     setError("");
     api<Comparison>(
-      `/research/managers/${slug}/changes?quarter=${quarter}`,
+      period === "annual"
+        ? `/research/managers/${slug}/annual-changes?year=${year}`
+        : `/research/managers/${slug}/changes?quarter=${quarter}`,
     ).then(
       (data) => {
         if (active) setComparison(data);
@@ -474,7 +493,7 @@ function ManagerDetail({ slug }: { slug: string }) {
     return () => {
       active = false;
     };
-  }, [slug, quarter, retry]);
+  }, [slug, quarter, period, year, retry]);
   return (
     <>
       {error && (
@@ -494,21 +513,56 @@ function ManagerDetail({ slug }: { slug: string }) {
             <p>No quarterly holdings loaded yet.</p>
           ) : (
             <>
-              <label>
-                Report quarter{" "}
-                <select
-                  value={quarter}
-                  onChange={(event) => setQuarter(event.target.value)}
-                >
-                  {Array.from(
-                    new Set(detail.filings.map((filing) => filing.quarter)),
-                  ).map((day) => (
-                    <option key={day} value={day}>
-                      {quarterLabel(day)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="research-controls">
+                <label>
+                  View{" "}
+                  <select
+                    aria-label="Comparison view"
+                    value={period}
+                    onChange={(event) => setPeriod(event.target.value)}
+                  >
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual net change</option>
+                  </select>
+                </label>
+                {period === "annual" ? (
+                  <label>
+                    Report year{" "}
+                    <select
+                      value={year}
+                      onChange={(event) => setYear(event.target.value)}
+                    >
+                      {Array.from(
+                        new Set(
+                          detail.filings.map((filing) =>
+                            filing.quarter.slice(0, 4),
+                          ),
+                        ),
+                      ).map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <label>
+                    Report quarter{" "}
+                    <select
+                      value={quarter}
+                      onChange={(event) => setQuarter(event.target.value)}
+                    >
+                      {Array.from(
+                        new Set(detail.filings.map((filing) => filing.quarter)),
+                      ).map((day) => (
+                        <option key={day} value={day}>
+                          {quarterLabel(day)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
               {!comparison && !error && (
                 <p role="status">Loading position changes…</p>
               )}
@@ -517,10 +571,20 @@ function ManagerDetail({ slug }: { slug: string }) {
               )}
               {comparison?.status === "available" && (
                 <>
+                  {period === "annual" && (
+                    <p>
+                      {quarterLabel(comparison.previous_quarter)} →{" "}
+                      {quarterLabel(comparison.quarter)}
+                      {comparison.year_to_date && " · YTD"}
+                    </p>
+                  )}
                   {comparison.changes.length === 0 ? (
                     <p>No disclosed positions in these quarters.</p>
                   ) : (
-                    <QuarterlyChanges changes={comparison.changes} />
+                    <QuarterlyChanges
+                      changes={comparison.changes}
+                      annual={period === "annual"}
+                    />
                   )}
                 </>
               )}
