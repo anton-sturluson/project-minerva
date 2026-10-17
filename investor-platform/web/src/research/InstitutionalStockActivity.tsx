@@ -218,7 +218,7 @@ function RankedActivity({
   );
 }
 
-export function StockActivity() {
+export function InstitutionalStockActivity() {
   const [data, setData] = useState<Activity | null>(null);
   const [quarter, setQuarter] = useState("");
   const [loading, setLoading] = useState(true);

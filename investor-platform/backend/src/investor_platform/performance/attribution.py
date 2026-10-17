@@ -1,32 +1,40 @@
 """Read-only stock contributions linked to the same daily portfolio return index."""
 
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from investor_platform.domain import IN_KIND_ENTRIES, EntryKind
+from investor_platform.market_data.types import History
+from investor_platform.models import LedgerEntry, Security
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
 
 
 class StockAttribution:
-    def __init__(self, securities):
+    """Accumulate reconciled dollar gains and linked returns by stock and year."""
+
+    def __init__(self, securities: dict[UUID, Security]) -> None:
+        """Start an empty attribution for the supplied listing identities."""
         self.securities = securities
         self.previous = {}
         self.periods = {}
 
     def record(
         self,
-        day,
-        previous_day,
-        values,
-        entries,
-        prices,
-        distributions,
-        denominator,
-        growth_before,
-        growth_after,
-    ):
+        day: date,
+        previous_day: date | None,
+        values: dict[UUID, Decimal],
+        entries: list[LedgerEntry],
+        prices: dict[UUID, History],
+        distributions: dict[tuple[UUID, date], Decimal],
+        denominator: Decimal,
+        growth_before: Decimal,
+        growth_after: Decimal,
+    ) -> None:
+        """Record one session using the same flows as the portfolio calculation."""
         if previous_day is None and not entries:
             self.previous = values
             return
@@ -65,7 +73,8 @@ class StockAttribution:
                 period["linked"][sid] += growth_before * gain / denominator if denominator else ZERO
         self.previous = values
 
-    def report(self):
+    def report(self) -> list[dict]:
+        """Return reconciled full-history and calendar-year stock contributions."""
         reports = []
         for key, period in self.periods.items():
             # A lone year-end close can have execution gains but no return interval.

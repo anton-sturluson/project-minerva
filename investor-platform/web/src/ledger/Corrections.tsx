@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { IncomeFields, incomePayload } from "./IncomeFields";
 import { api, errorMessage, type Account } from "../api";
+import { formatExactDecimal } from "../format";
 import {
-  exact,
   labels,
   isInKind,
-  today,
   type Entry,
   type Holding,
   type Security,
   isPositionKind,
 } from "./ledger";
+import { newYorkToday } from "../marketDates";
 
 type Preview = {
   revision: string;
@@ -24,23 +24,26 @@ export function EntrySummary({ entry }: { entry: Entry }) {
   return (
     <p>
       #{entry.id} · {entry.effective_date} · {labels[entry.kind]} ·{" "}
-      {entry.currency} {exact(entry.amount)}
+      {entry.currency} {formatExactDecimal(entry.amount)}
       {entry.security && (
         <>
           {" "}
           · {entry.security.ticker} / {entry.security.exchange} ·{" "}
-          {exact(entry.quantity!, 0)} shares
+          {formatExactDecimal(entry.quantity!, 0)} shares
           {entry.price !== null && (
             <>
               {" "}
-              · price {exact(entry.price)} · fees {exact(entry.fees)}
+              · price {formatExactDecimal(entry.price)} · fees{" "}
+              {formatExactDecimal(entry.fees)}
             </>
           )}
           {isInKind(entry.kind) && (
             <>
               {" "}
               · basis{" "}
-              {entry.cost_basis === null ? "unknown" : exact(entry.cost_basis)}
+              {entry.cost_basis === null
+                ? "unknown"
+                : formatExactDecimal(entry.cost_basis)}
             </>
           )}
         </>
@@ -172,7 +175,7 @@ export function Corrections({
           type={type}
           value={draft[name]}
           required={required}
-          max={type === "date" ? today() : undefined}
+          max={type === "date" ? newYorkToday() : undefined}
           step={type === "number" ? "0.00000001" : undefined}
           onChange={(e) => change(name, e.target.value)}
         />
@@ -277,8 +280,9 @@ export function Corrections({
             )}
             <p>Reason: {draft.reason}</p>
             <p>
-              Cash: {account.base_currency} {exact(preview.previous_balance)} →{" "}
-              {exact(preview.balance)}
+              Cash: {account.base_currency}{" "}
+              {formatExactDecimal(preview.previous_balance)} →{" "}
+              {formatExactDecimal(preview.balance)}
             </p>
             <details open>
               <summary>Resulting holdings</summary>
@@ -287,8 +291,10 @@ export function Corrections({
                   {preview.holdings.map((h) => (
                     <li key={h.security.id}>
                       {h.security.ticker} · {h.security.exchange}:{" "}
-                      {exact(h.quantity, 0)} shares · basis{" "}
-                      {h.cost_basis === null ? "unknown" : exact(h.cost_basis)}
+                      {formatExactDecimal(h.quantity, 0)} shares · basis{" "}
+                      {h.cost_basis === null
+                        ? "unknown"
+                        : formatExactDecimal(h.cost_basis)}
                     </li>
                   ))}
                 </ul>

@@ -8,8 +8,9 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response
 
-from investor_platform.accounts import DB, Identity, owned_account
-from investor_platform.api_responses import wire
+from investor_platform.accounts import owned_account
+from investor_platform.api_responses import decimal_json_response
+from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import (
     ACCOUNTING_PRECISION,
     IN_KIND_ENTRIES,
@@ -20,10 +21,12 @@ from investor_platform.domain import (
     IncomeKind,
     completed_market_date,
 )
-from investor_platform.ledger.state import entries_for
+from investor_platform.ledger.state import active_entries_for_account
 from investor_platform.market_data import history as market
 from investor_platform.market_data import types as market_types
-from investor_platform.performance.minimum_funding_comparison import estimate
+from investor_platform.performance.minimum_funding_comparison import (
+    build_minimum_funding_comparison,
+)
 from investor_platform.performance.positions import holding_windows, period_securities
 from investor_platform.performance.report_cache import (
     CacheKey,
@@ -39,22 +42,33 @@ from investor_platform.performance.returns import (
     calculate,
     scenario_entries,
 )
-from investor_platform.performance.schemas import Baseline, BenchmarkMode, PerformanceScope, Period
+from investor_platform.performance.schemas import (
+    Baseline,
+    BenchmarkMode,
+    PerformanceRequest,
+    PerformanceScope,
+)
 from investor_platform.performance.statistics import trade_statistics
 
 router = APIRouter(prefix="/api/accounts")
 
 
 @router.get("/{account_id}/statistics")
-def statistics(account_id: UUID, session: DB, actor: Identity):
+def statistics(account_id: UUID, session: DatabaseSession, actor: CurrentActor) -> Response:
+    """Serve closed-position FIFO statistics for the owned account."""
     owned_account(session, actor, account_id)
     with localcontext() as ctx:
         ctx.prec = ACCOUNTING_PRECISION
-        return wire(trade_statistics(entries_for(session, account_id)))
+        return decimal_json_response(
+            trade_statistics(active_entries_for_account(session, account_id))
+        )
 
 
 @router.post("/{account_id}/performance")
-def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
+def performance(
+    account_id: UUID, period: PerformanceRequest, session: DatabaseSession, actor: CurrentActor
+) -> Response:
+    """Collect validated prices and serve the selected performance comparison."""
     account = owned_account(session, actor, account_id)
     provisional = bool(account.reconstruction)
     funding_status = FundingStatus.RECORDED
@@ -62,7 +76,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
         funding_status = FundingStatus(
             account.reconstruction.get("funding_status", FundingStatus.INFERRED)
         )
-    entries = entries_for(session, account_id)
+    entries = active_entries_for_account(session, account_id)
     if account.base_currency != Currency.USD:
         raise HTTPException(
             422,
@@ -204,7 +218,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                 dividend_policy=dividend_policy,
             )
             if estimated:
-                result = estimate(
+                result = build_minimum_funding_comparison(
                     entries,
                     fetched,
                     result,
@@ -349,7 +363,7 @@ def performance(account_id: UUID, period: Period, session: DB, actor: Identity):
                     ]
                 except ValueError as exc:
                     result["scenario_error"] = str(exc)
-        response: JSONResponse = wire(
+        response: JSONResponse = decimal_json_response(
             {
                 **result,
                 "fetched_at": datetime.now(UTC),

@@ -1,8 +1,8 @@
-import type { Report } from "./Tracker";
+import type { PerformanceReport } from "./performanceApi";
 import { number, percent } from "../format";
-import { today } from "../ledger/ledger";
+import { newYorkToday } from "../marketDates";
 
-type Point = Report["series"][number];
+type Point = PerformanceReport["series"][number];
 type Metric = "portfolio" | "SPY" | "QQQ";
 
 function periodReturn(points: Point[], key: Metric): string | null {
@@ -51,7 +51,7 @@ export function YearlyPerformance({
   report,
   requestedEnd,
 }: {
-  report: Report;
+  report: PerformanceReport;
   requestedEnd: string;
 }) {
   const ends = new Map<string, number>();
@@ -70,7 +70,7 @@ export function YearlyPerformance({
       const partialStart = from.slice(0, 4) === year;
       const partialEnd = requestedEnd < `${year}-12-31`;
       const label =
-        !partialStart && partialEnd && year === today().slice(0, 4)
+        !partialStart && partialEnd && year === newYorkToday().slice(0, 4)
           ? "YTD"
           : partialStart || partialEnd
             ? "partial"

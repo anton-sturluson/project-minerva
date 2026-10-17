@@ -23,7 +23,7 @@ from investor_platform.ledger.purchase_shortfalls import (
 )
 from investor_platform.ledger.schemas import LedgerView
 from investor_platform.ledger.state import (
-    entries_for,
+    active_entries_for_account,
     fingerprint,
     funding_purchase_key,
     ledger_view,
@@ -128,7 +128,7 @@ def migrate_purchase_funding(
             raise ValueError(
                 "Verified cash history cannot be replaced by inferred purchase funding"
             )
-        before: list[LedgerEntry] = entries_for(session, account_id)
+        before: list[LedgerEntry] = active_entries_for_account(session, account_id)
         revision: str = funding_revision(account, before)
         if apply and plan.expected_revision != revision:
             raise ValueError("Records changed or were not previewed; preview this plan again")
@@ -179,7 +179,7 @@ def migrate_purchase_funding(
             "warning": FUNDING_WARNING,
         }
         sync_canonical_funding(session, account, actor, plan.request_key)
-        after: list[LedgerEntry] = entries_for(session, account_id)
+        after: list[LedgerEntry] = active_entries_for_account(session, account_id)
         updated: LedgerView = ledger_view(after, account.base_currency)
         purchases: dict[UUID, LedgerEntry] = {
             entry.request_key: entry for entry in after if entry.kind == EntryKind.BUY
@@ -241,7 +241,7 @@ def sync_canonical_funding(
         != FundingStatus.INFERRED
     ):
         return
-    active: list[LedgerEntry] = entries_for(session, account.id)
+    active: list[LedgerEntry] = active_entries_for_account(session, account.id)
     generated: dict[UUID, LedgerEntry] = {}
     retained: list[LedgerEntry] = []
     entry: LedgerEntry

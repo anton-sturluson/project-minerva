@@ -15,10 +15,10 @@ The backend groups code by the feature it owns. `app.py` composes routes and the
 | `ledger/` | Input/view schemas, active entries, FIFO replay, entry construction, corrections, funding assumptions and imports. HTTP routes call shared operations. |
 | `performance/` | Return calculations, position episodes, statistics, attribution, valuations, benchmark policies and report caching. Routes collect inputs; calculators consume supplied records and prices. |
 | `market_data/` | Common history types, listing validation, Yahoo/Tiingo adapters, provider caching, dated FX conversion and daily collection. |
-| `financials/` | Annual bundle and reviewed-release admission, storage, company formulas, portfolio reports. Each admission/comparison policy remains explicit. |
+| `financials/` | Annual bundle and reviewed-release admission, storage, company formulas, portfolio reports and shared arithmetic. Each admission/comparison policy remains explicit. |
 | `research/` | SEC imports, manager eligibility, disclosed snapshots and manager/activity routes. Selected filings and holdings are loaded in batches. |
 
-The frontend follows `ledger/`, `performance/`, `financials/` and `research/`. `Portfolio` owns selection and creation; `CashLedger` owns the selected ledger and page composition. `Tracker` owns comparison state and its chart. The ledger types, labels, dates and formatting remain together in `ledger/ledger.ts`. Shared API transport stays at the source root.
+The frontend follows `ledger/`, `performance/`, `financials/` and `research/`. `Portfolio` owns selection and creation; `AccountWorkspace` owns the selected ledger and page composition. `PortfolioOverview` composes holdings and scorecards; `PerformanceComparison` owns comparison state and `ReturnChart` draws it. Feature API contracts live beside their request functions rather than inside components. Shared API transport, formatting and New York market-date helpers stay at the source root.
 
 `backend/migrations/` retains reviewed database history. Frontend and backend URLs, JSON values, stored names and CLI commands stay stable when internal modules move. Tests follow their owning features. See [ADR 0011](decisions/0011-group-code-by-feature-and-share-calculation-rules.md).
 

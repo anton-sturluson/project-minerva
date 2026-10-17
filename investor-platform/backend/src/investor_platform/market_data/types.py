@@ -1,19 +1,25 @@
-"""Dated market histories and supported collection limits."""
+"""Shared dated market histories and supported collection limits."""
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import TypedDict
 
-MAX_SECURITIES = 128
-
-
-HISTORY_WINDOW = timedelta(days=3660)
-
-
-SOURCE = "Yahoo Finance daily history"
+type MarketNumber = str | int | float | Decimal
+type JsonValue = str | int | float | Decimal | bool | None | list[JsonValue] | dict[str, JsonValue]
 
 
-BENCHMARKS = ("SPY", "QQQ")
+class HistoryOptions(TypedDict, total=False):
+    """Provider identity checks included in a Yahoo cache variant."""
+
+    currency: str
+    instruments: tuple[str, ...]
+
+
+MAX_SECURITIES: int = 128
+HISTORY_WINDOW: timedelta = timedelta(days=3660)
+SOURCE: str = "Yahoo Finance daily history"
+BENCHMARKS: tuple[str, ...] = ("SPY", "QQQ")
 
 
 class MarketDataError(OSError):
@@ -22,6 +28,8 @@ class MarketDataError(OSError):
 
 @dataclass
 class History:
+    """Dated prices, distributions, split events and provider listing identity."""
+
     close: dict[date, Decimal]
     adjusted: dict[date, Decimal]
     dividends: dict[date, Decimal] = field(default_factory=dict)
@@ -30,4 +38,4 @@ class History:
     source: str = SOURCE
 
 
-MAX_CLOSE_AGE = timedelta(days=4)
+MAX_CLOSE_AGE: timedelta = timedelta(days=4)

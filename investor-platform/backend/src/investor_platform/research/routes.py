@@ -1,14 +1,13 @@
 """Research manager registry, coverage and comparison HTTP routes."""
 
 from datetime import date
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from investor_platform.db import Actor, get_actor, get_session
+from investor_platform.db import Actor, CurrentActor, DatabaseSession
 from investor_platform.models import ResearchFiling, ResearchHolding, ResearchManager
 from investor_platform.research.eligibility import manager_eligibility
 from investor_platform.research.snapshots import (
@@ -20,12 +19,6 @@ from investor_platform.research.snapshots import (
 )
 
 router: APIRouter = APIRouter(prefix="/api/research")
-
-
-DB = Annotated[Session, Depends(get_session)]
-
-
-Identity = Annotated[Actor, Depends(get_actor)]
 
 
 def owned_manager(session: Session, actor: Actor, slug: str) -> ResearchManager:
@@ -120,7 +113,7 @@ def manager_view(
 
 
 @router.get("/managers")
-def list_managers(session: DB, actor: Identity) -> dict:
+def list_managers(session: DatabaseSession, actor: CurrentActor) -> dict:
     """Read the seeded registry without network access."""
     managers: list[ResearchManager] = list(
         session.scalars(
@@ -161,12 +154,12 @@ def list_managers(session: DB, actor: Identity) -> dict:
 
 
 @router.get("/managers/{slug}")
-def get_manager(slug: str, session: DB, actor: Identity) -> dict:
+def get_manager(slug: str, session: DatabaseSession, actor: CurrentActor) -> dict:
     """Read provenance and coverage for one manager."""
     return manager_view(session, owned_manager(session, actor, slug), detail=True)
 
 
 @router.get("/managers/{slug}/changes")
-def get_changes(slug: str, quarter: date, session: DB, actor: Identity) -> dict:
+def get_changes(slug: str, quarter: date, session: DatabaseSession, actor: CurrentActor) -> dict:
     """Compare quantities only across adjacent complete quarters and rank dollar changes."""
     return manager_comparison(session, owned_manager(session, actor, slug), quarter)

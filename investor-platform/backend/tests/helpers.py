@@ -3,6 +3,9 @@
 from datetime import date
 from uuid import uuid4
 
+from fastapi.testclient import TestClient
+from httpx import Response
+
 DAYS = [date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6)]
 
 
@@ -67,7 +70,8 @@ def stock_report(client, aid, **extra):
     )
 
 
-def replacement(entry, **changes):
+def replacement(entry: dict, **changes: str | None) -> dict:
+    """Copy effective entry fields into a synthetic correction draft."""
     result = {k: entry[k] for k in ("kind", "effective_date", "currency", "note")}
     result["request_key"] = str(uuid4())
     if entry["security"]:
@@ -78,7 +82,10 @@ def replacement(entry, **changes):
     return {**result, **changes}
 
 
-def correction(client, aid, entry, value, **extra):
+def correction(
+    client: TestClient, aid: str, entry: dict, value: dict | None, **extra: str
+) -> tuple[str, dict, Response]:
+    """Preview a synthetic correction and return its unchanged submission draft."""
     body = {
         "request_key": str(uuid4()),
         "reason": "Broker statement correction",

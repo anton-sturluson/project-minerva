@@ -1,3 +1,5 @@
+"""Verify append-only corrections, previews and retry identity."""
+
 import json
 from decimal import Decimal as D
 from uuid import uuid4
@@ -30,7 +32,7 @@ def test_preview_replace_chain_preserves_original_order_and_audit(db_client, dat
     assert D(preview.json()["balance"]) == 650
     assert ledger(db_client, aid) == before
     body["expected_revision"] = preview.json()["revision"]
-    saved = db_client.post(url, json=body)
+    saved: Response = db_client.post(url, json=body)
     assert saved.status_code == 200, saved.text
     assert db_client.post(url, json=body).json() == saved.json()
     assert db_client.post(url, json={**body, "reason": "different"}).status_code == 409

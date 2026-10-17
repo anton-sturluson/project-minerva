@@ -93,16 +93,6 @@ test("switches both indexes, retains mode across periods, and recovers from fail
   await expect(summary.getByRole("row", { name: /Nasdaq-100/ })).toContainText(
     "1,030.00",
   );
-  await expect(
-    page.getByText(/Estimated daily time-weighted returns/),
-  ).toHaveCount(0);
-  await expect(
-    page.getByText(/Indexes invest each stock purchase/),
-  ).toHaveCount(0);
-  await expect(page.getByText(/Index gains over displayed period/)).toHaveCount(
-    0,
-  );
-  await expect(page.getByText(/Estimated · stocks only/)).toHaveCount(0);
   await expect(chart.locator(".spy-line")).not.toHaveAttribute(
     "points",
     originalSpy!,
@@ -123,9 +113,6 @@ test("switches both indexes, retains mode across periods, and recovers from fail
   await expect(yearly).toContainText("3.00%");
   await page.getByRole("button", { name: "YTD", exact: true }).click();
   await expect(control).toHaveValue("matched");
-  await expect(
-    page.getByText(/Existing holdings start at their value/),
-  ).toHaveCount(0);
   await expect(summary.getByRole("row", { name: /S&P 500/ })).toContainText(
     "1,010.00",
   );

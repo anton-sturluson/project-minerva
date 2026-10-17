@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
+});
+
 const manager = {
   slug: "example-manager",
   name: "Example Technology Partners",

@@ -8,14 +8,24 @@ from decimal import Decimal
 from investor_platform.domain import IN_KIND_ENTRIES, EntryKind, IncomeKind
 from investor_platform.market_data import listings as market_listings
 from investor_platform.market_data import types as market_types
+from investor_platform.market_data.types import History
 from investor_platform.models import LedgerEntry
+from investor_platform.performance.daily_returns import daily_return_factor
 from investor_platform.performance.income import market_dividends
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
 
 
-def estimate(entries, histories, stock_report, start, *, provisional=False, inferred_opening=None):
+def build_minimum_funding_comparison(
+    entries: list[LedgerEntry],
+    histories: dict[str, History],
+    stock_report: dict,
+    start: date,
+    *,
+    provisional: bool = False,
+    inferred_opening: Decimal | None = None,
+) -> dict:
     """Infer daily cash shortages, then invest that capital once in each index.
 
     Recorded sales and estimated gross dividends fund subsequent actual purchases.
@@ -67,7 +77,8 @@ def estimate(entries, histories, stock_report, start, *, provisional=False, infe
     for (_, exdate), amount in dividends.items():
         flows[exdate] += amount
 
-    def session(day):
+    def session(day: date) -> date:
+        """Select the first available benchmark session for a contribution."""
         index = bisect_left(days, day)
         if index == len(days):
             raise ValueError("Funding contribution needs a completed benchmark session")
@@ -117,8 +128,9 @@ def estimate(entries, histories, stock_report, start, *, provisional=False, infe
             wealth[symbol] = units[symbol] * price
         if previous is not None:
             for key in growth:
-                denominator = previous[key] + contribution
-                factor = (wealth[key] - receipt) / denominator if denominator else ONE
+                factor = daily_return_factor(
+                    previous[key], wealth[key], contribution, receipts=receipt
+                )
                 if factor < 0:
                     raise ValueError("Funding estimate has an invalid daily return factor")
                 growth[key] *= factor

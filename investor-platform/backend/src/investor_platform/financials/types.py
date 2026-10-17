@@ -7,14 +7,8 @@ from decimal import Decimal
 from uuid import UUID
 
 type Json = str | int | float | bool | None | list[Json] | dict[str, Json]
-
-
 type Record = dict[str, Json]
-
-
 type Value = Json | Decimal | date | datetime | UUID
-
-
 type Row = dict[str, Value]
 
 

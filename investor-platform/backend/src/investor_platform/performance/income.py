@@ -1,14 +1,25 @@
 """Recorded dividend receivables; market events validate rather than invent income."""
 
+from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from investor_platform.domain import EntryKind, IncomeKind
+from investor_platform.market_data.types import History
+from investor_platform.models import LedgerEntry, Security
 
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
 
 
-def market_dividends(entries, prices, through, *, validation_start=None):
+def market_dividends(
+    entries: list[LedgerEntry],
+    prices: dict[UUID, History],
+    through: date,
+    *,
+    validation_start: date | None = None,
+) -> dict[tuple[UUID, date], Decimal]:
+    """Calculate distributions earned by recorded shares on provider ex-dates."""
     expected = {}
     for sid, history in prices.items():
         for exdate, per_share in history.dividends.items():
@@ -28,14 +39,14 @@ def market_dividends(entries, prices, through, *, validation_start=None):
 
 
 def dividend_receivables(
-    entries,
-    prices,
-    securities,
-    days,
+    entries: list[LedgerEntry],
+    prices: dict[UUID, History],
+    securities: dict[UUID, Security],
+    days: list[date],
     *,
-    validation_start=None,
+    validation_start: date | None = None,
     assume_unrecorded_zero: bool = False,
-):
+) -> tuple[dict[date, Decimal], list[str]]:
     """Accrue recorded income; optionally assume zero only for absent dividend records."""
     dividends = [e for e in entries if e.income_kind == IncomeKind.DIVIDEND]
     warnings = []

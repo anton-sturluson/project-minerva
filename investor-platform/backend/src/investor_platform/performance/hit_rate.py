@@ -1,13 +1,15 @@
 """Closed investment decisions versus capital- and holding-period-matched benchmarks."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_EVEN, Decimal, DecimalException, localcontext
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
-from investor_platform.accounts import DB, Identity, owned_account
-from investor_platform.api_responses import wire
+from investor_platform.accounts import owned_account
+from investor_platform.api_responses import decimal_json_response
+from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import (
     ACCOUNTING_PRECISION,
     IN_KIND_ENTRIES,
@@ -16,10 +18,12 @@ from investor_platform.domain import (
     EntryKind,
 )
 from investor_platform.ledger.accounting import UNIT
-from investor_platform.ledger.state import entries_for
+from investor_platform.ledger.state import active_entries_for_account
 from investor_platform.market_data import history as market
 from investor_platform.market_data import listings as market_listings
 from investor_platform.market_data import types as market_types
+from investor_platform.market_data.types import History
+from investor_platform.models import LedgerEntry
 from investor_platform.performance.positions import holding_windows, position_episodes
 
 router = APIRouter(prefix="/api/accounts")
@@ -27,7 +31,8 @@ ZERO = Decimal(0)
 CENT = Decimal("0.01")
 
 
-def exclusion(episode, today):
+def exclusion(episode: list[LedgerEntry], today: date) -> str | None:
+    """Explain why an episode lacks a valid matching benchmark."""
     if any(e.kind in IN_KIND_ENTRIES for e in episode):
         return "Received shares: original purchase dates are unknown"
     if episode[-1].effective_date >= today:
@@ -41,7 +46,8 @@ def exclusion(episode, today):
     return None
 
 
-def compare_episode(episode, histories):
+def compare_episode(episode: list[LedgerEntry], histories: dict[str, History]) -> dict:
+    """Match stock exits and FIFO capital with benchmark gains."""
     security = episode[0].security
     history = histories[market_listings.symbol_for(security)]
     market_listings.verify_exchange(security, history)
@@ -108,7 +114,10 @@ def compare_episode(episode, histories):
     }
 
 
-def calculate_hit_rate(episodes, open_count, histories, today):
+def calculate_hit_rate(
+    episodes: list[list[LedgerEntry]], open_count: int, histories: dict[str, History], today: date
+) -> dict:
+    """Summarize eligible investment decisions and their exclusions."""
     rows = []
     for episode in episodes:
         first, last = episode[0], episode[-1]
@@ -145,11 +154,12 @@ def calculate_hit_rate(episodes, open_count, histories, today):
 
 
 @router.post("/{account_id}/hit-rate")
-def hit_rate(account_id: UUID, session: DB, actor: Identity):
+def hit_rate(account_id: UUID, session: DatabaseSession, actor: CurrentActor) -> Response:
+    """Collect bounded histories and serve decision hit rates."""
     account = owned_account(session, actor, account_id)
     if account.base_currency != Currency.USD:
         raise HTTPException(422, "Hit rate currently requires a USD account")
-    episodes, open_count = position_episodes(entries_for(session, account_id))
+    episodes, open_count = position_episodes(active_entries_for_account(session, account_id))
     today = datetime.now(MARKET_TIMEZONE).date()
     candidates = [e for e in episodes if not exclusion(e, today)]
     try:
@@ -183,7 +193,7 @@ def hit_rate(account_id: UUID, session: DB, actor: Identity):
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
             result = calculate_hit_rate(episodes, open_count, histories, today)
-        return wire(
+        return decimal_json_response(
             {
                 **result,
                 "fetched_at": datetime.now(UTC),

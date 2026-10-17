@@ -1,7 +1,8 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useIdempotencyKey } from "./useIdempotencyKey";
+import { useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "../api";
+import { newYorkToday } from "../marketDates";
 import {
-  today,
   type Entry,
   type PositionKind,
   positionKinds,
@@ -19,7 +20,7 @@ export function Trades({
   const [kind, setKind] = useState<PositionKind>("buy");
   const [ticker, setTicker] = useState("");
   const [exchange, setExchange] = useState("");
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useState(newYorkToday());
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
   const [fees, setFees] = useState("0");
@@ -28,7 +29,7 @@ export function Trades({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const retry = useRef<{ body: string; key: string } | null>(null);
+  const requestKey = useIdempotencyKey();
   async function save(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -47,14 +48,13 @@ export function Trades({
       note,
     };
     const body = JSON.stringify(payload);
-    if (retry.current?.body !== body)
-      retry.current = { body, key: crypto.randomUUID() };
+    const key = requestKey.keyFor(body);
     try {
       await api<Entry>(`/accounts/${account.id}/trades`, {
         method: "POST",
-        body: JSON.stringify({ ...payload, request_key: retry.current.key }),
+        body: JSON.stringify({ ...payload, request_key: key }),
       });
-      retry.current = null;
+      requestKey.reset();
       setQuantity("");
       setNote("");
       setMessage("Position entry saved.");
@@ -126,7 +126,7 @@ export function Trades({
               aria-label="Position effective date"
               type="date"
               required
-              max={today()}
+              max={newYorkToday()}
               value={date}
               onChange={(e) => setDate(e.target.value)}
               disabled={saving}

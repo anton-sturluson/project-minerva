@@ -36,7 +36,11 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "F", "I", "UP", "ANN", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "D"]
+"migrations/**" = ["ANN", "D"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

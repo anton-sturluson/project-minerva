@@ -179,14 +179,14 @@ def test_yearly_linking_resets_at_prior_year_end_without_losing_cross_year_holdi
 
     from sqlalchemy.orm import Session
 
-    from investor_platform.ledger.state import entries_for
+    from investor_platform.ledger.state import active_entries_for_account
     from investor_platform.performance.returns import calculate
     from investor_platform.performance.schemas import PerformanceScope
 
     with Session(db_client.app.state.engine) as session, localcontext() as ctx:
         ctx.prec = 64
         result = calculate(
-            entries_for(session, UUID(aid)),
+            active_entries_for_account(session, UUID(aid)),
             data,
             date(2026, 1, 2),
             date(2027, 1, 4),

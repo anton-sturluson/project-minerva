@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
-import { StockActivity } from "./StockActivity";
+import { InstitutionalStockActivity } from "./InstitutionalStockActivity";
 import { percent, quarterLabel } from "../format";
 
 type Coverage = {
@@ -229,7 +229,7 @@ export function Research({ activity }: { activity: boolean }) {
           [ Stock activity ]
         </a>
       </nav>
-      {activity ? <StockActivity /> : <ManagersDirectory />}
+      {activity ? <InstitutionalStockActivity /> : <ManagersDirectory />}
     </section>
   );
 }

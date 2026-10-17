@@ -24,7 +24,7 @@ from investor_platform.ledger.purchase_shortfalls import (
     infer_purchase_shortfalls,
 )
 from investor_platform.ledger.schemas import CashInput, TradeInput
-from investor_platform.ledger.state import entries_for, funding_purchase_key
+from investor_platform.ledger.state import active_entries_for_account, funding_purchase_key
 from investor_platform.models import Account, LedgerCorrection, LedgerEntry
 
 
@@ -79,7 +79,7 @@ def test_import_keeps_full_product_precision_and_has_no_opening_cash(database: E
     aid: str = apply_import(database, "Precise inferred funding", entries, summary)[0]
     session: Session
     with Session(database) as session:
-        rows: list[LedgerEntry] = entries_for(session, UUID(aid))
+        rows: list[LedgerEntry] = active_entries_for_account(session, UUID(aid))
         assert [row.kind for row in rows] == ["deposit", "buy"]
         assert rows[0].amount == rows[1].amount == D("0.0152415765279684")
         assert funding_purchase_key(rows[0]) == rows[1].request_key

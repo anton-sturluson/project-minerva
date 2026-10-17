@@ -1,4 +1,4 @@
-import { today } from "../src/ledger/ledger";
+import { newYorkToday } from "../src/marketDates";
 import { expect, test } from "./fixtures";
 
 test("reviews a correction, retries a lost response once, preserves audit, and voids it", async ({
@@ -12,7 +12,7 @@ test("reviews a correction, retries a lost response once, preserves audit, and v
       kind: "deposit",
       amount: "100",
       currency: "USD",
-      effective_date: today(),
+      effective_date: newYorkToday(),
       note: "Synthetic correction fixture",
     },
   });
@@ -115,7 +115,7 @@ test("rejects an overdraft correction and requires a fresh review after another 
     kind: "deposit",
     amount: "100",
     currency: "USD",
-    effective_date: today(),
+    effective_date: newYorkToday(),
     note: "Stale preview fixture",
   };
   const entry = await (

@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { MARKET_DATA_TIMEOUT, api, errorMessage, type Account } from "../api";
 import { number, percent } from "../format";
 import { Financials } from "../financials/Financials";
-import { completedMarketDate, today, type Ledger } from "../ledger/ledger";
+import { marketDataThroughDate, newYorkToday } from "../marketDates";
+import { type Ledger } from "../ledger/ledger";
 
 type Stock = {
   security_id: string;
@@ -46,7 +47,7 @@ export function PostMortem({
 }) {
   const [reports, setReports] = useState<Attribution[]>([]);
   const [selected, setSelected] = useState(() =>
-    completedMarketDate().slice(0, 4),
+    marketDataThroughDate().slice(0, 4),
   );
   const [measureOverride, setMeasureOverride] = useState<Measure | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,7 +60,7 @@ export function PostMortem({
     setError("");
     setBusy(false);
     if (!first || account.base_currency !== "USD") return;
-    const end = completedMarketDate();
+    const end = marketDataThroughDate();
     setBusy(true);
     void api<{ attribution: Attribution[] | null }>(
       `/accounts/${account.id}/performance`,
@@ -88,7 +89,7 @@ export function PostMortem({
       active = false;
     };
   }, [account.id, account.base_currency, first, ledger, revision]);
-  const latestYear = Number(completedMarketDate().slice(0, 4));
+  const latestYear = Number(marketDataThroughDate().slice(0, 4));
   const firstYear = first ? Number(first.slice(0, 4)) : latestYear;
   const years = Array.from(
     { length: Math.max(1, latestYear - firstYear + 1) },
@@ -98,7 +99,7 @@ export function PostMortem({
   const label = (p: Attribution) =>
     p.period === "all"
       ? "Full history"
-      : `${p.period}${p.start.slice(0, 4) === p.period ? " · partial" : p.period === today().slice(0, 4) ? " · YTD" : ""}`;
+      : `${p.period}${p.start.slice(0, 4) === p.period ? " · partial" : p.period === newYorkToday().slice(0, 4) ? " · YTD" : ""}`;
   const measure =
     measureOverride ?? (selected === "all" ? "gain" : "contribution");
   const format = measure === "gain" ? dollars : points;

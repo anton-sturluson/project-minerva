@@ -6,10 +6,12 @@ import json
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Self, cast
 from uuid import UUID, uuid5
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -18,9 +20,9 @@ from investor_platform.db import LOCAL_OWNER, LOCAL_WORKSPACE, Actor, make_engin
 from investor_platform.domain import MARKET_TIMEZONE, EntryKind, FundingStatus
 from investor_platform.ledger.accounting import replay
 from investor_platform.ledger.commands import build_cash
-from investor_platform.ledger.schemas import CashInput, Money
-from investor_platform.ledger.state import entries_for, fingerprint, ledger_view
-from investor_platform.models import LedgerCorrection
+from investor_platform.ledger.schemas import CashInput, LedgerRecord, LedgerView, Money
+from investor_platform.ledger.state import active_entries_for_account, fingerprint, ledger_view
+from investor_platform.models import Account, LedgerCorrection, LedgerEntry
 
 RECORDED_CASH_WARNING: str = (
     "Transaction history remains provisional. Cash uses dated recorded events; "
@@ -29,6 +31,8 @@ RECORDED_CASH_WARNING: str = (
 
 
 class CashReconciliation(BaseModel):
+    """A reviewed cash replacement plan pinned to an account ledger and closing balance."""
+
     model_config = ConfigDict(extra="forbid")
     request_key: UUID
     source_reference: str = Field(min_length=1, max_length=240)
@@ -40,7 +44,8 @@ class CashReconciliation(BaseModel):
     expected_revision: str | None = None
 
     @model_validator(mode="after")
-    def unique_records(self):
+    def unique_records(self) -> Self:
+        """Require unique source rows and a complete, nonfuture closing checkpoint."""
         if self.as_of > datetime.now(MARKET_TIMEZONE).date():
             raise ValueError("The closing cash checkpoint cannot be in the future")
         if len(set(self.remove_entry_ids)) != len(self.remove_entry_ids):
@@ -56,39 +61,51 @@ class CashReconciliation(BaseModel):
         return self
 
 
-def reconcile(engine, account_id, plan, *, apply=False, actor=None):
+def reconcile(
+    engine: Engine,
+    account_id: UUID,
+    plan: CashReconciliation,
+    *,
+    apply: bool = False,
+    actor: Actor | None = None,
+) -> LedgerRecord:
+    """Preview or commit a cash replacement without changing any recorded trade."""
     actor = actor or Actor(LOCAL_OWNER, LOCAL_WORKSPACE)
-    body = plan.model_dump(mode="json", exclude={"expected_revision"})
-    digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
-    key = str(plan.request_key)
+    body: LedgerRecord = plan.model_dump(mode="json", exclude={"expected_revision"})
+    digest: str = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+    key: str = str(plan.request_key)
+    session: Session
     with Session(engine) as session:
-        account = owned_account(session, actor, account_id, lock=True)
+        account: Account = owned_account(session, actor, account_id, lock=True)
         if not account.reconstruction:
             raise ValueError(
                 "This workflow is for imported portfolios; use ordinary ledger corrections"
             )
-        receipts = account.reconstruction.get("cash_reconciliations", {})
-        previous = receipts.get(key)
+        receipts: dict[str, LedgerRecord] = cast(
+            dict[str, LedgerRecord], account.reconstruction.get("cash_reconciliations", {})
+        )
+        previous: LedgerRecord | None = receipts.get(key)
         if previous:
             if previous["digest"] != digest:
                 raise ValueError("This reconciliation key was already used for a different plan")
-            return previous["result"] | {"already_applied": True}
-        before = entries_for(session, account_id)
-        revision = hashlib.sha256(
+            return cast(LedgerRecord, previous["result"]) | {"already_applied": True}
+        before: list[LedgerEntry] = active_entries_for_account(session, account_id)
+        revision: str = hashlib.sha256(
             json.dumps(
                 {"ids": [e.id for e in before], "receipts": receipts}, sort_keys=True
             ).encode()
         ).hexdigest()
         if apply and plan.expected_revision != revision:
             raise ValueError("Records changed or were not previewed; preview this plan again")
-        cash_ids = {e.id for e in before if e.security_id is None}
+        cash_ids: set[int] = {e.id for e in before if e.security_id is None}
         if set(plan.remove_entry_ids) != cash_ids:
             raise ValueError(
                 "The plan must explicitly replace every active cash record, and no trades"
             )
         if before and plan.as_of < max(e.effective_date for e in before):
             raise ValueError("The closing cash checkpoint must cover every current ledger entry")
-        old = ledger_view(before, account.base_currency)
+        old: LedgerView = ledger_view(before, account.base_currency)
+        entry_id: int
         for entry_id in plan.remove_entry_ids:
             session.add(
                 LedgerCorrection(
@@ -101,14 +118,15 @@ def reconcile(engine, account_id, plan, *, apply=False, actor=None):
                     reason="Replace imported cash history: " + plan.source_reference[:200],
                 )
             )
+        item: CashInput
         for item in plan.entries:
             session.add(build_cash(account, item, session, actor, fingerprint(item)))
         session.flush()
-        after = entries_for(session, account_id)
-        updated = ledger_view(after, account.base_currency)
+        after: list[LedgerEntry] = active_entries_for_account(session, account_id)
+        updated: LedgerView = ledger_view(after, account.base_currency)
         if updated.holdings != old.holdings:
             raise ValueError("Cash reconciliation cannot change holdings or cost basis")
-        balance = replay([e for e in after if e.effective_date <= plan.as_of])[0]
+        balance: Decimal = replay([e for e in after if e.effective_date <= plan.as_of])[0]
         if balance.quantize(Decimal(".01")) != plan.reported_cash.quantize(Decimal(".01")):
             raise ValueError(
                 f"Closing cash does not reconcile: computed {balance:.2f}, "
@@ -117,7 +135,7 @@ def reconcile(engine, account_id, plan, *, apply=False, actor=None):
         status: FundingStatus = (
             FundingStatus.RECONCILED if plan.confirm_complete_funding else FundingStatus.INFERRED
         )
-        result = {
+        result: LedgerRecord = {
             "cash_method": "recorded",
             "funding_status": status,
             "account_id": str(account_id),
@@ -145,15 +163,16 @@ def reconcile(engine, account_id, plan, *, apply=False, actor=None):
         return result
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def main() -> None:
+    """Read a reviewed plan and print its preview or committed reconciliation receipt."""
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--account", type=UUID, required=True)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
-    args = parser.parse_args()
-    engine = make_engine()
+    args: argparse.Namespace = parser.parse_args()
+    engine: Engine = make_engine()
     try:
-        plan = CashReconciliation.model_validate_json(args.plan.read_text())
+        plan: CashReconciliation = CashReconciliation.model_validate_json(args.plan.read_text())
         print(json.dumps(reconcile(engine, args.account, plan, apply=args.apply), indent=2))
     except (ValueError, OSError, HTTPException) as exc:
         parser.exit(1, f"Reconciliation stopped: {getattr(exc, 'detail', str(exc))}\n")
