@@ -339,3 +339,94 @@ def test_ties_use_cusip_and_zero_quantity_presence_is_not_activity(
     assert [item["cusip"] for item in data["decreased"]] == ["333333333", "444444444"]
     assert all(Decimal(item["average_weight_change_pp"]) == 10 for item in data["increased"])
     assert all(Decimal(item["average_weight_change_pp"]) == -10 for item in data["decreased"])
+
+
+def test_contributor_reported_prices_use_dated_holdings_not_trade_cash_flow(
+    database: Engine,
+    db_client: TestClient,
+) -> None:
+    """New, retained and exited shares use their reported value and correct quarter date."""
+    with Session(database) as session:
+        alpha: ResearchManager = manager(session, "alpha", "1001")
+        quarter(
+            session,
+            alpha,
+            "2026-03-31",
+            [
+                position("111111111", "10", "100"),
+                position("222222222", "10", "300"),
+                position("333333333", "5", "125"),
+                position("444444444", "5", "175"),
+                position("999999999", "10", "100"),
+            ],
+        )
+        quarter(
+            session,
+            alpha,
+            "2026-06-30",
+            [
+                position("111111111", "20", "600"),
+                position("222222222", "5", "200"),
+                position("444444444", "0", "0"),
+                position("555555555", "4", "240"),
+                position("666666666", "2", "0"),
+                position("999999999", "10", "100"),
+            ],
+        )
+        session.commit()
+    result: dict = db_client.get("/api/research/activity?quarter=2026-06-30").json()
+    contributors: dict[str, dict] = {
+        item["cusip"]: item["contributors"][0] for item in result["increased"] + result["decreased"]
+    }
+    assert result["included_managers"] == 1
+    assert "999999999" not in contributors
+    assert Decimal(contributors["111111111"]["quarter_end_price_usd"]) == 30
+    assert Decimal(contributors["222222222"]["quarter_end_price_usd"]) == 40
+    assert Decimal(contributors["333333333"]["quarter_end_price_usd"]) == 25
+    assert Decimal(contributors["444444444"]["quarter_end_price_usd"]) == 35
+    assert Decimal(contributors["555555555"]["quarter_end_price_usd"]) == 60
+    assert Decimal(contributors["666666666"]["quarter_end_price_usd"]) == 0
+    assert all(
+        contributors[cusip]["price_as_of"] == "2026-06-30"
+        for cusip in ["111111111", "222222222", "555555555", "666666666"]
+    )
+    assert contributors["333333333"]["kind"] == "exited"
+    assert Decimal(contributors["444444444"]["current_quantity"]) == 0
+    assert all(
+        contributors[cusip]["price_as_of"] == "2026-03-31" for cusip in ["333333333", "444444444"]
+    )
+    assert all(len(contributor["source_urls"]) == 2 for contributor in contributors.values())
+
+
+def test_reported_price_retains_large_value_and_fractional_share_precision(
+    database: Engine,
+    db_client: TestClient,
+) -> None:
+    """Already normalized USD per fractional share must retain digits beyond default precision."""
+    with Session(database) as session:
+        alpha: ResearchManager = manager(session, "alpha", "1001")
+        quarter(
+            session,
+            alpha,
+            "2026-03-31",
+            [position("111111111", "0.00000001", "1"), position("222222222", "2", "50")],
+        )
+        quarter(
+            session,
+            alpha,
+            "2026-06-30",
+            [
+                position("111111111", "0.00000002", "1234567890123456789012345678.91"),
+                position("222222222", "3", "100"),
+            ],
+        )
+        session.commit()
+    result: dict = db_client.get("/api/research/activity?quarter=2026-06-30").json()
+    contributors: dict[str, dict] = {
+        item["cusip"]: item["contributors"][0] for item in result["increased"]
+    }
+    assert Decimal(contributors["111111111"]["quarter_end_price_usd"]) == Decimal(
+        "61728394506172839450617283945500000"
+    )
+    assert contributors["222222222"]["quarter_end_price_usd"] == "33." + "3" * 62
+    assert all(contributor["price_as_of"] == "2026-06-30" for contributor in contributors.values())

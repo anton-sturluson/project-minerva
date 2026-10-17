@@ -863,6 +863,35 @@ summary:focus-visible {
   gap: 28px;
   margin-top: 20px;
 }
+@media (min-width: 801px) {
+  #research {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--header-height) - 36px);
+  }
+  #research > section {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #research > section > .form-note {
+    flex: 0 0 auto;
+  }
+  .research-layout {
+    flex: 1;
+    min-height: 0;
+  }
+}
+.research-directory,
+.research-detail {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+.research-directory {
+  min-width: 0;
+}
 .manager-directory {
   list-style: none;
   margin: 0;
@@ -913,9 +942,17 @@ summary:focus-visible {
   font-weight: bold;
 }
 .stock-activity-table {
-  min-width: 620px;
+  min-width: 940px;
+  table-layout: fixed;
 }
-.stock-activity-table th button {
+.stock-activity-table > thead th:first-child {
+  width: 28%;
+}
+.stock-activity-table > tbody > .activity-stock-row > td:first-child {
+  white-space: normal;
+}
+.stock-activity-table > thead th button,
+.activity-stock-toggle {
   padding: 0;
   border: 0;
   background: none;
@@ -924,31 +961,46 @@ summary:focus-visible {
   text-decoration: underline;
   cursor: pointer;
 }
-.stock-activity-table td:first-child {
-  width: 55%;
-  min-width: 220px;
-  white-space: normal;
+.activity-stock-toggle {
+  text-align: left;
 }
-.stock-activity-table summary {
-  cursor: pointer;
-}
-.stock-activity-table summary small {
+.activity-stock-row small,
+.activity-manager-table small {
   display: block;
   margin-top: 3px;
   font-size: 11px;
+  font-weight: normal;
 }
-.activity-contributors {
-  margin: 12px 0 0;
-  padding-left: 18px;
+.stock-activity-table > tbody > .activity-expanded-row > td {
+  padding: 10px;
+  white-space: normal;
+  text-align: left;
+  background: var(--neutral);
 }
-.activity-contributors li {
-  margin-bottom: 14px;
+.activity-expanded-row[hidden] {
+  display: none;
 }
-.activity-contributors p {
-  margin: 4px 0;
+.activity-manager-table {
+  min-width: 620px;
 }
-.activity-contributors .research-links {
-  margin-top: 6px;
+.activity-manager-table th[scope="row"] {
+  white-space: normal;
+  min-width: 150px;
+  font-weight: normal;
+  color: var(--ink);
+}
+.activity-market-price button {
+  display: block;
+  margin: 3px 0 0 auto;
+  font-size: 11px;
+}
+.activity-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
 }
 .activity-coverage {
   margin: 14px 0;
@@ -981,6 +1033,11 @@ summary:focus-visible {
 @media (max-width: 800px) {
   .research-layout {
     grid-template-columns: 1fr;
+  }
+  .research-directory,
+  .research-detail {
+    overflow-y: visible;
+    overscroll-behavior-y: auto;
   }
   .research-detail {
     border-left: 0;

@@ -637,3 +637,92 @@ def test_amendment_repeated_positions_require_complete_exact_existing_snapshot(
         assert len(result["source_urls"]) == 3
     else:
         assert "overlaps" in result["reason"]
+
+
+def test_company_count_uses_latest_valid_stock_issuers(
+    database: Engine, db_client: TestClient, tmp_path: Path
+) -> None:
+    """Consolidate issuer share classes; block stale counts after an invalid filing."""
+    manager_id: UUID = registry(database, tmp_path)
+    endpoint: str = "/api/research/managers/example"
+    assert db_client.get(endpoint).json()["portfolio_company_count"] is None
+    rows: str = (
+        row("10", "100", cusip="123456100")
+        + row("10", "100", cusip="123456200")
+        + row("10", "100", cusip="234567100")
+        + row("10", "100", option="PUT", cusip="345678100")
+        + row("0", "0", cusip="456789100")
+        + row("10", "100", cusip="567890100").replace(
+            "<sshPrnamtType>SH</sshPrnamtType>", "<sshPrnamtType>PRN</sshPrnamtType>"
+        )
+    )
+    filing(database, manager_id, "2026-03-31", "old-count", rows, count=6)
+    response: dict = db_client.get(endpoint).json()
+    assert response["portfolio_company_count"] == 2
+    assert response["portfolio_company_count_quarter"] == "2026-03-31"
+    filing(database, manager_id, "2026-06-30", "blocked-count", row("1", "1"), count=2)
+    assert db_client.get(endpoint).json()["portfolio_company_count"] is None
+    filing(database, manager_id, "2026-06-30", "empty-count", "", count=0, amendment="RESTATEMENT")
+    assert db_client.get(endpoint).json()["portfolio_company_count"] == 0
+
+
+def test_share_reduction_can_have_positive_value_and_weight_change() -> None:
+    """A price rise can outweigh a sale without changing the share-based category."""
+    previous: dict[HoldingKey, Position] = {
+        ("123456789", "", "SH"): Position(
+            cusip="123456789",
+            issuer="Example",
+            security_class="COM",
+            put_call="",
+            share_type="SH",
+            quantity=Decimal("100"),
+            value_usd=Decimal("1000"),
+        ),
+        ("234567890", "", "SH"): Position(
+            cusip="234567890",
+            issuer="Other",
+            security_class="COM",
+            put_call="",
+            share_type="SH",
+            quantity=Decimal("100"),
+            value_usd=Decimal("1000"),
+        ),
+    }
+    current: dict[HoldingKey, Position] = {
+        **previous,
+        ("123456789", "", "SH"): {
+            **previous[("123456789", "", "SH")],
+            "quantity": Decimal("80"),
+            "value_usd": Decimal("1600"),
+        },
+    }
+    change: dict = next(
+        item for item in compare_positions(current, previous) if item["issuer"] == "Example"
+    )
+    assert change["category"] == "decreased"
+    assert Decimal(change["quantity_change"]) == -20
+    assert Decimal(change["value_change_usd"]) == 600
+    assert Decimal(change["weight_change"]) > 0
+
+
+def test_directory_company_counts_include_ordinary_latest_filings(
+    database: Engine, db_client: TestClient, tmp_path: Path
+) -> None:
+    """Directory batches retain latest ordinary holdings and reject a blocked newer quarter."""
+    manager_id: UUID = registry(database, tmp_path)
+    filing(database, manager_id, "2026-03-31", "older-directory", row("1", "10"))
+    filing(
+        database,
+        manager_id,
+        "2026-06-30",
+        "latest-directory",
+        row("2", "20", cusip="123456100") + row("3", "30", cusip="234567100"),
+        count=2,
+    )
+    manager: dict = db_client.get("/api/research/managers").json()["managers"][0]
+    assert manager["portfolio_company_count"] == 2
+    assert manager["portfolio_company_count_quarter"] == "2026-06-30"
+    filing(database, manager_id, "2026-09-30", "blocked-directory", row("1", "10"), count=2)
+    manager = db_client.get("/api/research/managers").json()["managers"][0]
+    assert manager["portfolio_company_count"] is None
+    assert manager["portfolio_company_count_quarter"] == "2026-09-30"
