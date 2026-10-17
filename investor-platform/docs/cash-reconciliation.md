@@ -45,6 +45,6 @@ Applying the plan changes the cash method to `recorded`, for both incomplete and
 
 ## References
 
-- [Reconciliation implementation](../backend/src/investor_platform/reconcile_cash.py) — atomic preview/apply and retained evidence.
-- [Accounting](../backend/src/investor_platform/accounting.py) — dated cash validation and FIFO preservation.
+- [Reconciliation implementation](../backend/src/investor_platform/ledger/reconcile_cash.py) — atomic preview/apply and retained evidence.
+- [Accounting](../backend/src/investor_platform/ledger/accounting.py) — dated cash validation and FIFO preservation.
 - [Performance methodology](performance.md) — flow timing, dividend validation and benchmark calculations.

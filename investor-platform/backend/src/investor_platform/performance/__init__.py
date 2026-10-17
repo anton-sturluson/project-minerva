@@ -1,0 +1,1 @@
+"""Investor platform performance feature."""

@@ -17,18 +17,17 @@ from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .accounts import router
-from .corrections import router as corrections_router
-from .db import make_engine
-from .financial_api import router as financial_router
-from .hit_rate import router as hit_rate_router
-from .ledger import router as ledger_router
-from .performance import router as performance_router
-from .research import router as research_router
-from .research_activity import router as research_activity_router
-from .research_market import router as research_market_router
-from .trades import router as trades_router
-from .valuation import router as valuation_router
+from investor_platform.accounts import router
+from investor_platform.db import make_engine
+from investor_platform.financials.api import router as financial_router
+from investor_platform.ledger.corrections import router as corrections_router
+from investor_platform.ledger.routes import router as ledger_router
+from investor_platform.performance.hit_rate import router as hit_rate_router
+from investor_platform.performance.routes import router as performance_router
+from investor_platform.performance.valuation import router as valuation_router
+from investor_platform.research.activity import router as research_activity_router
+from investor_platform.research.market_context import router as research_market_router
+from investor_platform.research.routes import router as research_router
 
 LOCAL_ORIGINS = frozenset({"http://127.0.0.1:5173", "http://localhost:5173"})
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -40,7 +39,7 @@ async def lifespan(app):
         app.state.engine = make_engine()
     stop, worker = Event(), None
     if app.state.daily_prices:
-        from .price_refresh import run_worker
+        from investor_platform.market_data.price_refresh import run_worker
 
         worker = Thread(target=run_worker, args=(app.state.engine, stop), daemon=True)
         worker.start()
@@ -84,7 +83,6 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.state.daily_prices = remote and os.environ.get("INVESTOR_DAILY_PRICES") == "1"
     app.include_router(router)
     app.include_router(ledger_router)
-    app.include_router(trades_router)
     app.include_router(corrections_router)
     app.include_router(performance_router)
     app.include_router(valuation_router)

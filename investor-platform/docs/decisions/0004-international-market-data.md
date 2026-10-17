@@ -24,6 +24,6 @@ FX support does not repair missing purchase records, delisted histories or unrec
 
 ## References
 
-- [Market adapter](../../backend/src/investor_platform/market.py) — listing mapping, history validation and FX conversion.
+- [Market adapter](../../backend/src/investor_platform/market_data/history.py) — listing mapping, history validation and FX conversion.
 - [Performance methodology](../performance.md) — linked returns, dividends and split safeguards.
 - [ADR 0003](0003-independent-holdings.md) — current holdings and matching-date FX.
