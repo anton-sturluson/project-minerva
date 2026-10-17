@@ -863,6 +863,35 @@ summary:focus-visible {
   gap: 28px;
   margin-top: 20px;
 }
+@media (min-width: 801px) {
+  #research {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--header-height) - 36px);
+  }
+  #research > section {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #research > section > .form-note {
+    flex: 0 0 auto;
+  }
+  .research-layout {
+    flex: 1;
+    min-height: 0;
+  }
+}
+.research-directory,
+.research-detail {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+.research-directory {
+  min-width: 0;
+}
 .manager-directory {
   list-style: none;
   margin: 0;
@@ -1004,6 +1033,11 @@ summary:focus-visible {
 @media (max-width: 800px) {
   .research-layout {
     grid-template-columns: 1fr;
+  }
+  .research-directory,
+  .research-detail {
+    overflow-y: visible;
+    overscroll-behavior-y: auto;
   }
   .research-detail {
     border-left: 0;
