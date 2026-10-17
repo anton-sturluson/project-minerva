@@ -23,5 +23,5 @@ This is a historical hypothetical, not a forecast or a substitute for reconciled
 ## References
 
 - User request in the investor-platform conversation, 3 October 2026 — exclude selected stocks and recalculate performance.
-- [Calculation implementation](../../backend/src/investor_platform/performance.py) — cash replay and validation.
+- [Calculation implementation](../../backend/src/investor_platform/performance/returns.py) — cash replay and validation.
 - [Data assumptions](../data-assumptions.md) — provisional reconstruction limits.

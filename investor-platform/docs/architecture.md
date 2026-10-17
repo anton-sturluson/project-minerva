@@ -1,6 +1,6 @@
 # Investor Platform architecture
 
-Updated: 2026-10-04. This describes the implemented application.
+Updated: 2026-10-17. This describes the implemented application.
 
 ## Runtime
 
@@ -8,12 +8,19 @@ The platform is an independent project inside Minerva: a React/TypeScript fronte
 
 ## Boundaries
 
-- `web/src/`: account and ledger forms, trade statistics, hit rate, and dated performance reports. Native controls and SVG charts follow [Homepage Club](../design/README.md).
-- `backend/src/investor_platform/`: API endpoints, ownership checks, immutable records, accounting calculations, and public market-history access. Calculations accept records and market data rather than calling providers themselves.
-- `backend/migrations/`: reviewed database history. Cash and trades share an account lock and transaction; balances and FIFO positions are derived from entries.
-- `.github/workflows/investor-platform-ci.yml`: backend lint/tests and frontend formatting/build/browser checks using PostgreSQL and synthetic data.
+The backend groups code by the feature it owns. `app.py` composes routes and the access boundary; `db.py` owns connections and shared request dependencies; `models.py` owns the small shared database schema; `domain.py` owns stable entry, currency and timing values.
 
-These boundaries are implemented in the [backend](../backend/src/investor_platform/), [frontend](../web/src/), [migrations](../backend/migrations/) and [CI workflow](../../.github/workflows/investor-platform-ci.yml).
+| Backend feature | Responsibility |
+| --- | --- |
+| `ledger/` | Input/view schemas, active entries, FIFO replay, entry construction, corrections, funding assumptions and imports. HTTP routes call shared operations. |
+| `performance/` | Return calculations, position episodes, statistics, attribution, valuations, benchmark policies and report caching. Routes collect inputs; calculators consume supplied records and prices. |
+| `market_data/` | Common history types, listing validation, Yahoo/Tiingo adapters, provider caching, dated FX conversion and daily collection. |
+| `financials/` | Annual bundle and reviewed-release admission, storage, company formulas, portfolio reports. Each admission/comparison policy remains explicit. |
+| `research/` | SEC imports, manager eligibility, disclosed snapshots and manager/activity routes. Selected filings and holdings are loaded in batches. |
+
+The frontend follows `ledger/`, `performance/`, `financials/` and `research/`. `Portfolio` owns selection and creation; `CashLedger` owns the selected ledger and page composition. `Tracker` owns comparison state and its chart. The ledger types, labels, dates and formatting remain together in `ledger/ledger.ts`. Shared API transport stays at the source root.
+
+`backend/migrations/` retains reviewed database history. Frontend and backend URLs, JSON values, stored names and CLI commands stay stable when internal modules move. Tests follow their owning features. See [ADR 0011](decisions/0011-group-code-by-feature-and-share-calculation-rules.md).
 
 ## Identity and data
 
@@ -23,11 +30,11 @@ PostgreSQL owns portfolio state. There is no spreadsheet sync or runtime depende
 
 ## Domain values and shared calculations
 
-[Domain definitions](../backend/src/investor_platform/domain.py) define the stable `EntryKind` and `Currency` string enums and exact-arithmetic precision. API values and existing VARCHAR storage remain unchanged; historical SQL migrations retain their original literals. Provider limits and supported listings live in the market adapter. Imports and HTTP writes share trade construction, and correction previews reuse the active ledger view without rebuilding audit history. Frontend entry types and form choices derive from the same local [label and kind definitions](../web/src/records.ts). See the [ledger view](../backend/src/investor_platform/ledger.py) and [trade builder](../backend/src/investor_platform/trades.py).
+[Domain definitions](../backend/src/investor_platform/domain.py) define the stable `EntryKind` and `Currency` string enums and exact-arithmetic precision. API values and existing VARCHAR storage remain unchanged; historical SQL migrations retain their original literals. Provider limits and supported listings live in the market adapter. Imports and HTTP writes share trade construction, and correction previews reuse the active ledger view without rebuilding audit history. Frontend entry types and form choices derive from the same local [label and kind definitions](../web/src/ledger/ledger.ts). See the [ledger view](../backend/src/investor_platform/ledger/state.py) and [trade builder](../backend/src/investor_platform/ledger/commands.py).
 
 ## Market data and daily collection
 
-Validated Yahoo and optional Tiingo inputs are cached privately by workspace; ledger values are recalculated for every report. The opt-in Tailscale worker collects daily at 17:00 America/New_York, with durable run status and bounded retries. ([Cache](../backend/src/investor_platform/market_cache.py), [collector](../backend/src/investor_platform/price_refresh.py), [daily prices](daily-prices.md))
+Validated Yahoo and optional Tiingo inputs are cached privately by workspace; ledger values are recalculated for every report. The opt-in Tailscale worker collects daily at 17:00 America/New_York, with durable run status and bounded retries. ([Cache](../backend/src/investor_platform/market_data/cache.py), [collector](../backend/src/investor_platform/market_data/price_refresh.py), [daily prices](daily-prices.md))
 
 ## Future work
 
@@ -41,7 +48,7 @@ Add boundaries when their feature needs them. Hosted login, generated API client
 
 ### Implementation
 
-- [Cache](../backend/src/investor_platform/market_cache.py), [collector](../backend/src/investor_platform/price_refresh.py) and [daily prices](daily-prices.md): implemented market-data lifecycle.
+- [Cache](../backend/src/investor_platform/market_data/cache.py), [collector](../backend/src/investor_platform/market_data/price_refresh.py) and [daily prices](daily-prices.md): implemented market-data lifecycle.
 
 - [Operations](operations.md) and [portfolio guide](portfolio.md): runtime commands, ownership, workflows and limitations.
 - [Backend](../backend/src/investor_platform/) and [frontend](../web/src/): implemented modules and request boundaries.

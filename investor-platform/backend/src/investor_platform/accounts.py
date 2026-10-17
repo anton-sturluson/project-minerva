@@ -8,9 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .db import Actor, get_actor, get_session
-from .domain import Currency, FundingStatus
-from .models import Account, Workspace
+from investor_platform.db import Actor, get_actor, get_session
+from investor_platform.domain import Currency, FundingStatus
+from investor_platform.models import Account, Workspace
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_session)]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Portfolio } from "./Portfolio";
-import { Research } from "./Research";
+import { Research } from "./research/Research";
 
 type Theme = "system" | "light" | "dark";
 function savedTheme(): Theme {

@@ -1,4 +1,4 @@
-import { today } from "../src/records";
+import { today } from "../src/ledger/ledger";
 import { expect, test } from "./fixtures";
 
 test("shows a closed synthetic trade and recovers a scorecard load failure", async ({

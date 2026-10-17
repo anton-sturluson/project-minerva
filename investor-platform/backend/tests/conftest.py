@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 from helpers import DAYS, cash, trade
 from sqlalchemy import create_engine, text
 
-from investor_platform import market
 from investor_platform.app import app
 from investor_platform.db import DEFAULT_URL
-from investor_platform.market import History
+from investor_platform.market_data import yahoo as market_yahoo
+from investor_platform.market_data.types import History
 
 
 @pytest.fixture
@@ -92,5 +92,5 @@ def portfolio(db_client, monkeypatch):
     data["AAA"].exchange = "NYQ"
     data["SPY"].exchange = "PCX"
     data["QQQ"].exchange = "NGM"
-    monkeypatch.setattr(market, "history", lambda symbol, start, end: data[symbol])
+    monkeypatch.setattr(market_yahoo, "history", lambda symbol, start, end: data[symbol])
     return aid, data

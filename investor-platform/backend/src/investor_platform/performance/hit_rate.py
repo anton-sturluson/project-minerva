@@ -1,0 +1,202 @@
+"""Closed investment decisions versus capital- and holding-period-matched benchmarks."""
+
+from datetime import UTC, datetime
+from decimal import ROUND_HALF_EVEN, Decimal, DecimalException, localcontext
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException
+
+from investor_platform.accounts import DB, Identity, owned_account
+from investor_platform.api_responses import wire
+from investor_platform.domain import (
+    ACCOUNTING_PRECISION,
+    IN_KIND_ENTRIES,
+    MARKET_TIMEZONE,
+    Currency,
+    EntryKind,
+)
+from investor_platform.ledger.accounting import UNIT
+from investor_platform.ledger.state import entries_for
+from investor_platform.market_data import history as market
+from investor_platform.market_data import listings as market_listings
+from investor_platform.market_data import types as market_types
+from investor_platform.performance.positions import holding_windows, position_episodes
+
+router = APIRouter(prefix="/api/accounts")
+ZERO = Decimal(0)
+CENT = Decimal("0.01")
+
+
+def exclusion(episode, today):
+    if any(e.kind in IN_KIND_ENTRIES for e in episode):
+        return "Received shares: original purchase dates are unknown"
+    if episode[-1].effective_date >= today:
+        return "Wait for completed closing prices after today's trades"
+    if episode[0].effective_date < today - market_types.HISTORY_WINDOW:
+        return "Purchase history exceeds the ten-year data window"
+    try:
+        market_listings.symbol_for(episode[0].security)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def compare_episode(episode, histories):
+    security = episode[0].security
+    history = histories[market_listings.symbol_for(security)]
+    market_listings.verify_exchange(security, history)
+    start, end = episode[0].effective_date, episode[-1].effective_date
+    for day in history.splits | history.dividends.keys():
+        if start < day <= end:
+            quantity = sum(
+                (
+                    e.quantity * (-1 if e.kind == EntryKind.SELL else 1)
+                    for e in episode
+                    if e.effective_date < day
+                ),
+                ZERO,
+            )
+            if quantity:
+                if day in history.splits:
+                    raise ValueError("Position spans a split; split accounting is unavailable")
+                raise ValueError(
+                    "Position earned a distribution; stock-level income is not recorded"
+                )
+    # Require actual sessions on every trade date; no previous/next-day substitution.
+    for entry in episode:
+        if entry.effective_date not in history.close or any(
+            entry.effective_date not in histories[b].adjusted for b in market_types.BENCHMARKS
+        ):
+            raise ValueError("Missing matching closing prices on a trade date")
+    lots = []
+    invested = sum((e.amount for e in episode if e.kind == EntryKind.BUY), ZERO)
+    pnl = sum((e.amount for e in episode if e.kind == EntryKind.SELL), ZERO) - invested
+    benchmark_pnl = dict.fromkeys(market_types.BENCHMARKS, ZERO)
+    for entry in episode:
+        if entry.kind == EntryKind.BUY:
+            lots.append(
+                {"quantity": entry.quantity, "cost": entry.amount, "date": entry.effective_date}
+            )
+            continue
+        remaining = entry.quantity
+        for lot in lots:
+            take = min(remaining, lot["quantity"])
+            if not take:
+                continue
+            cost = (
+                lot["cost"]
+                if take == lot["quantity"]
+                else (lot["cost"] * take / lot["quantity"]).quantize(UNIT, ROUND_HALF_EVEN)
+            )
+            for benchmark in market_types.BENCHMARKS:
+                adjusted = histories[benchmark].adjusted
+                benchmark_pnl[benchmark] += cost * (
+                    adjusted[entry.effective_date] / adjusted[lot["date"]] - 1
+                )
+            lot["cost"] -= cost
+            lot["quantity"] -= take
+            remaining -= take
+    return {
+        "pnl": pnl,
+        "benchmarks": {
+            b: {
+                "pnl": benchmark_pnl[b],
+                "excess": (pnl - benchmark_pnl[b]).quantize(CENT, ROUND_HALF_EVEN),
+            }
+            for b in market_types.BENCHMARKS
+        },
+    }
+
+
+def calculate_hit_rate(episodes, open_count, histories, today):
+    rows = []
+    for episode in episodes:
+        first, last = episode[0], episode[-1]
+        row = {
+            "ticker": first.security.ticker,
+            "exchange": first.security.exchange,
+            "opened_on": first.effective_date,
+            "closed_on": last.effective_date,
+            "excluded": exclusion(episode, today),
+        }
+        if not row["excluded"]:
+            try:
+                row.update(compare_episode(episode, histories))
+            except ValueError as exc:
+                row["excluded"] = str(exc)
+        rows.append(row)
+    eligible = [r for r in rows if not r["excluded"]]
+    metrics = {}
+    for benchmark in market_types.BENCHMARKS:
+        excess = [r["benchmarks"][benchmark]["excess"] for r in eligible]
+        hits = sum(x > ZERO for x in excess)
+        metrics[benchmark] = {
+            "hit_rate": Decimal(hits) / len(eligible) if eligible else None,
+            "hits": hits,
+            "evaluated": len(eligible),
+            "ties": excess.count(ZERO),
+        }
+    return {
+        "benchmarks": metrics,
+        "episodes": rows,
+        "open": open_count,
+        "excluded": len(rows) - len(eligible),
+    }
+
+
+@router.post("/{account_id}/hit-rate")
+def hit_rate(account_id: UUID, session: DB, actor: Identity):
+    account = owned_account(session, actor, account_id)
+    if account.base_currency != Currency.USD:
+        raise HTTPException(422, "Hit rate currently requires a USD account")
+    episodes, open_count = position_episodes(entries_for(session, account_id))
+    today = datetime.now(MARKET_TIMEZONE).date()
+    candidates = [e for e in episodes if not exclusion(e, today)]
+    try:
+        histories = {}
+        if candidates:
+            if len({e[0].security_id for e in candidates}) > market_types.MAX_SECURITIES:
+                raise ValueError(
+                    f"Hit rate supports up to {market_types.MAX_SECURITIES} securities "
+                    "plus SPY and QQQ"
+                )
+            start = min(e[0].effective_date for e in candidates)
+            end = max(e[-1].effective_date for e in candidates)
+            # P&L is already recorded in USD. Use actual local sessions to validate
+            # trade dates; holiday-carried valuation prices are not trade sessions.
+            securities = {e[0].security_id: e[0].security for e in candidates}
+            histories = market.security_histories(
+                securities.values(),
+                start,
+                end,
+                convert_fx=False,
+                engine=session.get_bind(),
+                workspace_id=actor.workspace_id,
+                windows=holding_windows(
+                    [entry for episode in candidates for entry in episode],
+                    securities,
+                    start,
+                    end,
+                    provisional=False,
+                ),
+            )
+        with localcontext() as ctx:
+            ctx.prec = ACCOUNTING_PRECISION
+            result = calculate_hit_rate(episodes, open_count, histories, today)
+        return wire(
+            {
+                **result,
+                "fetched_at": datetime.now(UTC),
+                "source": " + ".join(sorted({h.source for h in histories.values()}))
+                if candidates
+                else "Saved records",
+            }
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except market_types.MarketDataError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except (OSError, KeyError, TypeError, IndexError, DecimalException) as exc:
+        raise HTTPException(
+            503, "Hit rate data is unavailable. Retry; saved records are unchanged."
+        ) from exc

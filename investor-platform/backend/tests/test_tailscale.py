@@ -120,7 +120,7 @@ def test_missing_build_refuses_startup(remote_env):
 def test_daily_worker_starts_only_when_enabled_and_stops_with_api(remote_env, monkeypatch):
     from threading import Event
 
-    from investor_platform import price_refresh
+    from investor_platform.market_data import price_refresh as price_refresh
 
     entered, stopped = Event(), Event()
 

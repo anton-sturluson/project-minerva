@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { FinancialReport, PerShareComparison } from "../src/financialApi";
+import type {
+  FinancialReport,
+  PerShareComparison,
+} from "../src/financials/financialApi";
 
 const main = "00000000-0000-4000-8000-000000000091";
 const other = "00000000-0000-4000-8000-000000000092";

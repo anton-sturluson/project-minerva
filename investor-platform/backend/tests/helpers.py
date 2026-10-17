@@ -65,3 +65,26 @@ def stock_report(client, aid, **extra):
         f"/api/accounts/{aid}/performance",
         json={"start": "2026-01-02", "end": "2026-01-06", "scope": "stocks", **extra},
     )
+
+
+def replacement(entry, **changes):
+    result = {k: entry[k] for k in ("kind", "effective_date", "currency", "note")}
+    result["request_key"] = str(uuid4())
+    if entry["security"]:
+        result.update({k: entry[k] for k in ("quantity", "price", "fees", "cost_basis")})
+        result.update({k: entry["security"][k] for k in ("ticker", "exchange")})
+    else:
+        result["amount"] = entry["amount"]
+    return {**result, **changes}
+
+
+def correction(client, aid, entry, value, **extra):
+    body = {
+        "request_key": str(uuid4()),
+        "reason": "Broker statement correction",
+        "replacement": value,
+        **extra,
+    }
+    url = f"/api/accounts/{aid}/entries/{entry['id']}/correction"
+    preview = client.post(url + "?preview=true", json=body)
+    return url, body, preview

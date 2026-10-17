@@ -1,4 +1,4 @@
-import { today } from "../src/records";
+import { today } from "../src/ledger/ledger";
 import { expect, test } from "./fixtures";
 
 test("reviews a correction, retries a lost response once, preserves audit, and voids it", async ({
