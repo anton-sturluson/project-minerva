@@ -914,8 +914,16 @@ summary:focus-visible {
 }
 .stock-activity-table {
   min-width: 620px;
+  table-layout: fixed;
 }
-.stock-activity-table th button {
+.stock-activity-table > thead th:first-child {
+  width: 40%;
+}
+.stock-activity-table > tbody > .activity-stock-row > td:first-child {
+  white-space: normal;
+}
+.stock-activity-table > thead th button,
+.activity-stock-toggle {
   padding: 0;
   border: 0;
   background: none;
@@ -924,31 +932,45 @@ summary:focus-visible {
   text-decoration: underline;
   cursor: pointer;
 }
-.stock-activity-table td:first-child {
-  width: 55%;
-  min-width: 220px;
-  white-space: normal;
+.activity-stock-toggle {
+  text-align: left;
 }
-.stock-activity-table summary {
-  cursor: pointer;
-}
-.stock-activity-table summary small {
+.activity-stock-row small,
+.activity-manager-table small {
   display: block;
   margin-top: 3px;
   font-size: 11px;
+  font-weight: normal;
 }
-.activity-contributors {
-  margin: 12px 0 0;
-  padding-left: 18px;
+.stock-activity-table > tbody > .activity-expanded-row > td {
+  padding: 10px;
+  white-space: normal;
+  text-align: left;
+  background: var(--neutral);
 }
-.activity-contributors li {
-  margin-bottom: 14px;
+.activity-expanded-row[hidden] {
+  display: none;
 }
-.activity-contributors p {
-  margin: 4px 0;
+.activity-manager-table {
+  min-width: 820px;
 }
-.activity-contributors .research-links {
-  margin-top: 6px;
+.activity-manager-table th[scope="row"] {
+  white-space: normal;
+  min-width: 150px;
+  font-weight: normal;
+  color: var(--ink);
+}
+.activity-manager-table .research-links {
+  margin: 0;
+  gap: 4px;
+}
+.activity-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
 }
 .activity-coverage {
   margin: 14px 0;

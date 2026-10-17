@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { api, errorMessage } from "./api";
 import { number, percent, quarterLabel } from "./format";
 
@@ -11,6 +11,8 @@ type Contributor = {
   previous_weight: string;
   current_weight: string;
   weight_change_pp: string;
+  quarter_end_price_usd: string | null;
+  price_as_of: string | null;
   source_urls: string[];
 };
 type ActivityRow = {
@@ -39,6 +41,9 @@ const labels: Record<string, string> = {
   increased: "Increased",
   decreased: "Decreased",
 };
+function shares(value: string) {
+  return Number(value).toLocaleString("en-US", { maximumFractionDigits: 8 });
+}
 function percentagePoints(value: string) {
   return `${Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -53,6 +58,160 @@ const columns: { key: SortColumn; label: string }[] = [
   { key: "weight", label: "Average 13F weight" },
   { key: "weight_change", label: "Average weight change" },
 ];
+function ContributorsTable({
+  contributors,
+  issuer,
+}: {
+  contributors: Contributor[];
+  issuer: string;
+}) {
+  const [limit, setLimit] = useState(10);
+  const ordered = [...contributors].sort(
+    (left, right) =>
+      Number(right.current_weight) - Number(left.current_weight) ||
+      left.name.localeCompare(right.name, "en") ||
+      left.slug.localeCompare(right.slug, "en"),
+  );
+  return (
+    <>
+      <div className="table-scroll" tabIndex={0}>
+        <table
+          className="activity-manager-table"
+          aria-label={`${issuer} managers`}
+        >
+          <thead>
+            <tr>
+              <th scope="col">Manager / change</th>
+              <th scope="col" className="number">
+                Shares
+              </th>
+              <th scope="col" className="number">
+                13F weight
+              </th>
+              <th scope="col" className="number">
+                Weight change
+              </th>
+              <th
+                scope="col"
+                className="number"
+                title="Reported quarter-end value per share; not a purchase price."
+              >
+                Quarter-end price
+              </th>
+              <th scope="col">Sources</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.slice(0, limit).map((manager) => (
+              <tr key={manager.slug}>
+                <th scope="row">
+                  {manager.name}
+                  <small>{labels[manager.kind] ?? manager.kind}</small>
+                </th>
+                <td className="number">
+                  {shares(manager.previous_quantity)} →{" "}
+                  {shares(manager.current_quantity)}
+                </td>
+                <td className="number">
+                  {percent(manager.previous_weight)} →{" "}
+                  {percent(manager.current_weight)}
+                </td>
+                <td className="number">
+                  {percentagePoints(manager.weight_change_pp)}
+                </td>
+                <td className="number">
+                  {manager.quarter_end_price_usd === null
+                    ? "Unavailable"
+                    : `$${number(manager.quarter_end_price_usd)}`}
+                  {manager.price_as_of && <small>{manager.price_as_of}</small>}
+                </td>
+                <td>
+                  <div className="research-links">
+                    {manager.source_urls.map((url, index) => (
+                      <a key={url} href={url} target="_blank" rel="noreferrer">
+                        Filing source {index + 1}
+                      </a>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {contributors.length > 10 && (
+        <div
+          className="activity-pagination"
+          aria-label={`${issuer} manager pages`}
+        >
+          <span>
+            {Math.min(limit, contributors.length)} of {contributors.length}{" "}
+            managers
+          </span>
+          {limit < contributors.length && (
+            <button
+              onClick={() =>
+                setLimit(Math.min(limit + 10, contributors.length))
+              }
+            >
+              Show 10 more
+            </button>
+          )}
+          {limit > 10 && (
+            <button onClick={() => setLimit(10)}>Show fewer</button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function StockRow({
+  row,
+  averageWeight,
+}: {
+  row: ActivityRow;
+  averageWeight: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
+  return (
+    <>
+      <tr className="activity-stock-row">
+        <td>
+          <button
+            className="activity-stock-toggle"
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            onClick={() => setExpanded(!expanded)}
+          >
+            <span aria-hidden="true">{expanded ? "▾ " : "▸ "}</span>
+            {row.issuer}
+          </button>
+          <small>
+            {row.security_class} · {row.cusip}
+          </small>
+        </td>
+        <td className="number">{row.manager_count}</td>
+        <td className="number">{percent(String(averageWeight))}</td>
+        <td className="number">
+          {percentagePoints(row.average_weight_change_pp)}
+        </td>
+      </tr>
+      <tr className="activity-expanded-row" hidden={!expanded}>
+        <td colSpan={4} id={panelId}>
+          {expanded && (
+            <ContributorsTable
+              contributors={row.contributors}
+              issuer={row.issuer}
+            />
+          )}
+        </td>
+      </tr>
+    </>
+  );
+}
+
 function RankedActivity({
   title,
   rows,
@@ -60,20 +219,14 @@ function RankedActivity({
   title: string;
   rows: ActivityRow[];
 }) {
-  const [showAll, setShowAll] = useState(false);
+  const [limit, setLimit] = useState(10);
   const [sort, setSort] = useState<{
     column: SortColumn;
     direction: "ascending" | "descending";
-  }>({ column: "weight", direction: "descending" });
+  }>({ column: "manager_count", direction: "descending" });
   const ordered = rows
     .map((row) => ({
       ...row,
-      contributors: [...row.contributors].sort(
-        (left, right) =>
-          Number(right.current_weight) - Number(left.current_weight) ||
-          left.name.localeCompare(right.name, "en") ||
-          left.slug.localeCompare(right.slug, "en"),
-      ),
       averageWeight:
         row.contributors.reduce(
           (sum, manager) => sum + Number(manager.current_weight),
@@ -98,8 +251,8 @@ function RankedActivity({
         left.security_class.localeCompare(right.security_class)
       );
     });
-  const visible = showAll ? ordered : ordered.slice(0, 20);
   function changeSort(column: SortColumn) {
+    setLimit(10);
     setSort({
       column,
       direction:
@@ -115,23 +268,22 @@ function RankedActivity({
   return (
     <section className="research-change-group" aria-label={title}>
       <h4>
-        {title}{" "}
-        <small>
-          {rows.length > 20 && !showAll
-            ? `Top 20 of ${rows.length}`
-            : `${rows.length} stocks`}
-        </small>
+        {title} <small>{rows.length} stocks</small>
       </h4>
       {rows.length === 0 ? (
         <p>No reported quantity changes in this direction.</p>
       ) : (
         <div className="table-scroll" tabIndex={0}>
-          <table className="stock-activity-table">
+          <table
+            className="stock-activity-table"
+            aria-label={`${title} stocks`}
+          >
             <thead>
               <tr>
                 {columns.map((column) => (
                   <th
                     key={column.key}
+                    scope="col"
                     className={column.key === "issuer" ? undefined : "number"}
                     aria-sort={
                       sort.column === column.key ? sort.direction : "none"
@@ -152,67 +304,34 @@ function RankedActivity({
               </tr>
             </thead>
             <tbody>
-              {visible.map((row) => (
-                <tr key={`${row.cusip}|${row.security_class}`}>
-                  <td>
-                    <details>
-                      <summary>
-                        {row.issuer}
-                        <small>
-                          {row.security_class} · {row.cusip}
-                        </small>
-                      </summary>
-                      <ul className="activity-contributors">
-                        {row.contributors.map((manager) => (
-                          <li key={manager.slug}>
-                            <strong>{manager.name}</strong>
-                            <p>
-                              {labels[manager.kind] ?? manager.kind} ·{" "}
-                              {percent(manager.previous_weight)} →{" "}
-                              {percent(manager.current_weight)} ·{" "}
-                              {percentagePoints(manager.weight_change_pp)}
-                            </p>
-                            <p>
-                              Reported shares:{" "}
-                              {number(manager.previous_quantity, 0)} →{" "}
-                              {number(manager.current_quantity, 0)}
-                            </p>
-                            <div className="research-links">
-                              {manager.source_urls.map((url, index) => (
-                                <a
-                                  key={url}
-                                  href={url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  Filing source {index + 1}
-                                </a>
-                              ))}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </td>
-                  <td className="number">{row.manager_count}</td>
-                  <td className="number">
-                    {percent(String(row.averageWeight))}
-                  </td>
-                  <td className="number">
-                    {percentagePoints(row.average_weight_change_pp)}
-                  </td>
-                </tr>
+              {ordered.slice(0, limit).map((row) => (
+                <StockRow
+                  key={`${row.cusip}|${row.security_class}`}
+                  row={row}
+                  averageWeight={row.averageWeight}
+                />
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {rows.length > 20 && (
-        <p>
-          <button onClick={() => setShowAll(!showAll)} aria-expanded={showAll}>
-            {showAll ? "Show top 20" : "Show all"}
-          </button>
-        </p>
+      {rows.length > 10 && (
+        <div
+          className="activity-pagination"
+          aria-label={`${title} stock pages`}
+        >
+          <span>
+            {Math.min(limit, rows.length)} of {rows.length} stocks
+          </span>
+          {limit < rows.length && (
+            <button onClick={() => setLimit(Math.min(limit + 10, rows.length))}>
+              Show 10 more
+            </button>
+          )}
+          {limit > 10 && (
+            <button onClick={() => setLimit(10)}>Show fewer</button>
+          )}
+        </div>
       )}
     </section>
   );
@@ -285,26 +404,6 @@ export function StockActivity() {
           <p>
             {data.included_managers} of {data.total_managers} managers included.
           </p>
-          <p className="form-note">
-            Default order: average current 13F weight, largest first. Select any
-            column heading to change the order.
-          </p>
-          <details>
-            <summary>How activity is measured</summary>
-            <p className="form-note">
-              Changes compare quarter-end share quantities, not individual
-              trades. Share changes can reflect stock splits. Price changes
-              alone do not count as increased or decreased positions. Weights
-              include all disclosed 13F positions, not the whole fund. Rankings
-              exclude options and principal positions; fund shares can be
-              included. Average weight changes use only contributing managers
-              and can have a different sign from share changes. Changes are in
-              percentage points (pp). Average 13F weight is the equal-weight
-              mean of current portfolio weights among contributing managers.
-              Expanded manager lists show current weights from largest to
-              smallest.
-            </p>
-          </details>
           {data.excluded_managers.length > 0 && (
             <details className="activity-coverage">
               <summary>
