@@ -109,7 +109,7 @@ def _build_report(
     )
     funds: set[tuple[str, str]] = fund_listings(release)
     holdings: list[Record] = [
-        holding
+        dict(holding)
         for holding in records(snapshot["holdings"])
         if (str(holding["ticker"]), str(holding["exchange"])) not in funds
     ]
