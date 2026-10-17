@@ -17,6 +17,8 @@ export type PerShareComparison = {
   percent_change: string | null;
   reason?: string | null;
   exclusions?: FinancialExclusion[];
+  basis_notes?: { ticker: string; note: string }[];
+  coverage?: string | null;
 };
 
 type FinancialExclusion = {

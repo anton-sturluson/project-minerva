@@ -106,7 +106,11 @@ export function Financials({
         )
         .map(({ key }) => `${key}-exclusions`),
       ...rows
-        .filter(({ metric }) => metric?.comparison?.exclusions?.length)
+        .filter(
+          ({ metric }) =>
+            metric?.comparison?.exclusions?.length ||
+            metric?.comparison?.basis_notes?.length,
+        )
         .map(({ key }) => `${key}-prior-exclusions`),
     ].map((id, index) => [id, index + 1]),
   );
@@ -190,15 +194,16 @@ export function Financials({
                       <td
                         className="number"
                         aria-describedby={
-                          metric?.comparison?.exclusions?.length
+                          metric?.comparison?.exclusions?.length ||
+                          metric?.comparison?.basis_notes?.length
                             ? `${key}-prior-exclusions`
                             : undefined
                         }
                       >
-                        {digits === null
-                          ? "—"
-                          : metric?.comparison?.prior_value == null
-                            ? "Unavailable"
+                        {metric?.comparison?.prior_value == null
+                          ? "Unavailable"
+                          : digits === null
+                            ? percent(metric.comparison.prior_value, 1)
                             : Number(
                                 metric.comparison.prior_value,
                               ).toLocaleString("en-US", {
@@ -207,19 +212,20 @@ export function Financials({
                                 minimumFractionDigits: digits,
                                 maximumFractionDigits: digits,
                               })}
-                        {Boolean(metric?.comparison?.exclusions?.length) && (
+                        {Boolean(
+                          metric?.comparison?.exclusions?.length ||
+                          metric?.comparison?.basis_notes?.length,
+                        ) && (
                           <sup>{footnotes.get(`${key}-prior-exclusions`)}</sup>
                         )}
                       </td>
                       <td className="number">
-                        {digits === null
-                          ? "—"
-                          : metric?.comparison?.status === "not_meaningful"
-                            ? "N/M"
-                            : metric?.comparison?.status === "calculated" &&
-                                metric.comparison.percent_change != null
-                              ? percent(metric.comparison.percent_change, 1)
-                              : "Unavailable"}
+                        {metric?.comparison?.status === "not_meaningful"
+                          ? "N/M"
+                          : metric?.comparison?.status === "calculated" &&
+                              metric.comparison.percent_change != null
+                            ? percent(metric.comparison.percent_change, 1)
+                            : "Unavailable"}
                       </td>
                     </tr>
                   ))}
@@ -269,7 +275,11 @@ export function Financials({
                 </p>
               ))}
             {rows
-              .filter(({ metric }) => metric?.comparison?.exclusions?.length)
+              .filter(
+                ({ metric }) =>
+                  metric?.comparison?.exclusions?.length ||
+                  metric?.comparison?.basis_notes?.length,
+              )
               .map(({ key, label, metric }) => (
                 <p
                   className="form-note"
@@ -277,14 +287,31 @@ export function Financials({
                   key={`${key}-prior`}
                 >
                   <sup>{footnotes.get(`${key}-prior-exclusions`)}</sup>{" "}
-                  {priorYear} {label} excludes{" "}
-                  {metric!
-                    .comparison!.exclusions!.map(
-                      (excluded) =>
-                        `${excluded.ticker || "Company"} (${excluded.equity_weight != null ? `${percent(excluded.equity_weight, 1)} weight` : "weight unavailable"}; ${omissionReason(excluded.reason)})`,
-                    )
-                    .join(", ")}
-                  .
+                  {priorYear} {label}
+                  {metric!.comparison!.exclusions?.length ? " " : ": "}
+                  {Boolean(metric!.comparison!.exclusions?.length) && (
+                    <>
+                      excludes{" "}
+                      {metric!
+                        .comparison!.exclusions!.map(
+                          (excluded) =>
+                            `${excluded.ticker || "Company"} (${excluded.equity_weight != null ? `${percent(excluded.equity_weight, 1)} weight` : "weight unavailable"}; ${omissionReason(excluded.reason)})`,
+                        )
+                        .join(", ")}
+                      .
+                    </>
+                  )}
+                  {Boolean(metric!.comparison!.basis_notes?.length) && (
+                    <>
+                      {" "}
+                      {metric!
+                        .comparison!.basis_notes!.map(
+                          (item) => `${item.ticker}: ${item.note}`,
+                        )
+                        .join("; ")}
+                      .
+                    </>
+                  )}
                 </p>
               ))}
             <details>

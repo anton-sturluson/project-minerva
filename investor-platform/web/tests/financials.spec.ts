@@ -65,6 +65,7 @@ function report(accountId = main, year = 2026): FinancialReport {
     weighted_ratios: {
       gross_margin: {
         label: "Gross margin",
+        comparison: comparison("0.32", "0.25"),
         value: "0.40",
         coverage: "0.75",
         exclusions: [
@@ -76,6 +77,7 @@ function report(accountId = main, year = 2026): FinancialReport {
       },
       operating_margin: {
         label: "Operating margin",
+        comparison: comparison("-0.10", null),
         value: year === 2023 ? "0.23" : "-0.125",
         coverage: "0.75",
         exclusions: [
@@ -87,6 +89,7 @@ function report(accountId = main, year = 2026): FinancialReport {
       },
       fcf_margin_after_disclosed_capex: {
         label: "FCF margin",
+        comparison: comparison("0.10", "0.3"),
         value: "0.13",
         coverage: "1",
         exclusions: [],
@@ -629,4 +632,113 @@ test("gross margin keeps a numbered cost-basis note without exclusions", async (
     .filter({ hasText: "Gross margin" });
   await expect(gross.getByText("40.0%", { exact: true })).toBeVisible();
   await expect(gross.locator("sup")).toHaveText("1");
+});
+
+test("all prior margin cells show the actual previous portfolio and retain its disclosures", async ({
+  page,
+}) => {
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const year = Number(
+      new URL(route.request().url()).searchParams.get("year"),
+    );
+    const data = report(main, year);
+    const prior = {
+      gross_margin: "0.25",
+      operating_margin: "0.10",
+      fcf_margin_after_disclosed_capex: "0.08",
+    };
+    if (year === 2026) {
+      for (const [key, value, change] of [
+        ["gross_margin", "0.40", "0.6"],
+        ["operating_margin", "0.20", "1"],
+        ["fcf_margin_after_disclosed_capex", "0.12", "0.5"],
+      ]) {
+        data.weighted_ratios[key].value = value;
+        data.weighted_ratios[key].comparison = {
+          prior_year: 2025,
+          prior_value: prior[key as keyof typeof prior],
+          status: "calculated",
+          percent_change: change,
+        };
+      }
+      data.weighted_ratios.gross_margin.comparison!.basis_notes = [
+        {
+          ticker: "OLD",
+          note: "excludes separately reported depreciation and amortization",
+        },
+      ];
+      data.weighted_ratios.fcf_margin_after_disclosed_capex.comparison!.exclusions =
+        [
+          {
+            ticker: "SOLD",
+            equity_weight: "0.2",
+            reason: "Prior source unavailable",
+          },
+        ];
+    } else if (year === 2025) {
+      data.companies = [
+        {
+          issuer_key: "example:old",
+          ticker: "OLD",
+          name: "Previous holding",
+          equity_weight: "1",
+          financial_status: "eligible",
+        },
+      ];
+      for (const [key, value] of Object.entries(prior))
+        data.weighted_ratios[key].value = value;
+    }
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  const summary = page.getByRole("region", {
+    name: "Portfolio-weighted metrics",
+  });
+  const expected = [
+    ["Gross margin", "40.0%", "25.0%3", "60.0%"],
+    ["Operating margin", "20.0%", "10.0%", "100.0%"],
+    ["FCF margin", "12.0%", "8.0%4", "50.0%"],
+  ];
+  for (const [label, current, prior, change] of expected) {
+    const row = summary.getByRole("row", { name: new RegExp(`^${label}`) });
+    await expect(row.getByRole("cell")).toHaveText([current, prior, change]);
+  }
+  await expect(
+    page.getByText(
+      "3 2025 Gross margin: OLD: excludes separately reported depreciation and amortization.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "4 2025 FCF margin excludes SOLD (20.0% weight; data unavailable).",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    summary
+      .getByRole("row", { name: /^Gross margin/ })
+      .getByRole("cell")
+      .nth(1),
+  ).toHaveAttribute("aria-describedby", "gross_margin-prior-exclusions");
+  await page.getByLabel("Post-mortem year").selectOption("2025");
+  for (const [label, , prior] of expected) {
+    const row = summary.getByRole("row", { name: new RegExp(`^${label}`) });
+    await expect(row.getByRole("cell").nth(0)).toHaveText(
+      prior.replace(/[34]$/, ""),
+    );
+  }
+  await page.getByLabel("Post-mortem year").selectOption("2024");
+  await expect(
+    summary
+      .getByRole("row", { name: /^Operating margin/ })
+      .getByRole("cell")
+      .nth(2),
+  ).toHaveText("N/M");
+  await page.getByLabel("Post-mortem year").selectOption("2023");
+  for (const [label] of expected) {
+    const row = summary.getByRole("row", { name: new RegExp(`^${label}`) });
+    await expect(row.getByRole("cell").nth(1)).toHaveText("Unavailable");
+    await expect(row.getByRole("cell").nth(2)).toHaveText("Unavailable");
+  }
 });

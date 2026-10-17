@@ -19,7 +19,7 @@ SHARES: dict[str, str] = {
 def comparison(current: Decimal | None, prior: Decimal | None, year: int) -> Record:
     """Keep prior amounts while withholding meaningless percentage changes."""
     status: str = "unavailable"
-    reason: str | None = "Comparable prior financial data unavailable"
+    reason: str | None = "Current or prior financial data unavailable"
     change: Decimal | None = None
     if current is not None and prior is not None:
         if prior <= 0:
@@ -260,22 +260,26 @@ def add_portfolio_comparisons(
     """Compare independent portfolio snapshots, allowing holdings and weights to change."""
     with localcontext() as context:
         context.prec = 40
+        group: str
         key: str
-        for key in SHARES.values():
-            metric: Record = record(record(current["weighted_company_per_share"])[key])
-            old: Record | None = (
-                record(record(prior["weighted_company_per_share"])[key]) if prior else None
-            )
-            now: Decimal | None = number(metric["value"]) if metric["value"] is not None else None
-            before: Decimal | None = (
-                number(old["value"]) if old and old["value"] is not None else None
-            )
-            compared: Record = comparison(now, before, year)
-            compared["exclusions"] = old["exclusions"] if old else []
-            compared["conventions"] = old.get("conventions", []) if old else []
-            if reason:
-                compared["reason"] = reason
-            metric["comparison"] = compared
+        for group in ("weighted_ratios", "weighted_company_per_share"):
+            for key in record(current[group]):
+                metric: Record = record(record(current[group])[key])
+                old: Record | None = record(record(prior[group])[key]) if prior else None
+                now: Decimal | None = (
+                    number(metric["value"]) if metric["value"] is not None else None
+                )
+                before: Decimal | None = (
+                    number(old["value"]) if old and old["value"] is not None else None
+                )
+                compared: Record = comparison(now, before, year)
+                compared["coverage"] = old["coverage"] if old else None
+                compared["exclusions"] = old["exclusions"] if old else []
+                compared["basis_notes"] = old.get("basis_notes", []) if old else []
+                compared["conventions"] = old.get("conventions", []) if old else []
+                if reason:
+                    compared["reason"] = reason
+                metric["comparison"] = compared
         current["comparison_basis"] = "Each portfolio's own dated holdings, weights and FX"
         current["comparison_inputs"] = (
             {
@@ -286,6 +290,7 @@ def add_portfolio_comparisons(
                     "market_value_snapshot",
                     "reporting_fx",
                     "weighted_company_per_share",
+                    "weighted_ratios",
                 )
             }
             if prior
