@@ -35,6 +35,8 @@ class Contributor(TypedDict):
     previous_weight: str
     current_weight: str
     weight_change_pp: str
+    quarter_end_price_usd: str | None
+    price_as_of: str | None
     source_urls: list[str]
 
 
@@ -144,6 +146,25 @@ def activity_for_quarter(
                 assert change["previous_weight"] is not None
                 assert change["current_weight"] is not None
                 assert change["weight_change"] is not None
+                current_quantity: Decimal = Decimal(change["current_quantity"])
+                reference_quantity: Decimal = (
+                    current_quantity
+                    if current_quantity > 0
+                    else Decimal(change["previous_quantity"])
+                )
+                reference_value: Decimal = Decimal(
+                    change["current_value_usd"]
+                    if current_quantity > 0
+                    else change["previous_value_usd"]
+                )
+                reported_price: str | None = (
+                    str(reference_value / reference_quantity) if reference_quantity > 0 else None
+                )
+                price_as_of: str | None = (
+                    (quarter if current_quantity > 0 else prior).isoformat()
+                    if reported_price is not None
+                    else None
+                )
                 activity["contributors"].append(
                     Contributor(
                         slug=manager.slug,
@@ -154,6 +175,8 @@ def activity_for_quarter(
                         previous_weight=change["previous_weight"],
                         current_weight=change["current_weight"],
                         weight_change_pp=str(Decimal(change["weight_change"]) * 100),
+                        quarter_end_price_usd=reported_price,
+                        price_as_of=price_as_of,
                         source_urls=comparison["source_urls"],
                     )
                 )
