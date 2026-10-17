@@ -2,6 +2,8 @@
 
 Status: pilot contract · 2026-10-14. This contract defines annual inputs and the bounded import/read path. Collection and portfolio reporting remain separate.
 
+This remains the manual `investor-financial validate/import/show` contract. The current Post-mortem app uses the separate [account/year financial-history API](decisions/0009-bind-reviewed-history-to-account-snapshots.md), which accepts reviewed annual/LTM measures in native reporting currencies. Its headline comparison uses each year's own portfolio holdings, weights and dated FX; the pilot's annual-only rules below do not govern that API.
+
 The pilot covers GOOGL, OSCR and ACFN fiscal years 2023–2025. Collect reported US-GAAP annual statement facts in USD. Use confirmed issuer identity; a ticker is a listing label, not a financial join key. Owner earnings, TTM, guidance, adjusted earnings and a generic collection platform are outside this contract.
 
 ## Bundle and evidence
@@ -102,11 +104,11 @@ Without `--reviewed`, imports remain candidates. The flag records the caller's c
 
 Publications, observations, document versions, publication-source links and metric definitions are append-only. An identical UUID/content/review-status replay returns unchanged; a conflicting replay is refused. Corrections use a new bundle UUID. Reads select one coherent latest reviewed import, ordered by `imported_at`, per issuer and period ending in the requested calendar year, or the latest candidate import if no reviewed import exists. This does not discover the latest restatement. An older filing imported later can supersede a newer filing, so the reviewer must deliberately choose publication/import order. Each result exposes its review status, observation/source IDs, formula version and exact calculation inputs. Decimal values remain plain decimal strings; divisions use 38 significant digits. The source and period metadata are checked on reuse rather than silently replaced.
 
-A normal annual duration must be 350–380 days for this pilot. Fiscal labels remain independent of the calendar year in which the period ends. Missing PP&E cash spending withholds FCF; optional intangible cash spending does not enter the expressly limited PP&E formula. Insurer gross margin is withheld; insurer cash-flow comparison remains the report's separate applicability decision. Source byte checks do not infer a zero from a missing line.
+A normal annual duration must be 350–380 days for these manual pilot formulas. Fiscal labels remain independent of the calendar year in which the period ends. The archival PP&E-only formula withholds FCF when PP&E cash spending is missing; optional intangible cash spending does not enter that limited formula. The pilot withholds insurer gross margin; these applicability rules do not govern the current financial-history API. Source byte checks do not infer a zero from a missing line.
 
-The read-only app endpoint is `GET /api/financials?year=2025`, supporting 2023–2025. Set `INVESTOR_FINANCIAL_SCHEMA` explicitly to the reviewed pilot namespace on the app's existing `DATABASE_URL` service, then restart the API. Requests use a consistent read-only transaction; they never create a namespace or import data. Unconfigured, missing or unsupported financial namespaces return an unavailable view. Connection or read-permission failures return a recoverable 503 without connection details.
+## Historical pilot app (retired)
 
-The app uses a single declared illustrative equity-weight registry in `financial_api.py`. Its nominal USD values exercise the weighting formula; they are not actual portfolio positions or historical quotes. Responses retain the existing company/report evidence shapes and expose `synthetic`, `api_status`, coverage and availability reasons. Existing app authentication and origin checks apply.
+The former `GET /api/financials?year=2025` endpoint supported 2023–2025 and used illustrative equity weights. That endpoint and its illustrative registry have been removed. The current app uses `GET /api/accounts/{account_id}/financials?year=2025` with ownership checks, actual dated account holdings and the separate [reviewed-history contract](decisions/0009-bind-reviewed-history-to-account-snapshots.md). The annual CLI and manual report library remain available.
 
 ## Disclosed cash capital spending in storage v2
 

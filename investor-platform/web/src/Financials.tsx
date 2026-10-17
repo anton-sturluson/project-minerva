@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { annualFinancials } from "./financialApi";
-import type { FinancialReport } from "./financialApi";
+import type {
+  FinancialBasisNote,
+  FinancialComparison,
+  FinancialExclusion,
+  FinancialReport,
+} from "./financialApi";
 import { percent } from "./format";
 
 const metrics = [
@@ -9,8 +14,8 @@ const metrics = [
   ["fcf_margin_after_disclosed_capex", "FCF margin"],
 ] as const;
 const perShareMetrics = [
-  ["weighted_company_eps", "Weighted company EPS", 1],
-  ["weighted_company_fcf_per_share", "Weighted company FCF/share", 1],
+  ["weighted_company_eps", "Weighted company EPS"],
+  ["weighted_company_fcf_per_share", "Weighted company FCF/share"],
 ] as const;
 
 function isNotReported(reason?: string | null) {
@@ -31,6 +36,59 @@ function omissionReason(reason: string) {
   return /insurer/i.test(reason) && /not applicable/i.test(reason)
     ? "insurer"
     : "data unavailable";
+}
+
+type AmountFormat = "percent" | "currency";
+type FinancialNote = {
+  id: string;
+  label: string;
+  exclusions: FinancialExclusion[];
+  basisNotes: FinancialBasisNote[];
+};
+
+function amount(value: string | null | undefined, format: AmountFormat) {
+  if (value == null) return "Unavailable";
+  return format === "percent"
+    ? percent(value, 1)
+    : Number(value).toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      });
+}
+
+function change(comparison?: FinancialComparison) {
+  if (comparison?.status === "not_meaningful") return "N/M";
+  return comparison?.status === "calculated" &&
+    comparison.percent_change != null
+    ? percent(comparison.percent_change, 1)
+    : "Unavailable";
+}
+
+function FinancialNote({
+  note,
+  number,
+}: {
+  note: FinancialNote;
+  number: number;
+}) {
+  const exclusions = note.exclusions
+    .map(
+      (excluded) =>
+        `${excluded.ticker} (${excluded.equity_weight != null ? `${percent(excluded.equity_weight, 1)} weight` : "weight unavailable"}; ${omissionReason(excluded.reason)})`,
+    )
+    .join(", ");
+  const basis = note.basisNotes
+    .map((item) => `${item.ticker}: ${item.note}`)
+    .join("; ");
+  return (
+    <p className="form-note" id={note.id}>
+      <sup>{number}</sup> {note.label}
+      {exclusions ? ` excludes ${exclusions}.` : ": "}
+      {basis ? `${exclusions ? " " : ""}${basis}.` : null}
+    </p>
+  );
 }
 
 export function Financials({
@@ -74,46 +132,38 @@ export function Financials({
       active = false;
     };
   }, [accountId, year, retry]);
-  const tickers = new Map(
-    report?.market_value_snapshot?.holdings.map((holding) => [
-      holding.issuer_key,
-      holding.ticker,
-    ]) || [],
-  );
   const rows = [
     ...metrics.map(([key, label]) => ({
       key,
       label,
       metric: report?.weighted_ratios[key],
-      digits: null,
+      format: "percent" as const,
     })),
-    ...perShareMetrics.map(([key, label, digits]) => ({
+    ...perShareMetrics.map(([key, label]) => ({
       key,
       label,
       metric: report?.weighted_company_per_share?.[key],
-      digits,
+      format: "currency" as const,
     })),
   ];
   const priorYear =
     report?.weighted_company_per_share?.weighted_company_eps?.comparison
       ?.prior_year ?? (year === null ? null : year - 1);
-  const footnotes = new Map(
-    [
-      ...rows
-        .filter(
-          ({ metric }) =>
-            metric?.exclusions.length || metric?.basis_notes?.length,
-        )
-        .map(({ key }) => `${key}-exclusions`),
-      ...rows
-        .filter(
-          ({ metric }) =>
-            metric?.comparison?.exclusions?.length ||
-            metric?.comparison?.basis_notes?.length,
-        )
-        .map(({ key }) => `${key}-prior-exclusions`),
-    ].map((id, index) => [id, index + 1]),
-  );
+  const notes: FinancialNote[] = [
+    ...rows.map(({ key, label, metric }) => ({
+      id: `${key}-exclusions`,
+      label,
+      exclusions: metric?.exclusions ?? [],
+      basisNotes: metric?.basis_notes ?? [],
+    })),
+    ...rows.map(({ key, label, metric }) => ({
+      id: `${key}-prior-exclusions`,
+      label: `${priorYear} ${label}`,
+      exclusions: metric?.comparison?.exclusions ?? [],
+      basisNotes: metric?.comparison?.basis_notes ?? [],
+    })),
+  ].filter((note) => note.exclusions.length || note.basisNotes.length);
+  const footnotes = new Map(notes.map((note, index) => [note.id, index + 1]));
   return (
     <section
       className="annual-financials"
@@ -162,156 +212,44 @@ export function Financials({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(({ key, label, metric, digits }) => (
+                  {rows.map(({ key, label, metric, format }) => (
                     <tr key={key}>
                       <th scope="row">{label}</th>
                       <td
                         className="number"
                         aria-describedby={
-                          metric?.exclusions.length ||
-                          metric?.basis_notes?.length
+                          footnotes.has(`${key}-exclusions`)
                             ? `${key}-exclusions`
                             : undefined
                         }
                       >
-                        {metric?.value == null
-                          ? "Unavailable"
-                          : digits === null
-                            ? percent(metric.value, 1)
-                            : Number(metric.value).toLocaleString("en-US", {
-                                style: "currency",
-                                currency: "USD",
-                                minimumFractionDigits: digits,
-                                maximumFractionDigits: digits,
-                              })}
-                        {Boolean(
-                          metric?.exclusions.length ||
-                          metric?.basis_notes?.length,
-                        ) && <sup>{footnotes.get(`${key}-exclusions`)}</sup>}
+                        {amount(metric?.value, format)}
+                        {footnotes.has(`${key}-exclusions`) && (
+                          <sup>{footnotes.get(`${key}-exclusions`)}</sup>
+                        )}
                       </td>
                       <td
                         className="number"
                         aria-describedby={
-                          metric?.comparison?.exclusions?.length ||
-                          metric?.comparison?.basis_notes?.length
+                          footnotes.has(`${key}-prior-exclusions`)
                             ? `${key}-prior-exclusions`
                             : undefined
                         }
                       >
-                        {metric?.comparison?.prior_value == null
-                          ? "Unavailable"
-                          : digits === null
-                            ? percent(metric.comparison.prior_value, 1)
-                            : Number(
-                                metric.comparison.prior_value,
-                              ).toLocaleString("en-US", {
-                                style: "currency",
-                                currency: "USD",
-                                minimumFractionDigits: digits,
-                                maximumFractionDigits: digits,
-                              })}
-                        {Boolean(
-                          metric?.comparison?.exclusions?.length ||
-                          metric?.comparison?.basis_notes?.length,
-                        ) && (
+                        {amount(metric?.comparison?.prior_value, format)}
+                        {footnotes.has(`${key}-prior-exclusions`) && (
                           <sup>{footnotes.get(`${key}-prior-exclusions`)}</sup>
                         )}
                       </td>
-                      <td className="number">
-                        {metric?.comparison?.status === "not_meaningful"
-                          ? "N/M"
-                          : metric?.comparison?.status === "calculated" &&
-                              metric.comparison.percent_change != null
-                            ? percent(metric.comparison.percent_change, 1)
-                            : "Unavailable"}
-                      </td>
+                      <td className="number">{change(metric?.comparison)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {rows
-              .filter(
-                ({ metric }) =>
-                  metric?.exclusions.length || metric?.basis_notes?.length,
-              )
-              .map(({ key, label, metric }) => (
-                <p className="form-note" id={`${key}-exclusions`} key={key}>
-                  <sup>{footnotes.get(`${key}-exclusions`)}</sup> {label}
-                  {metric!.exclusions.length ? " " : ": "}
-                  {Boolean(metric!.exclusions.length) && (
-                    <>
-                      excludes{" "}
-                      {metric!.exclusions
-                        .map((excluded) => {
-                          const company = report.companies.find(
-                            (item) => item.issuer_key === excluded.issuer_key,
-                          );
-                          const name =
-                            company?.ticker ||
-                            tickers.get(excluded.issuer_key || "") ||
-                            company?.name ||
-                            "Company";
-                          const why = omissionReason(excluded.reason);
-                          return `${name} (${company?.equity_weight != null ? `${percent(company.equity_weight, 1)} weight` : "weight unavailable"}; ${why})`;
-                        })
-                        .join(", ")}
-                      .
-                    </>
-                  )}
-                  {Boolean(metric!.basis_notes?.length) && (
-                    <>
-                      {" "}
-                      {metric!
-                        .basis_notes!.map(
-                          (item) => `${item.ticker}: ${item.note}`,
-                        )
-                        .join("; ")}
-                      .
-                    </>
-                  )}
-                </p>
-              ))}
-            {rows
-              .filter(
-                ({ metric }) =>
-                  metric?.comparison?.exclusions?.length ||
-                  metric?.comparison?.basis_notes?.length,
-              )
-              .map(({ key, label, metric }) => (
-                <p
-                  className="form-note"
-                  id={`${key}-prior-exclusions`}
-                  key={`${key}-prior`}
-                >
-                  <sup>{footnotes.get(`${key}-prior-exclusions`)}</sup>{" "}
-                  {priorYear} {label}
-                  {metric!.comparison!.exclusions?.length ? " " : ": "}
-                  {Boolean(metric!.comparison!.exclusions?.length) && (
-                    <>
-                      excludes{" "}
-                      {metric!
-                        .comparison!.exclusions!.map(
-                          (excluded) =>
-                            `${excluded.ticker || "Company"} (${excluded.equity_weight != null ? `${percent(excluded.equity_weight, 1)} weight` : "weight unavailable"}; ${omissionReason(excluded.reason)})`,
-                        )
-                        .join(", ")}
-                      .
-                    </>
-                  )}
-                  {Boolean(metric!.comparison!.basis_notes?.length) && (
-                    <>
-                      {" "}
-                      {metric!
-                        .comparison!.basis_notes!.map(
-                          (item) => `${item.ticker}: ${item.note}`,
-                        )
-                        .join("; ")}
-                      .
-                    </>
-                  )}
-                </p>
-              ))}
+            {notes.map((note, index) => (
+              <FinancialNote key={note.id} note={note} number={index + 1} />
+            ))}
             <details>
               <summary>Company details</summary>
               <div
@@ -339,11 +277,10 @@ export function Financials({
                   <tbody>
                     {report.companies.flatMap((company) => {
                       return [
-                        { key: "basic_eps", label: "EPS (basic)", digits: 1 },
+                        { key: "basic_eps", label: "EPS (basic)" },
                         {
                           key: "fcf_per_basic_share",
                           label: "FCF/share",
-                          digits: 1,
                         },
                       ].map((measure) => {
                         const comparison =
@@ -354,12 +291,11 @@ export function Financials({
                           value?.status === "available" &&
                           value.value != null;
                         return (
-                          <tr key={`${company.issuer_key}:${measure.key}`}>
+                          <tr
+                            key={`${company.issuer_key}:${company.exchange}:${company.ticker}:${measure.key}`}
+                          >
                             <th scope="row">
-                              {company.ticker ||
-                                tickers.get(company.issuer_key) ||
-                                company.name ||
-                                "Company"}
+                              {company.ticker || company.name || "Company"}
                             </th>
                             <td>
                               {measure.key === "basic_eps" &&
@@ -373,40 +309,20 @@ export function Financials({
                             </td>
                             <td className="number">
                               {available
-                                ? Number(value?.value).toLocaleString("en-US", {
-                                    style: "currency",
-                                    currency: "USD",
-                                    minimumFractionDigits: measure.digits,
-                                    maximumFractionDigits: measure.digits,
-                                  })
+                                ? amount(value?.value, "currency")
                                 : isNotReported(value?.reason)
                                   ? "Not reported"
                                   : "Unavailable"}
                             </td>
                             <td className="number">
                               {comparison?.prior_value != null
-                                ? Number(comparison.prior_value).toLocaleString(
-                                    "en-US",
-                                    {
-                                      style: "currency",
-                                      currency: "USD",
-                                      minimumFractionDigits: measure.digits,
-                                      maximumFractionDigits: measure.digits,
-                                    },
-                                  )
+                                ? amount(comparison.prior_value, "currency")
                                 : isNotReported(comparison?.reason)
                                   ? "Not reported"
                                   : "Unavailable"}
                             </td>
                             <td className="number">
-                              {!available
-                                ? "Unavailable"
-                                : comparison?.status === "not_meaningful"
-                                  ? "N/M"
-                                  : comparison?.status === "calculated" &&
-                                      comparison.percent_change != null
-                                    ? percent(comparison.percent_change, 1)
-                                    : "Unavailable"}
+                              {available ? change(comparison) : "Unavailable"}
                             </td>
                           </tr>
                         );
