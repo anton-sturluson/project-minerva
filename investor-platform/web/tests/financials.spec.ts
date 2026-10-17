@@ -289,7 +289,7 @@ test("shared year updates current, prior and changes; all history withholds annu
   expect(requested.length).toBe(count);
 });
 
-test("zero-revenue convention and reported diluted EPS stay visible", async ({
+test("zero figures stay available without zero-revenue notes", async ({
   page,
 }) => {
   await page.route("**/api/accounts/*/financials?year=*", (route) => {
@@ -325,14 +325,11 @@ test("zero-revenue convention and reported diluted EPS stay visible", async ({
       .getByRole("cell")
       .nth(0),
   ).toHaveText("$0.0");
+  await expect(page.getByText(/included at 0%|no revenue/i)).toHaveCount(0);
   await expect(
-    page.getByText("3 FCF margin: EXM included at 0% (no revenue).", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByText(/Operating margin excludes OTH.*EXM included at 0%/),
-  ).toBeVisible();
+    summary.getByRole("row", { name: /^FCF margin/ }).locator("sup"),
+  ).toHaveCount(0);
+  await expect(page.getByText(/Operating margin excludes OTH/)).toBeVisible();
   await page.getByText("Company details", { exact: true }).click();
   await expect(
     page.getByRole("cell", { name: "EPS (diluted)", exact: true }),
