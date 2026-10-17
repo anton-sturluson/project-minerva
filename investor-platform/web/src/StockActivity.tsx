@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, errorMessage } from "./api";
 import { number, percent, quarterLabel } from "./format";
 
@@ -35,6 +35,39 @@ type Activity = {
   increased: ActivityRow[];
   decreased: ActivityRow[];
 };
+type MarketContext = {
+  status: "available" | "unavailable";
+  reason: string | null;
+  average_close_usd: string | null;
+  low_close_usd: string | null;
+  high_close_usd: string | null;
+  first_session: string | null;
+  last_session: string | null;
+  session_count: number;
+  source_urls: string[];
+};
+type MarketPrices = Record<string, MarketContext>;
+const averageWeightHelp =
+  "Equal mean of current 13F portfolio weights among managers in this direction.";
+const weightChangeHelp =
+  "Equal mean of portfolio weight changes among managers in this direction, in percentage points (pp): 2% to 3% is +1 pp.";
+const averageCloseHelp =
+  "Arithmetic mean of daily closing prices in the quarter; not a purchase price.";
+const closingRangeHelp =
+  "Minimum and maximum daily closing prices in the quarter; not intraday lows/highs or purchase prices.";
+function unavailablePrice(reason: string): MarketContext {
+  return {
+    status: "unavailable",
+    reason,
+    average_close_usd: null,
+    low_close_usd: null,
+    high_close_usd: null,
+    first_session: null,
+    last_session: null,
+    session_count: 0,
+    source_urls: [],
+  };
+}
 const labels: Record<string, string> = {
   new: "New position",
   exited: "Exited",
@@ -52,11 +85,15 @@ function percentagePoints(value: string) {
   })} pp`;
 }
 type SortColumn = "issuer" | "manager_count" | "weight" | "weight_change";
-const columns: { key: SortColumn; label: string }[] = [
+const columns: { key: SortColumn; label: string; help?: string }[] = [
   { key: "issuer", label: "Security" },
   { key: "manager_count", label: "Managers" },
-  { key: "weight", label: "Average 13F weight" },
-  { key: "weight_change", label: "Average weight change" },
+  { key: "weight", label: "Avg portfolio %", help: averageWeightHelp },
+  {
+    key: "weight_change",
+    label: "Avg change (pp)",
+    help: weightChangeHelp,
+  },
 ];
 function ContributorsTable({
   contributors,
@@ -85,20 +122,20 @@ function ContributorsTable({
               <th scope="col" className="number">
                 Shares
               </th>
-              <th scope="col" className="number">
-                13F weight
-              </th>
-              <th scope="col" className="number">
-                Weight change
+              <th
+                scope="col"
+                className="number"
+                title="Share of this manager's reported 13F portfolio, previous quarter to current quarter."
+              >
+                13F weight: before → after
               </th>
               <th
                 scope="col"
                 className="number"
-                title="Reported quarter-end value per share; not a purchase price."
+                title="Portfolio weight difference in percentage points: 2% to 3% is +1 pp."
               >
-                Quarter-end price
+                Weight change (pp)
               </th>
-              <th scope="col">Sources</th>
             </tr>
           </thead>
           <tbody>
@@ -118,21 +155,6 @@ function ContributorsTable({
                 </td>
                 <td className="number">
                   {percentagePoints(manager.weight_change_pp)}
-                </td>
-                <td className="number">
-                  {manager.quarter_end_price_usd === null
-                    ? "Unavailable"
-                    : `$${number(manager.quarter_end_price_usd)}`}
-                  {manager.price_as_of && <small>{manager.price_as_of}</small>}
-                </td>
-                <td>
-                  <div className="research-links">
-                    {manager.source_urls.map((url, index) => (
-                      <a key={url} href={url} target="_blank" rel="noreferrer">
-                        Filing source {index + 1}
-                      </a>
-                    ))}
-                  </div>
                 </td>
               </tr>
             ))}
@@ -169,9 +191,13 @@ function ContributorsTable({
 function StockRow({
   row,
   averageWeight,
+  market,
+  retryMarket,
 }: {
   row: ActivityRow;
   averageWeight: number;
+  market: MarketContext | undefined;
+  retryMarket: (cusip: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const panelId = useId();
@@ -197,9 +223,41 @@ function StockRow({
         <td className="number">
           {percentagePoints(row.average_weight_change_pp)}
         </td>
+        <td
+          className="number activity-market-price"
+          title={market?.reason ?? averageCloseHelp}
+        >
+          {!market ? (
+            "Loading…"
+          ) : market.status === "available" ? (
+            `$${number(market.average_close_usd)}`
+          ) : (
+            <>
+              Unavailable{" "}
+              <button
+                onClick={() => retryMarket(row.cusip)}
+                aria-label={`Retry prices for ${row.issuer}`}
+              >
+                Retry
+              </button>
+            </>
+          )}
+          {market?.status === "available" && (
+            <small
+              title={`${market.session_count} sessions: ${market.first_session} – ${market.last_session}`}
+            >
+              {market.session_count} sessions
+            </small>
+          )}
+        </td>
+        <td className="number" title={closingRangeHelp}>
+          {market?.status === "available"
+            ? `$${number(market.low_close_usd)} – $${number(market.high_close_usd)}`
+            : "—"}
+        </td>
       </tr>
       <tr className="activity-expanded-row" hidden={!expanded}>
-        <td colSpan={4} id={panelId}>
+        <td colSpan={6} id={panelId}>
           {expanded && (
             <ContributorsTable
               contributors={row.contributors}
@@ -215,9 +273,15 @@ function StockRow({
 function RankedActivity({
   title,
   rows,
+  prices,
+  reportVisible,
+  retryMarket,
 }: {
   title: string;
   rows: ActivityRow[];
+  prices: MarketPrices;
+  reportVisible: (title: string, cusips: string[]) => void;
+  retryMarket: (cusip: string) => void;
 }) {
   const [limit, setLimit] = useState(10);
   const [sort, setSort] = useState<{
@@ -251,6 +315,11 @@ function RankedActivity({
         left.security_class.localeCompare(right.security_class)
       );
     });
+  const visible = ordered.slice(0, limit);
+  const visibleKey = visible.map((row) => row.cusip).join(",");
+  useEffect(() => {
+    reportVisible(title, visibleKey ? visibleKey.split(",") : []);
+  }, [reportVisible, title, visibleKey]);
   function changeSort(column: SortColumn) {
     setLimit(10);
     setSort({
@@ -284,12 +353,16 @@ function RankedActivity({
                   <th
                     key={column.key}
                     scope="col"
+                    title={column.help}
                     className={column.key === "issuer" ? undefined : "number"}
                     aria-sort={
                       sort.column === column.key ? sort.direction : "none"
                     }
                   >
-                    <button onClick={() => changeSort(column.key)}>
+                    <button
+                      aria-description={column.help}
+                      onClick={() => changeSort(column.key)}
+                    >
                       {column.label}{" "}
                       <span aria-hidden="true">
                         {sort.column === column.key
@@ -301,14 +374,22 @@ function RankedActivity({
                     </button>
                   </th>
                 ))}
+                <th scope="col" className="number" title={averageCloseHelp}>
+                  Quarter avg close
+                </th>
+                <th scope="col" className="number" title={closingRangeHelp}>
+                  Closing range
+                </th>
               </tr>
             </thead>
             <tbody>
-              {ordered.slice(0, limit).map((row) => (
+              {visible.map((row) => (
                 <StockRow
                   key={`${row.cusip}|${row.security_class}`}
                   row={row}
                   averageWeight={row.averageWeight}
+                  market={prices[row.cusip]}
+                  retryMarket={retryMarket}
                 />
               ))}
             </tbody>
@@ -334,6 +415,88 @@ function RankedActivity({
         </div>
       )}
     </section>
+  );
+}
+
+function ActivityTables({ data }: { data: Activity }) {
+  const [visible, setVisible] = useState<Record<string, string[]>>({});
+  const [prices, setPrices] = useState<MarketPrices>({});
+  const pending = useRef(new Set<string>());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const reportVisible = useCallback((title: string, cusips: string[]) => {
+    setVisible((previous) => ({ ...previous, [title]: cusips }));
+  }, []);
+  const visibleKey = [...new Set(Object.values(visible).flat())]
+    .sort()
+    .join(",");
+  useEffect(() => {
+    const missing = visibleKey
+      .split(",")
+      .filter(
+        (cusip) => cusip && !prices[cusip] && !pending.current.has(cusip),
+      );
+    for (let start = 0; start < missing.length; start += 20) {
+      const batch = missing.slice(start, start + 20);
+      batch.forEach((cusip) => pending.current.add(cusip));
+      api<{ quarter: string; prices: MarketPrices }>(
+        `/research/activity/market-context?quarter=${data.quarter}&cusips=${batch.join(",")}`,
+        undefined,
+        45000,
+      ).then(
+        (response) => {
+          if (!mounted.current) return;
+          const received: MarketPrices = {};
+          batch.forEach((cusip) => {
+            received[cusip] =
+              response.quarter === data.quarter && response.prices[cusip]
+                ? response.prices[cusip]
+                : unavailablePrice("Quarter prices unavailable");
+            pending.current.delete(cusip);
+          });
+          setPrices((previous) => ({ ...previous, ...received }));
+        },
+        (failure) => {
+          if (!mounted.current) return;
+          const unavailable: MarketPrices = {};
+          batch.forEach((cusip) => {
+            pending.current.delete(cusip);
+            unavailable[cusip] = unavailablePrice(errorMessage(failure));
+          });
+          setPrices((previous) => ({ ...previous, ...unavailable }));
+        },
+      );
+    }
+  }, [visibleKey, prices, data.quarter]);
+  function retryMarket(cusip: string) {
+    setPrices((previous) => {
+      const updated = { ...previous };
+      delete updated[cusip];
+      return updated;
+    });
+  }
+  return (
+    <>
+      <RankedActivity
+        title="Most increased"
+        rows={data.increased}
+        prices={prices}
+        reportVisible={reportVisible}
+        retryMarket={retryMarket}
+      />
+      <RankedActivity
+        title="Most decreased"
+        rows={data.decreased}
+        prices={prices}
+        reportVisible={reportVisible}
+        retryMarket={retryMarket}
+      />
+    </>
   );
 }
 
@@ -421,18 +584,7 @@ export function StockActivity() {
           {data.status === "unavailable" ? (
             <p role="status">Stock activity unavailable: {data.reason}</p>
           ) : (
-            <>
-              <RankedActivity
-                key={`${data.quarter}:increased`}
-                title="Most increased"
-                rows={data.increased}
-              />
-              <RankedActivity
-                key={`${data.quarter}:decreased`}
-                title="Most decreased"
-                rows={data.decreased}
-              />
-            </>
+            <ActivityTables key={data.quarter} data={data} />
           )}
         </>
       )}
