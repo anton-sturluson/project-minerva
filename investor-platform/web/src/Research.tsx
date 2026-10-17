@@ -460,7 +460,9 @@ function ManagerDetail({ slug }: { slug: string }) {
         if (active) {
           setDetail(data);
           setQuarter(data.filings[0]?.quarter ?? "");
-          setYear(data.filings[0]?.quarter.slice(0, 4) ?? "");
+          setYear(
+            (current) => current || data.filings[0]?.quarter.slice(0, 4) || "",
+          );
         }
       },
       (failure) => {

@@ -447,6 +447,7 @@ test("compact values preserve share direction and expose exact amounts", async (
 test("annual net change uses year selection and preserves quarterly comparison", async ({
   page,
 }) => {
+  let annualFailure = true;
   await page.route("**/api/research/managers", (route) =>
     route.fulfill({ json: { managers: [manager] } }),
   );
@@ -474,6 +475,13 @@ test("annual net change uses year selection and preserves quarterly comparison",
       const year = Number(
         new URL(route.request().url()).searchParams.get("year"),
       );
+      if (year === 2024 && annualFailure) {
+        annualFailure = false;
+        return route.fulfill({
+          status: 503,
+          json: { detail: "Annual data temporarily unavailable" },
+        });
+      }
       return route.fulfill({
         json: {
           ...comparison,
@@ -522,6 +530,11 @@ test("annual net change uses year selection and preserves quarterly comparison",
     }),
   ).toHaveCount(0);
   await page.getByLabel("Report year").selectOption("2024");
+  await expect(page.getByRole("alert")).toContainText(
+    "Annual data temporarily unavailable",
+  );
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByLabel("Report year")).toHaveValue("2024");
   await expect(page.getByText("2023 Q4 → 2024 Q4")).toBeVisible();
   await page.getByLabel("Comparison view").selectOption("quarterly");
   await expect(page.getByLabel("Report quarter")).toHaveValue("2026-06-30");
