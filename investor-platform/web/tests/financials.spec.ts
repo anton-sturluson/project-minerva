@@ -202,7 +202,12 @@ test("selected portfolio financials lead contributors with one shared year and f
   await expect(
     summary.getByRole("row", { name: /^Weighted company FCF/ }),
   ).toContainText("$0.3");
-  await expect(financials.getByText("-12.5%", { exact: true })).toBeVisible();
+  await expect(
+    summary
+      .getByRole("row", { name: /^Operating margin/ })
+      .getByRole("cell")
+      .nth(0),
+  ).toHaveText("-12.5%2");
   await expect(page.locator(".financial-per-share-table")).toBeHidden();
   await page.getByText("Company details", { exact: true }).click();
   const table = page.getByRole("region", { name: "Company per-share figures" });
@@ -486,7 +491,10 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
   const notes = page.locator(".annual-financials .form-note");
   await expect(notes.locator("sup")).toHaveText(["1", "2", "3", "4"]);
   await expect(
-    summary.getByRole("rowheader", { name: /^FCF margin/ }),
+    summary
+      .getByRole("row", { name: /^FCF margin/ })
+      .getByRole("cell")
+      .nth(0),
   ).toHaveAttribute(
     "aria-describedby",
     "fcf_margin_after_disclosed_capex-exclusions",
@@ -630,8 +638,9 @@ test("gross margin keeps a numbered cost-basis note without exclusions", async (
     .getByRole("region", { name: "Portfolio-weighted metrics", exact: true })
     .getByRole("row")
     .filter({ hasText: "Gross margin" });
-  await expect(gross.getByText("40.0%", { exact: true })).toBeVisible();
-  await expect(gross.locator("sup")).toHaveText("1");
+  await expect(gross.getByRole("cell").nth(0)).toHaveText("40.0%1");
+  await expect(gross.getByRole("cell").nth(0).locator("sup")).toHaveText("1");
+  await expect(gross.getByRole("rowheader").locator("sup")).toHaveCount(0);
 });
 
 test("all prior margin cells show the actual previous portfolio and retain its disclosures", async ({
@@ -695,8 +704,8 @@ test("all prior margin cells show the actual previous portfolio and retain its d
     name: "Portfolio-weighted metrics",
   });
   const expected = [
-    ["Gross margin", "40.0%", "25.0%3", "60.0%"],
-    ["Operating margin", "20.0%", "10.0%", "100.0%"],
+    ["Gross margin", "40.0%1", "25.0%3", "60.0%"],
+    ["Operating margin", "20.0%2", "10.0%", "100.0%"],
     ["FCF margin", "12.0%", "8.0%4", "50.0%"],
   ];
   for (const [label, current, prior, change] of expected) {
@@ -722,11 +731,13 @@ test("all prior margin cells show the actual previous portfolio and retain its d
       .nth(1),
   ).toHaveAttribute("aria-describedby", "gross_margin-prior-exclusions");
   await page.getByLabel("Post-mortem year").selectOption("2025");
-  for (const [label, , prior] of expected) {
+  for (const [label, value] of [
+    ["Gross margin", "25.0%1"],
+    ["Operating margin", "10.0%2"],
+    ["FCF margin", "8.0%"],
+  ]) {
     const row = summary.getByRole("row", { name: new RegExp(`^${label}`) });
-    await expect(row.getByRole("cell").nth(0)).toHaveText(
-      prior.replace(/[34]$/, ""),
-    );
+    await expect(row.getByRole("cell").nth(0)).toHaveText(value);
   }
   await page.getByLabel("Post-mortem year").selectOption("2024");
   await expect(
