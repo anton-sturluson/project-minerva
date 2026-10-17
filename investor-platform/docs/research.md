@@ -65,25 +65,49 @@ The manager detail groups positions by reported quantity: Increased includes new
 
 Current 13F weight is current holding value divided by all disclosed current holdings value, including disclosed options and principal positions. It describes the reported 13F portfolio, not the manager's full fund. An exit has zero current weight when the current portfolio has a positive value; a zero-value portfolio has unavailable weights. Before/after fractions and their signed difference share one comparison calculation.
 
+### Annual net change
+
+The manager view can compare a calendar year with the prior December 31 snapshot. The latest loaded year uses its latest quarter and shows the endpoint range, marked YTD until Q4 is loaded. Earlier years require Q4. Missing or blocked boundaries or intervening quarters make the annual comparison unavailable; there is no fallback to another year or reporting entity.
+
+Annual results reuse the quarterly quantity and value calculation at the two boundaries. They show net change, not the sum of quarterly buys and sells: a position increased and later reduced to its opening quantity is unchanged for the year. Value changes include price effects; portfolio weights are calculated from the two endpoint portfolios, never summed. Filing links retain the evidence for the full interval. The annual API is `/api/research/managers/{slug}/annual-changes?year=2026`; the quarterly API is unchanged.
+
 ## Stock activity
 
 Research has two subsections: Managers and Stock activity (`#research/activity`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included managers and lists exclusions for missing, blocked, or zero-value snapshots.
 
 The two rankings show shares increased (including new positions) and shares decreased (including exits). A manager contributes once per CUSIP and direction. Rankings exclude options and principal positions; share-type disclosures can also include funds. Unchanged quantities do not contribute, even when their value or weight changes. Share changes can reflect splits or reporting changes as well as trades.
 
-The activity API returns a deterministic order by contributing manager count, then signed average weight change and CUSIP. The view defaults to average current 13F portfolio weight descending. Every column is sortable: security name, manager count, average current weight, and average weight change. Selecting a heading toggles direction; numeric columns start descending and security starts alphabetically. Sorting applies to all results before the top-20 display limit, and a quarter change restores the default order. The average gives each contributing manager equal weight and uses only the managers in that direction, not every covered manager. Weight change is current 13F weight minus previous 13F weight, shown in percentage points: 2% to 3% is +1 pp. Both fractions use all disclosed 13F value, including disclosed options and principal positions. An increased quantity can have a negative weight change; the signed result is retained.
+The activity API returns a deterministic order by contributing manager count, then signed average weight change and CUSIP. The stock table defaults to contributing manager count descending. Four stock columns are sortable: security name, manager count, average current weight, and average weight change. Quarter-average close and closing-price range are informational columns. Selecting a heading toggles direction; numeric columns start descending and security starts alphabetically. Sorting applies to all results before the display limit, and a quarter change restores the default order. The average gives each contributing manager equal weight and uses only the managers in that direction, not every covered manager. Weight change is current 13F weight minus previous 13F weight, shown in percentage points: 2% to 3% is +1 pp. Both fractions use all disclosed 13F value, including disclosed options and principal positions. An increased quantity can have a negative weight change; the signed result is retained.
 
-The view shows the top 20 stocks in each direction first, with an option to show all results. Expand a stock to see its managers, before/after quantities and weights, and filing links. Expanded managers sort by current 13F weight from largest to smallest, with names as the tie-breaker. The same stock can appear in both rankings when managers disagree. Activity is calculated from stored snapshots through the shared comparison calculation; no duplicate activity table, opaque score, or network fetch is added.
+The stock table shows ten stocks per direction first and reveals ten more at a time. Stocks start folded. Expanding a stock shows a full-width manager table with before/after quantities and portfolio weights, and weight change. Manager tables start with ten rows and reveal ten more at a time, ordered by current 13F weight descending, with manager name as the tie-breaker. Changing a sortable heading reorders the full set and resets the display to ten stocks. A quarter change restores the defaults. Folding a stock resets its manager table to ten rows. The same stock can appear in both rankings when managers disagree. Activity is calculated from stored snapshots through the shared comparison calculation. Market context loads separately for visible CUSIPs. Filing evidence remains in the activity API and stored records; the contributor table has no Sources column.
+
+The activity API retains the contributor’s reported quarter-end price and date for compatibility; the manager table does not display them. This proxy is disclosed holding value in USD divided by disclosed shares: current-quarter values for a retained or new position, and previous-quarter values and date for an exit. A positive reference quantity is required; otherwise price and date are unavailable. It is not an execution price, purchase cost or sale proceeds, and never divides value change by share change. ([SEC Form 13F instructions](https://www.sec.gov/info/edgar/forms/form13f.pdf))
+
+## Stock market context
+
+`GET /api/research/activity/market-context?quarter=2026-06-30&cusips=...` supplies independent market context for up to twenty ordinary-share CUSIPs already present in the workspace's selected or previous-quarter research filings. Existing activity quantities, weights, rankings and filing evidence remain unchanged. Options, principal positions and private portfolio records are not used for symbol resolution.
+
+Exact CUSIPs are mapped through [OpenFIGI](https://www.openfigi.com/api/documentation), constrained to US, USD and Equity. All returned records must agree on one composite FIGI and one supported ticker; unmatched, ambiguous or unsupported mappings stay unavailable. The API retains the mapping timestamp and composite FIGI. This is a current identifier mapping, not proof of the historical listing identity or a manager's purchase cost. Mapping results, including unmatched and ambiguous results, use the existing one-day provider cache. Anonymous requests contain at most ten mapping jobs; provider quota failures return unavailable without an immediate retry loop.
+
+The quarterly average is the arithmetic mean of available daily closing prices. Low and high are the minimum and maximum daily **closes**, not intraday low/high prices. USD equity or ETF history comes from the existing cached Yahoo adapter, with the existing configured Tiingo fallback and a supported US exchange check. First and last observed session dates and session count make coverage explicit; these do not guarantee a complete quarter. Prices are as traded in each session; a split can place different share units within one quarter. They are not split-normalized returns, transaction prices, a dollar-change/share-change ratio, or an estimate of cost basis. Missing or invalid history remains unavailable. History requests run with at most four workers per context request; mapping and price data remain separate from normalized SEC holdings.
 
 ## References
 
 ### SEC
 
 - [Form 13F guidance](https://www.sec.gov/divisions/investment/13ffaq): disclosure scope, filing timing, and amendments.
+- [Form 13F instructions](https://www.sec.gov/info/edgar/forms/form13f.pdf): reported values use quarter-end market valuation.
 - [EDGAR data APIs](https://www.sec.gov/search-filings/edgar-application-programming-interfaces): submissions indexes and historical files.
+
+### Market data
+
+- [OpenFIGI mapping documentation](https://www.openfigi.com/api/documentation): exact identifier filters, response identities and anonymous request limits.
+- [Yahoo historical data](https://finance.yahoo.com/): observed daily closing prices through the existing adapter.
+- [Tiingo end-of-day documentation](https://www.tiingo.com/documentation/end-of-day): configured fallback closing-price history.
 
 ### Implementation
 
 - [Manager source checks](research-sources.md): primary sources for the catalog and known reporting transitions.
 - [Research API](../backend/src/investor_platform/research.py): coverage and quantity comparisons.
+- [Research market context](../backend/src/investor_platform/research_market.py): exact public identity mapping and observed quarterly close statistics.
 - [Importer](../backend/src/investor_platform/research_sync.py): explicit catalog and SEC ingestion.

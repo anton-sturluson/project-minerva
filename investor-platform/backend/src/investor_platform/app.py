@@ -26,6 +26,7 @@ from .ledger import router as ledger_router
 from .performance import router as performance_router
 from .research import router as research_router
 from .research_activity import router as research_activity_router
+from .research_market import router as research_market_router
 from .trades import router as trades_router
 from .valuation import router as valuation_router
 
@@ -90,6 +91,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.include_router(hit_rate_router)
     app.include_router(research_router)
     app.include_router(research_activity_router)
+    app.include_router(research_market_router)
     app.include_router(financial_router)
     app.state.financial_schema = os.environ.get("INVESTOR_FINANCIAL_SCHEMA")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)

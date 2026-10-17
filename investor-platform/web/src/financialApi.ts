@@ -10,23 +10,25 @@ export type PerShareMeasure = {
     "basic_weighted_average" | "diluted_weighted_average" | "period_end";
 };
 
-export type PerShareComparison = {
+export type FinancialComparison = {
   prior_year: number;
   prior_value: string | null;
   status: "calculated" | "not_meaningful" | "unavailable";
   percent_change: string | null;
   reason?: string | null;
   exclusions?: FinancialExclusion[];
-  basis_notes?: { ticker: string; note: string }[];
+  basis_notes?: FinancialBasisNote[];
   coverage?: string | null;
 };
 
-type FinancialExclusion = {
-  issuer_key?: string;
-  ticker?: string;
-  equity_weight?: string | null;
+export type FinancialExclusion = {
+  issuer_key: string;
+  ticker: string;
+  equity_weight: string | null;
   reason: string;
 };
+
+export type FinancialBasisNote = { ticker: string; note: string };
 
 type SummaryMeasure = {
   label: string;
@@ -34,8 +36,8 @@ type SummaryMeasure = {
   coverage: string | null;
   exclusions: FinancialExclusion[];
   conventions?: { issuer_key: string; ticker: string }[];
-  basis_notes?: { ticker: string; note: string }[];
-  comparison?: PerShareComparison;
+  basis_notes?: FinancialBasisNote[];
+  comparison?: FinancialComparison;
 };
 
 export type FinancialReport = {
@@ -51,13 +53,14 @@ export type FinancialReport = {
   companies: {
     issuer_key: string;
     ticker: string;
+    exchange: string;
     name: string;
     equity_weight?: string | null;
     financial_status: "eligible" | "unavailable";
     period?: { start: string; end: string; fiscal_label?: string } | null;
     prior_period?: { start: string; end: string; fiscal_label?: string } | null;
     source_urls?: string[];
-    per_share_comparisons?: Record<string, PerShareComparison>;
+    per_share_comparisons?: Record<string, FinancialComparison>;
     per_share_metrics?: Record<string, PerShareMeasure>;
   }[];
   weighted_ratios: Record<string, SummaryMeasure>;

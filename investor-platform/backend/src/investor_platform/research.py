@@ -4,8 +4,8 @@ from datetime import date, timedelta
 from decimal import Decimal, localcontext
 from typing import Annotated, Literal, TypedDict
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .db import Actor, get_actor, get_session
@@ -147,10 +147,27 @@ def manager_view(session: Session, manager: ResearchManager, *, detail: bool = F
             break
         streak += 1
         cursor = period
+    company_count: int | None = None
+    latest_period: date | None = periods[-1] if periods else None
+    if latest_period is not None and latest_period in usable:
+        latest_positions: dict[HoldingKey, Position] = snapshot(
+            session, [filing for filing in filings if filing.report_period == latest_period]
+        )[0]
+        company_count = len(
+            {
+                position["cusip"][:6]
+                for position in latest_positions.values()
+                if position["share_type"] == "SH"
+                and not position["put_call"]
+                and position["quantity"] > 0
+            }
+        )
     result: dict = {
         **manager.profile,
         "slug": manager.slug,
         "cik": manager.cik,
+        "portfolio_company_count": company_count,
+        "portfolio_company_count_quarter": latest_period.isoformat() if latest_period else None,
         "eligibility": manager_eligibility(manager.profile, date.today()),
         "coverage": {
             "quarters": len(usable),
@@ -299,39 +316,50 @@ def compare_positions(
     return sorted(changes, key=sort_key)
 
 
-def manager_comparison(session: Session, manager: ResearchManager, quarter: date) -> dict:
-    """Read adjacent filing snapshots and their common comparison response."""
+def manager_comparison(
+    session: Session, manager: ResearchManager, quarter: date, *, prior: date | None = None
+) -> dict:
+    """Read complete calendar-quarter snapshots between two comparison boundaries."""
     if not quarter_end(quarter):
         raise HTTPException(422, "Choose a calendar quarter end")
-    prior: date = previous_quarter(quarter)
+    prior = prior or previous_quarter(quarter)
     filings: list[ResearchFiling] = list(
         session.scalars(
             select(ResearchFiling).where(
                 ResearchFiling.manager_id == manager.id,
-                ResearchFiling.report_period.in_([prior, quarter]),
+                ResearchFiling.report_period.between(prior, quarter),
             )
         )
     )
-    current: dict[HoldingKey, Position]
-    current_error: str | None
-    current_sources: list[str]
-    previous: dict[HoldingKey, Position]
-    previous_error: str | None
-    previous_sources: list[str]
-    current, current_error, current_sources = snapshot(
-        session, [filing for filing in filings if filing.report_period == quarter]
-    )
-    previous, previous_error, previous_sources = snapshot(
-        session, [filing for filing in filings if filing.report_period == prior]
-    )
-    error: str | None = current_error or previous_error
+    current: dict[HoldingKey, Position] = {}
+    previous: dict[HoldingKey, Position] = {}
+    sources: list[str] = []
+    error: str | None = None
+    period: date = quarter
+    while period >= prior:
+        positions: dict[HoldingKey, Position]
+        reason: str | None
+        period_sources: list[str]
+        positions, reason, period_sources = snapshot(
+            session, [filing for filing in filings if filing.report_period == period]
+        )
+        sources = period_sources + sources
+        if reason and error is None:
+            error = (
+                f"{period.isoformat()}: {reason}" if prior != previous_quarter(quarter) else reason
+            )
+        if period == quarter:
+            current = positions
+        if period == prior:
+            previous = positions
+        period = previous_quarter(period)
     changes: list[PositionChange] = compare_positions(current, previous) if error is None else []
     return {
         "quarter": quarter.isoformat(),
         "previous_quarter": prior.isoformat(),
         "status": "unavailable" if error else "available",
         "reason": error,
-        "source_urls": previous_sources + current_sources,
+        "source_urls": sources,
         "changes": changes,
     }
 
@@ -340,3 +368,25 @@ def manager_comparison(session: Session, manager: ResearchManager, quarter: date
 def get_changes(slug: str, quarter: date, session: DB, actor: Identity) -> dict:
     """Compare quantities only across adjacent complete quarters and rank dollar changes."""
     return manager_comparison(session, owned_manager(session, actor, slug), quarter)
+
+
+@router.get("/managers/{slug}/annual-changes")
+def get_annual_changes(
+    slug: str,
+    year: Annotated[int, Query(ge=1901, le=9998)],
+    session: DB,
+    actor: Identity,
+) -> dict:
+    """Compare annual net holdings, using the latest loaded quarter for an unfinished year."""
+    manager: ResearchManager = owned_manager(session, actor, slug)
+    latest: date | None = session.scalar(
+        select(func.max(ResearchFiling.report_period)).where(
+            ResearchFiling.manager_id == manager.id
+        )
+    )
+    end: date = latest if latest and latest.year == year else date(year, 12, 31)
+    return {
+        **manager_comparison(session, manager, end, prior=date(year - 1, 12, 31)),
+        "year": year,
+        "year_to_date": end.month != 12,
+    }
