@@ -214,3 +214,43 @@ def test_nonmax_provider_revision_invalidates_cached_report(
     assert refreshed.status_code == 200, refreshed.text
     assert Decimal(original["attribution"][0]["gain"]) == 210
     assert Decimal(refreshed.json()["attribution"][0]["gain"]) == 300
+
+
+@pytest.mark.parametrize("change", ["import_evidence", "unrelated_quote"])
+def test_irrelevant_evidence_and_quotes_preserve_cached_response(
+    db_client: TestClient,
+    portfolio: tuple[str, dict[str, History]],
+    database: Engine,
+    change: str,
+) -> None:
+    """Report reuse depends on calculation policy and relevant symbols only."""
+    account: str = portfolio[0]
+    with Session(database) as session:
+        model: Account = session.get(Account, UUID(account))
+        model.reconstruction = {"cash_method": "recorded", "funding_status": "recorded"}
+        session.commit()
+    original: Response = warm_report(db_client, account)
+    with Session(database) as session:
+        model = session.get(Account, UUID(account))
+        if change == "import_evidence":
+            model.reconstruction = {
+                **model.reconstruction,
+                "raw_source": "Synthetic source export",
+                "source_rows": [{"note": "Source-only metadata"}],
+            }
+        else:
+            session.add(
+                MarketCache(
+                    workspace_id=model.workspace_id,
+                    provider="yahoo-v1",
+                    symbol="UNRELATED:synthetic",
+                    start=date(2026, 1, 2),
+                    end=date(2026, 1, 6),
+                    payload={"synthetic": True},
+                    fetched_at=datetime.now(UTC),
+                )
+            )
+        session.commit()
+    repeated: Response = stock_report(db_client, account)
+    assert repeated.status_code == 200
+    assert repeated.content == original.content

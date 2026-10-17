@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import market
-from .accounting import replay
+from .accounting import ReplayState, replay
 from .accounts import DB, Identity, owned_account
 from .attribution import StockAttribution
 from .domain import (
@@ -351,9 +351,19 @@ def calculate(
         warnings.extend(income_warnings)
     latest_holdings = []
     attribution = StockAttribution(securities) if stock_only else None
+    replay_state: ReplayState = ReplayState()
+    cursor: int = 0
     for d in days:
-        prefix = [e for e in entries if e.effective_date <= d]
-        cash, lots, _ = replay(prefix)
+        first: int = cursor
+        while cursor < len(entries) and entries[cursor].effective_date <= d:
+            entry: LedgerEntry = entries[cursor]
+            cursor += 1
+            replay_state.apply(
+                entry,
+                day_end=cursor == len(entries)
+                or entries[cursor].effective_date != entry.effective_date,
+            )
+        cash, lots = replay_state.cash, replay_state.lots
         holdings = []
         holding_values = {}
         for sid, sl in lots.items():
@@ -386,10 +396,10 @@ def calculate(
         growth_before = growth
         # Full-history dollars include recorded executions before the first close.
         # The time-weighted index still begins at that close with no first-day return.
-        interval = prefix if previous is None and include_opening_gain else []
+        interval = entries[:cursor] if previous is None and include_opening_gain else []
         denominator = ZERO
         if previous is not None:
-            interval = [e for e in entries if previous_day < e.effective_date <= d]
+            interval = entries[first:cursor]
             incoming = outgoing = in_kind = ZERO
             for e in interval:
                 if e.kind in {EntryKind.DEPOSIT, EntryKind.OPENING_CASH}:

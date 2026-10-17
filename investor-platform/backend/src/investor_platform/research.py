@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from decimal import Decimal, localcontext
 from typing import Annotated, Literal, TypedDict
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -54,10 +55,31 @@ def filing_state(filing: ResearchFiling, reason: str | None) -> tuple[bool, str 
     return replacement, reason
 
 
-def snapshot(
+def load_holdings(
     session: Session, filings: list[ResearchFiling]
+) -> dict[UUID, list[ResearchHolding]]:
+    """Read selected filings in one query without loading unrelated historical holdings."""
+    result: dict[UUID, list[ResearchHolding]] = {}
+    if not filings:
+        return result
+    holding: ResearchHolding
+    for holding in session.scalars(
+        select(ResearchHolding).where(
+            ResearchHolding.filing_id.in_([filing.id for filing in filings])
+        )
+    ):
+        result.setdefault(holding.filing_id, []).append(holding)
+    return result
+
+
+def snapshot(
+    session: Session,
+    filings: list[ResearchFiling],
+    holdings: dict[UUID, list[ResearchHolding]] | None = None,
 ) -> tuple[dict[HoldingKey, Position], str | None, list[str]]:
     """Apply known amendments; block uncertain additions rather than infer trades."""
+    if holdings is None:
+        holdings = load_holdings(session, filings)
     positions: dict[HoldingKey, Position] = {}
     sources: list[str] = []
     reason: str | None = "No original or restated holdings available"
@@ -69,9 +91,7 @@ def snapshot(
         if replacement:
             positions = {}
         holding: ResearchHolding
-        rows: list[ResearchHolding] = list(
-            session.scalars(select(ResearchHolding).where(ResearchHolding.filing_id == filing.id))
-        )
+        rows: list[ResearchHolding] = holdings.get(filing.id, [])
         additions: dict[HoldingKey, Position] = {}
         for holding in rows:
             key: HoldingKey = (
@@ -111,25 +131,37 @@ def owned_manager(session: Session, actor: Actor, slug: str) -> ResearchManager:
     return manager
 
 
-def manager_view(session: Session, manager: ResearchManager, *, detail: bool = False) -> dict:
+def manager_view(
+    session: Session,
+    manager: ResearchManager,
+    *,
+    detail: bool = False,
+    filings: list[ResearchFiling] | None = None,
+    holdings: dict[UUID, list[ResearchHolding]] | None = None,
+) -> dict:
     """Report imported usable coverage separately from manager operating history."""
-    filings: list[ResearchFiling] = list(
-        session.scalars(
-            select(ResearchFiling)
-            .where(ResearchFiling.manager_id == manager.id)
-            .order_by(ResearchFiling.report_period.desc(), ResearchFiling.filed_date.desc())
+    filings = (
+        filings
+        if filings is not None
+        else list(
+            session.scalars(
+                select(ResearchFiling)
+                .where(ResearchFiling.manager_id == manager.id)
+                .order_by(ResearchFiling.report_period.desc(), ResearchFiling.filed_date.desc())
+            )
         )
     )
-    periods: list[date] = sorted({filing.report_period for filing in filings})
+    by_period: dict[date, list[ResearchFiling]] = {}
+    for filing in filings:
+        by_period.setdefault(filing.report_period, []).append(filing)
+    periods: list[date] = sorted(by_period)
     usable: list[date] = []
     period: date
     for period in periods:
-        quarter_filings: list[ResearchFiling] = [
-            filing for filing in filings if filing.report_period == period
-        ]
+        quarter_filings: list[ResearchFiling] = by_period[period]
         # Ordinary quarters need metadata only. Additions require identity overlap checks.
         if any(filing.amendment_type == "NEW HOLDINGS" for filing in quarter_filings):
-            reason: str | None = snapshot(session, quarter_filings)[1]
+            reason: str | None = snapshot(session, quarter_filings, holdings)[1]
         else:
             reason = "No original or restated holdings available"
             filing: ResearchFiling
@@ -151,7 +183,9 @@ def manager_view(session: Session, manager: ResearchManager, *, detail: bool = F
     latest_period: date | None = periods[-1] if periods else None
     if latest_period is not None and latest_period in usable:
         latest_positions: dict[HoldingKey, Position] = snapshot(
-            session, [filing for filing in filings if filing.report_period == latest_period]
+            session,
+            [filing for filing in filings if filing.report_period == latest_period],
+            holdings,
         )[0]
         company_count = len(
             {
@@ -205,7 +239,39 @@ def list_managers(session: DB, actor: Identity) -> dict:
             .order_by(ResearchManager.slug)
         )
     )
-    return {"managers": [manager_view(session, manager) for manager in managers]}
+    filings: list[ResearchFiling] = list(
+        session.scalars(
+            select(ResearchFiling)
+            .where(ResearchFiling.manager_id.in_([manager.id for manager in managers]))
+            .order_by(ResearchFiling.report_period.desc(), ResearchFiling.filed_date.desc())
+        )
+    )
+    grouped: dict[UUID, list[ResearchFiling]] = {}
+    for filing in filings:
+        grouped.setdefault(filing.manager_id, []).append(filing)
+    amendment_periods: set[tuple[UUID, date]] = {
+        (filing.manager_id, filing.report_period)
+        for filing in filings
+        if filing.amendment_type == "NEW HOLDINGS"
+    }
+    latest_periods: set[tuple[UUID, date]] = {
+        (manager_id, max(filing.report_period for filing in manager_filings))
+        for manager_id, manager_filings in grouped.items()
+    }
+    holdings: dict[UUID, list[ResearchHolding]] = load_holdings(
+        session,
+        [
+            filing
+            for filing in filings
+            if (filing.manager_id, filing.report_period) in amendment_periods | latest_periods
+        ],
+    )
+    return {
+        "managers": [
+            manager_view(session, manager, filings=grouped.get(manager.id, []), holdings=holdings)
+            for manager in managers
+        ]
+    }
 
 
 @router.get("/managers/{slug}")
@@ -317,20 +383,32 @@ def compare_positions(
 
 
 def manager_comparison(
-    session: Session, manager: ResearchManager, quarter: date, *, prior: date | None = None
+    session: Session,
+    manager: ResearchManager,
+    quarter: date,
+    *,
+    prior: date | None = None,
+    filings: list[ResearchFiling] | None = None,
+    holdings: dict[UUID, list[ResearchHolding]] | None = None,
 ) -> dict:
     """Read complete calendar-quarter snapshots between two comparison boundaries."""
     if not quarter_end(quarter):
         raise HTTPException(422, "Choose a calendar quarter end")
     prior = prior or previous_quarter(quarter)
-    filings: list[ResearchFiling] = list(
-        session.scalars(
-            select(ResearchFiling).where(
-                ResearchFiling.manager_id == manager.id,
-                ResearchFiling.report_period.between(prior, quarter),
+    filings = (
+        filings
+        if filings is not None
+        else list(
+            session.scalars(
+                select(ResearchFiling).where(
+                    ResearchFiling.manager_id == manager.id,
+                    ResearchFiling.report_period.between(prior, quarter),
+                )
             )
         )
     )
+    if holdings is None:
+        holdings = load_holdings(session, filings)
     current: dict[HoldingKey, Position] = {}
     previous: dict[HoldingKey, Position] = {}
     sources: list[str] = []
@@ -341,7 +419,7 @@ def manager_comparison(
         reason: str | None
         period_sources: list[str]
         positions, reason, period_sources = snapshot(
-            session, [filing for filing in filings if filing.report_period == period]
+            session, [filing for filing in filings if filing.report_period == period], holdings
         )
         sources = period_sources + sources
         if reason and error is None:

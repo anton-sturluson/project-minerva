@@ -15,6 +15,7 @@ from .research import (
     DB,
     Identity,
     PositionChange,
+    load_holdings,
     manager_comparison,
     previous_quarter,
     quarter_end,
@@ -93,6 +94,24 @@ def activity_for_quarter(
     excluded: list[dict[str, str]] = []
     included: int = 0
     manager: ResearchManager
+    eligible: list[ResearchManager] = [
+        manager
+        for manager in managers
+        if manager_eligibility(manager.profile, date.today())["status"] == "eligible"
+        and {quarter, prior}.issubset(periods.get(manager.id, set()))
+    ]
+    filings: list[ResearchFiling] = list(
+        session.scalars(
+            select(ResearchFiling).where(
+                ResearchFiling.manager_id.in_([manager.id for manager in eligible]),
+                ResearchFiling.report_period.in_([quarter, prior]),
+            )
+        )
+    )
+    grouped: dict[UUID, list[ResearchFiling]] = {}
+    for filing in filings:
+        grouped.setdefault(filing.manager_id, []).append(filing)
+    holdings = load_holdings(session, filings)
     with localcontext() as context:
         context.prec = ACCOUNTING_PRECISION
         for manager in managers:
@@ -105,7 +124,13 @@ def activity_for_quarter(
             if reason is None and (quarter not in manager_periods or prior not in manager_periods):
                 reason = "Missing selected or previous adjacent quarter"
             elif reason is None:
-                comparison = manager_comparison(session, manager, quarter)
+                comparison = manager_comparison(
+                    session,
+                    manager,
+                    quarter,
+                    filings=grouped.get(manager.id, []),
+                    holdings=holdings,
+                )
                 changes = comparison["changes"]
                 reason = comparison["reason"]
                 if reason is None and (

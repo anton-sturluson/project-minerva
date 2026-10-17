@@ -703,3 +703,26 @@ def test_share_reduction_can_have_positive_value_and_weight_change() -> None:
     assert Decimal(change["quantity_change"]) == -20
     assert Decimal(change["value_change_usd"]) == 600
     assert Decimal(change["weight_change"]) > 0
+
+
+def test_directory_company_counts_include_ordinary_latest_filings(
+    database: Engine, db_client: TestClient, tmp_path: Path
+) -> None:
+    """Directory batches retain latest ordinary holdings and reject a blocked newer quarter."""
+    manager_id: UUID = registry(database, tmp_path)
+    filing(database, manager_id, "2026-03-31", "older-directory", row("1", "10"))
+    filing(
+        database,
+        manager_id,
+        "2026-06-30",
+        "latest-directory",
+        row("2", "20", cusip="123456100") + row("3", "30", cusip="234567100"),
+        count=2,
+    )
+    manager: dict = db_client.get("/api/research/managers").json()["managers"][0]
+    assert manager["portfolio_company_count"] == 2
+    assert manager["portfolio_company_count_quarter"] == "2026-06-30"
+    filing(database, manager_id, "2026-09-30", "blocked-directory", row("1", "10"), count=2)
+    manager = db_client.get("/api/research/managers").json()["managers"][0]
+    assert manager["portfolio_company_count"] is None
+    assert manager["portfolio_company_count_quarter"] == "2026-09-30"

@@ -9,9 +9,10 @@ from time import monotonic
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, and_, or_, select
 from sqlalchemy.orm import Session
 
+from . import market
 from .db import Actor
 from .models import Account, LedgerEntry, MarketCache, Security
 
@@ -49,20 +50,57 @@ def cache_key(
                 "entries": [str(entry.id) for entry in entries],
                 "securities": securities,
                 "currency": account.base_currency,
-                "reconstruction": account.reconstruction,
+                "provisional": bool(account.reconstruction),
+                "reconstruction": {
+                    key: (account.reconstruction or {}).get(key)
+                    for key in ("cash_method", "funding_status", "dividend_policy", "opening_cash")
+                },
                 "period": period,
                 "market_date": market_date.isoformat(),
             },
             sort_keys=True,
         ).encode()
     ).hexdigest()
+    yahoo_symbols: set[str] = set(market.BENCHMARKS)
+    tiingo_symbols: set[str] = set()
+    for entry in entries:
+        for security in (entry.security, entry.income_security):
+            if security is None:
+                continue
+            yahoo_symbols.add(market.symbol_for(security, provisional=bool(account.reconstruction)))
+            review: dict = (security.market_identity or {}).get("tiingo", {})
+            tiingo_symbols.add("stock:" + review.get("symbol", security.ticker))
+            foreign: tuple | None = market.FOREIGN_LISTINGS.get(security.exchange)
+            if foreign:
+                currency: str = foreign[1]
+                yahoo_symbols.add(f"{currency}USD=X")
+                pair: str = (
+                    currency.lower() + "usd"
+                    if currency in {"AUD", "EUR", "GBP", "NZD"}
+                    else "usd" + currency.lower()
+                )
+                tiingo_symbols.add("fx:" + pair)
     provider: str
     symbol: str
     stamp: datetime
     revisions: list[tuple[str, str, str]] = []
     for provider, symbol, stamp in session.execute(
         select(MarketCache.provider, MarketCache.symbol, MarketCache.fetched_at)
-        .where(MarketCache.workspace_id == actor.workspace_id)
+        .where(
+            MarketCache.workspace_id == actor.workspace_id,
+            or_(
+                and_(
+                    MarketCache.provider == "yahoo-v1",
+                    or_(
+                        *(
+                            MarketCache.symbol.startswith(symbol + ":", autoescape=True)
+                            for symbol in yahoo_symbols
+                        )
+                    ),
+                ),
+                and_(MarketCache.provider == "tiingo", MarketCache.symbol.in_(tiingo_symbols)),
+            ),
+        )
         .order_by(MarketCache.provider, MarketCache.symbol)
     ):
         revisions.append((provider, symbol, stamp.isoformat()))
