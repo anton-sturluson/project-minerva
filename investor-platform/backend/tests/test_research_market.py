@@ -2,7 +2,7 @@
 
 import io
 import json
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from urllib.error import HTTPError
 from urllib.request import Request
@@ -336,3 +336,77 @@ def test_twenty_security_request_respects_anonymous_mapping_batch_limit(
     assert all("No exact" in item["reason"] for item in result["prices"].values())
     with Session(database) as session:
         assert session.scalar(select(func.count()).select_from(MarketCache)) == 20
+
+
+@pytest.mark.parametrize("provider", ["yahoo", "tiingo"])
+def test_malformed_price_does_not_abort_other_security_results(
+    database: Engine,
+    db_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+) -> None:
+    """Invalid provider decimal text affects one security while valid histories remain usable."""
+    seed_research(database)
+    monkeypatch.delenv("TIINGO_API_KEY", raising=False)
+    if provider == "tiingo":
+        monkeypatch.setenv("TIINGO_API_KEY", "synthetic-test-token")
+
+    def mappings(request: Request, timeout: int) -> io.BytesIO:
+        """Map both owned CUSIPs to separate supported public symbols."""
+        return io.BytesIO(
+            json.dumps([{"data": [mapped_row()]}, {"data": [mapped_row("OTHER")]}]).encode()
+        )
+
+    def yahoo(request: Request, timeout: int) -> io.BytesIO:
+        """Send malformed primary data or force the actual fallback parser to read bad data."""
+        malformed: bool = "/SYNTH?" in request.full_url
+        if malformed and provider == "tiingo":
+            raise OSError("Synthetic primary-provider outage")
+        close: str = "invalid" if malformed else "40"
+        body: dict = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "instrumentType": "EQUITY",
+                            "exchangeTimezoneName": "UTC",
+                            "exchangeName": "NMS",
+                        },
+                        "timestamp": [int(datetime(2026, 4, 1, 12, tzinfo=UTC).timestamp())],
+                        "indicators": {
+                            "quote": [{"close": [close]}],
+                            "adjclose": [{"adjclose": ["40"]}],
+                        },
+                    }
+                ]
+            }
+        }
+        return io.BytesIO(json.dumps(body).encode())
+
+    def fallback(path: str, key: str) -> dict | list[dict]:
+        """Keep valid listing metadata while returning invalid close text through Tiingo."""
+        if "/prices?" not in path:
+            return {"ticker": "SYNTH", "exchangeCode": "NASDAQ", "currency": "USD"}
+        return [
+            {
+                "date": "2026-04-01T00:00:00Z",
+                "close": "invalid",
+                "adjClose": "40",
+                "divCash": "0",
+                "splitFactor": "1",
+            }
+        ]
+
+    monkeypatch.setattr(research_market, "urlopen", mappings)
+    monkeypatch.setattr(market, "urlopen", yahoo)
+    monkeypatch.setattr(tiingo, "get", fallback)
+    response: Response = db_client.get(
+        "/api/research/activity/market-context?quarter=2026-06-30&cusips=111111111,222222222"
+    )
+    assert response.status_code == 200
+    prices: dict = response.json()["prices"]
+    assert prices["111111111"]["status"] == "unavailable"
+    assert prices["111111111"]["average_close_usd"] is None
+    assert prices["222222222"]["status"] == "available"
+    assert Decimal(prices["222222222"]["average_close_usd"]) == 40
