@@ -1,6 +1,6 @@
 # Research manager directory
 
-The Research view reads a PostgreSQL manager registry with official websites, public letter or commentary sources, and SEC filing links. The reviewed [catalog](../backend/src/investor_platform/research_managers.json) includes established technology, growth, and value investors plus clearly identified history candidates. See [source verification](research-sources.md).
+The Research view reads a PostgreSQL manager registry with official websites, public letter or commentary sources, and SEC filing links. The reviewed [catalog](../backend/src/investor_platform/research/managers.json) includes established technology, growth, and value investors plus clearly identified history candidates. See [source verification](research-sources.md).
 
 ## Load the registry and holdings
 
@@ -85,5 +85,5 @@ The view shows the top 20 stocks in each direction first, with an option to show
 ### Implementation
 
 - [Manager source checks](research-sources.md): primary sources for the catalog and known reporting transitions.
-- [Research API](../backend/src/investor_platform/research.py): coverage and quantity comparisons.
-- [Importer](../backend/src/investor_platform/research_sync.py): explicit catalog and SEC ingestion.
+- [Research API](../backend/src/investor_platform/research/routes.py): coverage and quantity comparisons.
+- [Importer](../backend/src/investor_platform/research/sync.py): explicit catalog and SEC ingestion.

@@ -12,6 +12,7 @@
 | [ADR 0006](decisions/0006-dividend-accrual.md) | Dividend attribution, receivables and payment-date cash. |
 | [ADR 0007](decisions/0007-stock-performance-scope.md) | Stock-only performance scope, estimated distributions and separate account reconciliation. |
 | [ADR 0008](decisions/0008-store-annual-financial-observations.md) | Proposed annual financial store with immutable source evidence. |
+| [ADR 0011](decisions/0011-group-code-by-feature-and-share-calculation-rules.md) | Feature ownership, shared calculations and exact reviewed-release admission. |
 | [Annual financial contract](annual-financial-contract.md) | Financial statement inputs, calculation definitions and pilot bundle schema. |
 | [Annual financial tickets](annual-financial-tickets.md) | Approved three-step pilot: contract, parallel collection and weighted report. |
 | [Weighted financial report](weighted-financial-report.md) | Annual metric weights, separate coverage and reproducible cited reports. |

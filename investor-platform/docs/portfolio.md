@@ -38,7 +38,7 @@ Imported minimum opening holdings remain provisional. When receipt evidence beco
 
 The [transaction import CLI](transaction-import.md) downloads or reads a source export, previews the reconstruction and writes a separate testing database. It preserves fractional shares, raw evidence, exclusions and inferred opening shares. New reconstructions start with zero cash and infer a deposit only when the next purchase exceeds available cash, preserving source order within each date. A later sale cannot fund an earlier purchase. Received shares do not create cash. These deposits are assumptions, not broker-verified contributions.
 
-Accounts marked `cash_method: purchase_shortfall` use these deposits as active records. A reviewed migration can void explicitly identified old cash placeholders without deleting their audit history or changing trades, shares or basis. Future transaction refreshes, cash entries and corrections use existing cash first and update only the generated purchase shortfalls. Missing or mismatched dividend records still withhold returns. ([Shortfall rules](../backend/src/investor_platform/funding.py), [migration and synchronization](../backend/src/investor_platform/purchase_funding.py))
+Accounts marked `cash_method: purchase_shortfall` use these deposits as active records. A reviewed migration can void explicitly identified old cash placeholders without deleting their audit history or changing trades, shares or basis. Future transaction refreshes, cash entries and corrections use existing cash first and update only the generated purchase shortfalls. Missing or mismatched dividend records still withhold returns. ([Shortfall rules](../backend/src/investor_platform/ledger/purchase_shortfalls.py), [migration and synchronization](../backend/src/investor_platform/ledger/purchase_funding.py))
 
 ## Portfolio tracker
 
@@ -78,7 +78,7 @@ Current holdings fetch only open securities and remain available if the historic
 
 Choose **Dividend · gross**, **Interest**, or **Other investment income** under Activity → Record cash. Dividends require a security already present in the account records and an ex-dividend date no later than the effective cash payment date. Record taxes as **Fee or tax**. Corrections retain and preview the income classification, security and ex-date. Interest and other income can optionally be linked to a security, for example stock-lending payments. Linked payments for excluded stocks are removed; account-level interest remains. Unclassified or unlinked other income blocks scenarios because its stock attribution is unknown.
 
-Current holdings with an unresolved split during the current position display **Split adjustment required** and withhold value, unrealized gains, weights and hypothetical liquidation. Other holdings retain valid prices; portfolio totals remain unavailable while any holding is unresolved. The guard checks from the current position's acquisition rather than only the latest ten days, and ignores splits before a position was reopened. It also rejects a pre-split previous close for a post-split purchase. This safeguard does not create a split transaction or change recorded shares/basis. ([Current valuation](../backend/src/investor_platform/valuation.py))
+Current holdings with an unresolved split during the current position display **Split adjustment required** and withhold value, unrealized gains, weights and hypothetical liquidation. Other holdings retain valid prices; portfolio totals remain unavailable while any holding is unresolved. The guard checks from the current position's acquisition rather than only the latest ten days, and ignores splits before a position was reopened. It also rejects a pre-split previous close for a post-split purchase. This safeguard does not create a split transaction or change recorded shares/basis. ([Current valuation](../backend/src/investor_platform/performance/valuation.py))
 
 ## Overview and pages
 
@@ -94,9 +94,9 @@ Holdings figures display one decimal place, including shares, prices, dollar val
 
 ## References
 
-- [Current valuation](../backend/src/investor_platform/valuation.py) — independent pricing and unresolved-split safeguard.
-- [Ledger implementation](../backend/src/investor_platform/ledger.py) — active records and cash writes.
-- [Accounting](../backend/src/investor_platform/accounting.py) — cash validation and FIFO calculations.
-- [Corrections](../backend/src/investor_platform/corrections.py) — preview, replacement, void and audit behavior.
-- [Purchase shortfall rules](../backend/src/investor_platform/funding.py) and [migration/synchronization](../backend/src/investor_platform/purchase_funding.py) — inferred funding records, preserved cash/source order and review guards.
+- [Current valuation](../backend/src/investor_platform/performance/valuation.py) — independent pricing and unresolved-split safeguard.
+- [Ledger implementation](../backend/src/investor_platform/ledger/state.py) — active records and cash writes.
+- [Accounting](../backend/src/investor_platform/ledger/accounting.py) — cash validation and FIFO calculations.
+- [Corrections](../backend/src/investor_platform/ledger/corrections.py) — preview, replacement, void and audit behavior.
+- [Purchase shortfall rules](../backend/src/investor_platform/ledger/purchase_shortfalls.py) and [migration/synchronization](../backend/src/investor_platform/ledger/purchase_funding.py) — inferred funding records, preserved cash/source order and review guards.
 - [Performance methodology](performance.md) and [hit-rate methodology](hit-rate.md) — benchmark comparisons.

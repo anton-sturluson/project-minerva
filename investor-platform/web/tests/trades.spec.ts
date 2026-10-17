@@ -1,4 +1,4 @@
-import { today } from "../src/records";
+import { newYorkToday } from "../src/marketDates";
 import { expect, test } from "./fixtures";
 
 test("opening shares, buy, partial sale, oversell rejection, close and reload", async ({
@@ -11,7 +11,7 @@ test("opening shares, buy, partial sale, oversell rejection, close and reload", 
       kind: "deposit",
       amount: "1000",
       currency: "USD",
-      effective_date: today(),
+      effective_date: newYorkToday(),
       request_key: crypto.randomUUID(),
     },
   });

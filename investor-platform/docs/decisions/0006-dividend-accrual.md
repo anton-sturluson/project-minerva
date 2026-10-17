@@ -19,5 +19,5 @@ No future cash entries are posted. An unrecorded or unpaid entitlement lacking a
 ## References
 
 - [GIPS handbook](https://www.gipsstandards.org/standards/gips-standards-for-firms/gips-standards-handbook-for-firms/) — ex-date dividend accrual recommendation.
-- [Income reconciliation](../../backend/src/investor_platform/income.py) — security-specific validation and recorded receivables.
-- [Cash entry](../../backend/src/investor_platform/ledger.py) — input and ownership validation.
+- [Income reconciliation](../../backend/src/investor_platform/performance/income.py) — security-specific validation and recorded receivables.
+- [Cash entry](../../backend/src/investor_platform/ledger/state.py) — input and ownership validation.

@@ -14,12 +14,12 @@ dependencies = [
 ]
 
 [project.scripts]
-investor-financial = "investor_platform.financial_cli:main"
+investor-financial = "investor_platform.financials.cli:main"
 investor-api = "investor_platform.app:main"
-investor-refresh-prices = "investor_platform.price_refresh:main"
-investor-import = "investor_platform.import_transactions:main"
-investor-reconcile-cash = "investor_platform.reconcile_cash:main"
-investor-research-sync = "investor_platform.research_sync:main"
+investor-refresh-prices = "investor_platform.market_data.price_refresh:main"
+investor-import = "investor_platform.ledger.import_transactions:main"
+investor-reconcile-cash = "investor_platform.ledger.reconcile_cash:main"
+investor-research-sync = "investor_platform.research.sync:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -36,7 +36,12 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "F", "I", "UP", "ANN", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "D"]
+"migrations/**" = ["ANN", "D"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]

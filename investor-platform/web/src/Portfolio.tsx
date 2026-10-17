@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage, type Account } from "./api";
 import type { Page } from "./App";
-import { CashLedger } from "./CashLedger";
+import { AccountWorkspace } from "./AccountWorkspace";
 
 const selectionKey = "minerva-portfolio";
 function savedSelection() {
@@ -194,7 +194,7 @@ export function Portfolio({ page }: { page: Page }) {
             </form>
           )}
           {account && (
-            <CashLedger key={account.id} account={account} page={page} />
+            <AccountWorkspace key={account.id} account={account} page={page} />
           )}
         </>
       )}

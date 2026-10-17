@@ -6,7 +6,7 @@ The pilot covers GOOGL, OSCR and ACFN fiscal years 2023–2025. Collect reported
 
 ## Bundle and evidence
 
-Use the [JSON Schema](../backend/src/investor_platform/annual_financial_bundle.schema.json) and [synthetic bundle](../backend/tests/fixtures/financial/synthetic-annual-bundle.json). One bundle describes one issuer and one annual period. Every named input is present, with either a reported decimal value or an explicit missing/applicability status. Financial values are decimal strings in whole USD; share counts are unscaled decimal strings; EPS is USD per share. Exponents, numeric JSON values and formatted amounts are rejected. Ratios are derived as fractions and formatted as percentages only for display.
+Use the [JSON Schema](../backend/src/investor_platform/financials/annual_financial_bundle.schema.json) and [synthetic bundle](../backend/tests/fixtures/financial/synthetic-annual-bundle.json). One bundle describes one issuer and one annual period. Every named input is present, with either a reported decimal value or an explicit missing/applicability status. Financial values are decimal strings in whole USD; share counts are unscaled decimal strings; EPS is USD per share. Exponents, numeric JSON values and formatted amounts are rejected. Ratios are derived as fractions and formatted as percentages only for display.
 
 `bundle_id` identifies an immutable candidate/publication version. Sources include immutable document identity, HTTPS URL, original publication date, retrieval timestamp and the SHA-256 of the downloaded document bytes. Each reported fact names one source and an exact statement/row/column locator, with page or XBRL tag where available. Source documents can provide comparative prior-year facts; their publication date remains the date of that document. Do not invent an earlier date for a restated comparative value.
 
@@ -127,8 +127,12 @@ Coverage measures availability of this stated formula, not completeness of all i
 - [ADR 0008](decisions/0008-store-annual-financial-observations.md) — proposed store and immutable-observation decision.
 - [Backend models](../backend/src/investor_platform/models.py) — existing securities, ledger and decimal storage.
 - [ADR 0003](decisions/0003-independent-holdings.md) — independent holdings valuation and missing-price handling.
-- [JSON Schema](../backend/src/investor_platform/annual_financial_bundle.schema.json) — machine-readable input structure.
+- [JSON Schema](../backend/src/investor_platform/financials/annual_financial_bundle.schema.json) — machine-readable input structure.
 
 ### SEC filings
 
 - [Oscar 2025 10-K](https://www.sec.gov/Archives/edgar/data/1568651/000156865126000011/oscr-20251231.htm) — insurer revenue and MLR definitions; no pilot financial figures are asserted here.
+
+## Reviewed history release admission
+
+The separate account-history path preserves native currencies and annual/LTM periods under [ADR 0009](decisions/0009-bind-reviewed-history-to-account-snapshots.md). A new import requires each review receipt content to declare `status: independent_source_review_passed`, the explicit `packet_sha256`, and `records_sha256`. The records digest is SHA256 over canonical JSON from `digest({"records": release["records"]})`, including all metrics, methods, periods, classifications and share conversion fields. The receipt's own SHA256 still pins its exact content bytes. Every source packet needs a matching passed receipt. Changes to admitted records require independent re-review; the importer never upgrades a legacy receipt automatically. Existing immutable releases remain readable without rewriting them.

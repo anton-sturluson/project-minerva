@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
+});
+
 function contributor(
   name: string,
   slug: string,

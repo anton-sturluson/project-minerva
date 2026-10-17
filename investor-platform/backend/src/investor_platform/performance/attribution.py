@@ -1,0 +1,115 @@
+"""Read-only stock contributions linked to the same daily portfolio return index."""
+
+from collections import defaultdict
+from datetime import date
+from decimal import Decimal
+from uuid import UUID
+
+from investor_platform.domain import IN_KIND_ENTRIES, EntryKind
+from investor_platform.market_data.types import History
+from investor_platform.models import LedgerEntry, Security
+
+ZERO = Decimal(0)
+ONE = Decimal(1)
+
+
+class StockAttribution:
+    """Accumulate reconciled dollar gains and linked returns by stock and year."""
+
+    def __init__(self, securities: dict[UUID, Security]) -> None:
+        """Start an empty attribution for the supplied listing identities."""
+        self.securities = securities
+        self.previous = {}
+        self.periods = {}
+
+    def record(
+        self,
+        day: date,
+        previous_day: date | None,
+        values: dict[UUID, Decimal],
+        entries: list[LedgerEntry],
+        prices: dict[UUID, History],
+        distributions: dict[tuple[UUID, date], Decimal],
+        denominator: Decimal,
+        growth_before: Decimal,
+        growth_after: Decimal,
+    ) -> None:
+        """Record one session using the same flows as the portfolio calculation."""
+        if previous_day is None and not entries:
+            self.previous = values
+            return
+        gains = {
+            sid: values.get(sid, ZERO) - self.previous.get(sid, ZERO)
+            for sid in values.keys() | self.previous.keys()
+        }
+        for entry in entries:
+            sid = entry.security_id
+            if sid is None:
+                continue
+            gains.setdefault(sid, ZERO)
+            if entry.kind == EntryKind.BUY:
+                gains[sid] -= entry.amount
+            elif entry.kind == EntryKind.SELL:
+                gains[sid] += entry.amount
+            elif entry.kind in IN_KIND_ENTRIES:
+                gains[sid] -= entry.quantity * prices[sid].close[day]
+        for (sid, exdate), amount in distributions.items():
+            if exdate <= day and (previous_day is None or previous_day < exdate):
+                gains[sid] = gains.get(sid, ZERO) + amount
+        for key in ("all", str(day.year)):
+            period = self.periods.setdefault(
+                key,
+                {
+                    "start": previous_day or day,
+                    "base": growth_before,
+                    "linked": defaultdict(Decimal),
+                    "gains": defaultdict(Decimal),
+                },
+            )
+            period["end"] = day
+            period["growth"] = growth_after
+            for sid, gain in gains.items():
+                period["gains"][sid] += gain
+                period["linked"][sid] += growth_before * gain / denominator if denominator else ZERO
+        self.previous = values
+
+    def report(self) -> list[dict]:
+        """Return reconciled full-history and calendar-year stock contributions."""
+        reports = []
+        for key, period in self.periods.items():
+            # A lone year-end close can have execution gains but no return interval.
+            base = period["base"] if period["start"] < period["end"] else ZERO
+            result = period["growth"] / base - ONE if base else None
+            rows = [
+                {
+                    "security_id": sid,
+                    "ticker": self.securities[sid].ticker,
+                    "exchange": self.securities[sid].exchange,
+                    "contribution": linked / base if base else None,
+                    "gain": period["gains"][sid],
+                }
+                for sid, linked in period["linked"].items()
+            ]
+            total = sum((row["contribution"] for row in rows), ZERO) if base else None
+            # Never redistribute an unexplained difference between securities to force a match.
+            if result is not None and abs(result - total) > Decimal("1e-20"):
+                raise ValueError("Stock return contributions could not be reconciled")
+            reports.append(
+                {
+                    "period": key,
+                    "start": period["start"],
+                    "end": period["end"],
+                    "return": result,
+                    "contribution_total": total,
+                    "gain": sum(period["gains"].values(), ZERO),
+                    "stocks": sorted(
+                        rows,
+                        key=lambda row: (
+                            -(row["contribution"] or ZERO),
+                            row["ticker"],
+                            row["exchange"],
+                        ),
+                    ),
+                }
+            )
+        return reports

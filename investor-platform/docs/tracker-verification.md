@@ -8,7 +8,7 @@ The separate `minerva_tracker_demo` portfolio was also inspected in the live bro
 
 ## References
 
-- [Scorecard accounting fixture](../backend/tests/test_statistics.py) — fees, partial exits, unknown basis and breakevens.
+- [Scorecard accounting fixture](../backend/tests/performance/test_statistics.py) — fees, partial exits, unknown basis and breakevens.
 - [Scorecard browser workflow](../web/tests/scorecard.spec.ts) — synthetic closed trade and load recovery.
 
 ## Investment income

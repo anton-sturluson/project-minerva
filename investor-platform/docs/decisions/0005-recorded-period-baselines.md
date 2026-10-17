@@ -18,7 +18,7 @@ Exclusions in recorded mode apply within the selected period. Prior trades remai
 
 ## References
 
-- [Performance implementation](../../backend/src/investor_platform/performance.py) — security selection, full ledger replay and period scenarios.
+- [Performance implementation](../../backend/src/investor_platform/performance/returns.py) — security selection, full ledger replay and period scenarios.
 - [Performance conventions](../performance.md) — cash flows, income, unknown prices and CAGR.
 - [ADR 0002](0002-stock-exclusion-scenarios.md) — full-history exclusion semantics.
 

@@ -20,6 +20,6 @@ The overview remains usable when a historical comparison fails. Current holdings
 
 ## References
 
-- [Valuation endpoint](../../backend/src/investor_platform/valuation.py) — current holdings and failure isolation.
-- [Market adapter](../../backend/src/investor_platform/market.py) — quote currency and instrument checks.
+- [Valuation endpoint](../../backend/src/investor_platform/performance/valuation.py) — current holdings and failure isolation.
+- [Market adapter](../../backend/src/investor_platform/market_data/history.py) — quote currency and instrument checks.
 - [Performance conventions](../performance.md) — independent historical return and scorecard rules.

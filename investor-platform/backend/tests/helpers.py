@@ -3,6 +3,9 @@
 from datetime import date
 from uuid import uuid4
 
+from fastapi.testclient import TestClient
+from httpx import Response
+
 DAYS = [date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6)]
 
 
@@ -65,3 +68,30 @@ def stock_report(client, aid, **extra):
         f"/api/accounts/{aid}/performance",
         json={"start": "2026-01-02", "end": "2026-01-06", "scope": "stocks", **extra},
     )
+
+
+def replacement(entry: dict, **changes: str | None) -> dict:
+    """Copy effective entry fields into a synthetic correction draft."""
+    result = {k: entry[k] for k in ("kind", "effective_date", "currency", "note")}
+    result["request_key"] = str(uuid4())
+    if entry["security"]:
+        result.update({k: entry[k] for k in ("quantity", "price", "fees", "cost_basis")})
+        result.update({k: entry["security"][k] for k in ("ticker", "exchange")})
+    else:
+        result["amount"] = entry["amount"]
+    return {**result, **changes}
+
+
+def correction(
+    client: TestClient, aid: str, entry: dict, value: dict | None, **extra: str
+) -> tuple[str, dict, Response]:
+    """Preview a synthetic correction and return its unchanged submission draft."""
+    body = {
+        "request_key": str(uuid4()),
+        "reason": "Broker statement correction",
+        "replacement": value,
+        **extra,
+    }
+    url = f"/api/accounts/{aid}/entries/{entry['id']}/correction"
+    preview = client.post(url + "?preview=true", json=body)
+    return url, body, preview

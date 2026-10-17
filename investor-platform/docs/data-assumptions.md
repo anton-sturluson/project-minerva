@@ -23,5 +23,5 @@ Closed positions can therefore block a full-history chart while current holdings
 
 ## References
 
-- [Importer](../backend/src/investor_platform/import_transactions.py) — reconstruction and provenance.
-- [Performance calculation](../backend/src/investor_platform/performance.py) — recorded dividend validation, estimated stock distributions and measurement boundaries.
+- [Importer](../backend/src/investor_platform/ledger/import_transactions.py) — reconstruction and provenance.
+- [Performance calculation](../backend/src/investor_platform/performance/returns.py) — recorded dividend validation, estimated stock distributions and measurement boundaries.
