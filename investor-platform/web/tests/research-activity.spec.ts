@@ -223,9 +223,7 @@ test("stock activity ranks by manager count and opens compact sourced manager ta
   await expect(rows.nth(1)).toContainText("100 → 120");
   await expect(rows.nth(1)).toContainText("4.00% → 5.00%");
   await expect(rows.nth(1)).toContainText("+1.00 pp");
-  await expect(stocks.first().getByRole("cell").nth(4)).toContainText(
-    "$125.50",
-  );
+  await expect(stocks.first().getByRole("cell").nth(4)).toHaveText("$125.50");
   await expect(stocks.first().getByRole("cell").nth(5)).toHaveText(
     "$100.00 – $150.00",
   );
