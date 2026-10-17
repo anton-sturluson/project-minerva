@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from .accounting import replay
 from .accounts import DB, Identity, owned_account
 from .domain import ACCOUNTING_PRECISION, IN_KIND_ENTRIES, EntryKind
-from .ledger import EntryInput, EntryView, Money, entries_for, fingerprint
+from .ledger import EntryInput, EntryView, Money, entries_for, fingerprint, normalize_request_body
 from .models import LedgerEntry, Security
 
 router = APIRouter(prefix="/api/accounts")
@@ -61,7 +61,7 @@ def record_trade(account_id: UUID, data: TradeInput, session: DB, actor: Identit
         )
     )
     if existing:
-        if existing.request_body != body:
+        if normalize_request_body(existing.request_body) != body:
             raise HTTPException(409, "This retry key was already used for different entries")
         return existing
     entry = build_trade(account, data, session, actor, body)

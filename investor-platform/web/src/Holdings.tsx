@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, errorMessage } from "./api";
+import { MARKET_DATA_TIMEOUT, api, errorMessage } from "./api";
 import { number as formatNumber, percent as formatPercent } from "./format";
 import { type Ledger } from "./records";
 
@@ -42,7 +42,11 @@ export function Holdings({
     setReport(null);
     setError("");
     setBusy(true);
-    void api<Valuation>(`/accounts/${accountId}/valuation`, undefined, 60000)
+    void api<Valuation>(
+      `/accounts/${accountId}/valuation`,
+      undefined,
+      MARKET_DATA_TIMEOUT,
+    )
       .then((value) => {
         if (active) setReport(value);
       })

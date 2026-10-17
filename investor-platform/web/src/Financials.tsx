@@ -140,6 +140,11 @@ export function Financials({
           <p role="status">Table unavailable.</p>
         ) : (
           <>
+            <p className="form-note">
+              Holdings as of {report.holdings_date}. Annual financial periods
+              ending in {report.calendar_year}. Retrospective figures;
+              publication dates are not limited to the holdings date.
+            </p>
             <div
               className="table-scroll"
               tabIndex={0}
@@ -417,6 +422,57 @@ export function Financials({
                   </tbody>
                 </table>
               </div>
+              <section aria-label="Financial sources and periods">
+                <h3>Sources and periods</h3>
+                {report.publication_policy && (
+                  <p className="form-note">{report.publication_policy}</p>
+                )}
+                <ul>
+                  {report.companies.map((company) => (
+                    <li key={company.issuer_key}>
+                      <strong>
+                        {company.ticker || company.name || company.issuer_key}
+                      </strong>
+                      {company.period && (
+                        <p>
+                          Current period: {company.period.start} through{" "}
+                          {company.period.end}
+                          {company.period.fiscal_label
+                            ? ` (${company.period.fiscal_label})`
+                            : ""}
+                          .
+                        </p>
+                      )}
+                      {company.prior_period && (
+                        <p>
+                          Prior period: {company.prior_period.start} through{" "}
+                          {company.prior_period.end}
+                          {company.prior_period.fiscal_label
+                            ? ` (${company.prior_period.fiscal_label})`
+                            : ""}
+                          .
+                        </p>
+                      )}
+                      {company.source_urls?.length ? (
+                        <ul>
+                          {company.source_urls.map((url, index) => (
+                            <li key={url}>
+                              <a href={url} target="_blank" rel="noreferrer">
+                                {company.ticker || company.name || "Company"}{" "}
+                                filing source {index + 1}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="form-note">
+                          No linked filing source available.
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
             </details>
           </>
         ))}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, type Account } from "./api";
+import { MARKET_DATA_TIMEOUT, api, errorMessage, type Account } from "./api";
 import { number, percent } from "./format";
 import { type Ledger } from "./records";
 
@@ -42,6 +42,8 @@ export function TradeScorecard({
     setStatsError("");
     void api<Stats>(
       `/accounts/${account.id}/statistics${hypothetical ? "/hypothetical" : ""}`,
+      undefined,
+      hypothetical ? MARKET_DATA_TIMEOUT : undefined,
     )
       .then((s) => {
         if (active) setStats(s);

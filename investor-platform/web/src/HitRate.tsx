@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, errorMessage } from "./api";
+import { MARKET_DATA_TIMEOUT, api, errorMessage } from "./api";
 import { number, percent } from "./format";
 
 type Benchmark = "SPY" | "QQQ";
@@ -35,7 +35,7 @@ export function HitRate({ accountId }: { accountId: string }) {
         await api<Result>(
           `/accounts/${accountId}/hit-rate`,
           { method: "POST" },
-          60000,
+          MARKET_DATA_TIMEOUT,
         ),
       );
     } catch (e) {

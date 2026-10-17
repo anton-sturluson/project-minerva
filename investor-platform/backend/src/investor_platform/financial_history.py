@@ -73,13 +73,27 @@ def validate_release(release: Record) -> None:
     if not receipts:
         raise ValueError("Financial history needs independent review receipts")
     reviewed_hashes: set[str] = set()
+    reviewed_records: set[str] = set()
     receipt: Record
     for receipt in receipts:
         content: str = str(receipt["content"])
         if hashlib.sha256(content.encode()).hexdigest() != receipt["sha256"]:
             raise ValueError("Review receipt hash does not match")
-        record(json.loads(content))
-        reviewed_hashes.update(re.findall(r'"([0-9a-f]{64})"', content))
+        review: Record = record(json.loads(content))
+        if review.get("status") != "independent_source_review_passed":
+            raise ValueError(
+                "A passed independent source review is required; re-review this release"
+            )
+        packet_hash: Json = review.get("packet_sha256")
+        if not isinstance(packet_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", packet_hash):
+            raise ValueError("Review receipt must explicitly pin its financial packet")
+        reviewed_hashes.add(packet_hash)
+        records_hash: Json = review.get("records_sha256")
+        if not isinstance(records_hash, str):
+            raise ValueError(
+                "Review receipt does not bind admitted records; re-review this release"
+            )
+        reviewed_records.add(records_hash)
     evidence: Record = record(record(release["evidence"])["packets"])
     documents: dict[str, Record] = {}
     sha: str
@@ -114,6 +128,9 @@ def validate_release(release: Record) -> None:
             period: Record = record(row[key])
             start: date = date.fromisoformat(str(period["start"]))
             end: date = date.fromisoformat(str(period["end"]))
+            expected_year: int = identity[2] - (1 if key == "prior_period" else 0)
+            if end.year != expected_year:
+                raise ValueError("Financial period must end in its selected calendar year")
             if not 350 <= (end - start).days + 1 <= 380:
                 raise ValueError("Financial comparison requires a complete annual/LTM period")
         if str(record(row["prior_period"])["end"]) >= str(record(row["period"])["start"]):
@@ -190,6 +207,13 @@ def validate_release(release: Record) -> None:
                     raise ValueError(
                         "Zero-revenue convention needs exact-period verified zero revenue"
                     )
+
+    # The reviewer attests the admitted values, identities, periods and methods together.
+    # This binds reviewed bytes; it does not establish source truth automatically.
+    if reviewed_records != {digest({"records": release["records"]})}:
+        raise ValueError(
+            "Financial records changed after independent review; re-review this release"
+        )
 
 
 def history_table(schema: str) -> sql.Composed:

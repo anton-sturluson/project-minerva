@@ -48,24 +48,30 @@ export function CashLedger({
   const [income, setIncome] = useState(emptyIncome);
   const [note, setNote] = useState("");
   const retry = useRef<{ body: string; key: string } | null>(null);
+  const loadGeneration = useRef(0);
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setLoading(true);
     setError("");
     try {
       const result = await api<Ledger>(`/accounts/${account.id}/ledger`);
+      if (generation !== loadGeneration.current) return;
       setLedger(result);
       if (result.entries.length)
         setKind((current) =>
           current === "opening_cash" ? "deposit" : current,
         );
     } catch (e) {
-      setError(errorMessage(e));
+      if (generation === loadGeneration.current) setError(errorMessage(e));
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }, [account.id]);
   useEffect(() => {
     void load();
+    return () => {
+      loadGeneration.current += 1;
+    };
   }, [load]);
   async function save(event: FormEvent) {
     event.preventDefault();

@@ -132,3 +132,7 @@ Coverage measures availability of this stated formula, not completeness of all i
 ### SEC filings
 
 - [Oscar 2025 10-K](https://www.sec.gov/Archives/edgar/data/1568651/000156865126000011/oscr-20251231.htm) — insurer revenue and MLR definitions; no pilot financial figures are asserted here.
+
+## Reviewed history release admission
+
+The separate account-history path preserves native currencies and annual/LTM periods under [ADR 0009](decisions/0009-bind-reviewed-history-to-account-snapshots.md). A new import requires each review receipt content to declare `status: independent_source_review_passed`, the explicit `packet_sha256`, and `records_sha256`. The records digest is SHA256 over canonical JSON from `digest({"records": release["records"]})`, including all metrics, methods, periods, classifications and share conversion fields. The receipt's own SHA256 still pins its exact content bytes. Every source packet needs a matching passed receipt. Changes to admitted records require independent re-review; the importer never upgrades a legacy receipt automatically. Existing immutable releases remain readable without rewriting them.

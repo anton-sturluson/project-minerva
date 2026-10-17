@@ -1,8 +1,11 @@
+import json
 from decimal import Decimal as D
 from uuid import uuid4
 
+from fastapi.testclient import TestClient
 from helpers import cash, ledger, trade
-from sqlalchemy import func, select
+from httpx import Response
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from investor_platform.models import LedgerCorrection, LedgerEntry, Security
@@ -150,3 +153,32 @@ def test_concurrent_corrections_only_replace_original_once(db_client):
     result = ledger(db_client, aid)
     assert len(result["corrections"]) == 1
     assert len(result["entries"]) == 3
+
+
+def test_equivalent_correction_retry_preserves_legacy_body(
+    db_client: TestClient, database: Engine
+) -> None:
+    """Nested decimal spelling and ignored replacement keys cannot duplicate a correction."""
+    aid: str = db_client.post(
+        "/api/accounts", json={"name": "Correction decimals", "base_currency": "USD"}
+    ).json()["id"]
+    original: dict = cash(db_client, aid, "opening_cash", "10").json()
+    url: str
+    body: dict
+    preview: Response
+    url, body, preview = correction(db_client, aid, original, replacement(original, amount="20.00"))
+    body["expected_revision"] = preview.json()["revision"]
+    saved: Response = db_client.post(url, json=body)
+    assert saved.status_code == 200
+    with Session(database) as session:
+        stored: LedgerCorrection | None = session.scalar(select(LedgerCorrection))
+        assert stored is not None
+        # Existing immutable request evidence can retain the old unnormalized spelling.
+        stored.request_body = json.dumps(
+            {key: value for key, value in body.items() if key != "request_key"}
+        )
+        session.commit()
+    body["replacement"]["amount"] = "20"
+    body["replacement"]["request_key"] = str(uuid4())
+    assert db_client.post(url, json=body).json() == saved.json()
+    assert len(db_client.get(f"/api/accounts/{aid}/ledger").json()["corrections"]) == 1

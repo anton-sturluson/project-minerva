@@ -1,3 +1,5 @@
+export const MARKET_DATA_TIMEOUT = 60_000;
+
 export async function api<T>(
   path: string,
   options?: RequestInit,
