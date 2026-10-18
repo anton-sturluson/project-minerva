@@ -20,11 +20,15 @@ Files are finalized before their database references are committed. Artifact wri
 
 ## Research and evidence
 
-Each lead has at most two searches, six downloads including archive navigation, and three identity assessments. Source verification uses `gpt-6-luna`; thesis extraction and claim review each use `gpt-6.1-sol`. These are separate schema-constrained API calls, not agent sessions. OpenAI calls use low reasoning, a 180-second timeout, no automatic SDK retries and `store=False`.
+A Sol coordinator receives the full newsletter URL, archived newsletter text and selected roster. It groups related leads by manager and reporting period, delegates groups to parallel Luna research agents, and directs follow-up using their results. Workers choose their own search queries and follow HTML or PDF links. They share archived candidate documents, while attribution remains specific to each company and fund. Existing ready records supply at most two recent source URL hints for each exact fund, excluding future issues; current research downloads and checks them again rather than inheriting prior approvals. This replaces the former fixed two-query search. Up to four workers run concurrently under the existing processing deadline.
 
-Set `MINERVA_IDEAS_SOURCE_MODEL`, `MINERVA_IDEAS_EXTRACTION_MODEL` and `MINERVA_IDEAS_REVIEW_MODEL` to override stages. An explicit `--model` overrides all three for a single invocation (for example, `--model gemini-2.5-flash-lite` for cheap diagnostics). OpenAI stages require `OPENAI_API_KEY`; Gemini stages require `GEMINI_API_KEY`. No silent model fallback is used. Model calls have bounded time/output. Provider failures are operational errors, not unavailable-source claims.
+The research tools are web search, public-page navigation, source verification and researched exclusion. Python downloads and converts documents, then persists each result as it arrives. Public HTML links are paginated rather than restricted to dated PDFs. Browser collection can recover rendered public HTML when direct collection fails; this rendered evidence records its collection method. Browser or download failure is unfinished work, not proof that an original does not exist.
 
-Company and fund identity must match the discovery lead. Distinctive fund words are preserved; a sibling fund is not a substitute. The displayed period retains the source wording. A normalized period end is used only for the documented 190-day freshness window and the check against future commentary.
+Defaults: `gpt-6.1-sol` directs research; `gpt-6-luna` searches, verifies source identity and extracts theses; a separate `gpt-6.1-sol` call reviews claim support. Agent calls use the Responses API with narrow typed tools, full response/reasoning replay and `store=False`. No unrestricted shell tool or general agent framework is added. [ADR-0001](adr/0001-direct-original-source-research-with-agents.md) records the decision.
+
+Set `MINERVA_IDEAS_ORCHESTRATOR_MODEL`, `MINERVA_IDEAS_SOURCE_MODEL`, `MINERVA_IDEAS_EXTRACTION_MODEL` and `MINERVA_IDEAS_REVIEW_MODEL` to override roles. An explicit `--model` overrides every role for that invocation; use `--model gpt-6-luna` for cheaper research diagnostics. Agent research requires GPT models and `OPENAI_API_KEY`; `BRAVE_API_KEY` provides the workers' chosen web searches. Standalone extraction still supports Gemini overrides. There is no silent model fallback. Provider failures remain operational errors, not unavailable-source claims.
+
+Company and fund identity must match the discovery lead. A shortened issuer name is accepted only when the same archived document explicitly contains the full discovery name; unrelated substrings and sibling funds remain invalid. Distinctive fund words are preserved; a sibling fund is not a substitute. The displayed period retains the source wording. A normalized period end is used only for the documented 190-day freshness window and the check against future commentary.
 
 Models select source block/passage IDs. Python supplies the exact archived evidence. Claims require investment reasoning about the featured company; holdings weights, performance attribution and general manager commentary alone are excluded. A separate support review checks each claim against its selected evidence, with at most one correction. Equity/credit, stance and explicitly stated action are separate fields. Semantic review remains fallible; inspect the retained evidence when reviewing a view.
 
@@ -34,6 +38,7 @@ Models select source block/passage IDs. Python supplies the exact archived evide
 uv sync --extra jobwatch
 uv run minerva ideas init
 uv run minerva ideas run
+uv run minerva ideas run --url https://hfbestideas.substack.com/p/ISSUE_SLUG
 uv run minerva ideas run --fresh          # explicitly redo all research for this issue
 uv run minerva ideas status              # latest issue, including delivery receipts
 uv run minerva ideas status RUN_UUID
@@ -81,15 +86,15 @@ openclaw cron edit EXISTING_JOB_UUID --no-deliver --clear-thread-id
 
 Each new publication starts with `🧵 Manager Ideas - YYYY-MM-DD`, using the newsletter issue date. The complete verified summary follows in replies to that new message. Long summaries are split on line boundaries into bounded replies in the same thread. Neither the parent title nor the destination is selected by a model.
 
-Configure the three stage environment variables above in the command environment. The wrapper uses the installed `.venv/bin/minerva`, with no dependency installation during scheduled runs. Brave/OpenAI keys are inherited from the Gateway environment.
+Configure the four model environment variables above in the command environment. Run from the clean main checkout using project-local dependencies (`uv run`); do not use a development worktree as the scheduled runtime. Brave/OpenAI keys are inherited from the Gateway environment.
 
-`weekly` reconciles legacy announcements, researches incomplete work, then publishes only when no pending, sourced or failed items remain. Gaps stay in diagnostic status. It returns `NO_REPLY` after publication or a confirmed duplicate; the publication receipt in `minerva ideas status` records actual Slack delivery. With announcements disabled, the cron's own announcement status is not the publication receipt.
+`weekly` reconciles legacy announcements, researches incomplete work, then publishes only when no pending, sourced or failed items remain. Every digest discloses verified and unresolved lead counts. Research with gaps reports `complete_with_gaps`; a completed search does not establish complete source coverage. It returns `NO_REPLY` after publication or a confirmed duplicate; the publication receipt in `minerva ideas status` records actual Slack delivery. With announcements disabled, the cron's own announcement status is not the publication receipt.
 
 Publication identity includes the format, destination, parent title and full digest. The existing publications table stores the parent ID and acknowledged reply IDs as progress; raw transport acknowledgements stay beside the archived payload. A timeout or partial send marks the publication uncertain and blocks automatic resending, preserving any confirmed parent/replies for investigation. Read the saved receipts and Slack thread before resolving an uncertain send. Do not delete publication rows to force a retry.
 
 `render` remains a side-effect-free preview. `prepare` and `reconcile` retain the legacy announce-mode contract for earlier receipts; `prepare` does not send the new threaded format. Legacy reconciliation requires exact payload equality, successful execution and the explicit destination in the Gateway receipt.
 
-The runtime uses a dedicated clean worktree detached at a verified merged `main` commit. Keep that checkout and its ignored environment file until a verified deployment replaces it; do not use a development branch as the scheduled runtime. Back up the existing job configuration before changing it; do not create a duplicate automation or restart the Gateway for this workflow.
+The shared main checkout is the scheduled runtime. Keep it on `main`, clean and up to date with merged `origin/main`. Verify that state before running or changing scheduled jobs. Back up the existing job configuration before changing it; do not create a duplicate automation or restart the Gateway for this workflow.
 
 ## Validation
 
@@ -100,10 +105,12 @@ The PR series includes live Postgres import/source tests, bounded public-source 
 ### Implementation
 - [CLI](../src/harness/commands/ideas.py) — command contracts and scheduled entry point.
 - [Store](../src/harness/ideas/store.py) — the three-table Postgres schema and filesystem contract.
-- [Research](../src/harness/ideas/research.py) and [extraction](../src/harness/ideas/extraction.py) — source budgets, identity checks and evidence gates.
+- [Agent coordination](../src/harness/ideas/agents.py), [source verification](../src/harness/ideas/research.py) and [extraction](../src/harness/ideas/extraction.py) — adaptive research, identity checks and evidence gates.
 - [Publication](../src/harness/ideas/publication.py) — deterministic rendering, duplicate protection and transport verification.
 
 ### Model API
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling) — typed tools executed by the application.
+- [Stateless reasoning replay](https://developers.openai.com/cookbook/examples/responses_api/reasoning_items) — preserve reasoning and tool results with storage disabled.
 - [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs) — schema-constrained responses; application evidence checks remain mandatory.
 - [GPT-6 model guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.1-sol) — exact model IDs and supported reasoning settings.
 

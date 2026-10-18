@@ -37,10 +37,18 @@ def checked_view(row: dict, run: dict) -> dict:
 
 def render(run_id: UUID) -> str:
     run = store.get_run(run_id)
-    rows = [r for r in store.items(run_id) if r["state"] == "ready"]
-    if not rows:
+    all_rows: list[dict] = store.items(run_id)
+    rows: list[dict] = [r for r in all_rows if r["state"] == "ready"]
+    if not all_rows:
         return ""
-    lines = [f"*Original manager ideas — {run['issue_date']}*", ""]
+    unresolved: int = len(all_rows) - len(rows)
+    lines: list[str] = [
+        f"*Original manager ideas — {run['issue_date']}*",
+        f"Coverage: {len(rows)} of {len(all_rows)} leads verified; {unresolved} unresolved.",
+        "",
+    ]
+    if not rows:
+        lines.append("No verified ideas are available yet. Unresolved leads are not evidence that no original thesis exists.")
     groups = {}
     for row in rows:
         groups.setdefault(row["company"], []).append(row)

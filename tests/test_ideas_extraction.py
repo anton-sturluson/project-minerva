@@ -120,6 +120,6 @@ def test_extraction_routes_source_and_claims_to_separate_models(tmp_path, monkey
     extraction.extract(run_id, 1)
     assert calls == [
         ("source", "gpt-6-luna"),
-        ("View", "gpt-6.1-sol"),
+        ("View", "gpt-6-luna"),
         ("Review", "gpt-6.1-sol"),
     ]

@@ -10,8 +10,10 @@ import shutil
 import socket
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from typing import NotRequired, TypedDict
+from urllib.parse import SplitResult, urljoin, urlsplit
 from uuid import UUID
 
 import httpx
@@ -21,6 +23,43 @@ from psycopg.types.json import Jsonb
 from harness.ideas import store
 
 MAX_BYTES = 25 * 1024 * 1024
+LINK_PAGE_SIZE = 100
+
+
+class SourcePart(TypedDict):
+    """One numbered block extracted from the archived source."""
+
+    id: str
+    text: str
+
+
+class SourceDocument(TypedDict):
+    """Metadata compatible with the existing source archive and evidence loader."""
+
+    url: str
+    sha256: str
+    sections: str
+    collection: NotRequired[str]
+
+
+class PageLink(TypedDict):
+    """A navigation candidate that is revalidated before any network request."""
+
+    url: str
+    label: str
+
+
+class BrowseResult(TypedDict):
+    """A readable original or navigation page with explicit link pagination."""
+
+    url: str
+    document: SourceDocument | None
+    parts: list[SourcePart]
+    links: list[PageLink]
+    link_offset: int
+    next_link_offset: int | None
+    total_links: int
+    text_error: str | None
 
 
 def public_url(url: str) -> str:
@@ -115,16 +154,184 @@ def sections(payload: bytes) -> tuple[str, list[dict]]:
     return kind, parts
 
 
-def archive(folder: Path, url: str, *, fetch=download) -> dict:
-    payload, final_url = fetch(url)
-    digest = hashlib.sha256(payload).hexdigest()
-    kind, parts = sections(payload)
-    base = f"research/documents/{digest}"
+def page_links(payload: bytes, url: str) -> list[PageLink]:
+    """Keep HTML article and document destinations without date or PDF filtering.
+
+    Obvious nonpublic URLs are omitted here. DNS and redirect checks still run
+    through public_url before a returned candidate can be fetched.
+    """
+    if payload.lstrip().startswith(b"%PDF-"):
+        return []
+    tree: html.HtmlElement = html.fromstring(payload)
+    found: dict[str, PageLink] = {}
+    node: html.HtmlElement
+    for node in tree.xpath("//a[@href]"):
+        try:
+            destination: str = urljoin(url, node.get("href", "")).split("#", 1)[0]
+            parsed: SplitResult = urlsplit(destination)
+            host: str = (parsed.hostname or "").lower().rstrip(".")
+        except ValueError:
+            continue
+        if (
+            parsed.scheme != "https"
+            or not host
+            or parsed.username
+            or parsed.password
+            or host.endswith((".local", ".localhost"))
+            or host == "hfbestideas.com"
+            or host.endswith(".hfbestideas.com")
+            or host == "hfbestideas.substack.com"
+            or any(character in destination for character in "\r\n\t<>|")
+        ):
+            continue
+        try:
+            if not ipaddress.ip_address(host).is_global:
+                continue
+        except ValueError:
+            if "." not in host:
+                continue
+        label: str = " ".join(node.text_content().split()) or node.get("title", "")
+        if destination not in found or not found[destination]["label"]:
+            found[destination] = {"url": destination, "label": label[:500]}
+    return list(found.values())
+
+
+def rendered_download(url: str) -> tuple[bytes, str]:
+    """Read the actual rendered HTML in an owned browser tab and then close it."""
+    public_url(url)
+    browser: str | None = shutil.which("browser")
+    if browser is None:
+        raise ValueError(
+            "Browser recovery is unavailable; browser CLI is not installed"
+        )
+    opened: subprocess.CompletedProcess[str] = subprocess.run(
+        [browser, "open", url, "--new", "--window", "--no-delay"],
+        capture_output=True,
+        text=True,
+        timeout=90,
+        check=True,
+    )
+    match: re.Match[str] | None = re.search(
+        r"^Tab alias: (t[0-9]+)$", opened.stdout, re.M
+    )
+    if match is None:
+        raise ValueError("Browser recovery did not return an owned tab alias")
+    alias: str = match[1]
+    try:
+        subprocess.run(
+            [browser, "wait", "--stable", "body", "--timeout", "15000", "--tab", alias],
+            capture_output=True,
+            text=True,
+            timeout=25,
+            check=True,
+        )
+        expression: str = "JSON.stringify({url:location.href,html:document.documentElement.outerHTML})"
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            [browser, "eval", expression, "--tab", alias],
+            capture_output=True,
+            text=True,
+            timeout=40,
+            check=True,
+        )
+        # JSON.stringify produces one line; CLI diagnostics follow on later lines.
+        page: dict[str, str] = json.loads(result.stdout.splitlines()[0])
+        final_url: str = public_url(page["url"])
+        payload: bytes = page["html"].encode()
+        if not payload or len(payload) > MAX_BYTES:
+            raise ValueError("Rendered source is empty or exceeds 25 MB")
+        return payload, final_url
+    finally:
+        subprocess.run(
+            [browser, "close", alias],
+            capture_output=True,
+            text=True,
+            timeout=25,
+            check=True,
+        )
+
+
+def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
+    """Browse an original or archive page without discarding useful navigation links."""
+    if link_offset < 0:
+        raise ValueError("Link offset must be nonnegative")
+    collection: str = "http"
+    payload: bytes
+    final_url: str
+    try:
+        payload, final_url = download(url)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code not in {403, 429}:
+            raise
+        payload, final_url = rendered_download(url)
+        collection = "browser"
+    links: list[PageLink] = page_links(payload, final_url)
+    kind: str = ""
+    parts: list[SourcePart] = []
+    text_error: str | None = None
+    try:
+        kind, parts = sections(payload)
+    except ValueError as exc:
+        text_error = str(exc)
+        if collection == "http" and "too little readable text" in text_error:
+            try:
+                payload, final_url = rendered_download(url)
+                collection = "browser"
+                links = page_links(payload, final_url)
+                kind, parts = sections(payload)
+                text_error = None
+            except (ValueError, OSError, subprocess.SubprocessError) as recovery:
+                text_error += f"; browser recovery failed ({type(recovery).__name__})"
+    document: SourceDocument | None = None
+    if text_error is None:
+        document = _archive_payload(folder, final_url, payload, kind, parts)
+        document["collection"] = collection
+        if collection == "browser":
+            request_hash: str = hashlib.sha256(url.encode()).hexdigest()[:16]
+            store.json_artifact(
+                folder,
+                f"research/documents/{document['sha256']}.{request_hash}.provenance.json",
+                {"collection": "browser", "requested_url": url, "url": final_url},
+            )
+    next_offset: int = link_offset + LINK_PAGE_SIZE
+    return {
+        "url": final_url,
+        "document": document,
+        "parts": parts,
+        "links": links[link_offset:next_offset],
+        "link_offset": link_offset,
+        "next_link_offset": next_offset if next_offset < len(links) else None,
+        "total_links": len(links),
+        "text_error": text_error,
+    }
+
+
+def _archive_payload(
+    folder: Path, url: str, payload: bytes, kind: str, parts: list[SourcePart]
+) -> SourceDocument:
+    """Save eligible source bytes and blocks once for archive and browse callers."""
+    digest: str = hashlib.sha256(payload).hexdigest()
+    base: str = f"research/documents/{digest}"
     store.write_artifact(folder, f"{base}.{kind}", payload)
     store.json_artifact(folder, f"{base}.json", parts)
-    readable = "\n\n".join(f"## {p['id']}\n\n{p['text']}" for p in parts) + "\n"
+    readable: str = "\n\n".join(f"## {p['id']}\n\n{p['text']}" for p in parts) + "\n"
     store.write_artifact(folder, f"{base}.md", readable.encode())
-    return {"url": final_url, "sha256": digest, "sections": f"{base}.json"}
+    return {"url": url, "sha256": digest, "sections": f"{base}.json"}
+
+
+def archive(
+    folder: Path,
+    url: str,
+    *,
+    fetch: Callable[[str], tuple[bytes, str]] = download,
+) -> SourceDocument:
+    """Archive one original with the existing readable-text eligibility limits."""
+    payload: bytes
+    final_url: str
+    payload, final_url = fetch(url)
+    kind: str
+    parts: list[SourcePart]
+    kind, parts = sections(payload)
+    return _archive_payload(folder, final_url, payload, kind, parts)
 
 
 def load_sections(folder: Path, document: dict) -> list[dict]:

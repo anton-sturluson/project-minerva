@@ -16,15 +16,14 @@ import httpx
 import yaml
 
 from harness.ideas import store
-from harness.ideas.extraction import extract
-from harness.ideas.model import ModelError, check_model, resolve_models
-from harness.ideas.research import discover
+from harness.ideas.model import ModelError, StageModels, check_model, resolve_models
 from harness.ideas.roster import parse_roster
 
 FEED = "https://hfbestideas.substack.com/feed"
 
 
-def fetch_issue() -> tuple[dict, bytes]:
+def fetch_issue(issue_url: str | None = None) -> tuple[dict, bytes]:
+    """Read the latest newsletter roster, or select an explicit URL from its feed."""
     response = httpx.get(FEED, timeout=30, follow_redirects=True)
     response.raise_for_status()
     if len(response.content) > 5 * 1024 * 1024:
@@ -34,6 +33,8 @@ def fetch_issue() -> tuple[dict, bytes]:
     for item in tree.findall("./channel/item"):
         body = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or ""
         if "🔹" not in unescape(body):
+            continue
+        if issue_url is not None and item.findtext("link") != issue_url:
             continue
         raw_date = item.findtext("pubDate")
         if not raw_date:
@@ -52,7 +53,9 @@ def fetch_issue() -> tuple[dict, bytes]:
             )
         )
     if not choices:
-        raise ValueError("No issue roster found in feed")
+        raise ValueError(
+            "No matching issue roster in feed; use minerva ideas import for an archived issue."
+        )
     _, issue, body = max(choices, key=lambda row: row[0])
     # Downloaded XML is converted to YAML for readable research artifacts.
     readable = yaml.safe_dump(
@@ -63,8 +66,15 @@ def fetch_issue() -> tuple[dict, bytes]:
     return issue, readable
 
 
-def start(*, limit: int = 50, model: str | None = None, fresh: bool = False) -> dict:
-    issue, feed = fetch_issue()
+def start(
+    *,
+    limit: int = 50,
+    model: str | None = None,
+    fresh: bool = False,
+    issue_url: str | None = None,
+) -> dict:
+    """Archive a newsletter and start or resume agent-directed original research."""
+    issue, feed = fetch_issue(issue_url)
     # Avoid generating a duplicate run when the scheduler sees the same newsletter.
     with store.connect() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(719234002)")
@@ -87,6 +97,17 @@ def start(*, limit: int = 50, model: str | None = None, fresh: bool = False) -> 
     return resume(run_id, limit=limit, model=model)
 
 
+def selected_ordinals(rows: list[dict], limit: int, retry_gaps: bool) -> list[int]:
+    """Select pending work without repeating approved or explicitly skipped views."""
+    if not 1 <= limit <= 50:
+        raise ValueError("limit must be between 1 and 50")
+    return [
+        row["ordinal"]
+        for row in rows
+        if row["state"] != "ready" and (row["state"] != "gap" or retry_gaps)
+    ][:limit]
+
+
 def resume(
     run_id: UUID,
     *,
@@ -94,56 +115,75 @@ def resume(
     model: str | None = None,
     retry_gaps: bool = False,
 ) -> dict:
+    """Let Sol direct parallel Luna research while preserving completed evidence."""
+    from harness.ideas.agents import discover
+
     if not 1 <= limit <= 50:
         raise ValueError("limit must be between 1 and 50")
-    if not os.environ.get("BRAVE_API_KEY"):
-        raise ValueError("BRAVE_API_KEY is required before starting research")
-    models = resolve_models(model)
-    for selected in asdict(models).values():
-        check_model(selected)
-    deadline = time.monotonic() + 1200
-    processed = 0
     with store.run_lock(run_id):
-        run = store.get_run(run_id)
-        store.json_artifact(
-            store.run_folder(run),
-            f"research/attempts/{uuid4()}.json",
-            {"models": asdict(models), "limit": limit, "retry_gaps": retry_gaps},
-        )
-        for row in store.items(run_id):
-            if row["state"] == "ready" or (row["state"] == "gap" and not retry_gaps):
-                continue
-            if processed >= limit or time.monotonic() > deadline:
-                break
-            processed += 1
-            try:
-                if not row.get("document") or (retry_gaps and row["state"] == "gap"):
-                    outcome = discover(run_id, row["ordinal"], model=model)
-                    if "gap" in outcome:
-                        continue
-                extract(run_id, row["ordinal"], model=model)
-            except Exception as exc:
-                # One failed item must not discard the valid work on other companies.
-                # Provider exception text may contain request details; save only a safe class.
-                reason = (
-                    str(exc)[:500]
-                    if isinstance(exc, ValueError)
-                    else f"{type(exc).__name__}: collection/model request failed"
+        run: dict = store.get_run(run_id)
+        rows: list[dict] = store.items(run_id)
+        ordinals: list[int] = selected_ordinals(rows, limit, retry_gaps)
+        if ordinals:
+            if not os.environ.get("BRAVE_API_KEY"):
+                raise ValueError("BRAVE_API_KEY is required before starting research")
+            models: StageModels = resolve_models(model)
+            coordinator: str = model or os.environ.get(
+                "MINERVA_IDEAS_ORCHESTRATOR_MODEL", "gpt-6.1-sol"
+            )
+            selected: str
+            for selected in (*asdict(models).values(), coordinator):
+                check_model(selected)
+                if not selected.startswith("gpt-"):
+                    raise ValueError(
+                        "Agent research requires GPT models; use --model gpt-6-luna for cheaper diagnostics."
+                    )
+            store.json_artifact(
+                store.run_folder(run),
+                f"research/attempts/{uuid4()}.json",
+                {
+                    "models": {"orchestrator": coordinator, **asdict(models)},
+                    "limit": limit,
+                    "retry_gaps": retry_gaps,
+                    "ordinals": ordinals,
+                },
+            )
+            with store.connect() as conn:
+                conn.execute(
+                    "UPDATE minerva_ideas.items SET state='pending',error=NULL "
+                    "WHERE run_id=%s AND ordinal=ANY(%s) AND state IN ('gap','failed')",
+                    (run_id, ordinals),
                 )
+            try:
+                discover(
+                    run_id, ordinals, model=model, deadline=time.monotonic() + 1200
+                )
+            except ModelError:
                 with store.connect() as conn:
                     conn.execute(
-                        "UPDATE minerva_ideas.items SET state='failed',error=%s WHERE run_id=%s AND ordinal=%s",
-                        (reason, run_id, row["ordinal"]),
+                        "UPDATE minerva_ideas.items SET state='failed',error=%s "
+                        "WHERE run_id=%s AND ordinal=ANY(%s) AND state IN ('pending','sourced')",
+                        (
+                            "Model request failed; inspect archived agent traces and resume.",
+                            run_id,
+                            ordinals,
+                        ),
                     )
-                if isinstance(exc, ModelError):
-                    break
-        result = store.status(run_id)
-        result["processed"] = processed
+                store.json_artifact(
+                    store.run_folder(run),
+                    f"research/status/{uuid4()}.json",
+                    store.status(run_id),
+                )
+                raise
+        result: dict = store.status(run_id)
+        result["processed"] = len(ordinals)
         result["outcome"] = (
             "partial"
-            if result["counts"]["pending"]
-            or result["counts"]["sourced"]
-            or result["counts"]["failed"]
+            if any(
+                result["counts"][state] for state in ("pending", "sourced", "failed")
+            )
+            else "complete_with_gaps"
+            if result["counts"]["gap"]
             else "complete"
         )
         store.json_artifact(

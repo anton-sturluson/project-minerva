@@ -1,22 +1,17 @@
-"""Bounded discovery of original manager documents; never HF thesis summaries."""
+"""Original-source search and manager-document identity verification."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
-import socket
-from collections import deque
 from datetime import date
-from urllib.parse import urljoin, urlsplit
-from uuid import UUID, uuid4
 
 import httpx
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict
 
 from harness.ideas import store
-from harness.ideas.documents import archive, load_sections
+from harness.ideas.documents import load_sections
 from harness.ideas.model import generate, resolve_models
 
 
@@ -73,8 +68,11 @@ def words(value: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", value.casefold())
 
 
-def validate_target(match: Match, row: dict) -> None:
-    legal = {
+def validate_target(
+    match: Match, row: dict[str, str], parts: list[dict[str, str]] | None = None
+) -> None:
+    """Require matching names or an evidenced short name in this exact original."""
+    legal: set[str] = {
         "inc",
         "incorporated",
         "corp",
@@ -88,21 +86,22 @@ def validate_target(match: Match, row: dict) -> None:
         "holdings",
         "group",
     }
-    expected = words(row["company"])
-    observed = words(match.company)
+    expected: list[str] = words(row["company"])
+    observed: list[str] = words(match.company)
 
-    def issuer_name(tokens):
-        tokens = list(tokens)
-        while tokens and tokens[-1] in legal | {"capital"}:
-            tokens.pop()
-        return " ".join(tokens)
+    def issuer_name(tokens: list[str]) -> str:
+        """Remove only trailing legal issuer descriptors."""
+        result: list[str] = list(tokens)
+        while result and result[-1] in legal | {"capital"}:
+            result.pop()
+        return " ".join(result)
 
-    aliases = {" ".join(expected), issuer_name(expected)}
-    ticker = row.get("symbol", "").split(" ")[0].casefold()
+    aliases: set[str] = {" ".join(expected), issuer_name(expected)}
+    ticker: str = row.get("symbol", "").split(" ")[0].casefold()
     if len(ticker) >= 3 and ticker.isalpha():
         aliases.add(ticker)
     # A document may use a recognizable issuer acronym, e.g. TSMC.
-    acronym_words = list(expected)
+    acronym_words: list[str] = list(expected)
     while acronym_words and acronym_words[-1] in {
         "limited",
         "ltd",
@@ -112,15 +111,31 @@ def validate_target(match: Match, row: dict) -> None:
         "corp",
     }:
         acronym_words.pop()
-    acronym = "".join(w[0] for w in acronym_words)
+    acronym: str = "".join(w[0] for w in acronym_words)
     if len(acronym) >= 3:
         aliases.add(acronym)
-    company = issuer_name(observed)
-    if company not in aliases and " ".join(observed) not in aliases:
+    company: str = issuer_name(observed)
+    short_tokens: list[str] = company.split()
+    issuer_tokens: list[str] = issuer_name(expected).split()
+    full_name: str = " ".join(expected)
+    evidenced_short_name: bool = bool(
+        short_tokens
+        and len(short_tokens) < len(issuer_tokens)
+        and issuer_tokens[-len(short_tokens) :] == short_tokens
+        and any(
+            (" " + full_name + " ") in (" " + " ".join(words(part["text"])) + " ")
+            for part in (parts or [])
+        )
+    )
+    if (
+        company not in aliases
+        and " ".join(observed) not in aliases
+        and not evidenced_short_name
+    ):
         raise ValueError(
             "Original document company does not match the discovery company"
         )
-    descriptors = legal | {
+    descriptors: set[str] = legal | {
         "fund",
         "funds",
         "strategy",
@@ -135,13 +150,18 @@ def validate_target(match: Match, row: dict) -> None:
         "wm",
         "the",
     }
-    core = lambda value: " ".join(w for w in words(value) if w not in descriptors)
-    wanted, actual = core(row["fund"]), core(match.fund)
+
+    def core(value: str) -> str:
+        """Keep the distinctive words that distinguish sibling funds."""
+        return " ".join(w for w in words(value) if w not in descriptors)
+
+    wanted: str = core(row["fund"])
+    actual: str = core(match.fund)
     if not wanted or actual != wanted:
-        prefix = (
+        prefix: str = (
             wanted[: -len(actual)].strip() if actual and wanted.endswith(actual) else ""
         )
-        publisher = " " + core(match.publisher_quote) + " "
+        publisher: str = " " + core(match.publisher_quote) + " "
         if not prefix or (" " + prefix + " ") not in publisher:
             raise ValueError("Original document fund does not match the featured fund")
 
@@ -152,7 +172,7 @@ def validate_match(
     if not match.accepted:
         raise ValueError(match.reason or "Not a matching original")
     if row is not None:
-        validate_target(match, row)
+        validate_target(match, row, parts)
     text = " ".join(" ".join(p["text"].split()) for p in parts).casefold()
     for field in ("publisher_quote", "fund_quote", "company_quote", "period_quote"):
         quote = " ".join(getattr(match, field).split()).casefold()
@@ -219,120 +239,3 @@ def resolve_identity(identity: dict, parts: list[dict]) -> Match:
             raise ValueError("Identity cites an unknown source block")
         data[key + "_quote"] = blocks[block]
     return Match.model_validate(data)
-
-
-def linked_letters(folder, document, year):
-    """Follow dated PDF links from a manager archive instead of summarizing its index."""
-    from lxml import html
-
-    path = folder / f"research/documents/{document['sha256']}.html"
-    if not path.exists():
-        return []
-    tree = html.fromstring(path.read_bytes())
-    for node in tree.xpath("//nav | //footer | //header"):
-        node.drop_tree()
-    links = []
-    for node in tree.xpath("//a[@href]"):
-        url = urljoin(document["url"], node.get("href"))
-        label = " ".join(node.text_content().split())
-        target = (url + " " + label).lower()
-        is_letter = re.search(
-            r"letter|commentary|qcommentary|q[1-4]|[1-4]q(?:20)?[0-9]{2}", target
-        )
-        is_legal = re.search(r"form.?crs|crs-|prospectus|fact.?sheet|privacy", target)
-        if (
-            ".pdf" in url.lower()
-            and str(year) in (url + label)
-            and is_letter
-            and not is_legal
-        ):
-            if url not in links:
-                links.append(url)
-    return links[:2]
-
-
-def discover(
-    run_id: UUID,
-    ordinal: int,
-    *,
-    model=None,
-    searcher=search,
-    collector=archive,
-    assessor=assess,
-) -> dict:
-    run = store.get_run(run_id)
-    row = next((r for r in store.items(run_id) if r["ordinal"] == ordinal), None)
-    if row is None:
-        raise ValueError("Unknown roster ordinal")
-    folder = store.run_folder(run)
-    trace = {"ordinal": ordinal, "searches": [], "candidates": []}
-    visited = set()
-    assessments = downloads = 0
-    queries = [
-        f'"{row["fund"]}" investor letter quarterly commentary {run["issue_date"].year}',
-        f"{row['fund']} shareholder letter {run['issue_date'].year} {row['company']}",
-    ]
-    try:
-        for query_number, query in enumerate(queries):
-            results = searcher(query)
-            trace["searches"].append({"query": query, "results": results})
-            queue = deque(r["url"] for r in results)
-            while (
-                queue
-                and downloads < 6
-                and assessments < (2 if query_number == 0 else 3)
-            ):
-                url = queue.popleft()
-                host = (urlsplit(url).hostname or "").lower()
-                if (
-                    url in visited
-                    or "hfbestideas" in host
-                    or urlsplit(url).scheme != "https"
-                    or any(
-                        host == h or host.endswith("." + h)
-                        for h in (
-                            "yahoo.com",
-                            "insidermonkey.com",
-                            "kalkine.com.au",
-                            "seekingalpha.com",
-                            "equibles.com",
-                        )
-                    )
-                ):
-                    continue
-                visited.add(url)
-                downloads += 1
-                try:
-                    document = collector(folder, url)
-                    links = linked_letters(folder, document, run["issue_date"].year)
-                    if links:
-                        trace["candidates"].append({"url": url, "archive_links": links})
-                        queue.extendleft(reversed(links))
-                        continue
-                    assessments += 1
-                    match = assessor(row, run, document, model=model)
-                    document["identity"] = match.model_dump(mode="json")
-                    trace["candidates"].append({"url": url, "accepted": True})
-                    with store.connect() as conn:
-                        conn.execute(
-                            "UPDATE minerva_ideas.items SET document=%s,state='sourced',error=NULL WHERE run_id=%s AND ordinal=%s",
-                            (Jsonb(document), run_id, ordinal),
-                        )
-                    return document
-                except (ValueError, httpx.HTTPError, socket.gaierror) as exc:
-                    trace["candidates"].append(
-                        {"url": url, "accepted": False, "reason": str(exc)[:500]}
-                    )
-            if downloads >= 6 or assessments >= 3:
-                break
-        reason = f"No verified original found within budget ({len(trace['searches'])} searches, {downloads} downloads, {assessments} assessments); see research trace"
-        with store.connect() as conn:
-            conn.execute(
-                "UPDATE minerva_ideas.items SET state='gap',error=%s WHERE run_id=%s AND ordinal=%s",
-                (reason, run_id, ordinal),
-            )
-        return {"gap": reason}
-    finally:
-        store.json_artifact(
-            folder, f"research/searches/{ordinal}-{uuid4()}.json", trace
-        )

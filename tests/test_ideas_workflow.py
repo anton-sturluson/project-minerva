@@ -1,49 +1,18 @@
-from contextlib import nullcontext
-from datetime import date
-from uuid import uuid4
-
 from harness.ideas import workflow
 
 
-def test_resume_skips_ready_and_gaps_and_processes_only_limit(tmp_path, monkeypatch):
-    run_id = uuid4()
-    monkeypatch.setenv("BRAVE_API_KEY", "test-not-used")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-not-used")
-    monkeypatch.setattr(workflow.store, "run_lock", lambda _: nullcontext())
-    monkeypatch.setattr(
-        workflow.store,
-        "get_run",
-        lambda _: {"id": run_id, "issue_date": date(2026, 9, 30)},
-    )
-    monkeypatch.setattr(workflow.store, "run_folder", lambda _: tmp_path)
-    rows = [
+def test_resume_selection_preserves_ready_and_requires_explicit_gap_retry() -> None:
+    """Resuming selects only eligible ordinals and respects the requested limit."""
+    rows: list[dict] = [
         {"ordinal": 1, "state": "ready"},
         {"ordinal": 2, "state": "gap"},
         {"ordinal": 3, "state": "pending"},
-        {"ordinal": 4, "state": "pending"},
+        {"ordinal": 4, "state": "failed"},
+        {"ordinal": 5, "state": "sourced"},
     ]
-    monkeypatch.setattr(workflow.store, "items", lambda _: rows)
-    calls = []
-    monkeypatch.setattr(
-        workflow,
-        "discover",
-        lambda _, ordinal, **kw: (
-            calls.append(("discover", ordinal)) or {"url": "source"}
-        ),
-    )
-    monkeypatch.setattr(
-        workflow, "extract", lambda _, ordinal, **kw: calls.append(("extract", ordinal))
-    )
-    monkeypatch.setattr(
-        workflow.store,
-        "status",
-        lambda _: {
-            "counts": {"ready": 2, "pending": 1, "sourced": 0, "failed": 0, "gap": 1}
-        },
-    )
-    result = workflow.resume(run_id, limit=1)
-    assert calls == [("discover", 3), ("extract", 3)]
-    assert result["outcome"] == "partial"
+    assert workflow.selected_ordinals(rows, 50, False) == [3, 4, 5]
+    assert workflow.selected_ordinals(rows, 2, True) == [2, 3]
+    assert workflow.selected_ordinals(rows[:2], 50, False) == []
 
 
 def test_feed_accepts_html_encoded_roster_bullets(monkeypatch):

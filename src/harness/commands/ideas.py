@@ -91,11 +91,11 @@ def research(
         None, help="Override all stage models for this invocation."
     ),
 ):
-    """Find and verify an original manager source: at most 2 searches/6 downloads/3 assessments."""
-    from harness.ideas.research import discover
+    """Research one lead with adaptive agent searches and evidence review."""
+    from harness.ideas.agents import discover
 
     with store.run_lock(run_id):
-        emit(discover(run_id, ordinal, model=model))
+        emit(discover(run_id, [ordinal], model=model))
 
 
 @app.command("extract")
@@ -125,11 +125,12 @@ def run(
     model: str | None = typer.Option(
         None, help="Override all stage models for this invocation."
     ),
+    url: str | None = typer.Option(None, help="Select a newsletter URL from the feed instead of the latest issue."),
 ):
     """Discover the latest issue and research its original manager sources."""
     from harness.ideas.workflow import start
 
-    emit(start(limit=limit, model=model, fresh=fresh))
+    emit(start(limit=limit, model=model, fresh=fresh, issue_url=url))
 
 
 @app.command("resume")
