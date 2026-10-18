@@ -77,7 +77,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("economic research shows dated observations, chart gaps, cadence and a date filter", async ({
+test("economic research keeps dated observations, gaps and range controls", async ({
   page,
 }) => {
   await page.goto("/#research");
@@ -89,16 +89,9 @@ test("economic research shows dated observations, chart gaps, cadence and a date
   await expect(
     page.getByRole("heading", { name: "Economics", exact: true }),
   ).toBeVisible();
-  await page
-    .locator("summary")
-    .filter({ hasText: /^Household costs$/ })
-    .click();
-  await expect(
-    page.getByRole("cell", { name: "4.125", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("cell", { name: "Sep 2026", exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".economics-selected-value")).toContainText(
+    "4.125 USD per pound · Sep 2026",
+  );
   await expect(
     page.getByRole("img", { name: /Example food price/ }),
   ).toBeVisible();
@@ -112,6 +105,10 @@ test("economic research shows dated observations, chart gaps, cadence and a date
   await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(0);
   await page.getByText("Data table (5 observations)", { exact: true }).click();
   await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(5);
+  await expect(page.locator(".economics-data-table a")).toHaveCount(0);
+  await expect(
+    page.getByRole("columnheader", { name: "Notes", exact: true }),
+  ).toBeVisible();
   await page.getByText("Data table (5 observations)", { exact: true }).click();
   await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(0);
   await page.getByText("Data table (5 observations)", { exact: true }).click();
@@ -119,25 +116,16 @@ test("economic research shows dated observations, chart gaps, cadence and a date
   await expect(
     page.getByRole("cell", { name: "Unavailable", exact: true }),
   ).toBeVisible();
-  await page
-    .getByText("Sources & collection schedule", { exact: true })
-    .click();
+  await page.getByText("About this measure", { exact: true }).click();
   await expect(
-    page.getByText(
-      "Automatic collection is off. Initial data remains available.",
-      { exact: true },
-    ),
+    page.getByText("Automatic collection is off.", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Next check due", { exact: true })).toHaveCount(
-    0,
-  );
   await expect(
     page.getByText("A licensed data feed is required.", { exact: false }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
-    page.getByText("Second week of the month", { exact: false }).first(),
+    page.getByRole("link", { name: "Example Statistics", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Daily", { exact: true })).toBeVisible();
   await page.getByLabel("From", { exact: true }).fill("2026-08-01");
   await expect(
     page.getByText("Data table (2 observations)", { exact: true }),
@@ -287,6 +275,10 @@ const macroSeries = [
   frequency,
   category: ["cape", "equity-gdp"].includes(key) ? "valuation" : "macro",
   source_id: key === "financial-stress" ? "stress" : "example",
+  description:
+    key === "equity-gdp"
+      ? "Fed publicly traded equity includes closed-end funds and ETFs; divided by nominal annualized GDP for the same quarter."
+      : series.description,
   latest:
     key === "financial-stress"
       ? null
@@ -298,7 +290,7 @@ const macroSeries = [
         },
 }));
 
-test("macro overview keeps measures, native periods and provisional valuations clear", async ({
+test("grouped measure picker keeps periods and selected-source details clear", async ({
   page,
   isMobile,
 }) => {
@@ -483,106 +475,84 @@ test("macro overview keeps measures, native periods and provisional valuations c
   await expect(page.getByLabel("Through", { exact: true })).toHaveValue(
     "2026-07-01",
   );
-  await page.getByText("Latest readings", { exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "U.S. macro overview" }),
-  ).toBeVisible();
-  await expect(
-    page.locator(".economics-overview").first().locator(".economics-panel"),
-  ).toHaveCount(8);
-  await expect(
-    page
-      .getByRole("region", { name: "Jobs", exact: true })
-      .getByText("150", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Jobs", exact: true })
-      .getByText("125", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Interest rates", exact: true })
-      .getByText("4.25", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Interest rates", exact: true })
-      .getByText("4.5", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Economic growth", exact: true })
-      .getByText("Q3 2026", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("region", {
-      name: "Buffett-style equity/GDP proxy",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Sep 2026 · Provisional", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText(
-      /Fed publicly traded equity includes closed-end funds and ETFs/,
-    ),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Example food price", exact: true }),
-  ).toBeHidden();
-  await page
-    .getByRole("button", { name: "Real GDP growth", exact: true })
-    .click();
   await expect(
     page.getByRole("img", { name: /Real GDP growth.*Q1 2026 to Q3 2026/ }),
   ).toBeVisible();
   await expect(page.locator(".economics-chart circle")).toHaveCount(3);
-  await page
-    .getByRole("button", { name: "Fed target lower bound", exact: true })
-    .click();
+  await expect(page.getByText("Latest readings", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByText("Sources & collection schedule", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator("summary").filter({ hasText: /^Household costs$/ }),
+  ).toHaveCount(0);
+  await measure.fill("Monthly payroll change");
+  await measure.press("Enter");
+  await expect(page.locator(".economics-selected-value")).toContainText(
+    "150 Thousands of jobs",
+  );
+  await measure.fill("Payroll change, 3-month average");
+  await measure.press("Enter");
+  await expect(page.locator(".economics-selected-value")).toContainText(
+    "125 Thousands of jobs",
+  );
+  await measure.fill("Fed target lower bound");
+  await measure.press("Enter");
   await expect(
     page.getByRole("img", { name: /Fed target lower bound/ }),
   ).toBeVisible();
+  await expect(page.locator(".economics-selected-value")).toContainText(
+    "4.25 Percent",
+  );
   await expect(page.locator(".economics-line")).toHaveAttribute(
     "d",
     /H[\d.]+ V[\d.]+/,
   );
   await expect(page.locator(".economics-line")).not.toHaveAttribute("d", / L/);
-  await expect(page.getByText(/steps preserve each target/)).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Financial stress", exact: true })
-      .getByText("Unavailable", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Financial stress", exact: true })
-      .getByText(/A permitted numerical download/),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Financial stress index", exact: true })
-    .click();
+  await measure.fill("Fed target upper bound");
+  await measure.press("Enter");
+  await expect(page.locator(".economics-selected-value")).toContainText(
+    "4.5 Percent",
+  );
+  await measure.fill("Financial stress index");
+  await measure.press("Enter");
   await expect(
     page.getByText("No observations collected for these dates."),
   ).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(
+    "Source unavailable: A permitted numerical download is not yet available.",
+  );
   await expect(page.getByRole("img")).toHaveCount(0);
-  await page.getByRole("button", { name: "Shiller CAPE", exact: true }).click();
+  await measure.fill("Buffett-style equity/GDP proxy");
+  await measure.press("Enter");
+  await expect(page.locator(".economics-selected-value")).toContainText(
+    "Q3 2026",
+  );
   await expect(
-    page.getByText(/Latest source month is provisional/),
+    page.getByText(
+      /Fed publicly traded equity includes closed-end funds and ETFs/,
+    ),
+  ).toBeHidden();
+  await page.getByText("About this measure", { exact: true }).click();
+  await expect(
+    page.getByText(
+      /Fed publicly traded equity includes closed-end funds and ETFs/,
+    ),
   ).toBeVisible();
+  await measure.fill("Shiller CAPE");
+  await measure.press("Enter");
+  await expect(page.locator(".economics-selected-value")).toContainText(
+    "Sep 2026 · Provisional",
+  );
   await page.getByText("Data table (3 observations)", { exact: true }).click();
   await expect(
     page.getByText("Latest CPI inputs are estimated.", { exact: false }),
   ).toBeVisible();
-  await page
-    .locator("summary")
-    .filter({ hasText: /^Household costs$/ })
-    .click();
   await expect(
-    page.getByRole("button", { name: "Example food price", exact: true }),
-  ).toBeVisible();
+    page.getByText("Latest source month is provisional.", { exact: false }),
+  ).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -647,20 +617,11 @@ test("all dates keeps a missing latest period and imported snapshots do not clai
   await expect(
     page.getByRole("rowheader", { name: "Oct 2026", exact: true }),
   ).toBeVisible();
-  await page
-    .getByText("Sources & collection schedule", { exact: true })
-    .click();
+  await page.getByText("About this measure", { exact: true }).click();
   await expect(
-    page.getByText("Imported snapshot date", { exact: true }),
+    page.getByText(/^Imported on .*; publisher not checked\.$/),
   ).toBeVisible();
-  await expect(
-    page.getByText("Publisher check", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("Not checked", { exact: true })).toBeVisible();
-  await expect(page.getByText("Last checked", { exact: true })).toHaveCount(0);
-  await expect(
-    page.getByText("Last successful collection", { exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByText(/Last checked:/)).toHaveCount(0);
   await page.route("**/api/research/economics", (route) =>
     route.fulfill({
       json: {
@@ -676,11 +637,12 @@ test("all dates keeps a missing latest period and imported snapshots do not clai
     }),
   );
   await page.reload();
-  await page
-    .getByText("Sources & collection schedule", { exact: true })
-    .click();
   await expect(
-    page.getByText("Last accepted data", { exact: true }),
+    page.getByRole("img", { name: /Example food price/ }),
+  ).toBeVisible();
+  await page.getByText("About this measure", { exact: true }).click();
+  await expect(
+    page.getByText(/Last checked: .*Last accepted data:/),
   ).toBeVisible();
   await expect(
     page.getByText("Last successful collection", { exact: true }),

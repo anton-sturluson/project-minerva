@@ -1,32 +1,23 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
-import { MacroOverview } from "./MacroOverview";
 import { MeasureSelector } from "./MeasureSelector";
 import { dateLabel, valueLabel } from "./economicsFormat";
 
-export type Source = {
+type Source = {
   id: string;
   name: string;
-  url: string;
-  publication_frequency: string;
-  publication_schedule: string;
-  polling_frequency: string;
-  cadence_url: string;
   enabled: boolean;
   disabled_reason: string | null;
   status: string;
   last_attempt: string | null;
   last_success: string | null;
-  next_due: string | null;
   error: string | null;
 };
 type Observation = {
   date: string;
   value: string | null;
   missing: boolean;
-  source_url: string;
   footnotes: Record<string, string>[];
-  derived_from: Record<string, string | number>[];
   provisional?: boolean;
 };
 export type Series = {
@@ -43,7 +34,6 @@ export type Series = {
     Observation,
     "date" | "value" | "missing" | "provisional"
   > | null;
-  observation_count: number;
 };
 type Catalog = {
   sources: Source[];
@@ -102,168 +92,28 @@ export function Economics() {
         </div>
       ) : !catalog ? (
         <p role="status">Loading economic data…</p>
+      ) : catalog.series.length === 0 ? (
+        <p>No economic series have been added.</p>
       ) : (
         <>
-          {catalog.series.length === 0 ? (
-            <p>No economic series have been added.</p>
-          ) : (
-            <>
-              <MeasureSelector
-                series={catalog.series}
-                selected={selected}
-                onSelect={setSelected}
-              />
-              {selected && (
-                <SeriesDetail
-                  key={selected}
-                  seriesKey={selected}
-                  source={catalog.sources.find(
-                    (source) =>
-                      source.id ===
-                      catalog.series.find((item) => item.key === selected)
-                        ?.source_id,
-                  )}
-                />
+          <MeasureSelector
+            series={catalog.series}
+            selected={selected}
+            onSelect={setSelected}
+          />
+          {selected && (
+            <SeriesDetail
+              key={selected}
+              seriesKey={selected}
+              automaticCollectionEnabled={catalog.automatic_collection_enabled}
+              source={catalog.sources.find(
+                (source) =>
+                  source.id ===
+                  catalog.series.find((item) => item.key === selected)
+                    ?.source_id,
               )}
-              <details className="economics-overview-details">
-                <summary>Latest readings</summary>
-                <MacroOverview
-                  series={catalog.series}
-                  sources={catalog.sources}
-                  selected={selected}
-                  onSelect={(key) => {
-                    setSelected(key);
-                    document
-                      .getElementById("economic-series-detail")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  }}
-                />
-              </details>
-              <details className="economics-household">
-                <summary>Household costs</summary>
-                <div className="table-scroll" tabIndex={0}>
-                  <table className="economics-catalog">
-                    <caption>Household cost series</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">Series</th>
-                        <th scope="col">Latest value</th>
-                        <th scope="col">Unit</th>
-                        <th scope="col">Observation period</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {catalog.series
-                        .filter(
-                          (item) =>
-                            !item.category || item.category === "household",
-                        )
-                        .map((item) => (
-                          <tr
-                            key={item.key}
-                            aria-selected={item.key === selected}
-                          >
-                            <th scope="row">
-                              <button
-                                className="economics-series-link"
-                                aria-pressed={item.key === selected}
-                                onClick={() => setSelected(item.key)}
-                              >
-                                {item.name}
-                              </button>
-                            </th>
-                            <td className="numeric">
-                              {item.latest && !item.latest.missing
-                                ? valueLabel(item.latest.value)
-                                : "Unavailable"}
-                            </td>
-                            <td>{item.unit}</td>
-                            <td>
-                              {item.latest
-                                ? dateLabel(item.latest.date, item.frequency)
-                                : "Not collected"}
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-            </>
+            />
           )}
-          <details className="economics-sources">
-            <summary>Sources & collection schedule</summary>
-            {catalog.automatic_collection_enabled === false && (
-              <p>
-                Automatic collection is off. Initial data remains available.
-              </p>
-            )}
-            {catalog.automatic_collection_enabled === true && (
-              <p>
-                Automatic collection is running while the platform is online.
-              </p>
-            )}
-            {catalog.sources.map((source) => (
-              <section key={source.id} aria-labelledby={`source-${source.id}`}>
-                <h4 id={`source-${source.id}`}>
-                  <a href={source.url}>{source.name}</a>
-                </h4>
-                <dl>
-                  <dt>Publication frequency</dt>
-                  <dd>{source.publication_frequency}</dd>
-                  <dt>Publication schedule</dt>
-                  <dd>
-                    {source.publication_schedule}{" "}
-                    <a href={source.cadence_url}>Publisher schedule</a>
-                  </dd>
-                  <dt>Collection checks</dt>
-                  <dd>
-                    {source.enabled ? source.polling_frequency : "Disabled"}
-                  </dd>
-                  {source.status === "imported" ? (
-                    <>
-                      <dt>Imported snapshot date</dt>
-                      <dd>
-                        {checkedLabel(
-                          source.last_success ?? source.last_attempt,
-                        )}
-                      </dd>
-                      <dt>Publisher check</dt>
-                      <dd>Not checked</dd>
-                    </>
-                  ) : (
-                    <>
-                      <dt>Last checked</dt>
-                      <dd>{checkedLabel(source.last_attempt)}</dd>
-                      <dt>Last accepted data</dt>
-                      <dd>{checkedLabel(source.last_success)}</dd>
-                    </>
-                  )}
-                  {source.enabled &&
-                    catalog.automatic_collection_enabled !== false && (
-                      <>
-                        <dt>Next check due</dt>
-                        <dd>
-                          {source.next_due
-                            ? checkedLabel(source.next_due)
-                            : "Not scheduled"}
-                        </dd>
-                      </>
-                    )}
-                </dl>
-                {!source.enabled && (
-                  <p>
-                    Unavailable:{" "}
-                    {source.disabled_reason ??
-                      "Source access has not been configured."}
-                  </p>
-                )}
-                {source.error && (
-                  <p role="status">Last collection failed: {source.error}</p>
-                )}
-              </section>
-            ))}
-          </details>
         </>
       )}
     </section>
@@ -273,9 +123,11 @@ export function Economics() {
 function SeriesDetail({
   seriesKey,
   source,
+  automaticCollectionEnabled,
 }: {
   seriesKey: string;
   source?: Source;
+  automaticCollectionEnabled?: boolean;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState("");
@@ -366,6 +218,7 @@ function SeriesDetail({
       ) : (
         <>
           <p className="economics-selected-value">
+            Latest{" "}
             <strong>
               {detail.latest && !detail.latest.missing
                 ? valueLabel(detail.latest.value)
@@ -382,17 +235,20 @@ function SeriesDetail({
           </p>
           <p className="economics-meta">
             {detail.frequency} observations ·{" "}
-            <a href={detail.source_url}>Source</a>
+            <a href={detail.source_url}>{source?.name ?? "Source"}</a>
           </p>
+          {source?.enabled === false && (
+            <p role="status">
+              Source unavailable:{" "}
+              {source.disabled_reason ??
+                "Source access has not been configured."}
+            </p>
+          )}
+          {source?.error && (
+            <p role="status">Last collection failed: {source.error}</p>
+          )}
           {visibleDetail.observations.length === 0 ? (
-            <>
-              <p>No observations collected for these dates.</p>
-              {source?.disabled_reason && (
-                <p>
-                  {source.disabled_reason} <a href={source.url}>Publisher</a>
-                </p>
-              )}
-            </>
+            <p>No observations collected for these dates.</p>
           ) : (
             <>
               <EconomicChart detail={visibleDetail} />
@@ -411,7 +267,7 @@ function SeriesDetail({
                         <tr>
                           <th scope="col">Observation period</th>
                           <th scope="col">Value ({detail.unit})</th>
-                          <th scope="col">Source & notes</th>
+                          <th scope="col">Notes</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -427,11 +283,17 @@ function SeriesDetail({
                             </td>
                             <td>
                               {point.provisional && (
-                                <strong>Provisional · </strong>
+                                <strong>
+                                  Provisional
+                                  {point.footnotes?.length ? " · " : ""}
+                                </strong>
                               )}
-                              <a href={detail.source_url}>Source</a>
-                              {point.footnotes?.length > 0 &&
-                                ` · ${point.footnotes.map((note) => note.text ?? Object.values(note).join(": ")).join("; ")}`}
+                              {point.footnotes
+                                ?.map(
+                                  (note) =>
+                                    note.text ?? Object.values(note).join(": "),
+                                )
+                                .join("; ") || (!point.provisional ? "—" : "")}
                             </td>
                           </tr>
                         ))}
@@ -442,19 +304,27 @@ function SeriesDetail({
               </details>
             </>
           )}
-          {detail.observations.some((point) => point.provisional) && (
-            <p className="economics-caution">
-              Latest source month is provisional. See data-table notes.
-            </p>
-          )}
           <details>
-            <summary>Methodology</summary>
+            <summary>About this measure</summary>
             <p>{detail.description}</p>
             <p>{detail.methodology_notes}</p>
-            <p>
-              Observation dates identify the measured period. Collection times
-              appear under Sources & collection schedule.
-            </p>
+            {source?.status === "imported" ? (
+              <p>
+                Imported on{" "}
+                {checkedLabel(source.last_success ?? source.last_attempt)};
+                publisher not checked.
+              </p>
+            ) : (
+              source && (
+                <p>
+                  Last checked: {checkedLabel(source.last_attempt)}. Last
+                  accepted data: {checkedLabel(source.last_success)}.
+                </p>
+              )
+            )}
+            {automaticCollectionEnabled === false && (
+              <p>Automatic collection is off.</p>
+            )}
           </details>
         </>
       )}

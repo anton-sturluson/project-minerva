@@ -1,6 +1,6 @@
 # Economics under Research
 
-Research → Economics shows a U.S. macro overview, market valuation measures and a household-cost drill-down. Charts read accepted PostgreSQL observations. Page requests never contact a publisher. Source dates, publication frequency and collection checks are distinct.
+Research → Economics shows one selected macro, valuation or household-cost measure. Charts read accepted PostgreSQL observations. Page requests never contact a publisher. Source dates, publication frequency and collection checks are distinct.
 
 ## Minimal storage
 
@@ -12,7 +12,7 @@ Individual food-item prices are retired from the active catalog and collector. T
 
 ## Macro and valuation definitions
 
-The measure selector opens the full scrollable list, with search to filter it. Selecting a measure opens one detailed native-frequency chart near the top of the page. Latest macro and valuation readings, household costs and source details remain in collapsed sections below it. Date controls start at the available displayed history bounds; custom date filters remain under the reader's control.
+The grouped measure selector opens the full scrollable list, with search to filter it. The selected measure has date controls, its latest value and measured period, a source link and a native-frequency chart. The data table and About this measure details stay collapsed below the chart. About includes the selected source's collection or snapshot status; collection failures and unavailable sources remain visible when relevant. Date controls start at the available displayed history bounds; custom date filters remain under the reader's control.
 
 | Measure | Definition |
 | --- | --- |
@@ -74,7 +74,7 @@ Set `ECONOMICS_RAW_DIR` to an ignored private directory for source evidence. The
 
 Set `INVESTOR_ECONOMICS_REFRESH=1` in the private deployment's environment and restart the API. This explicitly enables the source worker in Tailscale mode. Leave it off on synthetic development/test servers. The worker belongs to the API process, so automatic checks run while the platform is running. PostgreSQL due state survives restarts; advisory locks prevent concurrent workers from importing the same source at once. Failed collection retains the previous accepted observations and uses bounded retries. This is not a system cron installation or a new generic scheduling service.
 
-The registry is the single source of truth for the implemented check schedule. The UI shows each source's publication description and our polling schedule separately. Conservative checks are intentional when the publisher provides no stable release date. Keep timestamps in UTC internally and use New York time for release-clock rules so daylight saving changes do not move the intended local check time.
+The registry is the single source of truth for the implemented check schedule. This document distinguishes publication cadence from collection checks; About this measure shows only the selected source's collection status. Conservative checks are intentional when the publisher provides no stable release date. Keep timestamps in UTC internally and use New York time for release-clock rules so daylight saving changes do not move the intended local check time.
 
 ## Publisher frequency
 
