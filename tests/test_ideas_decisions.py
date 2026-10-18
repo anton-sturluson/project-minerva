@@ -178,7 +178,7 @@ def test_decisions_ignore_url_model_and_delegation_but_bind_scope_and_policy(
         "identity",
     )
     assert decisions.read(tmp_path, alias) == decision
-    assert alias.model_copy(update={"policy_revision": 4}).key != alias.key
+    assert alias.model_copy(update={"policy_revision": 5}).key != alias.key
     assert alias.model_copy(update={"section_ids": ["p2"]}).key != alias.key
     assert decisions.EvidenceRejected(decision, reused=True).result()["reused"] is True
 
@@ -711,7 +711,7 @@ def test_exact_fund_policy_has_precedence_over_model_scope_hint() -> None:
     validate(candidate, "Harbor Capital Global Fund", parts)
 
 
-@pytest.mark.parametrize("revision", [2, 3])
+@pytest.mark.parametrize("revision", [2, 3, 4])
 def test_versioned_identity_keeps_its_original_policy_revision(revision: int) -> None:
     """Resolving old approved identities must not restamp their policy or labels."""
     parts: list[dict[str, str]] = [
@@ -816,3 +816,34 @@ def test_co_investment_publisher_is_not_a_legal_suffix() -> None:
     with pytest.raises(ValueError) as wrong:
         validate(candidate, "Harbor Global Fund", parts)
     assert not isinstance(wrong.value, MetadataError)
+
+
+def test_independent_manager_brand_can_omit_generic_publisher_descriptors() -> None:
+    """An independently printed brand allows metadata repair without stripping source text."""
+    from harness.ideas.research import MetadataError
+
+    publisher: str = "Harbor Investment Partners LLC"
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": publisher + " Q2 2026. " + publisher},
+        {"id": "p2", "text": "Global Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity("Global Fund", publisher, "specific")
+    with pytest.raises(ValueError) as fullname_only:
+        validate(candidate, "Harbor Global Fund", parts)
+    assert not isinstance(fullname_only.value, MetadataError)
+    parts[0]["text"] += " — Harbor"
+    candidate.policy_revision = 3
+    with pytest.raises(ValueError) as older_policy:
+        validate(candidate, "Harbor Global Fund", parts)
+    assert not isinstance(older_policy.value, MetadataError)
+    candidate.policy_revision = 4
+    with pytest.raises(MetadataError, match="shorter manager brand"):
+        validate(candidate, "Harbor Global Fund", parts)
+    candidate.publisher = "Harbor"
+    validate(candidate, "Harbor Global Fund", parts)
+    candidate.publisher = publisher
+    parts[0]["text"] = publisher + " Q2 2026 — Harbors"
+    with pytest.raises(ValueError) as incomplete_name:
+        validate(candidate, "Harbor Global Fund", parts)
+    assert not isinstance(incomplete_name.value, MetadataError)

@@ -75,7 +75,7 @@ class SourceObservations(IdentityFields):
 class EvidenceIdentity(MatchDraft):
     """Versioned, application-approved attribution and original relationship proof."""
 
-    policy_revision: Literal[2, 3] = decisions.POLICY_REVISION
+    policy_revision: Literal[2, 3, 4] = decisions.POLICY_REVISION
     publisher: str
     label_scope: LabelScope
     umbrella: str
@@ -85,7 +85,7 @@ class EvidenceIdentity(MatchDraft):
 class EvidenceMatch(Match):
     """Resolve new relationship references to immutable original source text."""
 
-    policy_revision: Literal[2, 3] = decisions.POLICY_REVISION
+    policy_revision: Literal[2, 3, 4] = decisions.POLICY_REVISION
     publisher: str
     label_scope: LabelScope
     umbrella: str
@@ -455,6 +455,11 @@ def validate_label(
         shorter_publisher: str = re.sub(
             r"(?:\s+(?:Co|LLC)\.?)+$", "", match.publisher, flags=re.IGNORECASE
         )
+        independent_brand: str = (
+            " ".join(fund_words(shorter_publisher))
+            if match.policy_revision >= 4
+            else shorter_publisher
+        )
         publisher_pattern: str = (
             r"(?<!\w)"
             + r"\W+".join(re.escape(token) for token in words(match.publisher))
@@ -467,7 +472,7 @@ def validate_label(
             and any(
                 contains_name(
                     re.sub(publisher_pattern, " ", part["text"], flags=re.IGNORECASE),
-                    shorter_publisher,
+                    independent_brand,
                 )
                 for part in (parts or [])
             )
@@ -668,7 +673,7 @@ def resolve_identity(identity: dict, parts: list[dict]) -> Match:
     """Read both historical identities and versioned original relationship evidence."""
     draft: MatchDraft = (
         EvidenceIdentity.model_validate(identity)
-        if identity.get("policy_revision") in (2, 3)
+        if identity.get("policy_revision") in (2, 3, 4)
         else MatchDraft.model_validate(identity)
     )
     blocks: dict[str, str] = {part["id"]: part["text"] for part in parts}

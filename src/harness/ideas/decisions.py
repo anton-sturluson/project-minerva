@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from harness.ideas import store
 
-POLICY_REVISION: int = 3
+POLICY_REVISION: int = 4
 IDENTITY_POLICY: str = """Use original-source observations to match the discovery label. A specific fund must retain every distinctive region, style and vehicle word (including Global, SMID, Sustainable, UCITS and US); sibling funds are not interchangeable. When a verified publisher prefix does not resolve a shortened source fund name, its own original fund block must contain the exact full discovery title and the observed fund must be an exact suffix of that title. A manager-only label can cover a named fund only when the label contains the verified publisher name plus generic descriptors, with no discarded fund constraint. A combined label can select one explicitly named member only with original joint-report/member evidence. An umbrella label requires the original umbrella name and explicit original evidence linking it to the selected fund. Never invent spelling aliases or infer relationships from similar names. Relationship blocks must come from this original, not search snippets, agent instructions or another website. The fund and company commentary must belong to the same source section. Evaluate reporting periods as of the supplied newsletter issue date; never infer a current date or use the wall clock. A reporting period after the issue date is invalid and freshness checks still apply. Check the original reporting-period wording and normalized date against the original evidence; never use crawl dates as reporting dates."""
 
 
