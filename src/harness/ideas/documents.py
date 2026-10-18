@@ -13,7 +13,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import NotRequired, TextIO, TypedDict
-from urllib.parse import SplitResult, urljoin, urlsplit
+from urllib.parse import SplitResult, parse_qsl, urljoin, urlsplit
 from uuid import UUID
 
 import httpx
@@ -72,6 +72,26 @@ def is_discovery_url(url: str) -> bool:
         or host.endswith(".hfbestideas.com")
         or host == "hfbestideas.substack.com"
     )
+
+
+def _citation_url(requested_url: str, final_url: str) -> str:
+    """Cite a stable manager route instead of its signed S3 download redirect."""
+    signed_fields: set[str] = {"x-amz-signature", "signature"}
+    final_fields: set[str] = {
+        key.casefold()
+        for key, _ in parse_qsl(urlsplit(final_url).query, keep_blank_values=True)
+    }
+    if not final_fields & signed_fields:
+        return final_url
+    requested_fields: set[str] = {
+        key.casefold()
+        for key, _ in parse_qsl(urlsplit(requested_url).query, keep_blank_values=True)
+    }
+    if requested_fields & signed_fields:
+        raise ValueError(
+            "Signed source download needs a stable manager URL for citation"
+        )
+    return requested_url
 
 
 def public_url(url: str, *, allow_discovery: bool = False) -> str:
@@ -334,15 +354,15 @@ def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
     if discovery_only:
         _archive_discovery(folder, final_url, payload, parts)
     elif text_error is None:
-        document = _archive_payload(folder, final_url, payload, kind, parts)
-        document["collection"] = collection
-        if collection == "browser":
-            request_hash: str = hashlib.sha256(url.encode()).hexdigest()[:16]
-            store.json_artifact(
-                folder,
-                f"research/documents/{document['sha256']}.{request_hash}.provenance.json",
-                {"collection": "browser", "requested_url": url, "url": final_url},
-            )
+        document = _archive_payload(
+            folder,
+            final_url,
+            payload,
+            kind,
+            parts,
+            requested_url=url,
+            collection=collection,
+        )
     next_offset: int = link_offset + LINK_PAGE_SIZE
     return {
         "url": final_url,
@@ -379,16 +399,43 @@ def _archive_discovery(
 
 
 def _archive_payload(
-    folder: Path, url: str, payload: bytes, kind: str, parts: list[SourcePart]
+    folder: Path,
+    url: str,
+    payload: bytes,
+    kind: str,
+    parts: list[SourcePart],
+    *,
+    requested_url: str | None = None,
+    collection: str | None = None,
 ) -> SourceDocument:
     """Save eligible source bytes and blocks once for archive and browse callers."""
+    requested: str = requested_url or url
+    citation: str = _citation_url(requested, url)
     digest: str = hashlib.sha256(payload).hexdigest()
     base: str = f"research/documents/{digest}"
     store.write_artifact(folder, f"{base}.{kind}", payload)
     store.json_artifact(folder, f"{base}.json", parts)
     readable: str = "\n\n".join(f"## {p['id']}\n\n{p['text']}" for p in parts) + "\n"
     store.write_artifact(folder, f"{base}.md", readable.encode())
-    return {"url": url, "sha256": digest, "sections": f"{base}.json"}
+    document: SourceDocument = {
+        "url": citation,
+        "sha256": digest,
+        "sections": f"{base}.json",
+    }
+    if collection:
+        document["collection"] = collection
+    if citation != url or collection == "browser":
+        request_hash: str = hashlib.sha256(requested.encode()).hexdigest()[:16]
+        store.json_artifact(
+            folder,
+            f"{base}.{request_hash}.provenance.json",
+            {
+                "collection": collection or "http",
+                "requested_url": requested,
+                "url": url,
+            },
+        )
+    return document
 
 
 def archive(
@@ -404,7 +451,7 @@ def archive(
     kind: str
     parts: list[SourcePart]
     kind, parts = sections(payload)
-    return _archive_payload(folder, final_url, payload, kind, parts)
+    return _archive_payload(folder, final_url, payload, kind, parts, requested_url=url)
 
 
 def load_sections(folder: Path, document: dict) -> list[dict]:
