@@ -1181,7 +1181,8 @@ summary:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
 }
-.economics-selector select {
+.economics-selector input {
+  width: min(100%, 440px);
   max-width: 100%;
   min-width: 0;
 }

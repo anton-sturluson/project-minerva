@@ -89,7 +89,10 @@ test("economic research shows dated observations, chart gaps, cadence and a date
   await expect(
     page.getByRole("heading", { name: "Economics", exact: true }),
   ).toBeVisible();
-  await page.getByText("Household costs", { exact: true }).click();
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Household costs$/ })
+    .click();
   await expect(
     page.getByRole("cell", { name: "4.125", exact: true }),
   ).toBeVisible();
@@ -106,7 +109,13 @@ test("economic research shows dated observations, chart gaps, cadence and a date
     "2026-09-01",
   );
   await expect(page.locator(".economics-line")).toHaveCount(2);
+  await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(0);
   await page.getByText("Data table (5 observations)", { exact: true }).click();
+  await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(5);
+  await page.getByText("Data table (5 observations)", { exact: true }).click();
+  await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(0);
+  await page.getByText("Data table (5 observations)", { exact: true }).click();
+  await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(5);
   await expect(
     page.getByRole("cell", { name: "Unavailable", exact: true }),
   ).toBeVisible();
@@ -330,20 +339,7 @@ test("macro overview keeps measures, native periods and provisional valuations c
     return route.fulfill({
       json: {
         series: item,
-        observations:
-          key === "financial-stress"
-            ? []
-            : key === "headline-inflation"
-              ? [
-                  {
-                    ...dated[0],
-                    date: "2026-06-01",
-                    value: null,
-                    missing: true,
-                  },
-                  ...dated,
-                ]
-              : dated,
+        observations: key === "financial-stress" ? [] : dated,
       },
     });
   });
@@ -355,6 +351,39 @@ test("macro overview keeps measures, native periods and provisional valuations c
     .getByRole("img", { name: /Headline CPI inflation/ })
     .boundingBox();
   expect(chartPosition!.y).toBeLessThan(550);
+  const measure = page.getByLabel("Measure", { exact: true });
+  await measure.click();
+  await measure.pressSequentially("CAP");
+  await expect(measure).toHaveValue("CAP");
+  await expect(page.locator("#economic-measures option")).toHaveCount(1);
+  await expect(page.locator("#economic-measures option")).toHaveAttribute(
+    "value",
+    "Shiller CAPE",
+  );
+  await expect(
+    page.getByRole("img", { name: /Headline CPI inflation/ }),
+  ).toBeVisible();
+  await measure.press("ArrowDown");
+  await measure.press("Enter");
+  await expect(page.getByRole("img", { name: /Shiller CAPE/ })).toBeVisible();
+  await measure.fill("No such measure");
+  await expect(page.getByRole("status")).toHaveText("No matching measures.");
+  await expect(page.getByRole("img", { name: /Shiller CAPE/ })).toBeVisible();
+  await measure.press("Escape");
+  await expect(measure).toHaveValue("Shiller CAPE");
+  await measure.fill("Buffett");
+  await expect(page.locator("#economic-measures option")).toHaveCount(1);
+  await expect(page.locator("#economic-measures option")).toHaveAttribute(
+    "value",
+    "Buffett-style equity/GDP proxy",
+  );
+  await measure.fill("No match");
+  await page.getByLabel("From", { exact: true }).click();
+  await expect(measure).toHaveValue("Shiller CAPE");
+  await measure.fill("Headline CPI inflation");
+  await expect(
+    page.getByRole("img", { name: /Headline CPI inflation/ }),
+  ).toBeVisible();
   await expect(page.getByLabel("From", { exact: true })).toHaveValue(
     "2026-07-01",
   );
@@ -368,9 +397,7 @@ test("macro overview keeps measures, native periods and provisional valuations c
   await expect(page.getByLabel("From", { exact: true })).toHaveValue(
     "2026-08-01",
   );
-  await page
-    .getByLabel("Measure", { exact: true })
-    .selectOption("real-gdp-growth");
+  await page.getByLabel("Measure", { exact: true }).fill("Real GDP growth");
   await expect(page.getByLabel("From", { exact: true })).toHaveValue(
     "2026-01-01",
   );
@@ -470,7 +497,10 @@ test("macro overview keeps measures, native periods and provisional valuations c
   await expect(
     page.getByText("Latest CPI inputs are estimated.", { exact: false }),
   ).toBeVisible();
-  await page.getByText("Household costs", { exact: true }).click();
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Household costs$/ })
+    .click();
   await expect(
     page.getByRole("button", { name: "Example food price", exact: true }),
   ).toBeVisible();
@@ -479,4 +509,107 @@ test("macro overview keeps measures, native periods and provisional valuations c
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("all dates keeps a missing latest period and imported snapshots do not claim publisher checks", async ({
+  page,
+}) => {
+  const missingLatest = {
+    ...observations[0],
+    date: "2026-10-01",
+    value: null,
+    missing: true,
+    footnotes: [{ text: "The publisher has not reported this period." }],
+  };
+  const definition = { ...series, latest: missingLatest, observation_count: 6 };
+  await page.route("**/api/research/economics", (route) =>
+    route.fulfill({
+      json: {
+        sources: [{ ...source, status: "imported" }],
+        series: [definition],
+      },
+    }),
+  );
+  await page.route("**/api/research/economics/series/*", (route) =>
+    route.fulfill({
+      json: {
+        series: definition,
+        observations: [...observations, missingLatest],
+      },
+    }),
+  );
+  await page.goto("/#research/economics");
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue(
+    "2026-01-01",
+  );
+  await expect(page.getByLabel("Through", { exact: true })).toHaveValue(
+    "2026-10-01",
+  );
+  await expect(
+    page.getByRole("img", { name: /Jan 2026 to Oct 2026/ }),
+  ).toBeVisible();
+  await page.getByText("Data table (6 observations)", { exact: true }).click();
+  await expect(
+    page.getByRole("rowheader", { name: "Oct 2026", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("The publisher has not reported this period.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page.getByLabel("Through", { exact: true }).fill("2026-09-01");
+  await expect(
+    page.getByText("Data table (5 observations)", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "All dates" }).click();
+  await expect(page.getByLabel("Through", { exact: true })).toHaveValue(
+    "2026-10-01",
+  );
+  await expect(
+    page.getByRole("rowheader", { name: "Oct 2026", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByText("Sources & collection schedule", { exact: true })
+    .click();
+  await expect(
+    page.getByText("Imported snapshot date", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Publisher check", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Not checked", { exact: true })).toBeVisible();
+  await expect(page.getByText("Last checked", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("Last successful collection", { exact: true }),
+  ).toHaveCount(0);
+  await page.route("**/api/research/economics", (route) =>
+    route.fulfill({
+      json: {
+        sources: [
+          {
+            ...source,
+            status: "failed",
+            error: "Publisher connection unavailable.",
+          },
+        ],
+        series: [definition],
+      },
+    }),
+  );
+  await page.reload();
+  await page
+    .getByText("Sources & collection schedule", { exact: true })
+    .click();
+  await expect(
+    page.getByText("Last accepted data", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Last successful collection", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText(
+      "Last collection failed: Publisher connection unavailable.",
+      { exact: true },
+    ),
+  ).toBeVisible();
 });

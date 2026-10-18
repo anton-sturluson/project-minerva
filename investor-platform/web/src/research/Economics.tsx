@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { MacroOverview } from "./MacroOverview";
+import { MeasureSelector } from "./MeasureSelector";
 import { dateLabel, valueLabel } from "./economicsFormat";
 
 export type Source = {
@@ -107,32 +108,11 @@ export function Economics() {
             <p>No economic series have been added.</p>
           ) : (
             <>
-              <label className="economics-selector">
-                <span className="sr-only">Measure</span>
-                <select
-                  aria-label="Measure"
-                  value={selected}
-                  onChange={(event) => setSelected(event.target.value)}
-                >
-                  {[
-                    ["macro", "Macro indicators"],
-                    ["valuation", "Market valuation"],
-                    ["household", "Household costs"],
-                  ].map(([category, label]) => (
-                    <optgroup key={category} label={label}>
-                      {catalog.series
-                        .filter(
-                          (item) => (item.category ?? "household") === category,
-                        )
-                        .map((item) => (
-                          <option key={item.key} value={item.key}>
-                            {item.name}
-                          </option>
-                        ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
+              <MeasureSelector
+                series={catalog.series}
+                selected={selected}
+                onSelect={setSelected}
+              />
               {selected && (
                 <SeriesDetail
                   key={selected}
@@ -240,10 +220,25 @@ export function Economics() {
                   <dd>
                     {source.enabled ? source.polling_frequency : "Disabled"}
                   </dd>
-                  <dt>Last checked</dt>
-                  <dd>{checkedLabel(source.last_attempt)}</dd>
-                  <dt>Last successful collection</dt>
-                  <dd>{checkedLabel(source.last_success)}</dd>
+                  {source.status === "imported" ? (
+                    <>
+                      <dt>Imported snapshot date</dt>
+                      <dd>
+                        {checkedLabel(
+                          source.last_success ?? source.last_attempt,
+                        )}
+                      </dd>
+                      <dt>Publisher check</dt>
+                      <dd>Not checked</dd>
+                    </>
+                  ) : (
+                    <>
+                      <dt>Last checked</dt>
+                      <dd>{checkedLabel(source.last_attempt)}</dd>
+                      <dt>Last accepted data</dt>
+                      <dd>{checkedLabel(source.last_success)}</dd>
+                    </>
+                  )}
                   {source.enabled &&
                     catalog.automatic_collection_enabled !== false && (
                       <>
@@ -285,6 +280,7 @@ function SeriesDetail({
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [dataTableOpen, setDataTableOpen] = useState(false);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [bounds, setBounds] = useState({ start: "", end: "" });
@@ -298,15 +294,7 @@ function SeriesDetail({
     ).then(
       (data) => {
         if (!active) return;
-        const dates = data.observations
-          .filter(
-            (point) =>
-              !point.missing &&
-              point.value !== null &&
-              Number.isFinite(Number(point.value)),
-          )
-          .map((point) => point.date)
-          .sort();
+        const dates = data.observations.map((point) => point.date).sort();
         const coverage = { start: dates[0] ?? "", end: dates.at(-1) ?? "" };
         setDetail({ ...data.series, observations: data.observations });
         setBounds(coverage);
@@ -408,43 +396,49 @@ function SeriesDetail({
           ) : (
             <>
               <EconomicChart detail={visibleDetail} />
-              <details>
+              <details
+                className="economics-data-table"
+                open={dataTableOpen}
+                onToggle={(event) => setDataTableOpen(event.currentTarget.open)}
+              >
                 <summary>
                   Data table ({visibleDetail.observations.length} observations)
                 </summary>
-                <div className="table-scroll" tabIndex={0}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th scope="col">Observation period</th>
-                        <th scope="col">Value ({detail.unit})</th>
-                        <th scope="col">Source & notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleDetail.observations.map((point) => (
-                        <tr key={point.date}>
-                          <th scope="row">
-                            {dateLabel(point.date, detail.frequency)}
-                          </th>
-                          <td className="numeric">
-                            {point.missing
-                              ? "Unavailable"
-                              : valueLabel(point.value)}
-                          </td>
-                          <td>
-                            {point.provisional && (
-                              <strong>Provisional · </strong>
-                            )}
-                            <a href={detail.source_url}>Source</a>
-                            {point.footnotes?.length > 0 &&
-                              ` · ${point.footnotes.map((note) => note.text ?? Object.values(note).join(": ")).join("; ")}`}
-                          </td>
+                {dataTableOpen && (
+                  <div className="table-scroll" tabIndex={0}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th scope="col">Observation period</th>
+                          <th scope="col">Value ({detail.unit})</th>
+                          <th scope="col">Source & notes</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {visibleDetail.observations.map((point) => (
+                          <tr key={point.date}>
+                            <th scope="row">
+                              {dateLabel(point.date, detail.frequency)}
+                            </th>
+                            <td className="numeric">
+                              {point.missing
+                                ? "Unavailable"
+                                : valueLabel(point.value)}
+                            </td>
+                            <td>
+                              {point.provisional && (
+                                <strong>Provisional · </strong>
+                              )}
+                              <a href={detail.source_url}>Source</a>
+                              {point.footnotes?.length > 0 &&
+                                ` · ${point.footnotes.map((note) => note.text ?? Object.values(note).join(": ")).join("; ")}`}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </details>
             </>
           )}
