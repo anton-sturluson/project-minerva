@@ -15,7 +15,7 @@ def test_stage_defaults_and_explicit_cheap_override(monkeypatch):
     for stage in ("SOURCE", "EXTRACTION", "REVIEW"):
         monkeypatch.delenv(f"MINERVA_IDEAS_{stage}_MODEL", raising=False)
     assert model.resolve_models() == model.StageModels(
-        "gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-sol"
+        "gpt-6-luna", "gpt-6-luna", "gpt-6.1-sol"
     )
     monkeypatch.setenv("MINERVA_IDEAS_SOURCE_MODEL", "gpt-6.1-sol")
     assert model.resolve_models().source == "gpt-6.1-sol"

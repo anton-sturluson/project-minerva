@@ -25,7 +25,7 @@ def resolve_models(override: str | None = None) -> StageModels:
     return StageModels(
         source=override or os.environ.get("MINERVA_IDEAS_SOURCE_MODEL", "gpt-6-luna"),
         extraction=override
-        or os.environ.get("MINERVA_IDEAS_EXTRACTION_MODEL", "gpt-6.1-sol"),
+        or os.environ.get("MINERVA_IDEAS_EXTRACTION_MODEL", "gpt-6-luna"),
         review=override or os.environ.get("MINERVA_IDEAS_REVIEW_MODEL", "gpt-6.1-sol"),
     )
 

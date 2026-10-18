@@ -30,6 +30,7 @@ def test_renderer_only_publishes_ready_original_equity_views(monkeypatch):
     )
     text = publication.render(uuid4())
     assert "Acme" in text and "Hidden" not in text
+    assert "Coverage: 1 of 2 leads verified; 1 unresolved." in text
     assert "<https://manager.com/letter|Original manager letter>" in text
     assert "not stated" not in text and "summary.md" not in text
 

@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from harness.ideas.research import Match, validate_match
+from harness.ideas.research import Match, MatchDraft, resolve_identity, validate_match
 
 
 def match():
@@ -38,77 +38,12 @@ def test_rejects_future_stale_and_missing_periods():
             validate_match(bad, parts, date(2026, 9, 30))
 
 
-def test_discovery_is_bounded_and_archives_rejections(tmp_path, monkeypatch):
-    from contextlib import contextmanager
-    from uuid import uuid4
-
-    from harness.ideas import research
-
-    run_id = uuid4()
-    run = {"id": run_id, "issue_date": date(2026, 9, 30)}
-    row = {"ordinal": 1, "company": "Acme", "fund": "Alpha", "symbol": "ACM US"}
-    monkeypatch.setattr(research.store, "get_run", lambda _: run)
-    monkeypatch.setattr(research.store, "items", lambda _: [row])
-    monkeypatch.setattr(research.store, "run_folder", lambda _: tmp_path)
-
-    class Connection:
-        def execute(self, *args):
-            pass
-
-    @contextmanager
-    def connect():
-        yield Connection()
-
-    monkeypatch.setattr(research.store, "connect", connect)
-    attempts = []
-
-    def collector(folder, url):
-        attempts.append(url)
-        raise ValueError("Wrong fund")
-
-    searcher = lambda _: (
-        [{"url": "https://hfbestideas.com/stock/ACM"}]
-        + [{"url": f"https://manager.com/{i}"} for i in range(6)]
-    )
-    result = research.discover(run_id, 1, searcher=searcher, collector=collector)
-    assert len(attempts) == 6
-    assert all("hfbestideas" not in url for url in attempts)
-    assert "gap" in result
-    assert len(list((tmp_path / "research/searches").glob("*.json"))) == 1
-
-
-def test_archive_page_exposes_original_pdf_links(tmp_path):
-    from harness.ideas.research import linked_letters
-
-    path = tmp_path / "research/documents/a.html"
-    path.parent.mkdir(parents=True)
-    path.write_text(
-        '<a href="/letters/2026-q2.pdf">Q2 2026</a><a href="/letters/2025-q4.pdf">2025</a>'
-    )
-    assert linked_letters(
-        tmp_path, {"sha256": "a", "url": "https://manager.com/letters"}, 2026
-    ) == ["https://manager.com/letters/2026-q2.pdf"]
-
-
 def test_provider_schema_avoids_unsupported_additional_properties():
     import json
 
     from harness.ideas.model import provider_schema
 
     assert "additionalProperties" not in json.dumps(provider_schema(Match))
-
-
-def test_archive_links_ignore_regulatory_footer_and_fact_sheets(tmp_path):
-    from harness.ideas.research import linked_letters
-
-    path = tmp_path / "research/documents/a.html"
-    path.parent.mkdir(parents=True)
-    path.write_text(
-        '<article><a href="/2026/q2-commentary.pdf">Q2 Commentary</a><a href="/2026/q2-fact-sheet.pdf">Q2 fact sheet</a></article><footer><a href="/2026/crs-fund.pdf">CRS</a></footer>'
-    )
-    assert linked_letters(
-        tmp_path, {"sha256": "a", "url": "https://manager.com/letter"}, 2026
-    ) == ["https://manager.com/2026/q2-commentary.pdf"]
 
 
 def test_identity_checks_tolerate_pdf_line_breaks_and_capitals():
@@ -150,3 +85,181 @@ def test_normalized_year_cannot_make_an_old_letter_look_current():
             [{"text": "Alpha Capital Alpha Fund Q2 2025 Acme pricing power"}],
             date(2026, 9, 30),
         )
+
+
+def test_short_issuer_name_requires_full_name_in_the_same_document() -> None:
+    """A letter can introduce a full issuer name before using its short name."""
+    candidate: Match = match()
+    candidate.company = "Inovance"
+    candidate.company_quote = "Inovance pricing power"
+    row: dict[str, str] = {
+        "company": "Shenzhen Inovance",
+        "fund": "Alpha Fund",
+        "symbol": "300124 CH",
+    }
+    parts: list[dict[str, str]] = [
+        {"text": "Alpha Capital Alpha Fund Q2 2026 initiated Shenzhen Inovance."},
+        {"text": "Inovance pricing power"},
+    ]
+    validate_match(candidate, parts, date(2026, 9, 30), row)
+    with pytest.raises(ValueError, match="company does not match"):
+        validate_match(candidate, parts[1:], date(2026, 9, 30), row)
+
+
+@pytest.mark.parametrize("observed", ["Vance", "Shenzhen", "Other Inovance"])
+def test_issuer_alias_does_not_allow_substrings_or_other_issuers(observed: str) -> None:
+    """Full-name evidence cannot authorize a partial word or a different issuer."""
+    candidate: Match = match()
+    candidate.company = observed
+    candidate.company_quote = observed + " pricing power"
+    row: dict[str, str] = {"company": "Shenzhen Inovance", "fund": "Alpha Fund"}
+    parts: list[dict[str, str]] = [
+        {
+            "text": "Alpha Capital Alpha Fund Q2 2026 Shenzhen Inovance. "
+            + candidate.company_quote
+        }
+    ]
+    with pytest.raises(ValueError, match="company does not match"):
+        validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+def test_issuer_alias_cannot_assemble_full_name_from_unrelated_blocks() -> None:
+    """Two adjacent source blocks are not evidence of one complete issuer name."""
+    candidate: Match = match()
+    candidate.company = "Inovance"
+    candidate.company_quote = "Inovance pricing power"
+    row: dict[str, str] = {"company": "Shenzhen Inovance", "fund": "Alpha Fund"}
+    parts: list[dict[str, str]] = [
+        {"text": "Alpha Capital Alpha Fund Q2 2026 Shenzhen"},
+        {"text": "Inovance pricing power"},
+    ]
+    with pytest.raises(ValueError, match="company does not match"):
+        validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+def test_issuer_alias_does_not_relax_sibling_fund_matching() -> None:
+    """Evidence for an issuer alias cannot substitute a different fund."""
+    candidate: Match = match()
+    candidate.company = "Inovance"
+    candidate.company_quote = "Inovance pricing power"
+    row: dict[str, str] = {"company": "Shenzhen Inovance", "fund": "Alpha Global Fund"}
+    parts: list[dict[str, str]] = [
+        {"text": "Alpha Capital Alpha Fund Q2 2026 Shenzhen Inovance."},
+        {"text": "Inovance pricing power"},
+    ]
+    with pytest.raises(ValueError, match="fund does not match"):
+        validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+@pytest.mark.parametrize(
+    "full_name",
+    ["The Harbor Insurance Group, Inc.", "Harbor International Group, Inc."],
+)
+def test_middle_or_prefix_alias_requires_adjacent_matching_ticker(
+    full_name: str,
+) -> None:
+    """A selected company passage can link a short name to its source-proven issuer."""
+    candidate: Match = match()
+    candidate.company = "Harbor"
+    candidate.company_quote = "Harbor (HBR) pricing power"
+    row: dict[str, str] = {
+        "company": full_name,
+        "fund": "Alpha Fund",
+        "symbol": "HBR US",
+    }
+    parts: list[dict[str, str]] = [
+        {"text": "Alpha Capital Alpha Fund Q2 2026 " + full_name},
+        {"text": candidate.company_quote},
+    ]
+    validate_match(candidate, parts, date(2026, 9, 30), row)
+    with pytest.raises(ValueError, match="company does not match"):
+        validate_match(candidate, parts[1:], date(2026, 9, 30), row)
+
+
+@pytest.mark.parametrize(
+    ("company", "quote"),
+    [
+        ("Harbor", "Harbor (OTHER) pricing power"),
+        ("Harbor", "Harbor (AHBR) pricing power"),
+        ("Harbor", "Harbor pricing power. HBR is a ticker elsewhere."),
+        ("Harb", "Harb (HBR) pricing power"),
+        ("Other Harbor", "Other Harbor (HBR) pricing power"),
+        ("The", "The (HBR) pricing power"),
+    ],
+)
+def test_ticker_alias_rejects_unsupported_company_relationships(
+    company: str, quote: str
+) -> None:
+    """Neither a loose ticker mention nor generic name tokens prove an issuer alias."""
+    candidate: Match = match()
+    candidate.company = company
+    candidate.company_quote = quote
+    row: dict[str, str] = {
+        "company": "The Harbor Insurance Group, Inc.",
+        "fund": "Alpha Fund",
+        "symbol": "HBR US",
+    }
+    parts: list[dict[str, str]] = [
+        {"text": "Alpha Capital Alpha Fund Q2 2026 The Harbor Insurance Group, Inc."},
+        {"text": quote},
+    ]
+    with pytest.raises(ValueError, match="company does not match"):
+        validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+@pytest.mark.parametrize(
+    "fund",
+    [
+        "Harbor Mid Cap Value Fund",
+        "Harbor Small Cap Value Fund",
+        "Harbor Mid Cap Growth Fund",
+        "Harbor Sustainable Mid Cap Value Fund",
+    ],
+)
+def test_advisors_descriptor_does_not_erase_distinctive_fund_words(fund: str) -> None:
+    """A manager descriptor can vary while size, style and strategy stay exact."""
+    candidate: Match = match()
+    candidate.fund = fund
+    candidate.fund_quote = fund
+    candidate.publisher_quote = "Harbor Advisors"
+    row: dict[str, str] = {
+        "company": "Acme",
+        "fund": "Harbor Advisors Mid Cap Value Fund",
+    }
+    parts: list[dict[str, str]] = [
+        {"text": "Harbor Advisors " + fund + " Q2 2026 Acme pricing power"}
+    ]
+    if fund == "Harbor Mid Cap Value Fund":
+        validate_match(candidate, parts, date(2026, 9, 30), row)
+    else:
+        with pytest.raises(ValueError, match="fund does not match"):
+            validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+def test_period_correction_must_select_the_block_with_original_wording() -> None:
+    """A valid date block does not support a different period label elsewhere."""
+    parts: list[dict[str, str]] = [
+        {"id": "b1", "text": "Alpha Capital Alpha Fund 3Q26 commentary"},
+        {"id": "b2", "text": "9/30/2026"},
+        {"id": "b3", "text": "Acme pricing power"},
+    ]
+    draft: MatchDraft = MatchDraft(
+        accepted=True,
+        reason="Official commentary",
+        fund="Alpha Fund",
+        company="Acme",
+        period="3Q26",
+        period_end=date(2026, 9, 30),
+        publisher_block="b1",
+        fund_block="b1",
+        company_block="b3",
+        period_block="b2",
+    )
+    with pytest.raises(ValueError, match="Period must retain the original wording"):
+        validate_match(
+            resolve_identity(draft.model_dump(), parts), parts, date(2026, 10, 14)
+        )
+    draft.period_block = "b1"
+    validate_match(
+        resolve_identity(draft.model_dump(), parts), parts, date(2026, 10, 14)
+    )

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -121,6 +122,33 @@ def items(run_id: UUID) -> list[dict]:
             "SELECT * FROM minerva_ideas.items WHERE run_id=%s ORDER BY ordinal",
             (run_id,),
         ).fetchall()
+
+
+def source_hints(funds: list[str], issue_date: date) -> list[dict[str, str]]:
+    """Return recent exact-fund URLs as candidates, never inherited approvals."""
+    with connect() as conn:
+        rows: list[dict] = conn.execute(
+            "SELECT i.fund,i.document->>'url' AS url,"
+            "i.document->'identity'->>'period' AS period "
+            "FROM minerva_ideas.items i JOIN minerva_ideas.runs r ON r.id=i.run_id "
+            "WHERE i.state='ready' AND i.fund=ANY(%s) AND r.issue_date<=%s "
+            "AND i.document IS NOT NULL "
+            "ORDER BY i.document->'identity'->>'period_end' DESC NULLS LAST,"
+            "r.issue_date DESC,r.created_at DESC",
+            (funds, issue_date),
+        ).fetchall()
+    found: dict[str, set[str]] = {}
+    hints: list[dict[str, str]] = []
+    row: dict
+    for row in rows:
+        seen: set[str] = found.setdefault(row["fund"], set())
+        url: str = row["url"] or ""
+        if url and url not in seen and len(seen) < 2:
+            seen.add(url)
+            hints.append(
+                {"fund": row["fund"], "url": url, "period": row["period"] or ""}
+            )
+    return hints
 
 
 def import_issue(issue: dict, *, run_id: UUID | None = None) -> UUID:
