@@ -7,10 +7,10 @@ import os
 import re
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, TypeAliasType
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from harness.ideas import decisions, store
 from harness.ideas.documents import load_sections
@@ -90,6 +90,69 @@ class EvidenceMatch(Match):
     label_scope: LabelScope
     umbrella: str
     relationship_quotes: list[str]
+
+
+def observation_schema(
+    parts: list[dict[str, str]],
+    *,
+    content_ids: list[str] | None = None,
+) -> type[SourceObservations]:
+    """Constrain exact provided IDs without exceeding provider enum-value limits."""
+    identifiers: list[str] = list(dict.fromkeys(part["id"] for part in parts))
+    allowed_content: set[str] = set(identifiers if content_ids is None else content_ids)
+    content: list[str] = [
+        identifier for identifier in identifiers if identifier in allowed_content
+    ]
+    if not identifiers or not content or not allowed_content <= set(identifiers):
+        raise ValueError(
+            "Observation fields require known nonempty content and identity block IDs"
+        )
+    identity_pattern: str = "|".join(
+        re.escape(identifier) for identifier in identifiers
+    )
+    identity_block: TypeAliasType = TypeAliasType(
+        "IdentityBlock", Annotated[str, Field(pattern=f"^(?:{identity_pattern})$")]
+    )
+    identity_reference: TypeAliasType = TypeAliasType(
+        "IdentityReference", Annotated[str, Field(pattern=f"^(?:|{identity_pattern})$")]
+    )
+    content_pattern: str = "|".join(re.escape(identifier) for identifier in content)
+    content_reference: TypeAliasType = (
+        identity_reference
+        if content == identifiers
+        else TypeAliasType(
+            "ContentReference",
+            Annotated[str, Field(pattern=f"^(?:|{content_pattern})$")],
+        )
+    )
+    return create_model(
+        "SourceObservations",
+        __base__=SourceObservations,
+        publisher_block=(identity_reference, ...),
+        period_block=(identity_reference, ...),
+        fund_block=(content_reference, ...),
+        company_block=(content_reference, ...),
+        relationship_blocks=(list[identity_block], ...),
+    )
+
+
+def identity_from_observations(
+    observed: SourceObservations, row: dict[str, str]
+) -> EvidenceIdentity:
+    """Give exact application fund matching precedence over the model's scope hint."""
+    scope: LabelScope = (
+        "specific"
+        if same_fund(row["fund"], observed.fund, observed.publisher)
+        else observed.label_scope
+    )
+    return EvidenceIdentity(
+        **observed.model_dump(
+            mode="json",
+            exclude={"source_kind", "substantive_commentary", "label_scope"},
+        ),
+        accepted=True,
+        label_scope=scope,
+    )
 
 
 def search(query: str) -> list[dict]:
@@ -483,6 +546,7 @@ Source URL: {document["url"]}
 Return observations, not an accept/reject judgment. source_kind reports whether the document is manager-authored original commentary, a third-party account, or unclear. substantive_commentary requires investment reasoning for this company, not a holding weight or performance attribution. publisher is the manager name actually present in publisher_block; fund is the actual fund/strategy actually present in fund_block. Classify the discovery label's scope and select original relationship_blocks proving any manager/member/umbrella link. Do not reject an observed relationship merely because source and discovery labels differ; preserve the evidence for application policy. Every required member or umbrella name must appear intact in its selected relationship_blocks. Individual section headings can prove each named member. For combined labels select proof for every discovery member, even when only one discusses the company. For umbrellas select the original umbrella title and member contents/heading evidence. Do not rely on table rows where numbers or other text interrupt a name, and never borrow a block outside the provided original context. An unsupported relationship must have no relationship_blocks. umbrella must be the original umbrella name, or empty when inapplicable.
 Select ONE existing block for each publisher_block, fund_block, company_block and period_block. Each name/period must occur verbatim in its OWN block. The fund and company commentary must belong to the same source section. Preserve distinctive fund words. Use the issuer name OR its ticker actually written in substantive company commentary, never a combined name-plus-ticker label. For example, return Polaris or PII, not Polaris (PII); return Builders FirstSource or BLDR, not Builders FirstSource (NYSE:BLDR). period is exact source wording and period_end only normalizes its reporting date. Never use a later reporting period, a stale letter or search crawl date. If evidence is missing, use empty fields or null date and describe what is missing. Do not fabricate or merge block IDs.
 Original blocks:\n{json.dumps(parts, ensure_ascii=False)}"""
+    schema: type[SourceObservations] = observation_schema(parts)
     feedback: str = ""
     identity: EvidenceIdentity | None = None
     reason: str = "Source identity is not supported"
@@ -490,14 +554,11 @@ Original blocks:\n{json.dumps(parts, ensure_ascii=False)}"""
     for correction in range(2):
         observed: SourceObservations = generate(
             prompt + feedback,
-            SourceObservations,
+            schema,
             folder,
             model=resolve_models(model).source,
         )
-        identity = EvidenceIdentity(
-            **observed.model_dump(exclude={"source_kind", "substantive_commentary"}),
-            accepted=True,
-        )
+        identity = identity_from_observations(observed, row)
         reason = observed.reason
         try:
             if observed.source_kind != "manager_original":

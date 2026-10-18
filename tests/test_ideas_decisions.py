@@ -574,3 +574,138 @@ def test_verified_descriptor_variation_preserves_the_actual_source_fund_and_quot
     assert resolved.fund == "Harbor Global Fund"
     assert resolved.fund_quote == parts[1]["text"]
     assert resolved.company_quote == parts[2]["text"]
+
+
+def test_observation_schema_uses_exact_ids_and_separates_content_from_anchors() -> None:
+    """A known anchor cannot become company/fund content, and decorated IDs stay invalid."""
+    from pydantic import ValidationError
+
+    from harness.ideas.research import SourceObservations, observation_schema
+
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Q2 2026"},
+        {"id": "p2", "text": "Harbor Global Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    observed: SourceObservations = SourceObservations(
+        fund="Harbor Global Fund",
+        company="Acme",
+        period="Q2 2026",
+        period_end=date(2026, 6, 30),
+        publisher_block="p1",
+        fund_block="p2",
+        company_block="p3",
+        period_block="p1",
+        source_kind="manager_original",
+        substantive_commentary=True,
+        publisher="Harbor Capital",
+        label_scope="specific",
+        umbrella="",
+        relationship_blocks=["p1"],
+        reason="Source observations",
+    )
+    schema: type[SourceObservations] = observation_schema(
+        parts, content_ids=["p2", "p3"]
+    )
+    valid: SourceObservations = schema.model_validate(observed.model_dump(mode="json"))
+    assert valid.model_dump(mode="json")["company_block"] == "p3"
+    assert (
+        schema.model_validate(
+            {**observed.model_dump(mode="json"), "publisher_block": ""}
+        ).publisher_block
+        == ""
+    )
+    invalid: dict
+    for invalid in (
+        {"company_block": "p3: Acme has pricing power."},
+        {"publisher_block": "p99"},
+        {"fund_block": "p1"},
+        {"company_block": "p1"},
+        {"relationship_blocks": [""]},
+        {"relationship_blocks": ["p1: Harbor Capital"]},
+    ):
+        with pytest.raises(ValidationError):
+            schema.model_validate({**observed.model_dump(mode="json"), **invalid})
+
+
+def test_large_source_schema_uses_shared_exact_id_patterns() -> None:
+    """A 2033-block original stays within provider enum limits and enforces literal IDs."""
+    from pydantic import ValidationError
+
+    from harness.ideas.research import SourceObservations, observation_schema
+
+    identifiers: list[str] = [f"b{number}" for number in range(1, 2034)]
+    identifiers.append("literal.+")
+    model: type[SourceObservations] = observation_schema(
+        [{"id": identifier, "text": "Original block"} for identifier in identifiers]
+    )
+    schema: dict = model.model_json_schema()
+    assert not any(
+        identifier in value.get("enum", [])
+        for value in schema["$defs"].values()
+        for identifier in identifiers
+    )
+    assert schema["properties"]["publisher_block"] == schema["properties"]["fund_block"]
+    assert schema["properties"]["period_block"] == schema["properties"]["company_block"]
+    observations: dict = {
+        "fund": "Harbor Global Fund",
+        "company": "Acme",
+        "period": "Q2 2026",
+        "period_end": "2026-06-30",
+        "publisher_block": "b1",
+        "fund_block": "b2033",
+        "company_block": "literal.+",
+        "period_block": "",
+        "source_kind": "manager_original",
+        "substantive_commentary": True,
+        "publisher": "Harbor Capital",
+        "label_scope": "specific",
+        "umbrella": "",
+        "relationship_blocks": ["b2033"],
+        "reason": "Source observations",
+    }
+    assert model.model_validate(observations).company_block == "literal.+"
+    invalid: str
+    for invalid in ("b2034", "b1: Heading", "literalZZ", "b1\n"):
+        with pytest.raises(ValidationError):
+            model.model_validate({**observations, "company_block": invalid})
+
+
+def test_exact_fund_policy_has_precedence_over_model_scope_hint() -> None:
+    """A factual match keeps all specific constraints even when the model guesses manager scope."""
+    from harness.ideas.research import SourceObservations, identity_from_observations
+
+    observed: SourceObservations = SourceObservations(
+        fund="Harbor Global Fund",
+        company="Acme",
+        period="Q2 2026",
+        period_end=date(2026, 6, 30),
+        publisher_block="p1",
+        fund_block="p2",
+        company_block="p3",
+        period_block="p1",
+        source_kind="manager_original",
+        substantive_commentary=True,
+        publisher="Harbor Capital Pty Ltd",
+        label_scope="manager",
+        umbrella="",
+        relationship_blocks=["p1"],
+        reason="Original observations",
+    )
+    candidate: EvidenceIdentity = identity_from_observations(
+        observed, {"fund": "Harbor Capital Global Fund"}
+    )
+    assert candidate.label_scope == "specific"
+    assert observed.label_scope == "manager"
+    assert (
+        identity_from_observations(
+            observed, {"fund": "Harbor Capital Sustainable Global Fund"}
+        ).label_scope
+        == "manager"
+    )
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Pty Ltd Q2 2026"},
+        {"id": "p2", "text": "Harbor Global Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    validate(candidate, "Harbor Capital Global Fund", parts)
