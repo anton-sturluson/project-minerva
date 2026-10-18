@@ -123,14 +123,29 @@ def validate_target(
     short_tokens: list[str] = company.split()
     issuer_tokens: list[str] = issuer_name(expected).split()
     full_name: str = " ".join(expected)
+    full_name_evidenced: bool = any(
+        (" " + full_name + " ") in (" " + " ".join(words(part["text"])) + " ")
+        for part in (parts or [])
+    )
+    ticker_linked_name: bool = bool(
+        len(ticker) >= 3
+        and ticker.isalpha()
+        and any(token not in legal | {"the"} for token in short_tokens)
+        and (" " + company + " ") in (" " + " ".join(issuer_tokens) + " ")
+        and re.search(
+            r"(?<![a-z0-9])"
+            + re.escape(company)
+            + r"\s*\(\s*"
+            + re.escape(ticker)
+            + r"\s*\)",
+            " ".join(match.company_quote.split()).casefold(),
+        )
+    )
     evidenced_short_name: bool = bool(
         short_tokens
         and len(short_tokens) < len(issuer_tokens)
-        and issuer_tokens[-len(short_tokens) :] == short_tokens
-        and any(
-            (" " + full_name + " ") in (" " + " ".join(words(part["text"])) + " ")
-            for part in (parts or [])
-        )
+        and full_name_evidenced
+        and (issuer_tokens[-len(short_tokens) :] == short_tokens or ticker_linked_name)
     )
     if (
         company not in aliases

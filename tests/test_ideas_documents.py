@@ -1,13 +1,17 @@
 """Source preservation and navigation parsing without live network requests."""
 
 import json
+from pathlib import Path
 
 import pytest
 
 from harness.ideas.documents import (
     PageLink,
+    SourcePart,
+    _archive_discovery,
     _parse_browser_page,
     archive,
+    is_discovery_url,
     load_sections,
     page_links,
     public_url,
@@ -117,3 +121,49 @@ def test_browser_page_rejects_truncated_html_or_failed_cli_output() -> None:
         _parse_browser_page(complete[:-3])
     with pytest.raises(ValueError, match="invalid page result"):
         _parse_browser_page(complete + "\n[error | url: unavailable | 0ms]\n")
+
+
+def test_newsletter_clues_cannot_enter_the_original_source_archive(
+    tmp_path: Path,
+) -> None:
+    """Newsletter text and links remain separate from independently verified originals."""
+    url: str = "https://hfbestideas.substack.com/p/weekly-ideas"
+    payload: bytes = b'<article><p>Research clues name Acme and Alpha Fund and explain where to find their original quarterly commentary.</p><a href="/p/source-clues">More clues</a><a href="https://manager.example.com/letter">Original</a></article>'
+    parts: list[SourcePart] = [{"id": "b1", "text": "Acme research clues"}]
+    _archive_discovery(tmp_path, url, payload, parts)
+    assert not (tmp_path / "research/documents").exists()
+    assert not (tmp_path / "research/candidates").exists()
+    assert (
+        next((tmp_path / "research/discovery").glob("*.html")).read_bytes() == payload
+    )
+    assert (
+        page_links(payload, url, allow_discovery=True)[0]["url"]
+        == "https://hfbestideas.substack.com/p/source-clues"
+    )
+    assert page_links(payload, url) == [
+        {"url": "https://manager.example.com/letter", "label": "Original"}
+    ]
+    with pytest.raises(ValueError, match="discovery only"):
+        public_url(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://hfbestideas.substack.com/p/weekly",
+        "https://user:password@example.com/p/weekly",
+        "https://127.0.0.1/private",
+        "https://10.0.0.1/private",
+    ],
+)
+def test_discovery_exception_preserves_public_url_security(url: str) -> None:
+    """The newsletter exception changes only the discovery-host evidence ban."""
+    with pytest.raises(ValueError):
+        public_url(url, allow_discovery=True)
+
+
+def test_discovery_host_detection_does_not_trust_lookalike_domains() -> None:
+    """Classify requested and redirect destinations by their actual hostname."""
+    assert is_discovery_url("https://www.hfbestideas.com/ideas")
+    assert is_discovery_url("https://HFBestIdeas.Substack.com./p/weekly")
+    assert not is_discovery_url("https://hfbestideas.substack.com.example.com/letter")

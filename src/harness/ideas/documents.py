@@ -17,6 +17,7 @@ from urllib.parse import SplitResult, urljoin, urlsplit
 from uuid import UUID
 
 import httpx
+import yaml
 from lxml import html
 from psycopg.types.json import Jsonb
 
@@ -60,18 +61,25 @@ class BrowseResult(TypedDict):
     next_link_offset: int | None
     total_links: int
     text_error: str | None
+    discovery_only: bool
 
 
-def public_url(url: str) -> str:
+def is_discovery_url(url: str) -> bool:
+    """Identify HF Best Ideas hosts without accepting lookalike domains."""
+    host: str = (urlsplit(url).hostname or "").rstrip(".").lower()
+    return (
+        host == "hfbestideas.com"
+        or host.endswith(".hfbestideas.com")
+        or host == "hfbestideas.substack.com"
+    )
+
+
+def public_url(url: str, *, allow_discovery: bool = False) -> str:
     parsed = urlsplit(url)
     host = (parsed.hostname or "").rstrip(".").lower()
     if parsed.scheme != "https" or not host or parsed.username or parsed.password:
         raise ValueError("Source must be a public HTTPS URL without credentials")
-    if (
-        host == "hfbestideas.com"
-        or host.endswith(".hfbestideas.com")
-        or host == "hfbestideas.substack.com"
-    ):
+    if is_discovery_url(url) and not allow_discovery:
         raise ValueError("HF Best Ideas is discovery only, never thesis evidence")
     if any(c in url for c in "\r\n\t<>|"):
         raise ValueError("Invalid source URL")
@@ -83,12 +91,12 @@ def public_url(url: str) -> str:
     return url
 
 
-def download(url: str) -> tuple[bytes, str]:
+def download(url: str, *, allow_discovery: bool = False) -> tuple[bytes, str]:
     with httpx.Client(
         timeout=30, headers={"User-Agent": "Minerva research/1.0"}
     ) as client:
         for _ in range(6):
-            public_url(url)
+            public_url(url, allow_discovery=allow_discovery)
             with client.stream("GET", url) as response:
                 if response.is_redirect:
                     url = urljoin(url, response.headers["location"])
@@ -154,7 +162,9 @@ def sections(payload: bytes) -> tuple[str, list[dict]]:
     return kind, parts
 
 
-def page_links(payload: bytes, url: str) -> list[PageLink]:
+def page_links(
+    payload: bytes, url: str, *, allow_discovery: bool = False
+) -> list[PageLink]:
     """Keep HTML article and document destinations without date or PDF filtering.
 
     Obvious nonpublic URLs are omitted here. DNS and redirect checks still run
@@ -178,9 +188,7 @@ def page_links(payload: bytes, url: str) -> list[PageLink]:
             or parsed.username
             or parsed.password
             or host.endswith((".local", ".localhost"))
-            or host == "hfbestideas.com"
-            or host.endswith(".hfbestideas.com")
-            or host == "hfbestideas.substack.com"
+            or (is_discovery_url(destination) and not allow_discovery)
             or any(character in destination for character in "\r\n\t<>|")
         ):
             continue
@@ -215,9 +223,9 @@ def _parse_browser_page(output: str) -> tuple[bytes, str]:
     return payload, page["url"]
 
 
-def rendered_download(url: str) -> tuple[bytes, str]:
+def rendered_download(url: str, *, allow_discovery: bool = False) -> tuple[bytes, str]:
     """Read the actual rendered HTML in an owned browser tab and then close it."""
-    public_url(url)
+    public_url(url, allow_discovery=allow_discovery)
     browser: str | None = shutil.which("browser")
     if browser is None:
         raise ValueError(
@@ -261,7 +269,7 @@ def rendered_download(url: str) -> tuple[bytes, str]:
             payload: bytes
             final_url: str
             payload, final_url = _parse_browser_page(output.read())
-        public_url(final_url)
+        public_url(final_url, allow_discovery=allow_discovery)
         return payload, final_url
     finally:
         subprocess.run(
@@ -281,13 +289,16 @@ def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
     payload: bytes
     final_url: str
     try:
-        payload, final_url = download(url)
+        payload, final_url = download(url, allow_discovery=True)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code not in {403, 429}:
             raise
-        payload, final_url = rendered_download(url)
+        payload, final_url = rendered_download(url, allow_discovery=True)
         collection = "browser"
-    links: list[PageLink] = page_links(payload, final_url)
+    discovery_only: bool = is_discovery_url(url) or is_discovery_url(final_url)
+    links: list[PageLink] = page_links(
+        payload, final_url, allow_discovery=discovery_only
+    )
     kind: str = ""
     parts: list[SourcePart] = []
     text_error: str | None = None
@@ -297,15 +308,18 @@ def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
         text_error = str(exc)
         if collection == "http" and "too little readable text" in text_error:
             try:
-                payload, final_url = rendered_download(url)
+                payload, final_url = rendered_download(url, allow_discovery=True)
                 collection = "browser"
-                links = page_links(payload, final_url)
+                discovery_only = is_discovery_url(url) or is_discovery_url(final_url)
+                links = page_links(payload, final_url, allow_discovery=discovery_only)
                 kind, parts = sections(payload)
                 text_error = None
             except (ValueError, OSError, subprocess.SubprocessError) as recovery:
                 text_error += f"; browser recovery failed ({type(recovery).__name__})"
     document: SourceDocument | None = None
-    if text_error is None:
+    if discovery_only:
+        _archive_discovery(folder, final_url, payload, parts)
+    elif text_error is None:
         document = _archive_payload(folder, final_url, payload, kind, parts)
         document["collection"] = collection
         if collection == "browser":
@@ -325,7 +339,29 @@ def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
         "next_link_offset": next_offset if next_offset < len(links) else None,
         "total_links": len(links),
         "text_error": text_error,
+        "discovery_only": discovery_only,
     }
+
+
+def _archive_discovery(
+    folder: Path, url: str, payload: bytes, parts: list[SourcePart]
+) -> None:
+    """Keep newsletter clues outside the original-document archive and indexes."""
+    digest: str = hashlib.sha256(payload).hexdigest()
+    base: str = f"research/discovery/{digest}"
+    if payload.lstrip().startswith(b"<?xml"):
+        # XML feeds are converted to readable YAML instead of saving raw XML.
+        readable_feed: str = yaml.safe_dump(
+            {"url": url, "parts": parts}, allow_unicode=True, sort_keys=False
+        )
+        store.write_artifact(folder, f"{base}.yaml", readable_feed.encode())
+    else:
+        store.write_artifact(folder, f"{base}.html", payload)
+    store.json_artifact(folder, f"{base}.json", parts)
+    readable: str = (
+        "\n\n".join(f"## {part['id']}\n\n{part['text']}" for part in parts) + "\n"
+    )
+    store.write_artifact(folder, f"{base}.md", readable.encode())
 
 
 def _archive_payload(

@@ -149,3 +149,59 @@ def test_issuer_alias_does_not_relax_sibling_fund_matching() -> None:
     ]
     with pytest.raises(ValueError, match="fund does not match"):
         validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+@pytest.mark.parametrize(
+    "full_name",
+    ["The Harbor Insurance Group, Inc.", "Harbor International Group, Inc."],
+)
+def test_middle_or_prefix_alias_requires_adjacent_matching_ticker(
+    full_name: str,
+) -> None:
+    """A selected company passage can link a short name to its source-proven issuer."""
+    candidate: Match = match()
+    candidate.company = "Harbor"
+    candidate.company_quote = "Harbor (HBR) pricing power"
+    row: dict[str, str] = {
+        "company": full_name,
+        "fund": "Alpha Fund",
+        "symbol": "HBR US",
+    }
+    parts: list[dict[str, str]] = [
+        {"text": "Alpha Capital Alpha Fund Q2 2026 " + full_name},
+        {"text": candidate.company_quote},
+    ]
+    validate_match(candidate, parts, date(2026, 9, 30), row)
+    with pytest.raises(ValueError, match="company does not match"):
+        validate_match(candidate, parts[1:], date(2026, 9, 30), row)
+
+
+@pytest.mark.parametrize(
+    ("company", "quote"),
+    [
+        ("Harbor", "Harbor (OTHER) pricing power"),
+        ("Harbor", "Harbor (AHBR) pricing power"),
+        ("Harbor", "Harbor pricing power. HBR is a ticker elsewhere."),
+        ("Harb", "Harb (HBR) pricing power"),
+        ("Other Harbor", "Other Harbor (HBR) pricing power"),
+        ("The", "The (HBR) pricing power"),
+    ],
+)
+def test_ticker_alias_rejects_unsupported_company_relationships(
+    company: str, quote: str
+) -> None:
+    """Neither a loose ticker mention nor generic name tokens prove an issuer alias."""
+    candidate: Match = match()
+    candidate.company = company
+    candidate.company_quote = quote
+    row: dict[str, str] = {
+        "company": "The Harbor Insurance Group, Inc.",
+        "fund": "Alpha Fund",
+        "symbol": "HBR US",
+    }
+    parts: list[dict[str, str]] = [
+        {"text": "Alpha Capital Alpha Fund Q2 2026 The Harbor Insurance Group, Inc."},
+        {"text": quote},
+    ]
+    with pytest.raises(ValueError, match="company does not match"):
+        validate_match(candidate, parts, date(2026, 9, 30), row)
