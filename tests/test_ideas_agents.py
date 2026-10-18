@@ -23,7 +23,9 @@ def test_source_tools_accept_only_explicit_public_source_arguments() -> None:
     assert candidate.ordinal == 1
     for extra in ("path", "identity", "state"):
         with pytest.raises(ValidationError):
-            Source.model_validate({"ordinal": 1, "url": candidate.url, extra: "injected"})
+            Source.model_validate(
+                {"ordinal": 1, "url": candidate.url, extra: "injected"}
+            )
     with pytest.raises(ValidationError):
         Source(ordinal=0, url=candidate.url)
     with pytest.raises(ValidationError):
@@ -51,15 +53,24 @@ def test_response_replay_preserves_api_aliases_and_encrypted_reasoning() -> None
 
     from harness.ideas.agents import replay_item
 
-    call: ResponseFunctionToolCall = ResponseFunctionToolCall.model_validate({
-        "id": "fc_test", "type": "function_call", "call_id": "call_test",
-        "name": "search", "arguments": '{"query":"manager letter"}', "async": True,
-    })
+    call: ResponseFunctionToolCall = ResponseFunctionToolCall.model_validate(
+        {
+            "id": "fc_test",
+            "type": "function_call",
+            "call_id": "call_test",
+            "name": "search",
+            "arguments": '{"query":"manager letter"}',
+            "async": True,
+        }
+    )
     encoded: dict = replay_item(call)
     assert "async_" not in encoded
     assert encoded["async"] is True
     assert encoded["arguments"] == call.arguments
     reasoning: ResponseReasoningItem = ResponseReasoningItem(
-        id="rs_test", type="reasoning", summary=[], encrypted_content="encrypted-example",
+        id="rs_test",
+        type="reasoning",
+        summary=[],
+        encrypted_content="encrypted-example",
     )
     assert replay_item(reasoning)["encrypted_content"] == "encrypted-example"

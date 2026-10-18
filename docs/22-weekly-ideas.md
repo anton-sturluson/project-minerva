@@ -98,7 +98,7 @@ The shared main checkout is the scheduled runtime. Keep it on `main`, clean and 
 
 ## Validation
 
-The PR series includes live Postgres import/source tests, bounded public-source discovery and extraction with Flash-Lite, full-issue processing, explicit gap retries, no-op resume, concurrency rejection, publication-state integration tests, and actual OpenClaw delivery tests. Threaded publication is verified with per-message Slack acknowledgements and direct parent/thread readback; a process exit code alone is insufficient. The separate Slack connector may not have access to the Gateway's Slack workspace, so direct channel readback is a distinct capability.
+Validate changes with focused tests, live Postgres checks, a full-issue Sol/Luna run, explicit gap retries, no-op resume, concurrency rejection and publication-state integration checks. Confirm archived source hashes and exact claim passages before accepting the digest. Threaded publication is verified with per-message Slack acknowledgements and direct parent/thread readback; a process exit code alone is insufficient. The separate Slack connector may not have access to the Gateway's Slack workspace, so direct channel readback is a distinct capability.
 
 ## References
 
