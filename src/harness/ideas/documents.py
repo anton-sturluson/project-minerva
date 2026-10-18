@@ -19,7 +19,6 @@ from uuid import UUID
 import httpx
 import yaml
 from lxml import etree, html
-from psycopg.types.json import Jsonb
 
 from harness.ideas import store
 
@@ -463,13 +462,7 @@ def load_sections(folder: Path, document: dict) -> list[dict]:
 
 
 def attach(run_id: UUID, ordinal: int, url: str) -> dict:
-    run = store.get_run(run_id)
-    if not any(r["ordinal"] == ordinal for r in store.items(run_id)):
-        raise ValueError("Unknown roster ordinal")
-    document = archive(store.run_folder(run), url)
-    with store.connect() as conn:
-        conn.execute(
-            "UPDATE minerva_ideas.items SET document=%s,state='sourced',error=NULL WHERE run_id=%s AND ordinal=%s",
-            (Jsonb(document), run_id, ordinal),
-        )
-    return document
+    """Use the shared unpublished-run and exact-approval attachment boundary."""
+    from harness.ideas.extraction import attach_source
+
+    return attach_source(run_id, ordinal, url)

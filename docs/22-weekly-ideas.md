@@ -32,6 +32,10 @@ Company and fund identity must match the discovery lead. A shortened issuer name
 
 Models select source block/passage IDs. Python supplies the exact archived evidence. Claims require investment reasoning about the featured company; holdings weights, performance attribution and general manager commentary alone are excluded. A separate support review checks each claim against its selected evidence, with at most one correction. Equity/credit, stance and explicitly stated action are separate fields. Semantic review remains fallible; inspect the retained evidence when reviewing a view.
 
+New source identities distinguish specific funds, manager-only leads, combined fund lists and umbrellas. A broad label requires original relationship blocks linking the publisher or group to the selected fund; region, style, vehicle and issuer constraints remain strict. Luna reports observations, Python applies the label policy, and Sol reviews the resolved relationship quotes with claim support. Historical identities retain their existing labels and publication text.
+
+Accepted and rejected evidence decisions are immutable within a run, keyed by source bytes, target, issue, scope and policy revision. Changing the URL, model or delegation instructions does not reopen a decision. An identical approved original keeps its first approved citation. Provider failures remain retryable rather than becoming negative evidence. A rejected claim draft retains its accepted source and returns `claim_revision_required`; an explicit revised draft receives the normal passage and Sol checks. Formatting, claim order or note changes cannot reroll the same proposal.
+
 ## Commands
 
 ```sh
@@ -60,7 +64,15 @@ uv run minerva ideas extract RUN_UUID ORDINAL
 
 An import contains an issue URL/date and `roster` entries with `company`, `fund` and optional `symbol`. Reimporting the same UUID/content is idempotent. Duplicate roster rows are preserved by ordinal. Attaching a source does not approve its thesis.
 
-Unchanged newsletter rosters reuse their run. `run --fresh` creates a new run with no inherited approvals, preserving earlier evidence and publication receipts. A model configuration change alone does not invalidate completed views: use `--fresh` to reprocess them. Completed views and known gaps are skipped; retries of gaps are explicit. A Postgres session lock prevents concurrent work on one run and releases on process failure. A run has a 20-minute processing budget; remaining work can be resumed.
+To repair a rejected claim draft, save a `View` JSON file and use `uv run minerva ideas extract RUN_UUID ORDINAL --draft revised-view.json`. This synthetic example assumes the attached original has passage `p1.1` supporting its claim; use the actual archived IDs:
+
+```json
+{"instrument":"equity","stance":"bull","action":"not stated","claims":[{"text":"Acme has pricing power.","passages":["p1.1"]}],"gap":""}
+```
+
+An unsuccessful replacement preserves an existing ready view. Once any publication is prepared (`sending`, `unknown` or `delivered`), source changes, extraction and research retries are frozen. Use `run --fresh` for a separate research run; do not edit an earlier published run. A no-op weekly resume can still reconcile an existing publication.
+
+Unchanged newsletter rosters reuse their run. `run --fresh` creates a new run with no inherited approvals, preserving earlier evidence and publication receipts. A model configuration change alone does not invalidate completed views: use `--fresh` to reprocess them. Completed views and known gaps are skipped; retries of gaps are explicit. A Postgres session lock prevents concurrent work on one run and releases on process failure. A run has a 45-minute processing budget; remaining work can be resumed.
 
 | Item state | Meaning |
 | --- | --- |

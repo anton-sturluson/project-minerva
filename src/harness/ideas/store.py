@@ -242,3 +242,16 @@ def run_lock(run_id: UUID):
             yield
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
+
+
+def require_unpublished(run_id: UUID) -> None:
+    """Freeze source and view evidence after any publication has been prepared."""
+    with connect() as conn:
+        publication: dict | None = conn.execute(
+            "SELECT state FROM minerva_ideas.publications WHERE run_id=%s LIMIT 1",
+            (run_id,),
+        ).fetchone()
+    if publication is not None:
+        raise ValueError(
+            "This run has a prepared publication and its evidence is frozen; use minerva ideas run --fresh for new research."
+        )

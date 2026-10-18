@@ -124,6 +124,7 @@ def resume(
         rows: list[dict] = store.items(run_id)
         ordinals: list[int] = selected_ordinals(rows, limit, retry_gaps)
         if ordinals:
+            store.require_unpublished(run_id)
             if not os.environ.get("BRAVE_API_KEY"):
                 raise ValueError("BRAVE_API_KEY is required before starting research")
             models: StageModels = resolve_models(model)
