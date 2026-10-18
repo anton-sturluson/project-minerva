@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 import xml.etree.ElementTree as ET
 from dataclasses import asdict
 from datetime import timezone
@@ -155,9 +154,7 @@ def resume(
                     (run_id, ordinals),
                 )
             try:
-                discover(
-                    run_id, ordinals, model=model, deadline=time.monotonic() + 1200
-                )
+                discover(run_id, ordinals, model=model)
             except ModelError:
                 with store.connect() as conn:
                     conn.execute(
