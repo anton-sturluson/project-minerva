@@ -17,13 +17,29 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
 from investor_platform.db import LOCAL_WORKSPACE, make_engine
+from investor_platform.economics.macro import (
+    BEA_SECTION1,
+    BEA_SECTION2,
+    FED_EQUITY_URL,
+    FED_H15_URL,
+    FED_TARGET_URL,
+    FREDDIE_URL,
+    SHILLER_URL,
+    parse_bea,
+    parse_fed_equity,
+    parse_fed_h15,
+    parse_fed_targets,
+    parse_freddie,
+    parse_shiller,
+    shiller_workbook_url,
+)
 from investor_platform.economics.parsers import Fact, parse_bls, parse_eia, parse_usda, validate
 from investor_platform.economics.registry import BLS_URL, SERIES, SOURCES, USDA_URL
 from investor_platform.models import EconomicObservation, EconomicRefreshState
 
 LOGGER: logging.Logger = logging.getLogger(__name__)
 PARSER_VERSION: str = "1"
-MAX_BYTES: int = 8 * 1024 * 1024
+MAX_BYTES: int = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -41,11 +57,27 @@ def next_regular(provider: str, now: datetime) -> datetime:
     local: datetime = now.astimezone(ZoneInfo("America/New_York"))
     hour: int
     minute: int
-    hour, minute = {"bls": (9, 0), "usda": (14, 0), "eia": (10, 30)}[provider]
+    hour, minute = {
+        "bls": (9, 0),
+        "bls-macro": (9, 0),
+        "usda": (14, 0),
+        "eia": (10, 30),
+        "bea": (10, 0),
+        "fed": (17, 0),
+        "fed-equity": (17, 0),
+        "freddie": (13, 0),
+        "shiller": (14, 0),
+    }[provider]
     candidate: datetime = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if candidate <= local:
         candidate += timedelta(days=1)
-    while candidate.weekday() >= 5 or (provider == "eia" and candidate.weekday() not in {1, 2}):
+    allowed_days: set[int] = {
+        "eia": {1, 2},
+        "freddie": {2, 3},
+        "shiller": {0},
+        "fed-equity": {0},
+    }.get(provider, set(range(5)))
+    while candidate.weekday() not in allowed_days:
         candidate += timedelta(days=1)
     return candidate.astimezone(UTC)
 
@@ -76,16 +108,32 @@ def collect_payloads(
         """Use an explicitly selected local source snapshot or a fresh publisher request."""
         return (import_dir / name).read_bytes() if import_dir else download(url, body)
 
-    if provider == "bls":
+    if provider in {"bls", "bls-macro"}:
+        expected: dict[str, str] = (
+            {"CUUR0000SA0": "cpi-index", "LNS14000000": "unemployment", "CES0000000001": "payrolls"}
+            if provider == "bls-macro"
+            else {s.source_key: s.key for s in SERIES if s.source_id == "bls"}
+        )
         request: bytes = json.dumps(
             {
-                "seriesid": [s.source_key for s in SERIES if s.source_id == "bls"],
-                "startyear": str(now.year - (6 if initial else 1)),
+                "seriesid": list(expected),
+                "startyear": str(now.year - (6 if initial or provider == "bls-macro" else 1)),
                 "endyear": str(now.year),
             }
         ).encode()
-        body: bytes = read("bls-api-2025-2026.json", BLS_URL, request)
-        return [Payload(BLS_URL, body, parse_bls(body), imported=import_dir is not None)]
+        body: bytes = read(
+            "bls-macro.json" if provider == "bls-macro" else "bls-api-2025-2026.json",
+            BLS_URL,
+            request,
+        )
+        return [
+            Payload(
+                BLS_URL,
+                body,
+                parse_bls(body, expected),
+                imported=import_dir is not None,
+            )
+        ]
     if provider == "usda":
         body = read("usda-moderate-cost.xlsx", USDA_URL)
         return [Payload(USDA_URL, body, parse_usda(body), imported=import_dir is not None)]
@@ -99,6 +147,41 @@ def collect_payloads(
                 Payload(url, body, parse_eia(body, key), imported=import_dir is not None)
             )
         return payloads
+    if provider == "bea":
+        payloads = []
+        section: int
+        for section, url in ((1, BEA_SECTION1), (2, BEA_SECTION2)):
+            body = read(f"bea-section{section}.xlsx", url)
+            payloads.append(
+                Payload(url, body, parse_bea(body, section), imported=import_dir is not None)
+            )
+        return payloads
+    if provider == "fed":
+        target_body: bytes = read("fed-target.csv", FED_TARGET_URL)
+        yield_body: bytes = read("fed-h15.csv", FED_H15_URL)
+        return [
+            Payload(
+                FED_TARGET_URL,
+                target_body,
+                parse_fed_targets(target_body),
+                imported=import_dir is not None,
+            ),
+            Payload(
+                FED_H15_URL, yield_body, parse_fed_h15(yield_body), imported=import_dir is not None
+            ),
+        ]
+    if provider == "fed-equity":
+        body = read("fed-z1-tables.zip", FED_EQUITY_URL)
+        return [
+            Payload(FED_EQUITY_URL, body, parse_fed_equity(body), imported=import_dir is not None)
+        ]
+    if provider == "freddie":
+        body = read("freddie-history.xlsx", FREDDIE_URL)
+        return [Payload(FREDDIE_URL, body, parse_freddie(body), imported=import_dir is not None)]
+    if provider == "shiller":
+        url = SHILLER_URL if import_dir else shiller_workbook_url(download(SHILLER_URL))
+        body = read("shiller-current.xls", url)
+        return [Payload(url, body, parse_shiller(body), imported=import_dir is not None)]
     raise ValueError("Unsupported economics publisher")
 
 
@@ -281,13 +364,21 @@ def run_worker(engine: Engine, stop: Event) -> None:
 def main() -> None:
     """Collect one or all supported sources into the explicitly configured database."""
     parser: argparse.ArgumentParser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=["all", "bls", "usda", "eia"], default="all")
+    parser.add_argument(
+        "--provider",
+        choices=["all"] + [source.id for source in SOURCES if source.enabled],
+        default="all",
+    )
     parser.add_argument("--import-dir", type=Path)
     parser.add_argument("--force", action="store_true")
     args: argparse.Namespace = parser.parse_args()
     engine: Engine = make_engine()
     try:
-        providers: list[str] = ["bls", "usda", "eia"] if args.provider == "all" else [args.provider]
+        providers: list[str] = (
+            [source.id for source in SOURCES if source.enabled]
+            if args.provider == "all"
+            else [args.provider]
+        )
         results: dict[str, str] = {
             provider: refresh(engine, provider, force=args.force, import_dir=args.import_dir)
             for provider in providers

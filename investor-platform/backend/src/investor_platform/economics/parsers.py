@@ -28,12 +28,12 @@ class Fact:
     derived_from: list[dict[str, str]] = field(default_factory=list)
 
 
-def number(value: str | float | int | None) -> Decimal | None:
+def number(value: str | float | int | None, *, signed: bool = False) -> Decimal | None:
     """Preserve missing markers and reject invalid or nonfinite prices."""
-    if value is None or str(value).strip() in {"", "-", "NA", "N/A"}:
+    if value is None or str(value).strip() in {"", "-", ".", "NA", "N/A", "ND"}:
         return None
     result: Decimal = Decimal(str(value))
-    if not result.is_finite() or result < 0:
+    if not result.is_finite() or (not signed and result < 0):
         raise ValueError("Invalid economics price")
     return result
 
@@ -52,10 +52,12 @@ def validate(facts: list[Fact]) -> list[Fact]:
     return sorted(facts, key=lambda row: (row.series_key, row.date))
 
 
-def parse_bls(payload: bytes) -> list[Fact]:
+def parse_bls(
+    payload: bytes, expected: dict[str, str] | None = None, *, signed: bool = False
+) -> list[Fact]:
     """Read exact food IDs, dates, decimals and missing-value footnotes."""
     data: dict = json.loads(payload)
-    expected: dict[str, str] = {s.source_key: s.key for s in SERIES if s.source_id == "bls"}
+    expected = expected or {s.source_key: s.key for s in SERIES if s.source_id == "bls"}
     if data.get("status") != "REQUEST_SUCCEEDED" or data.get("message"):
         raise ValueError("BLS request failed or returned a warning")
     facts: list[Fact] = []
@@ -81,7 +83,7 @@ def parse_bls(payload: bytes) -> list[Fact]:
                 Fact(
                     expected[identity],
                     date(int(row["year"]), int(period[1:]), 1),
-                    number(row["value"]),
+                    number(row["value"], signed=signed),
                     identity,
                     [note for note in row.get("footnotes", []) if note],
                 )

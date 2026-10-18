@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
+import { MacroOverview } from "./MacroOverview";
+import { dateLabel, valueLabel } from "./economicsFormat";
 
-type Source = {
+export type Source = {
   id: string;
   name: string;
   url: string;
@@ -23,9 +25,11 @@ type Observation = {
   missing: boolean;
   source_url: string;
   footnotes: Record<string, string>[];
-  derived_from: Record<string, string>[];
+  derived_from: Record<string, string | number>[];
+  provisional?: boolean;
 };
-type Series = {
+export type Series = {
+  category?: "macro" | "household" | "valuation";
   key: string;
   source_id: string;
   name: string;
@@ -34,7 +38,10 @@ type Series = {
   description: string;
   methodology_notes: string;
   source_url: string;
-  latest: Pick<Observation, "date" | "value" | "missing"> | null;
+  latest: Pick<
+    Observation,
+    "date" | "value" | "missing" | "provisional"
+  > | null;
   observation_count: number;
 };
 type Catalog = {
@@ -44,21 +51,6 @@ type Catalog = {
 };
 type Detail = Series & { observations: Observation[] };
 
-function dateLabel(value: string, frequency = ""): string {
-  return new Date(`${value.slice(0, 10)}T12:00:00Z`).toLocaleDateString(
-    "en-US",
-    {
-      year: "numeric",
-      month: "short",
-      day: /month/i.test(frequency) ? undefined : "numeric",
-      timeZone: "UTC",
-    },
-  );
-}
-function valueLabel(value: string | null): string {
-  if (value === null || !Number.isFinite(Number(value))) return "Unavailable";
-  return Number(value).toLocaleString("en-US", { maximumFractionDigits: 4 });
-}
 function checkedLabel(value: string | null): string {
   return value
     ? new Date(value).toLocaleString("en-US", { timeZoneName: "short" })
@@ -81,7 +73,10 @@ export function Economics() {
         setSelected((current) =>
           data.series.some((item) => item.key === current)
             ? current
-            : (data.series[0]?.key ?? ""),
+            : (data.series.find((item) => item.key === "headline-inflation")
+                ?.key ??
+              data.series[0]?.key ??
+              ""),
         );
       },
       (reason: unknown) => {
@@ -110,46 +105,79 @@ export function Economics() {
             <p>No economic series have been added.</p>
           ) : (
             <>
-              <div className="table-scroll" tabIndex={0}>
-                <table className="economics-catalog">
-                  <caption>Economic series</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Series</th>
-                      <th scope="col">Latest value</th>
-                      <th scope="col">Unit</th>
-                      <th scope="col">Observation period</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {catalog.series.map((item) => (
-                      <tr key={item.key} aria-selected={item.key === selected}>
-                        <th scope="row">
-                          <button
-                            className="economics-series-link"
-                            aria-pressed={item.key === selected}
-                            onClick={() => setSelected(item.key)}
-                          >
-                            {item.name}
-                          </button>
-                        </th>
-                        <td className="numeric">
-                          {item.latest && !item.latest.missing
-                            ? valueLabel(item.latest.value)
-                            : "Unavailable"}
-                        </td>
-                        <td>{item.unit}</td>
-                        <td>
-                          {item.latest
-                            ? dateLabel(item.latest.date, item.frequency)
-                            : "Not collected"}
-                        </td>
+              <MacroOverview
+                series={catalog.series}
+                sources={catalog.sources}
+                selected={selected}
+                onSelect={(key) => {
+                  setSelected(key);
+                  document
+                    .getElementById("economic-series-detail")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              />
+              <details className="economics-household">
+                <summary>Household costs</summary>
+                <div className="table-scroll" tabIndex={0}>
+                  <table className="economics-catalog">
+                    <caption>Individual food and household prices</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Series</th>
+                        <th scope="col">Latest value</th>
+                        <th scope="col">Unit</th>
+                        <th scope="col">Observation period</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {selected && <SeriesDetail key={selected} seriesKey={selected} />}
+                    </thead>
+                    <tbody>
+                      {catalog.series
+                        .filter(
+                          (item) =>
+                            !item.category || item.category === "household",
+                        )
+                        .map((item) => (
+                          <tr
+                            key={item.key}
+                            aria-selected={item.key === selected}
+                          >
+                            <th scope="row">
+                              <button
+                                className="economics-series-link"
+                                aria-pressed={item.key === selected}
+                                onClick={() => setSelected(item.key)}
+                              >
+                                {item.name}
+                              </button>
+                            </th>
+                            <td className="numeric">
+                              {item.latest && !item.latest.missing
+                                ? valueLabel(item.latest.value)
+                                : "Unavailable"}
+                            </td>
+                            <td>{item.unit}</td>
+                            <td>
+                              {item.latest
+                                ? dateLabel(item.latest.date, item.frequency)
+                                : "Not collected"}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+              {selected && (
+                <SeriesDetail
+                  key={selected}
+                  seriesKey={selected}
+                  source={catalog.sources.find(
+                    (source) =>
+                      source.id ===
+                      catalog.series.find((item) => item.key === selected)
+                        ?.source_id,
+                  )}
+                />
+              )}
             </>
           )}
           <details className="economics-sources">
@@ -216,7 +244,13 @@ export function Economics() {
   );
 }
 
-function SeriesDetail({ seriesKey }: { seriesKey: string }) {
+function SeriesDetail({
+  seriesKey,
+  source,
+}: {
+  seriesKey: string;
+  source?: Source;
+}) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -247,7 +281,11 @@ function SeriesDetail({ seriesKey }: { seriesKey: string }) {
     };
   }, [seriesKey, start, end, attempt, invalidRange]);
   return (
-    <section className="economics-detail" aria-label="Selected economic series">
+    <section
+      id="economic-series-detail"
+      className="economics-detail"
+      aria-label="Selected economic series"
+    >
       <div className="research-controls">
         <label>
           From{" "}
@@ -289,12 +327,25 @@ function SeriesDetail({ seriesKey }: { seriesKey: string }) {
         <>
           <h4>{detail.name}</h4>
           <p>{detail.description}</p>
+          {detail.observations.some((point) => point.provisional) && (
+            <p className="economics-caution">
+              Provisional observations are marked in the data table. The latest
+              month may use estimates rather than a completed monthly average.
+            </p>
+          )}
           <p className="economics-meta">
             {detail.unit} · {detail.frequency} observations ·{" "}
             <a href={detail.source_url}>Source</a>
           </p>
           {detail.observations.length === 0 ? (
-            <p>No observations collected for these dates.</p>
+            <>
+              <p>No observations collected for these dates.</p>
+              {source?.disabled_reason && (
+                <p>
+                  {source.disabled_reason} <a href={source.url}>Publisher</a>
+                </p>
+              )}
+            </>
           ) : (
             <>
               <EconomicChart detail={detail} />
@@ -323,6 +374,9 @@ function SeriesDetail({ seriesKey }: { seriesKey: string }) {
                               : valueLabel(point.value)}
                           </td>
                           <td>
+                            {point.provisional && (
+                              <strong>Provisional · </strong>
+                            )}
                             <a href={detail.source_url}>Source</a>
                             {point.footnotes?.length > 0 &&
                               ` · ${point.footnotes.map((note) => note.text ?? Object.values(note).join(": ")).join("; ")}`}
@@ -372,14 +426,18 @@ function EconomicChart({ detail }: { detail: Detail }) {
   const x = (date: string) =>
     74 + ((Date.parse(date) - first) / (last - first || 1)) * 656;
   const y = (value: number) => 24 + ((top - value) / (top - bottom)) * 220;
+  const stepped =
+    detail.key === "fed-target-lower" || detail.key === "fed-target-upper";
   const paths: string[] = [];
   let segment = "";
   let previous = 0;
-  const expectedDays = /month/i.test(detail.frequency)
-    ? 45
-    : /week/i.test(detail.frequency)
-      ? 11
-      : Infinity;
+  const expectedDays = /quarter/i.test(detail.frequency)
+    ? 110
+    : /month/i.test(detail.frequency)
+      ? 45
+      : /week/i.test(detail.frequency)
+        ? 11
+        : Infinity;
   for (const point of points) {
     const time = Date.parse(point.date);
     if (
@@ -396,7 +454,11 @@ function EconomicChart({ detail }: { detail: Detail }) {
       if (segment) paths.push(segment);
       segment = "";
     }
-    segment += `${segment ? " L" : "M"}${x(point.date)},${y(Number(point.value))}`;
+    segment += !segment
+      ? `M${x(point.date)},${y(Number(point.value))}`
+      : stepped
+        ? ` H${x(point.date)} V${y(Number(point.value))}`
+        : ` L${x(point.date)},${y(Number(point.value))}`;
     previous = time;
   }
   if (segment) paths.push(segment);
@@ -447,7 +509,10 @@ function EconomicChart({ detail }: { detail: Detail }) {
         </text>
       </svg>
       <figcaption>
-        Calendar dates · {detail.unit}. Missing observations leave gaps.
+        {stepped
+          ? "Policy effective dates; steps preserve each target until the next decision"
+          : "Calendar dates"}{" "}
+        · {detail.unit}. Missing observations leave gaps.
       </figcaption>
     </figure>
   );

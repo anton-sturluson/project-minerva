@@ -12,33 +12,26 @@ from sqlalchemy.sql import Select
 
 from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.economics.registry import SERIES, SOURCES, Series, Source
+from investor_platform.economics.views import Point, point_view, points_for
 from investor_platform.models import EconomicObservation, EconomicRefreshState
 
 router: APIRouter = APIRouter(prefix="/api/research/economics")
 
 
-def series_view(definition: Series, rows: list[EconomicObservation]) -> dict:
-    """Expose definition and coverage, keeping exact values as decimal strings."""
-    latest: EconomicObservation | None = rows[-1] if rows else None
+def series_view(definition: Series, points: list[Point]) -> dict:
+    """Expose a displayed definition, current coverage and provisional measurement flag."""
+    latest: Point | None = points[-1] if points else None
     return {
         **asdict(definition),
-        "observation_count": len(rows),
-        "latest": (
-            {
-                "date": latest.observation_date.isoformat(),
-                "value": str(latest.value) if latest.value is not None else None,
-                "missing": latest.missing,
-            }
-            if latest
-            else None
-        ),
+        "observation_count": len(points),
+        "latest": point_view(latest) if latest else None,
     }
 
 
 def current_rows(
     session: Session,
     workspace: UUID,
-    key: str | None = None,
+    key: str | tuple[str, ...] | None = None,
     start: date | None = None,
     end: date | None = None,
 ) -> list[EconomicObservation]:
@@ -47,7 +40,11 @@ def current_rows(
         EconomicObservation.workspace_id == workspace
     )
     if key:
-        query = query.where(EconomicObservation.series_key == key)
+        query = query.where(
+            EconomicObservation.series_key.in_(key)
+            if isinstance(key, tuple)
+            else EconomicObservation.series_key == key
+        )
     if start:
         query = query.where(EconomicObservation.observation_date >= start)
     if end:
@@ -97,8 +94,9 @@ def catalog(request: Request, session: DatabaseSession, actor: CurrentActor) -> 
         "automatic_collection_enabled": bool(request.app.state.economics_refresh),
         "sources": sources,
         "series": [
-            series_view(definition, [row for row in rows if row.series_key == definition.key])
+            series_view(definition, points_for(definition, rows))
             for definition in SERIES
+            if definition.visible
         ],
     }
 
@@ -117,20 +115,17 @@ def observations(
         raise HTTPException(404, "Economic series not found")
     if start and end and start > end:
         raise HTTPException(422, "Start must precede end")
-    rows: list[EconomicObservation] = current_rows(session, actor.workspace_id, key, start, end)
+    # Load comparison periods before applying the visible date range. Growth must use t-12,
+    # even when that base month is outside the selected chart window.
+    rows: list[EconomicObservation] = current_rows(
+        session, actor.workspace_id, definition.inputs or (definition.key,)
+    )
+    points: list[Point] = [
+        point
+        for point in points_for(definition, rows)
+        if (start is None or point.date >= start) and (end is None or point.date <= end)
+    ]
     return {
-        "series": series_view(definition, rows),
-        "observations": [
-            {
-                "date": row.observation_date.isoformat(),
-                "value": str(row.value) if row.value is not None else None,
-                "missing": row.missing,
-                "source_url": row.provenance["source_url"],
-                "footnotes": row.provenance["footnotes"],
-                "derived_from": row.provenance["derived_from"],
-                "collected_at": row.collected_at,
-                "sha256": row.provenance["sha256"],
-            }
-            for row in rows
-        ],
+        "series": series_view(definition, points),
+        "observations": [point_view(point) for point in points],
     }
