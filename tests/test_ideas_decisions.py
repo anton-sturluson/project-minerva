@@ -506,3 +506,71 @@ def test_wrong_composite_issuer_ticker_or_missing_source_pair_is_final(
     with pytest.raises(ValueError) as failure:
         validate(candidate, "Harbor Global Fund", parts)
     assert not isinstance(failure.value, MetadataError)
+
+
+def test_joint_report_incomplete_block_selection_can_be_repaired_from_provided_headings() -> (
+    None
+):
+    """An interrupted table name is not proof, but an available exact heading can fix it."""
+    from harness.ideas.research import MetadataError
+
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Q2 2026 joint report"},
+        {"id": "p2", "text": "Harbor International Shares Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+        {"id": "p4", "text": "Harbor Australian 5.2% 10.3% Shares Fund"},
+        {"id": "p10", "text": "Australian Shares Fund — quarterly commentary"},
+    ]
+    label: str = "Harbor Funds (Australian Shares Fund and International Shares Fund)"
+    candidate: EvidenceIdentity = identity(
+        "Harbor International Shares Fund",
+        "Harbor Capital",
+        "combined",
+        relationship_blocks=["p4", "p2"],
+    )
+    with pytest.raises(MetadataError, match="p10"):
+        validate(candidate, label, parts)
+    candidate.relationship_blocks = ["p10", "p2"]
+    validate(candidate, label, parts)
+
+
+def test_joint_report_missing_member_outside_provided_scope_is_not_metadata_repair() -> (
+    None
+):
+    """An unavailable member heading cannot be invented by stripping table numbers."""
+    from harness.ideas.research import MetadataError
+
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Q2 2026 joint report"},
+        {"id": "p2", "text": "Harbor International Shares Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+        {"id": "p4", "text": "Harbor Australian 5.2% 10.3% Shares Fund"},
+    ]
+    label: str = "Harbor Funds (Australian Shares Fund and International Shares Fund)"
+    candidate: EvidenceIdentity = identity(
+        "Harbor International Shares Fund",
+        "Harbor Capital",
+        "combined",
+        relationship_blocks=["p4", "p2"],
+    )
+    with pytest.raises(ValueError, match="every discovery member") as failure:
+        validate(candidate, label, parts)
+    assert not isinstance(failure.value, MetadataError)
+
+
+def test_verified_descriptor_variation_preserves_the_actual_source_fund_and_quotes() -> (
+    None
+):
+    """Accepted attribution supplies original proof without replacing its fund with a label."""
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Q2 2026"},
+        {"id": "p2", "text": "Harbor Global Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity(
+        "Harbor Global Fund", "Harbor Capital", "specific"
+    )
+    resolved: Match = validate(candidate, "Harbor Capital Global Fund", parts)
+    assert resolved.fund == "Harbor Global Fund"
+    assert resolved.fund_quote == parts[1]["text"]
+    assert resolved.company_quote == parts[2]["text"]

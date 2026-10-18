@@ -229,6 +229,8 @@ def validate_target(
                     validate_target(
                         match.model_copy(update={"company": issuer}), row, parts
                     )
+                except MetadataError:
+                    raise
                 except ValueError:
                     pass
                 else:
@@ -239,7 +241,7 @@ def validate_target(
             "Original document company does not match the discovery company"
         )
     if isinstance(match, EvidenceMatch):
-        validate_label(match, row)
+        validate_label(match, row, parts)
         return
     descriptors: set[str] = legal | {
         "fund",
@@ -363,7 +365,11 @@ def same_fund(expected: str, observed: str, publisher: str) -> bool:
     )
 
 
-def validate_label(match: EvidenceMatch, row: dict[str, str]) -> None:
+def validate_label(
+    match: EvidenceMatch,
+    row: dict[str, str],
+    parts: list[dict[str, str]] | None = None,
+) -> None:
     """Apply one evidence-based policy to specific, manager and grouped labels."""
     if not contains_name(match.publisher_quote, match.publisher):
         raise MetadataError("Publisher name must occur in its original identity block")
@@ -422,6 +428,20 @@ def validate_label(match: EvidenceMatch, row: dict[str, str]) -> None:
         if not all(
             any(contains_name(text, member) for text in proof) for member in members
         ):
+            available: dict[str, list[str]] = {
+                member: [
+                    part["id"]
+                    for part in (parts or [])
+                    if contains_name(part["text"], member)
+                ]
+                for member in members
+            }
+            if all(available.values()):
+                raise MetadataError(
+                    "Selected relationship blocks omit intact joint-report member names. "
+                    "Choose the exact member-name blocks already provided: "
+                    + json.dumps(available)
+                )
             raise ValueError(
                 "Original joint-report evidence must identify every discovery member"
             )
@@ -460,7 +480,7 @@ def assess(
 Discovery company={row["company"]}; label={row["fund"]}; symbol={row.get("symbol", "")}; issue={run["issue_date"]}.
 Source URL: {document["url"]}
 {decisions.IDENTITY_POLICY}
-Return observations, not an accept/reject judgment. source_kind reports whether the document is manager-authored original commentary, a third-party account, or unclear. substantive_commentary requires investment reasoning for this company, not a holding weight or performance attribution. publisher is the manager name actually present in publisher_block; fund is the actual fund/strategy actually present in fund_block. Classify the discovery label's scope and select original relationship_blocks proving any manager/member/umbrella link. Do not reject an observed relationship merely because source and discovery labels differ; preserve the evidence for application policy. An unsupported relationship must have no relationship_blocks. umbrella must be the original umbrella name, or empty when inapplicable.
+Return observations, not an accept/reject judgment. source_kind reports whether the document is manager-authored original commentary, a third-party account, or unclear. substantive_commentary requires investment reasoning for this company, not a holding weight or performance attribution. publisher is the manager name actually present in publisher_block; fund is the actual fund/strategy actually present in fund_block. Classify the discovery label's scope and select original relationship_blocks proving any manager/member/umbrella link. Do not reject an observed relationship merely because source and discovery labels differ; preserve the evidence for application policy. Every required member or umbrella name must appear intact in its selected relationship_blocks. Individual section headings can prove each named member. For combined labels select proof for every discovery member, even when only one discusses the company. For umbrellas select the original umbrella title and member contents/heading evidence. Do not rely on table rows where numbers or other text interrupt a name, and never borrow a block outside the provided original context. An unsupported relationship must have no relationship_blocks. umbrella must be the original umbrella name, or empty when inapplicable.
 Select ONE existing block for each publisher_block, fund_block, company_block and period_block. Each name/period must occur verbatim in its OWN block. The fund and company commentary must belong to the same source section. Preserve distinctive fund words. Use the issuer name OR its ticker actually written in substantive company commentary, never a combined name-plus-ticker label. For example, return Polaris or PII, not Polaris (PII); return Builders FirstSource or BLDR, not Builders FirstSource (NYSE:BLDR). period is exact source wording and period_end only normalizes its reporting date. Never use a later reporting period, a stale letter or search crawl date. If evidence is missing, use empty fields or null date and describe what is missing. Do not fabricate or merge block IDs.
 Original blocks:\n{json.dumps(parts, ensure_ascii=False)}"""
     feedback: str = ""
@@ -502,7 +522,9 @@ Original blocks:\n{json.dumps(parts, ensure_ascii=False)}"""
                 feedback = (
                     "\nCorrect metadata only using the SAME archived original. Do not invent evidence,"
                     " change the source or relax identity/date policy. Each block ID must exist and"
-                    " each name/period must occur in its OWN block. Fix the selected block or exact"
+                    " each name/period must occur in its OWN block. Recheck all relationship blocks:"
+                    " every required member and umbrella name must appear intact in selected proof."
+                    " Fix the selected block or exact"
                     " wording; never substitute a sibling fund or issuer.\nInvalid observations: "
                     + observed.model_dump_json()
                     + "\nValidation error: "
