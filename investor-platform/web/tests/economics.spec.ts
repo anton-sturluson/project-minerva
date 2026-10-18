@@ -357,6 +357,31 @@ test("macro overview keeps measures, native periods and provisional valuations c
   await measure.click();
   await expect(measure).toHaveAttribute("aria-expanded", "true");
   await expect(choices.getByRole("option")).toHaveCount(macroSeries.length + 1);
+  await expect(choices.getByRole("group")).toHaveCount(3);
+  await expect(
+    choices
+      .getByRole("group", { name: "Macro indicators", exact: true })
+      .getByRole("option"),
+  ).toHaveCount(macroSeries.filter((item) => item.category === "macro").length);
+  await expect(
+    choices
+      .getByRole("group", { name: "Market valuation", exact: true })
+      .getByRole("option"),
+  ).toHaveCount(2);
+  await expect(
+    choices
+      .getByRole("group", { name: "Household costs", exact: true })
+      .getByRole("option"),
+  ).toHaveCount(1);
+  await expect(
+    choices.locator("strong").filter({ hasText: /^Macro indicators$/ }),
+  ).toHaveCSS("font-weight", "700");
+  await expect(
+    choices.getByRole("option", {
+      name: "Headline CPI inflation",
+      exact: true,
+    }),
+  ).toHaveCSS("padding-left", "24px");
   await expect(
     choices.getByRole("option", { name: "Real GDP growth", exact: true }),
   ).toBeAttached();
@@ -378,10 +403,31 @@ test("macro overview keeps measures, native periods and provisional valuations c
     "aria-activedescendant",
     "economic-measure-headline-inflation",
   );
+  for (
+    let step = 0;
+    step < macroSeries.filter((item) => item.category === "macro").length;
+    step++
+  )
+    await measure.press("ArrowDown");
+  await expect(measure).toHaveAttribute(
+    "aria-activedescendant",
+    "economic-measure-cape",
+  );
+  await measure.press("ArrowUp");
+  await expect(measure).toHaveAttribute(
+    "aria-activedescendant",
+    "economic-measure-gasoline",
+  );
+  await measure.press("Escape");
+  await measure.click();
   await measure.pressSequentially("CAP");
   await expect(measure).toHaveValue("CAP");
   await expect(choices.getByRole("option")).toHaveCount(1);
   await expect(choices.getByRole("option")).toHaveText("Shiller CAPE");
+  await expect(choices.getByRole("group")).toHaveCount(1);
+  await expect(
+    choices.getByRole("group", { name: "Market valuation", exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("img", { name: /Headline CPI inflation/ }),
   ).toBeVisible();
