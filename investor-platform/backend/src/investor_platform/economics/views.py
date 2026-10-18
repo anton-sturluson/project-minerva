@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from investor_platform.economics.registry import Series
+from investor_platform.economics.registry import SERIES, Series
 from investor_platform.models import EconomicObservation
 
 
@@ -55,11 +55,14 @@ def points_for(definition: Series, rows: list[EconomicObservation]) -> list[Poin
         for row in rows
         if row.series_key in definition.inputs
     }
+    source_start: date | None = source[0].observation_date.replace(day=1) if source else None
+    labels: dict[str, str] = {series.key: series.name for series in SERIES}
     result: list[Point] = []
     row: EconomicObservation
     for row in source:
         day: date = row.observation_date
         inputs: list[EconomicObservation | None] = [row]
+        required: list[tuple[str, date]] = [(primary, day)]
         value: Decimal | None = row.value
         notes: list[dict[str, str]] = list(row.provenance["footnotes"])
         refs: list[dict] = list(row.provenance["derived_from"])
@@ -67,8 +70,15 @@ def points_for(definition: Series, rows: list[EconomicObservation]) -> list[Poin
             offsets: tuple[int, ...] = {"yoy": (12,), "change": (1,), "change_3m": (1, 2, 3)}[
                 definition.transform
             ]
-            inputs += [indexed.get((primary, month_before(day, offset))) for offset in offsets]
+            comparisons: list[date] = [month_before(day, offset) for offset in offsets]
+            # A growth series begins only when its comparison history can exist. An absent
+            # month inside that history is a genuine gap and must remain visible.
+            if source_start is not None and any(period < source_start for period in comparisons):
+                continue
+            required += [(primary, period) for period in comparisons]
+            inputs += [indexed.get((primary, period)) for period in comparisons]
         elif definition.transform == "equity_gdp":
+            required.append((definition.inputs[1], date(day.year, (day.month - 1) // 3 * 3 + 1, 1)))
             inputs.append(quarters.get((definition.inputs[1], day.year, (day.month - 1) // 3)))
         elif definition.transform:
             raise ValueError("Unsupported economics calculation")
@@ -76,12 +86,23 @@ def points_for(definition: Series, rows: list[EconomicObservation]) -> list[Poin
             refs = [reference(item, definition.transform) for item in inputs if item is not None]
             if any(item is None or item.value is None for item in inputs):
                 value = None
-                notes.append(
-                    {
-                        "code": "missing_input",
-                        "text": "A required calendar-period input is unavailable.",
-                    }
-                )
+                key: str
+                period: date
+                item: EconomicObservation | None
+                for (key, period), item in zip(required, inputs, strict=True):
+                    if item is None or item.value is None:
+                        notes.append(
+                            {
+                                "code": "missing_input" if item is None else "source_missing",
+                                "text": f"{labels[key]} is unavailable for {period:%Y-%m}. "
+                                "The calculation requires this exact period.",
+                            }
+                        )
+                        if item is not None:
+                            notes += [
+                                note for note in item.provenance["footnotes"] if note not in notes
+                            ]
+
             else:
                 values: list[Decimal] = [
                     item.value for item in inputs if item is not None and item.value is not None

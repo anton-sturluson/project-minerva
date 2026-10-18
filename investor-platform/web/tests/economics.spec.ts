@@ -99,6 +99,12 @@ test("economic research shows dated observations, chart gaps, cadence and a date
   await expect(
     page.getByRole("img", { name: /Example food price/ }),
   ).toBeVisible();
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue(
+    "2026-01-01",
+  );
+  await expect(page.getByLabel("Through", { exact: true })).toHaveValue(
+    "2026-09-01",
+  );
   await expect(page.locator(".economics-line")).toHaveCount(2);
   await page.getByText("Data table (5 observations)", { exact: true }).click();
   await expect(
@@ -127,11 +133,34 @@ test("economic research shows dated observations, chart gaps, cadence and a date
   await expect(
     page.getByText("Data table (2 observations)", { exact: true }),
   ).toBeVisible();
+  await expect(page.locator(".economics-chart circle")).toHaveCount(2);
+  await page.getByLabel("Through", { exact: true }).fill("2026-08-01");
+  await expect(
+    page.getByText("Data table (1 observations)", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".economics-chart circle")).toHaveCount(1);
+  await expect(
+    page.getByRole("rowheader", { name: "Aug 2026", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("rowheader", { name: "Sep 2026", exact: true }),
+  ).toHaveCount(0);
+  await page.getByLabel("Through", { exact: true }).fill("2026-09-01");
+  await expect(
+    page.getByText("Data table (2 observations)", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".economics-chart circle")).toHaveCount(2);
   await page.getByLabel("Through", { exact: true }).fill("2026-07-01");
   await expect(page.getByRole("alert")).toHaveText(
     "The end date must be on or after the start date.",
   );
   await page.getByRole("button", { name: "All dates" }).click();
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue(
+    "2026-01-01",
+  );
+  await expect(page.getByLabel("Through", { exact: true })).toHaveValue(
+    "2026-09-01",
+  );
   await expect(
     page.getByText("Data table (5 observations)", { exact: true }),
   ).toBeVisible();
@@ -301,11 +330,54 @@ test("macro overview keeps measures, native periods and provisional valuations c
     return route.fulfill({
       json: {
         series: item,
-        observations: key === "financial-stress" ? [] : dated,
+        observations:
+          key === "financial-stress"
+            ? []
+            : key === "headline-inflation"
+              ? [
+                  {
+                    ...dated[0],
+                    date: "2026-06-01",
+                    value: null,
+                    missing: true,
+                  },
+                  ...dated,
+                ]
+              : dated,
       },
     });
   });
   await page.goto("/#research/economics");
+  await expect(
+    page.getByRole("img", { name: /Headline CPI inflation/ }),
+  ).toBeVisible();
+  const chartPosition = await page
+    .getByRole("img", { name: /Headline CPI inflation/ })
+    .boundingBox();
+  expect(chartPosition!.y).toBeLessThan(550);
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue(
+    "2026-07-01",
+  );
+  await expect(page.getByLabel("Through", { exact: true })).toHaveValue(
+    "2026-09-01",
+  );
+  await page.getByLabel("From", { exact: true }).fill("2026-08-01");
+  await expect(
+    page.getByText("Data table (2 observations)", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue(
+    "2026-08-01",
+  );
+  await page
+    .getByLabel("Measure", { exact: true })
+    .selectOption("real-gdp-growth");
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue(
+    "2026-01-01",
+  );
+  await expect(page.getByLabel("Through", { exact: true })).toHaveValue(
+    "2026-07-01",
+  );
+  await page.getByText("Latest readings", { exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "U.S. macro overview" }),
   ).toBeVisible();
@@ -392,7 +464,7 @@ test("macro overview keeps measures, native periods and provisional valuations c
   await expect(page.getByRole("img")).toHaveCount(0);
   await page.getByRole("button", { name: "Shiller CAPE", exact: true }).click();
   await expect(
-    page.getByText(/Provisional observations are marked/),
+    page.getByText(/Latest source month is provisional/),
   ).toBeVisible();
   await page.getByText("Data table (3 observations)", { exact: true }).click();
   await expect(

@@ -89,7 +89,9 @@ export function Economics() {
   }, [attempt]);
   return (
     <section aria-labelledby="economics-heading" className="economics">
-      <h3 id="economics-heading">Economics</h3>
+      <h3 id="economics-heading" className="sr-only">
+        Economics
+      </h3>
       {error ? (
         <div role="alert">
           <p>{error}</p>
@@ -105,17 +107,58 @@ export function Economics() {
             <p>No economic series have been added.</p>
           ) : (
             <>
-              <MacroOverview
-                series={catalog.series}
-                sources={catalog.sources}
-                selected={selected}
-                onSelect={(key) => {
-                  setSelected(key);
-                  document
-                    .getElementById("economic-series-detail")
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              />
+              <label className="economics-selector">
+                <span className="sr-only">Measure</span>
+                <select
+                  aria-label="Measure"
+                  value={selected}
+                  onChange={(event) => setSelected(event.target.value)}
+                >
+                  {[
+                    ["macro", "Macro indicators"],
+                    ["valuation", "Market valuation"],
+                    ["household", "Household costs"],
+                  ].map(([category, label]) => (
+                    <optgroup key={category} label={label}>
+                      {catalog.series
+                        .filter(
+                          (item) => (item.category ?? "household") === category,
+                        )
+                        .map((item) => (
+                          <option key={item.key} value={item.key}>
+                            {item.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+              {selected && (
+                <SeriesDetail
+                  key={selected}
+                  seriesKey={selected}
+                  source={catalog.sources.find(
+                    (source) =>
+                      source.id ===
+                      catalog.series.find((item) => item.key === selected)
+                        ?.source_id,
+                  )}
+                />
+              )}
+              <details className="economics-overview-details">
+                <summary>Latest readings</summary>
+                <MacroOverview
+                  series={catalog.series}
+                  sources={catalog.sources}
+                  selected={selected}
+                  onSelect={(key) => {
+                    setSelected(key);
+                    document
+                      .getElementById("economic-series-detail")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                />
+              </details>
               <details className="economics-household">
                 <summary>Household costs</summary>
                 <div className="table-scroll" tabIndex={0}>
@@ -166,18 +209,6 @@ export function Economics() {
                   </table>
                 </div>
               </details>
-              {selected && (
-                <SeriesDetail
-                  key={selected}
-                  seriesKey={selected}
-                  source={catalog.sources.find(
-                    (source) =>
-                      source.id ===
-                      catalog.series.find((item) => item.key === selected)
-                        ?.source_id,
-                  )}
-                />
-              )}
             </>
           )}
           <details className="economics-sources">
@@ -256,21 +287,31 @@ function SeriesDetail({
   const [attempt, setAttempt] = useState(0);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [bounds, setBounds] = useState({ start: "", end: "" });
   const invalidRange = !!(start && end && start > end);
   useEffect(() => {
-    if (invalidRange) return;
     let active = true;
     setDetail(null);
     setError("");
-    const params = new URLSearchParams();
-    if (start) params.set("start", start);
-    if (end) params.set("end", end);
     api<{ series: Series; observations: Observation[] }>(
-      `/research/economics/series/${encodeURIComponent(seriesKey)}?${params}`,
+      `/research/economics/series/${encodeURIComponent(seriesKey)}`,
     ).then(
       (data) => {
-        if (active)
-          setDetail({ ...data.series, observations: data.observations });
+        if (!active) return;
+        const dates = data.observations
+          .filter(
+            (point) =>
+              !point.missing &&
+              point.value !== null &&
+              Number.isFinite(Number(point.value)),
+          )
+          .map((point) => point.date)
+          .sort();
+        const coverage = { start: dates[0] ?? "", end: dates.at(-1) ?? "" };
+        setDetail({ ...data.series, observations: data.observations });
+        setBounds(coverage);
+        setStart(coverage.start);
+        setEnd(coverage.end);
       },
       (reason: unknown) => {
         if (active) setError(errorMessage(reason));
@@ -279,7 +320,16 @@ function SeriesDetail({
     return () => {
       active = false;
     };
-  }, [seriesKey, start, end, attempt, invalidRange]);
+  }, [seriesKey, attempt]);
+  const visibleDetail = detail
+    ? {
+        ...detail,
+        observations: detail.observations.filter(
+          (point) =>
+            (!start || point.date >= start) && (!end || point.date <= end),
+        ),
+      }
+    : null;
   return (
     <section
       id="economic-series-detail"
@@ -292,6 +342,7 @@ function SeriesDetail({
           <input
             type="date"
             value={start}
+            disabled={!bounds.start}
             onChange={(event) => setStart(event.target.value)}
           />
         </label>
@@ -300,14 +351,15 @@ function SeriesDetail({
           <input
             type="date"
             value={end}
+            disabled={!bounds.end}
             onChange={(event) => setEnd(event.target.value)}
           />
         </label>
         {(start || end) && (
           <button
             onClick={() => {
-              setStart("");
-              setEnd("");
+              setStart(bounds.start);
+              setEnd(bounds.end);
             }}
           >
             All dates
@@ -321,23 +373,30 @@ function SeriesDetail({
           <p>{error}</p>
           <button onClick={() => setAttempt(attempt + 1)}>Retry series</button>
         </div>
-      ) : !detail ? (
+      ) : !detail || !visibleDetail ? (
         <p role="status">Loading series…</p>
       ) : (
         <>
-          <h4>{detail.name}</h4>
-          <p>{detail.description}</p>
-          {detail.observations.some((point) => point.provisional) && (
-            <p className="economics-caution">
-              Provisional observations are marked in the data table. The latest
-              month may use estimates rather than a completed monthly average.
-            </p>
-          )}
+          <p className="economics-selected-value">
+            <strong>
+              {detail.latest && !detail.latest.missing
+                ? valueLabel(detail.latest.value)
+                : "Unavailable"}
+            </strong>{" "}
+            {detail.unit}
+            {detail.latest && (
+              <>
+                {" "}
+                · {dateLabel(detail.latest.date, detail.frequency)}
+                {detail.latest.provisional ? " · Provisional" : ""}
+              </>
+            )}
+          </p>
           <p className="economics-meta">
-            {detail.unit} · {detail.frequency} observations ·{" "}
+            {detail.frequency} observations ·{" "}
             <a href={detail.source_url}>Source</a>
           </p>
-          {detail.observations.length === 0 ? (
+          {visibleDetail.observations.length === 0 ? (
             <>
               <p>No observations collected for these dates.</p>
               {source?.disabled_reason && (
@@ -348,10 +407,10 @@ function SeriesDetail({
             </>
           ) : (
             <>
-              <EconomicChart detail={detail} />
+              <EconomicChart detail={visibleDetail} />
               <details>
                 <summary>
-                  Data table ({detail.observations.length} observations)
+                  Data table ({visibleDetail.observations.length} observations)
                 </summary>
                 <div className="table-scroll" tabIndex={0}>
                   <table>
@@ -363,7 +422,7 @@ function SeriesDetail({
                       </tr>
                     </thead>
                     <tbody>
-                      {detail.observations.map((point) => (
+                      {visibleDetail.observations.map((point) => (
                         <tr key={point.date}>
                           <th scope="row">
                             {dateLabel(point.date, detail.frequency)}
@@ -389,8 +448,14 @@ function SeriesDetail({
               </details>
             </>
           )}
+          {detail.observations.some((point) => point.provisional) && (
+            <p className="economics-caution">
+              Latest source month is provisional. See data-table notes.
+            </p>
+          )}
           <details>
             <summary>Methodology</summary>
+            <p>{detail.description}</p>
             <p>{detail.methodology_notes}</p>
             <p>
               Observation dates identify the measured period. Collection times

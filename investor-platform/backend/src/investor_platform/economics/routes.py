@@ -21,9 +21,12 @@ router: APIRouter = APIRouter(prefix="/api/research/economics")
 def series_view(definition: Series, points: list[Point]) -> dict:
     """Expose a displayed definition, current coverage and provisional measurement flag."""
     latest: Point | None = points[-1] if points else None
+    available: list[Point] = [point for point in points if point.value is not None]
     return {
         **asdict(definition),
         "observation_count": len(points),
+        "available_start": available[0].date.isoformat() if available else None,
+        "available_end": available[-1].date.isoformat() if available else None,
         "latest": point_view(latest) if latest else None,
     }
 
@@ -120,12 +123,13 @@ def observations(
     rows: list[EconomicObservation] = current_rows(
         session, actor.workspace_id, definition.inputs or (definition.key,)
     )
+    history: list[Point] = points_for(definition, rows)
     points: list[Point] = [
         point
-        for point in points_for(definition, rows)
+        for point in history
         if (start is None or point.date >= start) and (end is None or point.date <= end)
     ]
     return {
-        "series": series_view(definition, points),
+        "series": series_view(definition, history),
         "observations": [point_view(point) for point in points],
     }

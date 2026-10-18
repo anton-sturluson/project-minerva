@@ -148,10 +148,6 @@ export function MacroOverview({
   return (
     <>
       <h4 className="economics-section-heading">U.S. macro overview</h4>
-      <p className="economics-meta">
-        Select a measure to view its history. Dates identify observation
-        periods.
-      </p>
       {panels(macroPanels)}
       <h4 className="economics-section-heading">Market valuation</h4>
       {panels(valuationPanels)}

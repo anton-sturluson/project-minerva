@@ -8,12 +8,13 @@ from zipfile import ZipFile
 
 import openpyxl
 import pytest
+from fastapi.testclient import TestClient
 from openpyxl.worksheet.worksheet import Worksheet
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from investor_platform.db import LOCAL_WORKSPACE
-from investor_platform.economics.collection import Payload, admit
+from investor_platform.economics.collection import Payload, admit, bls_macro_windows
 from investor_platform.economics.macro import (
     parse_bea,
     parse_fed_equity,
@@ -256,3 +257,73 @@ def test_shiller_provisional_months_cross_the_year_boundary() -> None:
     )
     assert not facts[0].footnotes and not facts[1].footnotes
     assert all(fact.footnotes[0]["code"] == "provisional" for fact in facts[-2:])
+
+
+def test_bls_full_history_windows_respect_native_starts_and_api_limit() -> None:
+    """Backfill each available series in nonoverlapping requests of at most ten years."""
+    windows: list[tuple[int, int, dict[str, str]]] = bls_macro_windows(2026, full_history=True)
+    assert len(windows) == 12 and windows[0][:2] == (1913, 1922)
+    assert windows[2][:2] == (1933, 1938)
+    assert windows[3][:2] == (1939, 1947)
+    assert windows[-1][:2] == (2018, 2026)
+    start: int
+    end: int
+    identities: dict[str, str]
+    for start, end, identities in windows:
+        assert end - start <= 9 and identities
+        assert ("CES0000000001" in identities) == (start >= 1939)
+        assert ("LNS14000000" in identities) == (start >= 1948)
+        assert "CUUR0000SA0" in identities
+    assert all(windows[index - 1][1] + 1 == windows[index][0] for index in range(1, len(windows)))
+    recent: list[tuple[int, int, dict[str, str]]] = bls_macro_windows(2026, full_history=False)
+    assert len(recent) == 1 and recent[0][:2] == (2020, 2026)
+
+
+def test_derived_warmup_is_omitted_but_publisher_and_internal_gaps_remain() -> None:
+    """Start inflation when the comparison year exists and explain genuine missing inputs."""
+    rows: list[EconomicObservation] = [
+        accepted("cpi-index", "2020-01-01", "100", 1),
+        accepted("cpi-index", "2020-02-01", "101", 2),
+        accepted("cpi-index", "2021-01-01", "110", 3),
+        accepted("cpi-index", "2021-02-01", None, 4),
+        accepted("cpi-index", "2021-03-01", "112", 5),
+        accepted("cpi-index", "2022-02-01", "120", 6),
+    ]
+    rows[3].provenance["footnotes"] = [{"code": "X", "text": "Publisher collection interrupted"}]
+    points: list[Point] = points_for(definition("headline-inflation"), rows)
+    assert [point.date for point in points] == [
+        date(2021, 1, 1),
+        date(2021, 2, 1),
+        date(2021, 3, 1),
+        date(2022, 2, 1),
+    ]
+    assert points[0].value == Decimal("10.0")
+    assert all(point.value is None for point in points[1:])
+    assert any(note["code"] == "source_missing" for note in points[1].footnotes)
+    assert any("2020-03" in note["text"] for note in points[2].footnotes)
+    assert {"code": "X", "text": "Publisher collection interrupted"} in points[3].footnotes
+    assert any("2021-02" in note["text"] for note in points[3].footnotes)
+
+
+def test_available_bounds_survive_an_empty_selected_window(
+    db_client: TestClient, database: Engine, tmp_path: Path
+) -> None:
+    """Expose full computable coverage even when the selected dates contain no values."""
+    payload: Payload = Payload(
+        "https://example.com/data",
+        b"synthetic coverage",
+        [
+            Fact("cpi-index", date(2020, 1, 1), Decimal("100"), "index"),
+            Fact("cpi-index", date(2021, 1, 1), Decimal("110"), "index"),
+        ],
+    )
+    with Session(database) as session, session.begin():
+        admit(session, LOCAL_WORKSPACE, [payload], datetime(2026, 10, 18, tzinfo=UTC), tmp_path)
+    data: dict = db_client.get(
+        "/api/research/economics/series/headline-inflation?start=2025-01-01"
+    ).json()
+    assert data["observations"] == []
+    assert data["series"]["available_start"] == "2021-01-01"
+    assert data["series"]["available_end"] == "2021-01-01"
+    complete: dict = db_client.get("/api/research/economics/series/headline-inflation").json()
+    assert [point["date"] for point in complete["observations"]] == ["2021-01-01"]

@@ -10,7 +10,7 @@ Observation rows contain exact decimal values or explicit missing flags and sour
 
 ## Macro and valuation definitions
 
-The overview separates inflation, activity, jobs, consumer spending, policy/market rates, mortgage finance and fuel. Valuation remains a separate section. Compact summaries open one detailed native-frequency chart at a time; household prices remain available as a drill-down.
+The measure selector opens one detailed native-frequency chart near the top of the page. Latest macro and valuation readings, household prices and source details remain in collapsed sections below it. Date controls start at the available displayed history bounds; custom date filters remain under the reader's control.
 
 | Measure | Definition |
 | --- | --- |
@@ -29,7 +29,11 @@ The overview separates inflation, activity, jobs, consumer spending, policy/mark
 
 Read-time calculations use accepted source observations and retain their exact input references and formula identifier. Signed values are valid for growth, payroll changes and stress; the household-price nonnegative rule must not be applied to these measures. Growth calculations use calendar periods, preserve missing inputs and require positive denominators. Policy bounds never become an invented midpoint.
 
+Leading periods without enough earlier input history are calculation warm-up, not missing published growth observations. They are excluded from the displayed growth range. Missing values within established history remain visible gaps with their input period and source notes. October 2025 CPI is a genuine publisher gap caused by the lapse in appropriations; do not interpolate it or treat it as a failed import. ([BLS explanation](https://www.bls.gov/cpi/additional-resources/2025-federal-government-shutdown-impact-cpi.htm))
+
 Quarterly source date keys can identify a quarter by its first day while the statistic describes quarter-end value. Show `Qn YYYY` and retain that distinction. The equity/GDP proxy uses annualized nominal GDP as published; do not divide GDP by four, combine different quarters, or interpolate daily ratios. Both component revisions can change the result. A current ratio does not reconstruct its historical publication vintage.
+
+The proxy does not reproduce [LongtermTrends' Buffett indicator](https://www.longtermtrends.com/market-cap-to-gdp-the-buffett-indicator/). Its first chart uses the Wilshire 5000 with GDP, while its second uses a broader public-and-private-equity numerator. This platform uses the Fed's quarterly domestic public-equity series, including fund shares. Different equity coverage and observation dates produce different ratios. Keep the existing definition and identity; changing to a Wilshire or fund-excluded numerator would require a separately named, reviewed series.
 
 Shiller workbook dates use `YYYY.MM`: a numeric `2026.1` denotes October, so retain two decimal month digits during parsing. Download the workbook linked from the [publisher page](https://shillerdata.com/), since its hosted attachment URL can change. CAPE is normalized to six decimal places for the existing database column; the original value and rounding rule remain in provenance, and the original workbook is retained. Preserve source notes rather than replacing the series with a purported live daily CAPE.
 
@@ -59,6 +63,8 @@ uv run --frozen investor-economics --provider all
 ```
 
 The collector uses original publisher downloads described above, including the existing USDA Moderate-Cost and EIA weekly gasoline/diesel workbooks. `--force` requests another attempt before a source is due. `--import-dir` accepts the known research payload filenames for an explicit initial import; it is not an arbitrary document importer. Imported fixtures or historical files must not be presented as a fresh publisher check. Use synthetic data and an isolated database for tests.
+
+Initial or incomplete BLS macro history is backfilled in bounded ten-year API windows, from each series' documented start. Do not request a series in a window before it exists. A full backfill through 2026 uses twelve requests; account for other BLS requests within its [unregistered daily limit of twenty-five](https://www.bls.gov/developers/api_faqs.htm). Normal macro checks revisit the latest six years. The existing source transaction keeps prior accepted data if any window fails.
 
 Set `ECONOMICS_RAW_DIR` to an ignored private directory for source evidence. The default `data/economics` is relative to the process working directory. Never put source files or database exports in Git. Exact file names and CLI options are available with `uv run --frozen investor-economics --help`.
 
@@ -126,3 +132,5 @@ Use the existing backend isolated-schema tests for migration/storage/API checks.
 - [Freddie Mac PMMS](https://www.freddiemac.com/pmms) — weekly mortgage rates and linked history.
 - [Shiller data](https://shillerdata.com/) — ordinary and total-return CAPE definitions, workbook and data notes.
 - [Buffett's original essay](https://www.berkshirehathaway.com/2001ar/FortuneMagazine%20DEC%2010%202001.pdf) — original publicly traded securities/GNP comparison; the implemented GDP proxy uses a different named definition.
+- [LongtermTrends Buffett charts](https://www.longtermtrends.com/market-cap-to-gdp-the-buffett-indicator/) — distinct Wilshire and public/private-equity comparisons; these are not the platform's Fed public-equity series.
+- [BLS 2025 shutdown impact](https://www.bls.gov/cpi/additional-resources/2025-federal-government-shutdown-impact-cpi.htm) — genuine missing CPI observations and collection limits.

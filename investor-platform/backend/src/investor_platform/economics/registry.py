@@ -35,6 +35,7 @@ class Series:
     visible: bool = True
     transform: str = ""
     inputs: tuple[str, ...] = ()
+    history_start_year: int | None = None
 
 
 SOURCES: tuple[Source, ...] = (
@@ -304,6 +305,7 @@ SERIES += (
         "CUUR0000SA0",
         category="macro",
         visible=False,
+        history_start_year=1913,
     ),
     Series(
         "core-pce-index",
@@ -339,6 +341,7 @@ SERIES += (
         "https://www.bls.gov/cps/",
         "LNS14000000",
         category="macro",
+        history_start_year=1948,
     ),
     Series(
         "payrolls",
@@ -351,6 +354,7 @@ SERIES += (
         "CES0000000001",
         category="macro",
         visible=False,
+        history_start_year=1939,
     ),
     Series(
         "real-consumption",

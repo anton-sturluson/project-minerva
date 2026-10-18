@@ -1175,3 +1175,57 @@ summary:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+.economics-selector {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.economics-selector select {
+  max-width: 100%;
+  min-width: 0;
+}
+.economics-selected-value {
+  margin: 10px 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.economics .economics-detail {
+  margin-block: 12px;
+  padding-block: 10px;
+}
+.economics-detail .economics-meta {
+  margin-block: 6px;
+}
+.economics-detail .economics-chart {
+  margin-top: 10px;
+}
+@media (max-width: 560px) {
+  .economics-detail .research-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+  }
+  .economics-detail .research-controls label {
+    display: grid;
+    gap: 4px;
+  }
+  .economics-detail .research-controls input {
+    min-width: 0;
+    width: 100%;
+  }
+  .economics-detail .research-controls button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (min-width: 360px) and (max-width: 560px) {
+  .economics-detail .research-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: end;
+  }
+  .economics-detail .research-controls button {
+    grid-column: auto;
+    padding-inline: 8px;
+  }
+}

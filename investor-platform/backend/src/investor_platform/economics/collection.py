@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, func, select, text
 from sqlalchemy.orm import Session
 
 from investor_platform.db import LOCAL_WORKSPACE, make_engine
@@ -99,8 +99,45 @@ def download(url: str, body: bytes | None = None) -> bytes:
     return payload
 
 
+def bls_macro_windows(year: int, *, full_history: bool) -> list[tuple[int, int, dict[str, str]]]:
+    """Plan nonoverlapping ten-year API windows within each native series' real coverage."""
+    starts: dict[str, int] = {
+        series.source_key: series.history_start_year
+        for series in SERIES
+        if series.source_id == "bls-macro"
+        and not series.transform
+        and series.history_start_year is not None
+    }
+    keys: dict[str, str] = {
+        series.source_key: series.key
+        for series in SERIES
+        if series.source_id == "bls-macro" and not series.transform
+    }
+    if not full_history:
+        return [(year - 6, year, keys)]
+    boundaries: list[int] = sorted({*starts.values(), year + 1})
+    windows: list[tuple[int, int, dict[str, str]]] = []
+    first: int
+    last: int
+    for first, last in zip(boundaries, boundaries[1:]):
+        identities: dict[str, str] = {
+            native: keys[native]
+            for native, history_start in starts.items()
+            if history_start <= first
+        }
+        windows += [
+            (start, min(start + 9, last - 1), identities) for start in range(first, last, 10)
+        ]
+    return windows
+
+
 def collect_payloads(
-    provider: str, now: datetime, *, initial: bool, import_dir: Path | None = None
+    provider: str,
+    now: datetime,
+    *,
+    initial: bool,
+    import_dir: Path | None = None,
+    raw_dir: Path | None = None,
 ) -> list[Payload]:
     """Collect the three concrete supported formats; offline import uses the same parsers."""
 
@@ -109,31 +146,35 @@ def collect_payloads(
         return (import_dir / name).read_bytes() if import_dir else download(url, body)
 
     if provider in {"bls", "bls-macro"}:
-        expected: dict[str, str] = (
-            {"CUUR0000SA0": "cpi-index", "LNS14000000": "unemployment", "CES0000000001": "payrolls"}
-            if provider == "bls-macro"
-            else {s.source_key: s.key for s in SERIES if s.source_id == "bls"}
-        )
-        request: bytes = json.dumps(
-            {
-                "seriesid": list(expected),
-                "startyear": str(now.year - (6 if initial or provider == "bls-macro" else 1)),
-                "endyear": str(now.year),
-            }
-        ).encode()
-        body: bytes = read(
-            "bls-macro.json" if provider == "bls-macro" else "bls-api-2025-2026.json",
-            BLS_URL,
-            request,
-        )
-        return [
-            Payload(
-                BLS_URL,
-                body,
-                parse_bls(body, expected),
-                imported=import_dir is not None,
+        expected: dict[str, str] = {
+            series.source_key: series.key
+            for series in SERIES
+            if series.source_id == provider and not series.transform
+        }
+        if import_dir is not None:
+            body: bytes = read(
+                "bls-macro.json" if provider == "bls-macro" else "bls-api-2025-2026.json", BLS_URL
             )
-        ]
+            return [Payload(BLS_URL, body, parse_bls(body, expected), imported=True)]
+        windows: list[tuple[int, int, dict[str, str]]] = (
+            bls_macro_windows(now.year, full_history=initial)
+            if provider == "bls-macro"
+            else [(now.year - (6 if initial else 1), now.year, expected)]
+        )
+        payloads: list[Payload] = []
+        start: int
+        end: int
+        for start, end, expected in windows:
+            request: bytes = json.dumps(
+                {"seriesid": list(expected), "startyear": str(start), "endyear": str(end)}
+            ).encode()
+            body = download(BLS_URL, request)
+            facts: list[Fact] = parse_bls(body, expected)
+            # Keep successful windows even if a later request reaches the publisher's quota.
+            if raw_dir is not None:
+                save_raw(body, raw_dir)
+            payloads.append(Payload(BLS_URL, body, facts))
+        return payloads
     if provider == "usda":
         body = read("usda-moderate-cost.xlsx", USDA_URL)
         return [Payload(USDA_URL, body, parse_usda(body), imported=import_dir is not None)]
@@ -300,6 +341,25 @@ def refresh(
                 initial: bool = state.last_success is None
                 if import_dir is not None and not initial:
                     raise ValueError("Saved snapshots may only initialize an uncollected publisher")
+                if provider == "bls-macro":
+                    coverage: dict[str, date] = dict(
+                        session.execute(
+                            select(
+                                EconomicObservation.series_key,
+                                func.min(EconomicObservation.observation_date),
+                            )
+                            .where(EconomicObservation.workspace_id == workspace)
+                            .group_by(EconomicObservation.series_key)
+                        ).all()
+                    )
+                    initial = initial or any(
+                        series.key not in coverage
+                        or coverage[series.key].year > series.history_start_year
+                        for series in SERIES
+                        if series.source_id == "bls-macro"
+                        and not series.transform
+                        and series.history_start_year is not None
+                    )
                 if state.last_attempt is None or state.last_attempt.date() != now.date():
                     state.failures = 0
                 state.last_attempt = now
@@ -315,7 +375,7 @@ def refresh(
                 session.commit()
                 try:
                     payloads: list[Payload] = collect_payloads(
-                        provider, now, initial=initial, import_dir=import_dir
+                        provider, now, initial=initial, import_dir=import_dir, raw_dir=raw_dir
                     )
                     admit(session, workspace, payloads, now, raw_dir)
                     state.last_success = now
