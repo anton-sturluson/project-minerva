@@ -86,12 +86,78 @@ def status(run_id: UUID | None = typer.Argument(None)) -> None:
 
 @app.command("source")
 @guarded
-def source(run_id: UUID, ordinal: int, url: str) -> None:
-    """Archive an original document candidate; this does not approve its thesis."""
-    from harness.ideas.documents import attach
+def source(
+    run_id: UUID,
+    ordinal: int,
+    url: str,
+    section_id: list[str] | None = typer.Option(
+        None,
+        "--section-id",
+        help="Repeat original IDs for one contiguous fund section. No flags preserve a same-byte ready approval.",
+    ),
+    anchor_id: list[str] | None = typer.Option(
+        None,
+        "--anchor-id",
+        help="Repeat other original IDs used only for publisher, date or fund relationships.",
+    ),
+) -> None:
+    """Archive an original, with an optional bounded fund section; thesis approval is separate."""
+    from harness.ideas.documents import attach, read
 
     with store.run_lock(run_id):
-        emit(attach(run_id, ordinal, url))
+        document: dict = attach(
+            run_id, ordinal, url, section_ids=section_id, anchor_ids=anchor_id
+        )
+        reading: dict = read(store.run_folder(store.get_run(run_id)), document)
+        emit(
+            {**document, **reading}
+            if reading["status"] == "need_selection"
+            else document
+        )
+
+
+@app.command("read")
+@guarded
+def read_source(
+    run_id: UUID,
+    ordinal: int,
+    query: str | None = typer.Option(
+        None,
+        help="Find literal text in the original section index, for example --query Acme.",
+    ),
+    section_id: list[str] | None = typer.Option(
+        None,
+        "--section-id",
+        help="Repeat contiguous original content IDs to inspect a bounded scope.",
+    ),
+    anchor_id: list[str] | None = typer.Option(
+        None, "--anchor-id", help="Repeat separate attribution-only original IDs."
+    ),
+    index_offset: int = typer.Option(
+        0, min=0, help="Continue the original section index from this offset."
+    ),
+) -> None:
+    """Read an attached original or find sections; this does not change the saved scope."""
+    from harness.ideas.documents import read
+
+    run: dict = store.get_run(run_id)
+    row: dict | None = next(
+        (row for row in store.items(run_id) if row["ordinal"] == ordinal), None
+    )
+    if row is None or not row.get("document"):
+        raise ValueError(
+            "Attach an original first with minerva ideas source RUN_UUID ORDINAL ORIGINAL_URL"
+        )
+    emit(
+        read(
+            store.run_folder(run),
+            row["document"],
+            section_ids=section_id,
+            anchor_ids=anchor_id,
+            query=query,
+            index_offset=index_offset,
+        )
+    )
 
 
 @app.command("research")

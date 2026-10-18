@@ -659,8 +659,17 @@ def read(
     }
 
 
-def attach(run_id: UUID, ordinal: int, url: str) -> dict:
+def attach(
+    run_id: UUID,
+    ordinal: int,
+    url: str,
+    *,
+    section_ids: list[str] | None = None,
+    anchor_ids: list[str] | None = None,
+) -> dict:
     """Use the shared unpublished-run and exact-approval attachment boundary."""
     from harness.ideas.extraction import attach_source
 
-    return attach_source(run_id, ordinal, url)
+    return attach_source(
+        run_id, ordinal, url, section_ids=section_ids, anchor_ids=anchor_ids
+    )

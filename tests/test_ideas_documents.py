@@ -486,3 +486,80 @@ def test_equivalent_source_scope_encodings_cannot_change_decision_identity(
         == canonical_scope(tmp_path, reordered)
         == (["b2", "b3"], ["b1", "b4"])
     )
+
+
+def test_publication_uses_selected_content_and_attribution_anchors_separately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real archived selection can render, but anchor-only claims cannot pass."""
+    from datetime import date
+    from uuid import UUID
+
+    from harness.ideas import publication, store
+
+    monkeypatch.setenv("MINERVA_IDEAS_ROOT", str(tmp_path))
+    run: dict = {"id": UUID(int=9), "issue_date": date(2026, 10, 14)}
+    payload: bytes = b"<article><h1>Alpha Capital Q3 2026</h1><h2>Global Fund</h2><p>Acme has pricing power supporting durable margins and cash generation.</p></article>"
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Preserve real parsed source evidence without a network dependency."""
+        return payload, url
+
+    folder: Path = store.run_folder(run)
+    document: SourceDocument = select_sections(
+        folder,
+        archive(folder, "https://manager.example.com/report", fetch=fetch),
+        ["b2", "b3"],
+        ["b1"],
+    )
+    identity: dict = {
+        "accepted": True,
+        "reason": "test original",
+        "fund": "Global Fund",
+        "company": "Acme",
+        "period": "Q3 2026",
+        "period_end": "2026-09-30",
+        "publisher_block": "b1",
+        "fund_block": "b2",
+        "company_block": "b3",
+        "period_block": "b1",
+    }
+    view: dict = {
+        "instrument": "equity",
+        "stance": "bull",
+        "action": "not stated",
+        "claims": [{"text": "Acme has pricing power.", "passages": ["b3.1"]}],
+        "gap": "",
+    }
+    row: dict = {
+        "company": "Acme",
+        "fund": "Global Fund",
+        "symbol": "ACM US",
+        "document": {**document, "identity": identity},
+        "view": view,
+    }
+    assert publication.checked_view(row, run) == view
+    with pytest.raises(ValueError, match="unknown source passage"):
+        publication.checked_view(
+            {
+                **row,
+                "view": {
+                    **view,
+                    "claims": [
+                        {"text": "Acme has pricing power.", "passages": ["b1.1"]}
+                    ],
+                },
+            },
+            run,
+        )
+    with pytest.raises(ValueError, match="selected content"):
+        publication.checked_view(
+            {
+                **row,
+                "document": {
+                    **row["document"],
+                    "identity": {**identity, "fund_block": "b1"},
+                },
+            },
+            run,
+        )

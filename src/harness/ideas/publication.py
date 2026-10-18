@@ -10,7 +10,7 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 
 from harness.ideas import store
-from harness.ideas.documents import load_sections
+from harness.ideas.documents import SourceScope, resolve_scope, validate_scope
 from harness.ideas.extraction import View, materialize, passages
 from harness.ideas.research import resolve_identity, validate_match
 
@@ -25,13 +25,17 @@ def escape(text):
 
 
 def checked_view(row: dict, run: dict) -> dict:
-    document = row["document"]
-    parts = load_sections(store.run_folder(run), document)
+    document: dict = row["document"]
+    scope: SourceScope = resolve_scope(store.run_folder(run), document)
+    validate_scope(document, document["identity"])
     validate_match(
-        resolve_identity(document["identity"], parts), parts, run["issue_date"], row
+        resolve_identity(document["identity"], scope["identity"]),
+        scope["identity"],
+        run["issue_date"],
+        row,
     )
-    view = View.model_validate(row["view"])
-    materialize(view, passages(parts))
+    view: View = View.model_validate(row["view"])
+    materialize(view, passages(scope["content"]))
     return view.model_dump(mode="json")
 
 

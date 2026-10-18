@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from harness.ideas.agents import Browse, Group, Source, validate_groups
+from harness.ideas.agents import Browse, Group, Read, Source, _tool, validate_groups
 
 
 def test_group_assignments_are_disjoint_and_selected() -> None:
@@ -30,6 +30,25 @@ def test_source_tools_accept_only_explicit_public_source_arguments() -> None:
         Source(ordinal=0, url=candidate.url)
     with pytest.raises(ValidationError):
         Browse(url=candidate.url, link_offset=-1)
+
+
+def test_source_reader_contract_keeps_strict_parameters_and_original_scope_ids() -> (
+    None
+):
+    """The actual tool schema requires all values and accepts only explicit source IDs."""
+    reading: Read = Read(
+        url="https://example.com/report.pdf",
+        section_ids=["p10", "p11"],
+        anchor_ids=["p1"],
+        query="Acme",
+    )
+    assert reading.section_ids == ["p10", "p11"] and reading.anchor_ids == ["p1"]
+    schema: dict = _tool("read", Read, "Read original source sections")["parameters"]
+    assert set(schema["required"]) == set(schema["properties"])
+    with pytest.raises(ValidationError):
+        Read.model_validate({**reading.model_dump(), "path": "/tmp/other-source"})
+    with pytest.raises(ValidationError):
+        Read(url=reading.url, index_offset=-1)
 
 
 def test_preview_caps_context_without_changing_archived_blocks() -> None:
