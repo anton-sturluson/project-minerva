@@ -1,6 +1,7 @@
-from uuid import uuid4
+from pathlib import Path
+from uuid import UUID, uuid4
 
-from harness.ideas import publication
+from harness.ideas import publication, store
 
 
 def test_renderer_only_publishes_ready_original_equity_views(monkeypatch):
@@ -195,16 +196,21 @@ def test_postgres_duplicate_and_receipt_lifecycle(tmp_path, monkeypatch):
             conn.execute("DELETE FROM minerva_ideas.runs WHERE id=%s", (run_id,))
 
 
-def test_render_gate_rejects_wrong_company_even_if_marked_ready(tmp_path, monkeypatch):
+def test_render_gate_rejects_wrong_company_even_if_marked_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ready state cannot override issuer checks against real archived source blocks."""
     from datetime import date
 
-    monkeypatch.setattr(publication.store, "run_folder", lambda _: tmp_path)
-    monkeypatch.setattr(
-        publication,
-        "load_sections",
-        lambda *a: [{"id": "p1", "text": "Alpha Fund Q2 2026 Acme investment thesis."}],
+    monkeypatch.setenv("MINERVA_IDEAS_ROOT", str(tmp_path))
+    run: dict = {"id": UUID(int=1), "issue_date": date(2026, 9, 30)}
+    document: dict = {"sha256": "a" * 64}
+    store.json_artifact(
+        store.run_folder(run),
+        f"research/documents/{document['sha256']}.json",
+        [{"id": "p1", "text": "Alpha Fund Q2 2026 Acme investment thesis."}],
     )
-    identity = {
+    identity: dict = {
         "accepted": True,
         "reason": "test",
         "fund": "Alpha Fund",
@@ -216,14 +222,14 @@ def test_render_gate_rejects_wrong_company_even_if_marked_ready(tmp_path, monkey
         "company_block": "p1",
         "period_block": "p1",
     }
-    row = {
+    row: dict = {
         "company": "Different Issuer",
         "fund": "Alpha Fund",
         "symbol": "DIF US",
-        "document": {"identity": identity},
+        "document": {**document, "identity": identity},
     }
     with pytest.raises(ValueError, match="company"):
-        publication.checked_view(row, {"issue_date": date(2026, 9, 30)})
+        publication.checked_view(row, run)
 
 
 def test_native_receipt_requires_explicit_route_and_successful_execution():

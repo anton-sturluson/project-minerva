@@ -64,6 +64,20 @@ uv run minerva ideas extract RUN_UUID ORDINAL
 
 An import contains an issue URL/date and `roster` entries with `company`, `fund` and optional `symbol`. Reimporting the same UUID/content is idempotent. Duplicate roster rows are preserved by ordinal. Attaching a source does not approve its thesis.
 
+Large originals keep their complete bytes and original `pN` page or `bN` HTML block IDs. If a source exceeds the model text limit, `source` returns `need_selection` with its archive hash and a paginated section index. Use a literal lookup to find the relevant company, then inspect one contiguous fund section:
+
+```sh
+uv run minerva ideas read RUN_UUID ORDINAL --query Acme
+uv run minerva ideas read RUN_UUID ORDINAL --index-offset 100
+uv run minerva ideas read RUN_UUID ORDINAL --section-id p10 --section-id p11 --anchor-id p1
+uv run minerva ideas source RUN_UUID ORDINAL https://manager.example.com/report.pdf --section-id p10 --section-id p11 --anchor-id p1
+uv run minerva ideas extract RUN_UUID ORDINAL
+```
+
+`read` has no model calls and does not change the saved scope. Repeated `--section-id` values select ordered, contiguous original content IDs. Repeated `--anchor-id` values select other blocks from the same file for publisher, date or explicit fund relationship proof only. Every anchor must support one of those identity fields. Fund and company identity must be in the content section; claims can cite only content. Content and anchors share the model text limit. Python preserves the IDs and checks these boundaries; the source review must also verify that the range belongs to the actual fund rather than a sibling fund.
+
+Save the chosen range with `source` before extraction. Reattaching identical bytes without selection flags preserves an existing ready scope, citation and view. An explicit different scope is a new candidate on an unpublished run. Equivalent full-source selections and reordered anchors share the same evidence decision, so they cannot reopen a rejected result.
+
 To repair a rejected claim draft, save a `View` JSON file and use `uv run minerva ideas extract RUN_UUID ORDINAL --draft revised-view.json`. This synthetic example assumes the attached original has passage `p1.1` supporting its claim; use the actual archived IDs:
 
 ```json

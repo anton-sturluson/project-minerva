@@ -13,7 +13,12 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 
 from harness.ideas import decisions, store
-from harness.ideas.documents import load_sections
+from harness.ideas.documents import (
+    SourceScope,
+    canonical_scope,
+    resolve_scope,
+    validate_scope,
+)
 from harness.ideas.model import StageModels, generate, resolve_models
 from harness.ideas.research import (
     Match,
@@ -143,7 +148,8 @@ def review_proposal(
     """Review each materialized draft once; revised claims require a different key."""
     proposal = canonical_proposal(proposal)
     folder: Path = store.run_folder(run)
-    parts: list[dict] = load_sections(folder, document)
+    scope: SourceScope = resolve_scope(folder, document)
+    parts: list[dict] = scope["content"]
     candidate: dict | None = None
     failure: str = ""
     try:
@@ -175,9 +181,16 @@ def review_proposal(
         return prior, True
     review: Review | None = None
     if not failure:
-        identity: dict = resolve_identity(document["identity"], parts).model_dump(
-            mode="json"
+        validate_scope(document, document["identity"])
+        validate_match(
+            resolve_identity(document["identity"], scope["identity"]),
+            scope["identity"],
+            run["issue_date"],
+            row,
         )
+        identity: dict = resolve_identity(
+            document["identity"], scope["identity"]
+        ).model_dump(mode="json")
         review = generate(
             f"""Independently judge EACH claim using ONLY its attached evidence. Identity and relationship proof is for attribution only, not substantive claim support.
 {decisions.IDENTITY_POLICY}
@@ -247,9 +260,14 @@ def apply_decision(
     run: dict = store.get_run(run_id)
     row: dict = next(row for row in store.items(run_id) if row["ordinal"] == ordinal)
     document: dict = dict(decision.document)
-    parts: list[dict] = load_sections(store.run_folder(run), document)
+    scope: SourceScope = resolve_scope(store.run_folder(run), document)
+    parts: list[dict] = scope["content"]
+    validate_scope(document, document["identity"])
     validate_match(
-        resolve_identity(document["identity"], parts), parts, run["issue_date"], row
+        resolve_identity(document["identity"], scope["identity"]),
+        scope["identity"],
+        run["issue_date"],
+        row,
     )
     materialize(proposal, passages(parts))
     store.json_artifact(
@@ -291,10 +309,15 @@ def extract(
         )
     document: dict = dict(row["document"])
     folder: Path = store.run_folder(run)
-    parts: list[dict] = load_sections(folder, document)
+    scope: SourceScope = resolve_scope(folder, document)
+    parts: list[dict] = scope["content"]
     if row["state"] == "ready" and draft is None:
+        validate_scope(document, document["identity"])
         validate_match(
-            resolve_identity(document["identity"], parts), parts, run["issue_date"], row
+            resolve_identity(document["identity"], scope["identity"]),
+            scope["identity"],
+            run["issue_date"],
+            row,
         )
         prior_view: View = View.model_validate(row["view"])
         materialize(prior_view, passages(parts))
@@ -304,8 +327,9 @@ def extract(
             row, run, document, model=models.source
         ).model_dump(mode="json")
         document = approved_document(row, run, document)
-    identity: Match = resolve_identity(document["identity"], parts)
-    validate_match(identity, parts, run["issue_date"], row)
+    validate_scope(document, document["identity"])
+    identity: Match = resolve_identity(document["identity"], scope["identity"])
+    validate_match(identity, scope["identity"], run["issue_date"], row)
     # A replacement proposal must not mutate an existing approval before review.
     if row["state"] != "ready":
         with store.connect() as conn:
@@ -379,9 +403,16 @@ Source passages: {json.dumps(spans, ensure_ascii=False)}"""
     return apply_decision(run_id, ordinal, initial, reused=False)
 
 
-def attach_source(run_id: UUID, ordinal: int, url: str) -> dict:
+def attach_source(
+    run_id: UUID,
+    ordinal: int,
+    url: str,
+    *,
+    section_ids: list[str] | None = None,
+    anchor_ids: list[str] | None = None,
+) -> dict:
     """Attach a candidate or reuse an exact approved original without changing its citation."""
-    from harness.ideas.documents import archive
+    from harness.ideas.documents import archive, select_sections
 
     store.require_unpublished(run_id)
     run: dict = store.get_run(run_id)
@@ -391,17 +422,32 @@ def attach_source(run_id: UUID, ordinal: int, url: str) -> dict:
     if row is None:
         raise ValueError("Unknown roster ordinal")
     document: dict = archive(store.run_folder(run), url)
+    if section_ids is not None:
+        document = select_sections(
+            store.run_folder(run), document, section_ids, anchor_ids
+        )
+    elif anchor_ids is not None:
+        raise ValueError("Attribution anchors require an explicit content range")
     previous: dict | None = row.get("document")
     if (
         row["state"] == "ready"
         and previous
         and previous["sha256"] == document["sha256"]
-    ):
-        parts: list[dict] = load_sections(store.run_folder(run), previous)
-        validate_match(
-            resolve_identity(previous["identity"], parts), parts, run["issue_date"], row
+        and (
+            section_ids is None
+            or canonical_scope(store.run_folder(run), previous)
+            == canonical_scope(store.run_folder(run), document)
         )
-        materialize(View.model_validate(row["view"]), passages(parts))
+    ):
+        scope: SourceScope = resolve_scope(store.run_folder(run), previous)
+        validate_scope(previous, previous["identity"])
+        validate_match(
+            resolve_identity(previous["identity"], scope["identity"]),
+            scope["identity"],
+            run["issue_date"],
+            row,
+        )
+        materialize(View.model_validate(row["view"]), passages(scope["content"]))
         return {**previous, "reused_approval": True}
     with store.connect() as conn:
         conn.execute(
