@@ -62,9 +62,19 @@ test("records a dividend payment and preserves attribution through correction", 
   expect(dividend.income_security.id).toBe(buy.security.id);
   expect(dividend.accrual_date).toBe("2026-01-05");
   await page.getByText("Account activity", { exact: true }).click();
+  const dividendRow = page.getByRole("row").filter({
+    has: page.getByRole("button", {
+      name: `Correct entry ${dividend.id}`,
+      exact: true,
+    }),
+  });
   await expect(
-    page.getByRole("row").filter({ hasText: "dividend" }),
-  ).toContainText("ex 2026-01-05");
+    dividendRow.getByRole("cell", { name: "Dividend · AAA", exact: true }),
+  ).toBeVisible();
+  const exDate = dividendRow.getByText("2026-01-05", { exact: true });
+  await expect(exDate).toBeHidden();
+  await dividendRow.getByText("Details", { exact: true }).click();
+  await expect(exDate).toBeVisible();
   await page
     .getByRole("button", { name: `Correct entry ${dividend.id}`, exact: true })
     .click();
