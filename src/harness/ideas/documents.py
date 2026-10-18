@@ -18,7 +18,7 @@ from uuid import UUID
 
 import httpx
 import yaml
-from lxml import html
+from lxml import etree, html
 from psycopg.types.json import Jsonb
 
 from harness.ideas import store
@@ -116,7 +116,18 @@ def download(url: str, *, allow_discovery: bool = False) -> tuple[bytes, str]:
     raise ValueError("Too many source redirects")
 
 
+def _html_tree(payload: bytes) -> html.HtmlElement:
+    """Normalize empty or invalid HTML into a recoverable collection failure."""
+    try:
+        return html.fromstring(payload)
+    except (etree.ParserError, etree.XMLSyntaxError) as exc:
+        raise ValueError(
+            "Source contains too little readable text; invalid or empty HTML needs browser collection"
+        ) from exc
+
+
 def sections(payload: bytes) -> tuple[str, list[dict]]:
+    """Extract source blocks or report a recoverable text-collection failure."""
     if payload.lstrip().startswith(b"%PDF-"):
         converter = shutil.which("pdftotext")
         if not converter:
@@ -137,7 +148,7 @@ def sections(payload: bytes) -> tuple[str, list[dict]]:
         ]
         kind = "pdf"
     else:
-        tree = html.fromstring(payload)
+        tree = _html_tree(payload)
         for node in tree.xpath("//script | //style | //nav | //footer | //header"):
             node.drop_tree()
         bodies = tree.xpath("//article") or tree.xpath("//main") or [tree]
@@ -172,7 +183,10 @@ def page_links(
     """
     if payload.lstrip().startswith(b"%PDF-"):
         return []
-    tree: html.HtmlElement = html.fromstring(payload)
+    try:
+        tree: html.HtmlElement = _html_tree(payload)
+    except ValueError:
+        return []
     found: dict[str, PageLink] = {}
     node: html.HtmlElement
     for node in tree.xpath("//a[@href]"):

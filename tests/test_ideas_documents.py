@@ -167,3 +167,42 @@ def test_discovery_host_detection_does_not_trust_lookalike_domains() -> None:
     assert is_discovery_url("https://www.hfbestideas.com/ideas")
     assert is_discovery_url("https://HFBestIdeas.Substack.com./p/weekly")
     assert not is_discovery_url("https://hfbestideas.substack.com.example.com/letter")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"",
+        b" \n\t\r ",
+        b"<!-- comment without a document -->",
+        b"<!DOCTYPE html>",
+        b"<!-- incomplete",
+    ],
+)
+def test_empty_or_unparseable_html_remains_a_recoverable_collection_failure(
+    payload: bytes,
+) -> None:
+    """Real parser failures expose no links and request browser text recovery."""
+    assert page_links(payload, "https://manager.example.com/letter") == []
+    with pytest.raises(
+        ValueError, match="too little readable text.*browser collection"
+    ):
+        sections(payload)
+
+
+def test_recoverable_html_markup_still_preserves_source_text_and_links() -> None:
+    """Normal HTML parser repair must keep readable originals usable."""
+    text: str = "Acme's recurring revenue and pricing power support durable cash generation. The manager sees an attractive valuation despite near-term demand uncertainty."
+    payload: bytes = (
+        "<article><h1>Fund commentary</h1><p>"
+        + text
+        + '<a href="/original-letter">Full original'
+    ).encode()
+    kind: str
+    parts: list[dict[str, str]]
+    kind, parts = sections(payload)
+    assert kind == "html"
+    assert any(text in part["text"] for part in parts)
+    assert page_links(payload, "https://manager.example.com/archive") == [
+        {"url": "https://manager.example.com/original-letter", "label": "Full original"}
+    ]
