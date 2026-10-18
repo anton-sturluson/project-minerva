@@ -14,6 +14,8 @@ Individual food-item prices are retired from the active catalog and collector. T
 
 The grouped measure selector opens the full scrollable list, with search to filter it. The selected measure has date controls, its latest value and measured period, a source link and a native-frequency chart. The data table and About this measure details stay collapsed below the chart. About includes the selected source's collection or snapshot status; collection failures and unavailable sources remain visible when relevant. Date controls start at the available displayed history bounds; custom date filters remain under the reader's control.
 
+Dense charts retain every native observation in their segmented line paths. Individual markers appear for sparse ranges (up to 200 numeric observations) and isolated points, so long histories avoid thousands of redundant SVG elements. Date and number formatters are reused. The data table still exposes every returned observation when opened.
+
 | Measure | Definition |
 | --- | --- |
 | Headline inflation | Twelve-month change in the unadjusted CPI-U index. Do not mix adjusted and unadjusted levels. |

@@ -654,3 +654,73 @@ test("all dates keeps a missing latest period and imported snapshots do not clai
     ),
   ).toBeVisible();
 });
+
+test("dense histories retain every vertex and gap while sparse ranges restore markers", async ({
+  page,
+}) => {
+  const points = Array.from({ length: 304 }, (_, index) => ({
+    ...observations[0],
+    date: new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10),
+    value: index === 100 || index === 102 ? null : String(100 + index),
+    missing: index === 100 || index === 102,
+    footnotes:
+      index === 100 || index === 102
+        ? [{ text: "Temporary publication gap." }]
+        : [],
+  }));
+  const definition = {
+    ...series,
+    key: "dense-history",
+    name: "Example daily yield",
+    unit: "Percent",
+    frequency: "Daily",
+    category: "macro",
+    latest: points.at(-1),
+    observation_count: points.length,
+  };
+  await page.route("**/api/research/economics", (route) =>
+    route.fulfill({ json: { sources: [source], series: [definition] } }),
+  );
+  await page.route("**/api/research/economics/series/*", (route) =>
+    route.fulfill({ json: { series: definition, observations: points } }),
+  );
+  await page.goto("/#research/economics");
+  await expect(
+    page.getByRole("img", { name: /Example daily yield/ }),
+  ).toBeVisible();
+  await expect(page.locator(".economics-line")).toHaveCount(3);
+  const vertices = await page
+    .locator(".economics-line")
+    .evaluateAll((paths) =>
+      paths.reduce(
+        (count, path) =>
+          count + (path.getAttribute("d")?.match(/[ML]/g)?.length ?? 0),
+        0,
+      ),
+    );
+  expect(vertices).toBe(302);
+  await expect(page.locator(".economics-chart circle")).toHaveCount(1);
+  await expect(page.locator(".economics-chart circle title")).toHaveText(
+    "Apr 12, 2025: 201 Percent",
+  );
+  await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(0);
+  await page.getByLabel("Through", { exact: true }).fill(points[199].date);
+  await expect(page.locator(".economics-chart circle")).toHaveCount(198);
+  await expect(page.locator(".economics-line")).toHaveCount(3);
+  await page.getByLabel("From", { exact: true }).fill(points[99].date);
+  await page.getByLabel("Through", { exact: true }).fill(points[103].date);
+  await expect(page.locator(".economics-chart circle")).toHaveCount(3);
+  await expect(page.locator(".economics-line")).toHaveCount(3);
+  await page.getByRole("button", { name: "All dates", exact: true }).click();
+  await expect(page.locator(".economics-chart circle")).toHaveCount(1);
+  await page
+    .getByText("Data table (304 observations)", { exact: true })
+    .click();
+  await expect(page.locator(".economics-data-table tbody tr")).toHaveCount(304);
+  await expect(
+    page.getByRole("cell", { name: "Unavailable", exact: true }),
+  ).toHaveCount(2);
+  await expect(
+    page.getByText("Temporary publication gap.", { exact: true }),
+  ).toHaveCount(2);
+});

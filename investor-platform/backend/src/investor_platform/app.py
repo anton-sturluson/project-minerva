@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import RequestResponseEndpoint
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
@@ -113,6 +114,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app.include_router(financial_router)
     app.state.financial_schema = os.environ.get("INVESTOR_FINANCIAL_SCHEMA")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
     @app.exception_handler(SQLAlchemyError)
     async def database_unavailable(request: Request, exc: SQLAlchemyError) -> JSONResponse:

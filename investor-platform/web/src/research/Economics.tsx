@@ -358,7 +358,19 @@ function EconomicChart({ detail }: { detail: Detail }) {
   const stepped =
     detail.key === "fed-target-lower" || detail.key === "fed-target-upper";
   const paths: string[] = [];
+  const sparse = valid.length <= 200;
+  const markers: Observation[] = sparse ? valid : [];
   let segment = "";
+  let segmentCount = 0;
+  let segmentPoint: Observation | null = null;
+  function finishSegment() {
+    if (segment) paths.push(segment);
+    if (!sparse && segmentCount === 1 && segmentPoint)
+      markers.push(segmentPoint);
+    segment = "";
+    segmentCount = 0;
+    segmentPoint = null;
+  }
   let previous = 0;
   const expectedDays = /quarter/i.test(detail.frequency)
     ? 110
@@ -374,15 +386,15 @@ function EconomicChart({ detail }: { detail: Detail }) {
       point.value === null ||
       !Number.isFinite(Number(point.value))
     ) {
-      if (segment) paths.push(segment);
-      segment = "";
+      finishSegment();
       previous = 0;
       continue;
     }
     if (previous && (time - previous) / 86400000 > expectedDays) {
-      if (segment) paths.push(segment);
-      segment = "";
+      finishSegment();
     }
+    segmentCount += 1;
+    segmentPoint = point;
     segment += !segment
       ? `M${x(point.date)},${y(Number(point.value))}`
       : stepped
@@ -390,7 +402,7 @@ function EconomicChart({ detail }: { detail: Detail }) {
         : ` L${x(point.date)},${y(Number(point.value))}`;
     previous = time;
   }
-  if (segment) paths.push(segment);
+  finishSegment();
   return (
     <figure className="economics-chart" tabIndex={0}>
       <svg
@@ -415,7 +427,7 @@ function EconomicChart({ detail }: { detail: Detail }) {
         {paths.map((path, index) => (
           <path key={index} d={path} className="economics-line" />
         ))}
-        {valid.map((point) => (
+        {markers.map((point) => (
           <circle
             key={point.date}
             cx={x(point.date)}
