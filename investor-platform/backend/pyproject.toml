@@ -18,6 +18,7 @@ investor-financial = "investor_platform.financials.cli:main"
 investor-api = "investor_platform.app:main"
 investor-refresh-prices = "investor_platform.market_data.price_refresh:main"
 investor-import = "investor_platform.ledger.import_transactions:main"
+investor-import-cash = "investor_platform.ledger.import_cash:main"
 investor-reconcile-cash = "investor_platform.ledger.reconcile_cash:main"
 investor-research-sync = "investor_platform.research.sync:main"
 

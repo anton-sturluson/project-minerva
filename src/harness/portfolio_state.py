@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ FISCAL_PERIOD_EXAMPLES = "FY2026, H1 FY2026, H2 FY2026, Q1 FY2026, Q2 FY2026, Q3
 MAX_THESIS_LIST_ITEMS = 5
 MAX_THESIS_METRICS = 5
 MAIN_PORTFOLIO = "Main"
+_CASH_TRANSACTION_ACTIONS: frozenset[str] = frozenset({"dividend", "dividend_tax", "adr_fee"})
 _GVIZ_RESPONSE_LIMIT = 10 * 1024 * 1024
 _GVIZ_PERCENTAGE_POINT_FIELDS = frozenset({"weight", "cost_weight", "target_weight"})
 _GVIZ_DATE_PATTERN = re.compile(r"^Date\((\d{4}),(\d{1,2}),(\d{1,2})\)$")
@@ -817,7 +819,12 @@ def render_portfolio_summary(
     watchlist_lines = [f"- `{item['security_id']}` | {item.get('company_name', 'Unknown')}" for item in watchlist]
     recent_transactions = transactions[:10]
     transaction_lines = [
-        f"- {item.get('trade_date', '')} | `{item.get('security_id', '')}` | {item.get('action', '')} | {item.get('quantity', '')}"
+        f"- {item.get('trade_date', '')} | `{item.get('security_id', '')}` | {item.get('action', '')} | "
+        + (
+            f"{item['total_usd']} USD"
+            if item.get("action") in _CASH_TRANSACTION_ACTIONS and "total_usd" in item
+            else str(item.get("quantity", ""))
+        )
         for item in recent_transactions
     ]
     return "\n".join(
@@ -1017,21 +1024,27 @@ def normalize_watchlist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def normalize_transactions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize Main transactions, validating the modern USD ledger shape."""
+    """Normalize Main trades and cash events in one stable, typed USD ledger.
+
+    Cash actions carry signed totals, never shares or prices. Legacy rows without
+    USD ledger fields retain their existing permissive behavior.
+    """
     normalized: list[dict[str, Any]] = []
-    for input_index, row in enumerate(_main_portfolio_rows(rows)):
-        modern_usd = "price_usd" in row or "total_usd" in row
+    input_index: int
+    row: dict[str, Any]
+    for input_index, row in enumerate(_main_portfolio_rows(_normalize_csv_headers(rows))):
+        modern_usd: bool = "price_usd" in row or "total_usd" in row
         if modern_usd and "portfolio" not in row:
             raise ValueError(f"transaction row {input_index + 2}: portfolio is required")
-        canonical_modern = modern_usd and all(
+        canonical_modern: bool = modern_usd and all(
             key in row for key in ("security_id", "trade_date", "action", "quantity", "price")
         )
-        ticker_source = _first_present(row, "ticker", "symbol")
+        ticker_source: Any = _first_present(row, "ticker", "symbol")
         if ticker_source is None and not ("ticker" in row and "security_id" in row):
             ticker_source = _first_present(row, "security_id", "security")
-        ticker = _clean_ticker(ticker_source)
-        company_name = _clean_name(_first_present(row, "company_name", "company", "name", "security"))
-        security_id = canonical_security_id(_first_present(row, "security_id") or ticker or company_name)
+        ticker: str = _clean_ticker(ticker_source)
+        company_name: str = _clean_name(_first_present(row, "company_name", "company", "name", "security"))
+        security_id: str = canonical_security_id(_first_present(row, "security_id") or ticker or company_name)
         if (
             modern_usd
             and not canonical_modern
@@ -1044,15 +1057,19 @@ def normalize_transactions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 raise ValueError(f"transaction row {input_index + 2}: symbol is required")
             continue
 
-        trade_date = _stringify_date(_first_present(row, "date", "trade_date", "timestamp"))
-        action_keys = (
+        trade_date: str = _stringify_date(_first_present(row, "date", "trade_date", "timestamp"))
+        action_keys: tuple[str, ...] = (
             ("action", "side", "transaction", "type")
             if modern_usd
             else ("action", "side", "transaction")
         )
-        action = str(_first_present(row, *action_keys) or "").strip().lower()
+        action: str = str(_first_present(row, *action_keys) or "").strip().lower()
+        quantity: float | int | None
+        price: float | int | None
+        total_usd: float | int
 
         if modern_usd:
+            action = {"dividend tax": "dividend_tax", "adr fee": "adr_fee"}.get(action, action)
             if not trade_date:
                 raise ValueError(f"transaction row {input_index + 2} ({security_id}): date is required")
             try:
@@ -1061,29 +1078,46 @@ def normalize_transactions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 raise ValueError(
                     f"transaction row {input_index + 2} ({security_id}): invalid date"
                 ) from exc
-            if action not in {"buy", "sell"}:
-                raise ValueError(
-                    f"transaction row {input_index + 2} ({security_id}): action must be buy or sell"
+            if action in _CASH_TRANSACTION_ACTIONS:
+                if not ticker or not THESIS_TICKER_PATTERN.fullmatch(ticker):
+                    raise ValueError(f"transaction row {input_index + 2}: invalid symbol")
+                if _first_present(row, "quantity", "shares", "price", "price_usd") is not None:
+                    raise ValueError(
+                        f"transaction row {input_index + 2} ({security_id}): "
+                        "cash events require blank shares and price"
+                    )
+                quantity = price = None
+                total_usd = _required_cash_total(
+                    row.get("total_usd"),
+                    row_number=input_index + 2,
+                    security_id=security_id,
+                    action=action,
                 )
-            quantity = _required_positive_number(
-                _first_present(row, "quantity", "shares"),
-                row_number=input_index + 2,
-                security_id=security_id,
-                field="shares",
-            )
-            price = _required_positive_number(
-                _first_present(row, "price") if canonical_modern else _first_present(row, "price_usd"),
-                row_number=input_index + 2,
-                security_id=security_id,
-                field="price",
-            )
-            total_usd = _required_positive_number(
-                _first_present(row, "total_usd"),
-                row_number=input_index + 2,
-                security_id=security_id,
-                field="total",
-            )
-            currency = str(row.get("currency") or "").strip().upper()
+            elif action in {"buy", "sell"}:
+                quantity = _required_positive_number(
+                    _first_present(row, "quantity", "shares"),
+                    row_number=input_index + 2,
+                    security_id=security_id,
+                    field="shares",
+                )
+                price = _required_positive_number(
+                    _first_present(row, "price") if canonical_modern else _first_present(row, "price_usd"),
+                    row_number=input_index + 2,
+                    security_id=security_id,
+                    field="price",
+                )
+                total_usd = _required_positive_number(
+                    _first_present(row, "total_usd"),
+                    row_number=input_index + 2,
+                    security_id=security_id,
+                    field="total",
+                )
+            else:
+                raise ValueError(
+                    f"transaction row {input_index + 2} ({security_id}): "
+                    "action must be buy, sell, dividend, dividend_tax or adr_fee"
+                )
+            currency: str = str(row.get("currency") or "").strip().upper()
             if currency and currency != "USD":
                 raise ValueError(
                     f"transaction row {input_index + 2} ({security_id}): "
@@ -1538,6 +1572,26 @@ def _required_positive_number(
         raise ValueError(f"transaction row {row_number} ({security_id}): {field} must be numeric")
     if parsed <= 0:
         raise ValueError(f"transaction row {row_number} ({security_id}): {field} must be greater than zero")
+    return parsed
+
+
+def _required_cash_total(
+    value: Any,
+    *,
+    row_number: int,
+    security_id: str,
+    action: str,
+) -> float | int:
+    """Require finite USD income or a charge with the action's explicit sign."""
+    parsed: float | int | None = _maybe_number(value)
+    if parsed is None or (isinstance(parsed, float) and not math.isfinite(parsed)) or "%" in str(value):
+        raise ValueError(f"transaction row {row_number} ({security_id}): total must be numeric USD")
+    if (action == "dividend" and parsed <= 0) or (action != "dividend" and parsed >= 0):
+        sign: str = "greater" if action == "dividend" else "less"
+        raise ValueError(
+            f"transaction row {row_number} ({security_id}): "
+            f"total must be {sign} than zero for {action}"
+        )
     return parsed
 
 

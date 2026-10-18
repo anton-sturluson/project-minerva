@@ -82,16 +82,14 @@ export function AccountActivity({
                 <tr key={e.id}>
                   <td>{e.effective_date}</td>
                   <td>
-                    {labels[e.kind]}
+                    {e.kind === "income" && e.income_kind === "dividend"
+                      ? "Dividend"
+                      : labels[e.kind]}
                     {e.security && <> · {e.security.ticker}</>}
-                    {e.income_kind && <> · {e.income_kind}</>}
-                    {e.income_security && (
-                      <>
-                        {" "}
-                        · {e.income_security.ticker}{" "}
-                        {e.accrual_date && <>· ex {e.accrual_date}</>}
-                      </>
+                    {e.income_kind && e.income_kind !== "dividend" && (
+                      <> · {e.income_kind}</>
                     )}
+                    {e.income_security && <> · {e.income_security.ticker}</>}
                   </td>
                   <td className="number">
                     {["withdrawal", "expense", "buy"].includes(e.kind)
@@ -137,6 +135,22 @@ export function AccountActivity({
                                   ? "Unknown: opening basis unavailable"
                                   : formatExactDecimal(e.realized_pnl)}
                               </dd>
+                            </>
+                          )}
+                          <dt>Recorded</dt>
+                          <dd>{e.created_at}</dd>
+                          <dt>Note</dt>
+                          <dd>{e.note || "—"}</dd>
+                        </dl>
+                      </details>
+                    ) : e.kind === "income" || e.kind === "expense" ? (
+                      <details>
+                        <summary>Details</summary>
+                        <dl className="entry-detail">
+                          {e.accrual_date && (
+                            <>
+                              <dt>Ex-dividend date</dt>
+                              <dd>{e.accrual_date}</dd>
                             </>
                           )}
                           <dt>Recorded</dt>
