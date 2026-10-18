@@ -1,5 +1,6 @@
 """Source preservation and navigation parsing without live network requests."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -7,8 +8,10 @@ import pytest
 
 from harness.ideas.documents import (
     PageLink,
+    SourceDocument,
     SourcePart,
     _archive_discovery,
+    _archive_payload,
     _parse_browser_page,
     archive,
     is_discovery_url,
@@ -206,3 +209,97 @@ def test_recoverable_html_markup_still_preserves_source_text_and_links() -> None
     assert page_links(payload, "https://manager.example.com/archive") == [
         {"url": "https://manager.example.com/original-letter", "label": "Full original"}
     ]
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "X-Amz-Signature=example&X-Amz-Expires=3600",
+        "Signature=example&Expires=2000000000",
+    ],
+)
+def test_signed_download_keeps_stable_citation_and_private_transport_provenance(
+    tmp_path: Path, signature: str
+) -> None:
+    """Archive real source bytes without publishing an expiring transport URL."""
+    stable: str = "https://manager.example.com/api/v1/file/letter"
+    transport: str = "https://files.example.com/source?" + signature
+    payload: bytes = b"<article><p>Acme's pricing power and disciplined capital allocation support durable cash generation, giving Alpha Fund confidence in its long-term investment thesis.</p></article>"
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply a synthetic redirect response to the real archive pipeline."""
+        return payload, transport
+
+    document: SourceDocument = archive(tmp_path, stable, fetch=fetch)
+    assert document["url"] == stable
+    assert document["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert "Signature" not in json.dumps(document)
+    assert (
+        tmp_path / f"research/documents/{document['sha256']}.html"
+    ).read_bytes() == payload
+    assert load_sections(tmp_path, document)[0]["text"].startswith(
+        "Acme's pricing power"
+    )
+    provenance: dict[str, str] = json.loads(
+        next((tmp_path / "research/documents").glob("*.provenance.json")).read_text()
+    )
+    assert provenance == {
+        "collection": "http",
+        "requested_url": stable,
+        "url": transport,
+    }
+
+
+def test_unsigned_redirect_keeps_its_canonical_final_citation(tmp_path: Path) -> None:
+    """Only signed redirects need the original request as their citation."""
+    canonical: str = "https://manager.example.com/letters/quarterly"
+    payload: bytes = b"<article><p>Alpha Fund sees Acme's improving business economics and recurring customer demand as support for its attractive valuation and future cash generation.</p></article>"
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply an ordinary redirect response to the archive pipeline."""
+        return payload, canonical
+
+    document: SourceDocument = archive(
+        tmp_path, "https://manager.example.com/latest", fetch=fetch
+    )
+    assert document["url"] == canonical
+    assert not list((tmp_path / "research/documents").glob("*.provenance.json"))
+
+
+def test_browser_archive_uses_the_same_stable_citation_boundary(tmp_path: Path) -> None:
+    """Rendered HTML keeps source blocks while its signed transport stays private."""
+    payload: bytes = b"<article><p>Acme has an attractive valuation supported by rising recurring demand and durable margins. Alpha Fund expects cash generation to improve with scale.</p></article>"
+    kind: str
+    parts: list[SourcePart]
+    kind, parts = sections(payload)
+    stable: str = "https://manager.example.com/letter"
+    transport: str = "https://files.example.com/letter?X-Amz-Signature=example"
+    document: SourceDocument = _archive_payload(
+        tmp_path,
+        transport,
+        payload,
+        kind,
+        parts,
+        requested_url=stable,
+        collection="browser",
+    )
+    assert document["url"] == stable and document["collection"] == "browser"
+    assert load_sections(tmp_path, document) == parts
+    provenance: dict[str, str] = json.loads(
+        next((tmp_path / "research/documents").glob("*.provenance.json")).read_text()
+    )
+    assert provenance["url"] == transport and provenance["collection"] == "browser"
+
+
+def test_direct_signed_download_cannot_become_a_citation(tmp_path: Path) -> None:
+    """Without a stable manager route an expiring source must fail closed."""
+    payload: bytes = b"<article><p>Alpha Fund sees Acme's improving business economics and recurring customer demand as support for its attractive valuation and future cash generation.</p></article>"
+    signed: str = "https://files.example.com/letter?X-Amz-Signature=example"
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply bytes from a directly requested signed URL."""
+        return payload, signed
+
+    with pytest.raises(ValueError, match="stable manager URL"):
+        archive(tmp_path, signed, fetch=fetch)
+    assert not (tmp_path / "research/documents").exists()
