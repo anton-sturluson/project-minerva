@@ -563,3 +563,45 @@ def test_publication_uses_selected_content_and_attribution_anchors_separately(
             },
             run,
         )
+
+
+def test_observation_schema_keeps_anchor_ids_out_of_fund_and_company() -> None:
+    """Exact source IDs constrain model metadata before the final scope policy gate."""
+    from pydantic import ValidationError
+
+    from harness.ideas.research import SourceObservations, observation_schema
+
+    parts: list[SourcePart] = [
+        {"id": "b1", "text": "Alpha Capital, Q3 2026"},
+        {"id": "b2", "text": "Global Fund"},
+        {"id": "b3", "text": "Acme has pricing power."},
+    ]
+    schema: type[SourceObservations] = observation_schema(
+        parts, content_ids=["b2", "b3"]
+    )
+    observed: dict = {
+        "fund": "Global Fund",
+        "company": "Acme",
+        "period": "Q3 2026",
+        "period_end": "2026-09-30",
+        "publisher_block": "b1",
+        "fund_block": "b2",
+        "company_block": "b3",
+        "period_block": "b1",
+        "source_kind": "manager_original",
+        "substantive_commentary": True,
+        "publisher": "Alpha Capital",
+        "label_scope": "specific",
+        "umbrella": "",
+        "relationship_blocks": ["b1"],
+        "reason": "Original commentary.",
+    }
+    assert schema.model_validate(observed).model_dump(mode="json") == observed
+    role: str
+    for role in ("fund_block", "company_block"):
+        with pytest.raises(ValidationError):
+            schema.model_validate({**observed, role: "b1"})
+    with pytest.raises(ValidationError):
+        schema.model_validate({**observed, "company_block": "b3: Acme"})
+    with pytest.raises(ValidationError):
+        schema.model_validate({**observed, "relationship_blocks": ["b4"]})
