@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from harness.ideas.research import Match, validate_match
+from harness.ideas.research import Match, MatchDraft, resolve_identity, validate_match
 
 
 def match():
@@ -205,3 +205,61 @@ def test_ticker_alias_rejects_unsupported_company_relationships(
     ]
     with pytest.raises(ValueError, match="company does not match"):
         validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+@pytest.mark.parametrize(
+    "fund",
+    [
+        "Harbor Mid Cap Value Fund",
+        "Harbor Small Cap Value Fund",
+        "Harbor Mid Cap Growth Fund",
+        "Harbor Sustainable Mid Cap Value Fund",
+    ],
+)
+def test_advisors_descriptor_does_not_erase_distinctive_fund_words(fund: str) -> None:
+    """A manager descriptor can vary while size, style and strategy stay exact."""
+    candidate: Match = match()
+    candidate.fund = fund
+    candidate.fund_quote = fund
+    candidate.publisher_quote = "Harbor Advisors"
+    row: dict[str, str] = {
+        "company": "Acme",
+        "fund": "Harbor Advisors Mid Cap Value Fund",
+    }
+    parts: list[dict[str, str]] = [
+        {"text": "Harbor Advisors " + fund + " Q2 2026 Acme pricing power"}
+    ]
+    if fund == "Harbor Mid Cap Value Fund":
+        validate_match(candidate, parts, date(2026, 9, 30), row)
+    else:
+        with pytest.raises(ValueError, match="fund does not match"):
+            validate_match(candidate, parts, date(2026, 9, 30), row)
+
+
+def test_period_correction_must_select_the_block_with_original_wording() -> None:
+    """A valid date block does not support a different period label elsewhere."""
+    parts: list[dict[str, str]] = [
+        {"id": "b1", "text": "Alpha Capital Alpha Fund 3Q26 commentary"},
+        {"id": "b2", "text": "9/30/2026"},
+        {"id": "b3", "text": "Acme pricing power"},
+    ]
+    draft: MatchDraft = MatchDraft(
+        accepted=True,
+        reason="Official commentary",
+        fund="Alpha Fund",
+        company="Acme",
+        period="3Q26",
+        period_end=date(2026, 9, 30),
+        publisher_block="b1",
+        fund_block="b1",
+        company_block="b3",
+        period_block="b2",
+    )
+    with pytest.raises(ValueError, match="Period must retain the original wording"):
+        validate_match(
+            resolve_identity(draft.model_dump(), parts), parts, date(2026, 10, 14)
+        )
+    draft.period_block = "b1"
+    validate_match(
+        resolve_identity(draft.model_dump(), parts), parts, date(2026, 10, 14)
+    )
