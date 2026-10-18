@@ -48,7 +48,9 @@ def render(run_id: UUID) -> str:
         "",
     ]
     if not rows:
-        lines.append("No verified ideas are available yet. Unresolved leads are not evidence that no original thesis exists.")
+        lines.append(
+            "No verified ideas are available yet. Unresolved leads are not evidence that no original thesis exists."
+        )
     groups = {}
     for row in rows:
         groups.setdefault(row["company"], []).append(row)
@@ -64,16 +66,24 @@ def render(run_id: UUID) -> str:
     return "\n".join(lines).strip()
 
 
-def render_fund(row, run):
-    lines = []
-    view = checked_view(row, run)
-    document = row["document"]
+def render_fund(row: dict, run: dict) -> list[str]:
+    """Render versioned source attribution without changing historical labels."""
+    lines: list[str] = []
+    view: dict = checked_view(row, run)
+    document: dict = row["document"]
     # Stored ready records are created by extraction after both validation gates.
     if view["instrument"] != "equity" or view["stance"] == "unclear":
         return []
-    period = document["identity"]["period"]
-    lines.append(f"*{escape(row['fund'])}*")
-    action = "" if view["action"] == "not stated" else f" · {escape(view['action'])}"
+    period: str = document["identity"]["period"]
+    label: str = (
+        document["identity"]["fund"]
+        if document["identity"].get("policy_revision") in (2, 3, 4)
+        else row["fund"]
+    )
+    lines.append(f"*{escape(label)}*")
+    action: str = (
+        "" if view["action"] == "not stated" else f" · {escape(view['action'])}"
+    )
     lines.append(f"{escape(view['stance'])}{action} · {escape(period)}")
     for claim in view["claims"]:
         lines.append("• " + escape(claim["text"]))
