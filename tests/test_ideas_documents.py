@@ -1,9 +1,12 @@
 """Source preservation and navigation parsing without live network requests."""
 
+import json
+
 import pytest
 
 from harness.ideas.documents import (
     PageLink,
+    _parse_browser_page,
     archive,
     load_sections,
     page_links,
@@ -81,3 +84,36 @@ def test_archive_navigation_keeps_more_than_one_page_of_original_links() -> None
         "url": "https://manager.example.com/letters/124",
         "label": "Letter 124",
     }
+
+
+def test_browser_page_preserves_large_html_and_unicode_line_separators() -> None:
+    """Read complete rendered HTML beyond pipe capacity without splitting source text."""
+    source: str = (
+        "<html><article>"
+        + "Evidence\u2028and\u2029qualifications. " * 6000
+        + "</article></html>"
+    )
+    url: str = "https://manager.example.com/commentary"
+    output: str = (
+        json.dumps({"url": url, "html": source}, ensure_ascii=False)
+        + "\n[ok | url: "
+        + url
+        + " | 1ms]\n"
+    )
+    payload: bytes
+    final_url: str
+    payload, final_url = _parse_browser_page(output)
+    assert len(payload) > 65536
+    assert payload.decode() == source
+    assert final_url == url
+
+
+def test_browser_page_rejects_truncated_html_or_failed_cli_output() -> None:
+    """A partial DOM or failed command cannot become archived source evidence."""
+    complete: str = json.dumps(
+        {"url": "https://manager.example.com", "html": "<p>source</p>"}
+    )
+    with pytest.raises(ValueError):
+        _parse_browser_page(complete[:-3])
+    with pytest.raises(ValueError, match="invalid page result"):
+        _parse_browser_page(complete + "\n[error | url: unavailable | 0ms]\n")

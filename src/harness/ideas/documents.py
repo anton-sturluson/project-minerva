@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import NotRequired, TextIO, TypedDict
 from urllib.parse import SplitResult, urljoin, urlsplit
 from uuid import UUID
 
@@ -196,6 +196,25 @@ def page_links(payload: bytes, url: str) -> list[PageLink]:
     return list(found.values())
 
 
+def _parse_browser_page(output: str) -> tuple[bytes, str]:
+    """Parse complete JSON before CLI diagnostics, retaining embedded line separators."""
+    content: str = output.lstrip()
+    page: dict[str, str]
+    end: int
+    page, end = json.JSONDecoder().raw_decode(content)
+    if (
+        not isinstance(page, dict)
+        or not isinstance(page.get("html"), str)
+        or not isinstance(page.get("url"), str)
+        or not content[end:].strip().startswith("[ok |")
+    ):
+        raise ValueError("Browser recovery returned an invalid page result")
+    payload: bytes = page["html"].encode()
+    if not payload or len(payload) > MAX_BYTES:
+        raise ValueError("Rendered source is empty or exceeds 25 MB")
+    return payload, page["url"]
+
+
 def rendered_download(url: str) -> tuple[bytes, str]:
     """Read the actual rendered HTML in an owned browser tab and then close it."""
     public_url(url)
@@ -226,19 +245,23 @@ def rendered_download(url: str) -> tuple[bytes, str]:
             check=True,
         )
         expression: str = "JSON.stringify({url:location.href,html:document.documentElement.outerHTML})"
-        result: subprocess.CompletedProcess[str] = subprocess.run(
-            [browser, "eval", expression, "--tab", alias],
-            capture_output=True,
-            text=True,
-            timeout=40,
-            check=True,
-        )
-        # JSON.stringify produces one line; CLI diagnostics follow on later lines.
-        page: dict[str, str] = json.loads(result.stdout.splitlines()[0])
-        final_url: str = public_url(page["url"])
-        payload: bytes = page["html"].encode()
-        if not payload or len(payload) > MAX_BYTES:
-            raise ValueError("Rendered source is empty or exceeds 25 MB")
+        # The CLI exits before a large stdout pipe drains. Regular-file stdout
+        # preserves the full DOM instead of truncating it at the pipe capacity.
+        output: TextIO
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
+            subprocess.run(
+                [browser, "eval", expression, "--tab", alias],
+                stdout=output,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=40,
+                check=True,
+            )
+            output.seek(0)
+            payload: bytes
+            final_url: str
+            payload, final_url = _parse_browser_page(output.read())
+        public_url(final_url)
         return payload, final_url
     finally:
         subprocess.run(

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from harness.ideas import store
 from harness.ideas.documents import load_sections
-from harness.ideas.model import generate, resolve_models
+from harness.ideas.model import ModelError, generate, resolve_models
 
 
 class Match(BaseModel):
@@ -47,13 +47,18 @@ def search(query: str) -> list[dict]:
     key = os.environ.get("BRAVE_API_KEY")
     if not key:
         raise ValueError("BRAVE_API_KEY is required for source discovery")
-    response = httpx.get(
-        "https://api.search.brave.com/res/v1/web/search",
-        params={"q": query, "count": 6},
-        headers={"X-Subscription-Token": key, "Accept": "application/json"},
-        timeout=30,
-    )
-    response.raise_for_status()
+    try:
+        response = httpx.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "count": 6},
+            headers={"X-Subscription-Token": key, "Accept": "application/json"},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        raise ModelError(
+            "Search provider request failed; check Brave credentials, quota and connectivity before resuming."
+        ) from None
     return [
         {
             "url": r["url"],

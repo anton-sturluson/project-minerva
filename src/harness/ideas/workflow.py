@@ -176,7 +176,14 @@ def resume(
                 )
                 raise
         result: dict = store.status(run_id)
-        result["processed"] = len(ordinals)
+        result["processed"] = (
+            sum(
+                row["ordinal"] in ordinals and row["state"] != "pending"
+                for row in store.items(run_id)
+            )
+            if ordinals
+            else 0
+        )
         result["outcome"] = (
             "partial"
             if any(
