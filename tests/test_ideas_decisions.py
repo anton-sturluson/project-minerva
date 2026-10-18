@@ -178,7 +178,7 @@ def test_decisions_ignore_url_model_and_delegation_but_bind_scope_and_policy(
         "identity",
     )
     assert decisions.read(tmp_path, alias) == decision
-    assert alias.model_copy(update={"policy_revision": 3}).key != alias.key
+    assert alias.model_copy(update={"policy_revision": 4}).key != alias.key
     assert alias.model_copy(update={"section_ids": ["p2"]}).key != alias.key
     assert decisions.EvidenceRejected(decision, reused=True).result()["reused"] is True
 
@@ -709,3 +709,110 @@ def test_exact_fund_policy_has_precedence_over_model_scope_hint() -> None:
         {"id": "p3", "text": "Acme has pricing power."},
     ]
     validate(candidate, "Harbor Capital Global Fund", parts)
+
+
+@pytest.mark.parametrize("revision", [2, 3])
+def test_versioned_identity_keeps_its_original_policy_revision(revision: int) -> None:
+    """Resolving old approved identities must not restamp their policy or labels."""
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Q2 2026"},
+        {"id": "p2", "text": "Harbor Global Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity(
+        "Harbor Global Fund", "Harbor Capital", "specific"
+    )
+    original: dict = candidate.model_dump(mode="json")
+    original["policy_revision"] = revision
+    resolved: Match = resolve_identity(original, parts)
+    assert resolved.policy_revision == revision
+    assert original["policy_revision"] == revision
+    validate_match(
+        resolved,
+        parts,
+        date(2026, 10, 14),
+        {"company": "Acme", "fund": "Harbor Global Fund"},
+    )
+
+
+def test_own_full_fund_title_proves_an_exact_short_source_suffix() -> None:
+    """An original title supplies the manager prefix; publisher-wide words cannot."""
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Ridge Global Advisors LLC Q2 2026"},
+        {"id": "p2", "text": "Harbor Ridge Global Equity"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity(
+        "Global Equity", "Harbor Ridge Global Advisors LLC", "specific"
+    )
+    validate(candidate, "Harbor Ridge Global Equity", parts)
+    candidate.policy_revision = 2
+    with pytest.raises(ValueError, match="fund does not match"):
+        validate(candidate, "Harbor Ridge Global Equity", parts)
+    candidate.policy_revision = 3
+    for label in (
+        "Harbor Ridge US Equity",
+        "Harbor Ridge Sustainable Global Equity",
+        "Harbour Ridge Global Equity",
+    ):
+        with pytest.raises(ValueError, match="fund does not match"):
+            validate(candidate, label, parts)
+    parts[1]["text"] = "Global Equity"
+    parts[0]["text"] += " Harbor Ridge Global Equity"
+    with pytest.raises(ValueError, match="fund does not match"):
+        validate(candidate, "Harbor Ridge Global Equity", parts)
+    candidate.fund = "Equity"
+    with pytest.raises(ValueError, match="fund does not match"):
+        validate(candidate, "Harbor Ridge Global Equity", parts)
+
+
+@pytest.mark.parametrize("suffix", ["Co.", "LLC", "Co. LLC"])
+def test_legal_publisher_suffix_requires_source_proven_metadata_repair(
+    suffix: str,
+) -> None:
+    """A legal publisher variant asks for one correction, never automatic acceptance."""
+    from harness.ideas.research import MetadataError
+
+    publisher: str = "Harbor Capital " + suffix
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": publisher + " Q2 2026"},
+        {"id": "p2", "text": "Global Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity("Global Fund", publisher, "specific")
+    with pytest.raises(ValueError) as fullname_only:
+        validate(candidate, "Harbor Capital Global Fund", parts)
+    assert not isinstance(fullname_only.value, MetadataError)
+    parts[0]["text"] += " " + publisher
+    with pytest.raises(ValueError) as repeated_fullname:
+        validate(candidate, "Harbor Capital Global Fund", parts)
+    assert not isinstance(repeated_fullname.value, MetadataError)
+    parts[0]["text"] += " — Harbor Capital"
+    with pytest.raises(MetadataError, match="shorter manager brand"):
+        validate(candidate, "Harbor Capital Global Fund", parts)
+    candidate.publisher = "Harbor Capital"
+    validate(candidate, "Harbor Capital Global Fund", parts)
+    candidate.publisher = publisher
+    with pytest.raises(ValueError) as wrong:
+        validate(candidate, "Harbor Capital US Global Fund", parts)
+    assert not isinstance(wrong.value, MetadataError)
+    parts[0]["text"] = "Harbor Capital Q2 2026"
+    with pytest.raises(MetadataError, match="Publisher name must occur"):
+        validate(candidate, "Harbor Capital Global Fund", parts)
+
+
+def test_co_investment_publisher_is_not_a_legal_suffix() -> None:
+    """Co-Investment remains a meaningful publisher/fund constraint."""
+    from harness.ideas.research import MetadataError
+
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Co-Investment Q2 2026"},
+        {"id": "p2", "text": "Global Fund"},
+        {"id": "p3", "text": "Acme has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity(
+        "Global Fund", "Harbor Co-Investment", "specific"
+    )
+    with pytest.raises(ValueError) as wrong:
+        validate(candidate, "Harbor Global Fund", parts)
+    assert not isinstance(wrong.value, MetadataError)

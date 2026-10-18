@@ -75,7 +75,7 @@ class SourceObservations(IdentityFields):
 class EvidenceIdentity(MatchDraft):
     """Versioned, application-approved attribution and original relationship proof."""
 
-    policy_revision: Literal[2] = 2
+    policy_revision: Literal[2, 3] = decisions.POLICY_REVISION
     publisher: str
     label_scope: LabelScope
     umbrella: str
@@ -85,7 +85,7 @@ class EvidenceIdentity(MatchDraft):
 class EvidenceMatch(Match):
     """Resolve new relationship references to immutable original source text."""
 
-    policy_revision: Literal[2] = 2
+    policy_revision: Literal[2, 3] = decisions.POLICY_REVISION
     publisher: str
     label_scope: LabelScope
     umbrella: str
@@ -440,9 +440,43 @@ def validate_label(
         raise ValueError("Original publisher must have a distinctive verified name")
     proof: list[str] = match.relationship_quotes
     if match.label_scope == "specific":
-        if not same_fund(row["fund"], match.fund, match.publisher):
-            raise ValueError("Original document fund does not match the featured fund")
-        return
+        if same_fund(row["fund"], match.fund, match.publisher):
+            return
+        expected: list[str] = words(row["fund"])
+        actual: list[str] = words(match.fund)
+        if (
+            match.policy_revision >= 3
+            and actual
+            and len(actual) <= len(expected)
+            and expected[-len(actual) :] == actual
+            and contains_name(match.fund_quote, row["fund"])
+        ):
+            return
+        shorter_publisher: str = re.sub(
+            r"(?:\s+(?:Co|LLC)\.?)+$", "", match.publisher, flags=re.IGNORECASE
+        )
+        publisher_pattern: str = (
+            r"(?<!\w)"
+            + r"\W+".join(re.escape(token) for token in words(match.publisher))
+            + r"(?!\w)"
+        )
+        if (
+            match.policy_revision >= 3
+            and shorter_publisher != match.publisher
+            and same_fund(row["fund"], match.fund, shorter_publisher)
+            and any(
+                contains_name(
+                    re.sub(publisher_pattern, " ", part["text"], flags=re.IGNORECASE),
+                    shorter_publisher,
+                )
+                for part in (parts or [])
+            )
+        ):
+            raise MetadataError(
+                "Publisher metadata must select the shorter manager brand actually written "
+                "in the supplied original and its exact publisher block; do not change fund constraints"
+            )
+        raise ValueError("Original document fund does not match the featured fund")
     if not proof:
         raise ValueError(
             "A non-specific discovery label requires original relationship evidence"
@@ -634,7 +668,7 @@ def resolve_identity(identity: dict, parts: list[dict]) -> Match:
     """Read both historical identities and versioned original relationship evidence."""
     draft: MatchDraft = (
         EvidenceIdentity.model_validate(identity)
-        if identity.get("policy_revision") == 2
+        if identity.get("policy_revision") in (2, 3)
         else MatchDraft.model_validate(identity)
     )
     blocks: dict[str, str] = {part["id"]: part["text"] for part in parts}
@@ -654,6 +688,7 @@ def resolve_identity(identity: dict, parts: list[dict]) -> Match:
             )
         return EvidenceMatch(
             **data,
+            policy_revision=draft.policy_revision,
             publisher=draft.publisher,
             label_scope=draft.label_scope,
             umbrella=draft.umbrella,

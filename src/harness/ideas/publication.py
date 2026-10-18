@@ -77,7 +77,7 @@ def render_fund(row: dict, run: dict) -> list[str]:
     period: str = document["identity"]["period"]
     label: str = (
         document["identity"]["fund"]
-        if document["identity"].get("policy_revision") == 2
+        if document["identity"].get("policy_revision") in (2, 3)
         else row["fund"]
     )
     lines.append(f"*{escape(label)}*")
