@@ -7,13 +7,16 @@ dependencies = [
     "alembic>=1.20.0",
     "fastapi",
     "jsonschema>=4.26.0",
+    "openpyxl==3.1.5",
     "psycopg[binary]>=3.3.6",
     "python-dotenv>=1.2.4",
     "sqlalchemy>=2.1.1",
     "uvicorn",
+    "xlrd==2.0.2",
 ]
 
 [project.scripts]
+investor-economics = "investor_platform.economics.collection:main"
 investor-financial = "investor_platform.financials.cli:main"
 investor-api = "investor_platform.app:main"
 investor-refresh-prices = "investor_platform.market_data.price_refresh:main"

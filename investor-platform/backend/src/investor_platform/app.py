@@ -22,6 +22,7 @@ from starlette.responses import Response
 
 from investor_platform.accounts import router
 from investor_platform.db import make_engine
+from investor_platform.economics.routes import router as economics_router
 from investor_platform.financials.api import router as financial_router
 from investor_platform.ledger.corrections import router as corrections_router
 from investor_platform.ledger.routes import router as ledger_router
@@ -41,17 +42,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own database and opt-in collector resources for the API lifetime."""
     if not hasattr(app.state, "engine"):
         app.state.engine = make_engine()
-    stop, worker = Event(), None
+    stop: Event = Event()
+    workers: list[Thread] = []
     if app.state.daily_prices:
         from investor_platform.market_data.price_refresh import run_worker
 
         worker = Thread(target=run_worker, args=(app.state.engine, stop), daemon=True)
         worker.start()
+        workers.append(worker)
+    if app.state.economics_refresh:
+        from investor_platform.economics.collection import run_worker as economics_worker
+
+        economics: Thread = Thread(
+            target=economics_worker, args=(app.state.engine, stop), daemon=True
+        )
+        economics.start()
+        workers.append(economics)
     try:
         yield
     finally:
         stop.set()
-        if worker:
+        for worker in workers:
             await asyncio.to_thread(worker.join)
         app.state.engine.dispose()
 
@@ -88,6 +99,8 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     app = FastAPI(title="Minerva Investor Platform", version="0.1.0", lifespan=lifespan)
     # Opt-in only on the private deployment, never on the synthetic development server.
     app.state.daily_prices = remote and os.environ.get("INVESTOR_DAILY_PRICES") == "1"
+    app.state.economics_refresh = remote and os.environ.get("INVESTOR_ECONOMICS_REFRESH") == "1"
+    app.include_router(economics_router)
     app.include_router(router)
     app.include_router(ledger_router)
     app.include_router(corrections_router)

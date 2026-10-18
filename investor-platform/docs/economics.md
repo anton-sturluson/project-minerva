@@ -1,0 +1,71 @@
+# Economics under Research
+
+Research → Economics shows public household-cost series from BLS, USDA and EIA. Charts read accepted PostgreSQL observations. Page requests never contact a publisher. Source dates, publication frequency and collection checks are distinct.
+
+## Minimal storage
+
+Migration 0015 adds only `economic_observations` and `economic_refresh_state`. The typed registry in `backend/src/investor_platform/economics/registry.py` owns source definitions, series IDs, units and cadence. No source, series, job-history or snapshot registry tables are added.
+
+Observation rows contain exact decimal values or explicit missing flags and source provenance. A changed fact appends a revision; an unchanged observation is not copied after every check. Source refresh state records due times and recent outcomes. Raw files are saved by content hash in ignored local storage; back up this storage with the database. Provider corrections are ordered by accepted collection, not a claim to complete historical release vintages. See [ADR 0012](decisions/0012-store-economic-observations-under-research.md).
+
+## Initial collection
+
+Back up the intended database before migration. Run from `investor-platform/backend` with the target `DATABASE_URL` explicitly set:
+
+```sh
+uv sync --frozen
+uv run --frozen alembic upgrade head
+uv run --frozen investor-economics --provider all
+```
+
+The collector uses public BLS JSON, the USDA Moderate-Cost workbook, and EIA weekly gasoline/diesel workbooks. `--force` requests another attempt before a source is due. `--import-dir` accepts the known research payload filenames for an explicit initial import; it is not an arbitrary document importer. Imported fixtures or historical files must not be presented as a fresh publisher check. Use synthetic data and an isolated database for tests.
+
+Set `ECONOMICS_RAW_DIR` to an ignored private directory for source evidence. The default `data/economics` is relative to the process working directory. Never put source files or database exports in Git. Exact file names and CLI options are available with `uv run --frozen investor-economics --help`.
+
+## Automatic checks within the platform
+
+Set `INVESTOR_ECONOMICS_REFRESH=1` in the private deployment's environment and restart the API. This explicitly enables the source worker in Tailscale mode. Leave it off on synthetic development/test servers. The worker belongs to the API process, so automatic checks run while the platform is running. PostgreSQL due state survives restarts; advisory locks prevent concurrent workers from importing the same source at once. Failed collection retains the previous accepted observations and uses bounded retries. This is not a system cron installation or a new generic scheduling service.
+
+The registry is the single source of truth for the implemented check schedule. The UI shows each source's publication description and our polling schedule separately. Conservative checks are intentional when the publisher provides no stable release date. Keep timestamps in UTC internally and use New York time for release-clock rules so daylight saving changes do not move the intended local check time.
+
+## Publisher frequency
+
+| Source | Publication cadence | Automated access |
+| --- | --- | --- |
+| BLS food average prices | Monthly, with CPI on the publisher's listed dates at 08:30 Eastern. | Enabled public JSON source. |
+| USDA food plans | Monthly; no fixed release day/time confirmed. A weekly budget amount is still a monthly observation. | Enabled public XLSX source. |
+| EIA fuel alternative | Weekly, normally Tuesday around 10:00 Eastern; listed holiday releases shift to Wednesday. Observations refer to Monday. | Enabled public XLS source; distinct from OPIS. |
+| Fidelity balances | Quarterly, with variable publication lag; no forward fixed-date calendar confirmed. | Disabled until permitted recurring access exists. |
+| Redfin mortgage payments | Exact WSJ export unresolved. Current public affordability data have monthly observations and quarterly releases. | Disabled until the matching principal-and-interest definition/export is confirmed. |
+| Edmunds vehicle prices | Monthly observations appear in reports; exact monthly aggregate publication schedule is unconfirmed. Public reports are irregular/quarterly. | Disabled; open API ended and no matching complete feed was verified. |
+| OPIS retail fuel | Daily public retail averages; exact entitled feed/cutoff depends on product. | Disabled without applicable access. |
+| FactSet index comparison | Trading-day market observations; exact index variant and delivery time require the entitled feed. Quarterly chart sampling is not quarterly publication. | Disabled without an exact tested index contract. |
+
+The platform does not automatically crawl disabled sources. Do not substitute their approximate public alternatives under the same series name.
+
+## Measurement rules
+
+- BLS series are dollar prices, not CPI inflation indexes. Preserve source-reported missing values and footnotes.
+- USDA family budget uses a defined household and compatible component costs. Retain calculation inputs and source locations. Do not join different household definitions as if they were one series.
+- EIA is an alternative to WSJ's OPIS series. Preserve gasoline and diesel coverage differences and methodology breaks. Weekly reference prices are not seven-day averages.
+- Charts use calendar dates and visible gaps, with accessible tables. Reported period and last successful collection remain visible so an old value does not look current merely because a check succeeded today.
+
+## Verification
+
+Use the existing backend isolated-schema tests for migration/storage/API checks. Parsing tests must validate actual source fields, missing values, household calculations and malformed-input rejection. Storage tests must demonstrate duplicate-free replay, retained revisions, and failure preservation. Frontend checks cover navigation under Research, chart/table display, unavailable sources, empty/error states, keyboard access and narrow layouts. Never use real portfolio records as fixtures. See [operations verification](operations.md#verification).
+
+## References
+
+### Public source methods and schedules
+
+- [BLS average prices](https://www.bls.gov/cpi/factsheets/average-prices.htm), [API contract](https://www.bls.gov/developers/api_signature_v2.htm), and [CPI release calendar](https://www.bls.gov/schedule/news_release/cpi.htm) — definitions, retrieval and monthly releases.
+- [USDA monthly food-plan reports](https://www.fns.usda.gov/research/cnpp/usda-food-plans/cost-food-monthly-reports) — workbooks, household costs and monthly updates.
+- [EIA fuel data](https://www.eia.gov/petroleum/gasdiesel/), [current release schedule](https://www.eia.gov/petroleum/gasdiesel/schedule.php), [gasoline methods](https://www.eia.gov/petroleum/gasdiesel/gas_proc-methods.php), and [diesel methods](https://www.eia.gov/petroleum/gasdiesel/diesel_proc-methods.php) — public histories, timing and coverage.
+
+### Unavailable exact sources
+
+- [Fidelity reports](https://about.fidelity.com/data-and-insights) and [terms](https://www.fidelity.com/terms-of-use) — quarterly reports and recurring-access restriction.
+- [Redfin methods/calendar](https://www.redfin.com/news/data-center/methodology/) — quarterly affordability releases and payment components.
+- [Edmunds access policy](https://help.edmunds.com/hc/en-us/articles/206103257-Accessing-Edmunds-data) — ended API and access limits.
+- [OPIS retail products](https://www.opis.com/product/pricing/) — product-specific data delivery.
+- [FactSet Formula API](https://github.com/factset/enterprise-sdk/blob/main/code/python/Formula/v1/docs/TimeSeriesApi.md) — entitled request contract, not proof of an exact index feed.
