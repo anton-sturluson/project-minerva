@@ -40,15 +40,6 @@ class Series:
 
 SOURCES: tuple[Source, ...] = (
     Source(
-        "bls",
-        "BLS",
-        "https://www.bls.gov/cpi/data.htm",
-        "Monthly",
-        "Published with CPI at 08:30 ET; calendar dates vary. See the publisher release calendar.",
-        "Weekdays at 09:00 ET; current and prior year, plus initial history",
-        "https://www.bls.gov/schedule/news_release/cpi.htm",
-    ),
-    Source(
         "usda",
         "USDA",
         "https://www.fns.usda.gov/research/cnpp/usda-food-plans/cost-food-monthly-reports",
@@ -125,67 +116,7 @@ SOURCES: tuple[Source, ...] = (
 
 BLS_URL: str = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
 USDA_URL: str = "https://fns-prod.azureedge.us/sites/default/files/resource-files/usdamoderatecostplan-sept2007-present.xlsx"
-BLS_NOTE: str = (
-    "U.S. city average, not seasonally adjusted. Sample and product mix can change; "
-    "these price levels are not CPI inflation measures. BLS cannot vouch for the data "
-    "or analyses derived from these data after the data have been retrieved from BLS."
-)
 SERIES: tuple[Series, ...] = (
-    Series(
-        "chicken-breast",
-        "bls",
-        "Boneless chicken breast",
-        "USD/lb",
-        "Monthly",
-        "U.S. city average retail price",
-        "https://data.bls.gov/timeseries/APU0000FF1101",
-        "APU0000FF1101",
-        BLS_NOTE,
-    ),
-    Series(
-        "ground-beef",
-        "bls",
-        "Ground beef, 100% beef",
-        "USD/lb",
-        "Monthly",
-        "U.S. city average retail price",
-        "https://data.bls.gov/timeseries/APU0000703112",
-        "APU0000703112",
-        BLS_NOTE,
-    ),
-    Series(
-        "eggs",
-        "bls",
-        "Eggs, grade A, large",
-        "USD/dozen",
-        "Monthly",
-        "U.S. city average retail price",
-        "https://data.bls.gov/timeseries/APU0000708111",
-        "APU0000708111",
-        BLS_NOTE,
-    ),
-    Series(
-        "milk",
-        "bls",
-        "Whole fortified milk",
-        "USD/gallon",
-        "Monthly",
-        "U.S. city average retail price",
-        "https://data.bls.gov/timeseries/APU0000709112",
-        "APU0000709112",
-        BLS_NOTE,
-    ),
-    Series(
-        "bread",
-        "bls",
-        "White pan bread",
-        "USD/lb",
-        "Monthly",
-        "U.S. city average retail price",
-        "https://data.bls.gov/timeseries/APU0000702111",
-        "APU0000702111",
-        BLS_NOTE,
-    ),
     Series(
         "family-groceries",
         "usda",

@@ -1176,6 +1176,8 @@ summary:focus-visible {
   }
 }
 .economics-selector {
+  position: relative;
+  width: min(100%, 440px);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1229,4 +1231,48 @@ summary:focus-visible {
     grid-column: auto;
     padding-inline: 8px;
   }
+}
+
+.economics-selector [role="listbox"] {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  max-height: min(280px, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  font:
+    14px Arial,
+    sans-serif;
+}
+.economics-selector [role="listbox"] li {
+  padding: 12px 10px;
+  min-height: 44px;
+}
+.economics-selector [role="option"] {
+  cursor: pointer;
+}
+.economics-selector [role="option"][data-active="true"],
+.economics-selector [role="option"]:hover {
+  background: var(--lilac);
+}
+.economics-selector [role="option"][aria-selected="true"] {
+  font-weight: bold;
+}
+
+.economics-selector input {
+  padding-right: 28px;
+}
+.economics-selector-caret {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
 }

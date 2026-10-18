@@ -8,9 +8,11 @@ Migration 0015 adds only `economic_observations` and `economic_refresh_state`. T
 
 Observation rows contain exact decimal values or explicit missing flags and source provenance. A changed fact appends a revision; an unchanged observation is not copied after every check. Source refresh state records due times and recent outcomes. Raw files are saved by content hash in ignored local storage; back up this storage with the database. Provider corrections are ordered by accepted collection, not a claim to complete historical release vintages. See [ADR 0012](decisions/0012-store-economic-observations-under-research.md).
 
+Individual food-item prices are retired from the active catalog and collector. Their existing observations, raw evidence and old collection-state records remain intact. The USDA family food budget and EIA gasoline/diesel series remain active.
+
 ## Macro and valuation definitions
 
-The measure selector opens one detailed native-frequency chart near the top of the page. Latest macro and valuation readings, household prices and source details remain in collapsed sections below it. Date controls start at the available displayed history bounds; custom date filters remain under the reader's control.
+The measure selector opens the full scrollable list, with search to filter it. Selecting a measure opens one detailed native-frequency chart near the top of the page. Latest macro and valuation readings, household costs and source details remain in collapsed sections below it. Date controls start at the available displayed history bounds; custom date filters remain under the reader's control.
 
 | Measure | Definition |
 | --- | --- |
@@ -43,7 +45,7 @@ Prefer original publisher files for persisted values. FRED remains useful for se
 
 | Publisher | Source route |
 | --- | --- |
-| BLS | Public JSON for CPI-U `CUUR0000SA0`, unemployment `LNS14000000`, payroll levels `CES0000000001`, and the existing food-price IDs. |
+| BLS | Public JSON for CPI-U `CUUR0000SA0`, unemployment `LNS14000000` and payroll levels `CES0000000001`. |
 | BEA | Original national-accounts workbooks for nominal GDP, published real GDP growth, real PCE and core PCE prices. Preserve each table's units and calendar frequency. |
 | Federal Reserve | Original target-bound CSV, H.15 preformatted Treasury CSV and current Z.1 table CSV archive. The valuation numerator is `LM883164115.Q` in `csv/F51_1_s.csv`; its dictionary identifies millions of dollars at end-of-period market value. |
 | Freddie Mac | The historical weekly workbook linked from its PMMS page. |
@@ -78,7 +80,7 @@ The registry is the single source of truth for the implemented check schedule. T
 
 | Source | Publication cadence | Automated access |
 | --- | --- | --- |
-| BLS food prices and CPI | Monthly, with CPI on the publisher's listed dates at 08:30 Eastern. | Public JSON source. |
+| BLS CPI | Monthly, with CPI on the publisher's listed dates at 08:30 Eastern. | Public JSON source. |
 | BLS jobs | Monthly Employment Situation, 08:30 Eastern on listed dates. | Public JSON source. |
 | BEA national accounts | Monthly spending/price observations and quarterly GDP observations, with revised releases. | Original workbooks; the collection registry distinguishes publication from polling. |
 | Fed policy bounds / Treasury yields | Policy bounds change with decisions; H.15 yields are business-day observations. | Original Fed CSV sources. |
@@ -98,7 +100,7 @@ The platform does not automatically crawl disabled sources. Do not substitute th
 
 ## Measurement rules
 
-- BLS household-price series are dollar prices, distinct from the macro CPI index. Preserve source-reported missing values and footnotes.
+- BLS CPI is an index, while unemployment and payrolls describe labor-market levels. Preserve source-reported missing values and footnotes.
 - USDA family budget uses a defined household and compatible component costs. Retain calculation inputs and source locations. Do not join different household definitions as if they were one series.
 - EIA is an alternative to WSJ's OPIS series. Preserve gasoline and diesel coverage differences and methodology breaks. Weekly reference prices are not seven-day averages.
 - Charts use calendar dates and visible gaps, with accessible tables. Reported period and last successful collection remain visible so an old value does not look current merely because a check succeeded today.
@@ -111,7 +113,7 @@ Use the existing backend isolated-schema tests for migration/storage/API checks.
 
 ### Public source methods and schedules
 
-- [BLS average prices](https://www.bls.gov/cpi/factsheets/average-prices.htm), [API contract](https://www.bls.gov/developers/api_signature_v2.htm), and [CPI release calendar](https://www.bls.gov/schedule/news_release/cpi.htm) — definitions, retrieval and monthly releases.
+- [BLS CPI](https://www.bls.gov/cpi/), [API contract](https://www.bls.gov/developers/api_signature_v2.htm), and [CPI release calendar](https://www.bls.gov/schedule/news_release/cpi.htm) — definitions, retrieval and monthly releases.
 - [USDA monthly food-plan reports](https://www.fns.usda.gov/research/cnpp/usda-food-plans/cost-food-monthly-reports) — workbooks, household costs and monthly updates.
 - [EIA fuel data](https://www.eia.gov/petroleum/gasdiesel/), [current release schedule](https://www.eia.gov/petroleum/gasdiesel/schedule.php), [gasoline methods](https://www.eia.gov/petroleum/gasdiesel/gas_proc-methods.php), and [diesel methods](https://www.eia.gov/petroleum/gasdiesel/diesel_proc-methods.php) — public histories, timing and coverage.
 

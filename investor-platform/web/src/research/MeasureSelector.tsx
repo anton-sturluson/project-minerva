@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Series } from "./Economics";
 
 export function MeasureSelector({
@@ -11,64 +11,130 @@ export function MeasureSelector({
   onSelect: (key: string) => void;
 }) {
   const selectedName = series.find((item) => item.key === selected)?.name ?? "";
-  const [query, setQuery] = useState(selectedName);
-  useEffect(() => setQuery(selectedName), [selectedName]);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const list = useRef<HTMLUListElement>(null);
   const normalized = query.trim().toLowerCase();
   const matches = series.filter(
     (item) =>
       item.name.toLowerCase().includes(normalized) ||
       item.key.includes(normalized),
   );
+  function openAll() {
+    setQuery("");
+    setActive(
+      Math.max(
+        0,
+        series.findIndex((item) => item.key === selected),
+      ),
+    );
+    setOpen(true);
+  }
+  function close() {
+    setOpen(false);
+    setQuery("");
+  }
+  function choose(item: Series) {
+    onSelect(item.key);
+    close();
+  }
+  useEffect(() => {
+    if (open)
+      list.current?.children.item(active)?.scrollIntoView({ block: "nearest" });
+  }, [active, open, query]);
   return (
-    <div className="economics-selector">
+    <div
+      className="economics-selector"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) close();
+      }}
+    >
       <label className="sr-only" htmlFor="economic-measure">
         Measure
       </label>
       <input
         id="economic-measure"
         type="text"
-        list="economic-measures"
+        role="combobox"
         autoComplete="off"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls="economic-measures"
+        aria-activedescendant={
+          open && matches[active]
+            ? `economic-measure-${matches[active].key}`
+            : undefined
+        }
         aria-describedby="economic-measure-help"
-        value={query}
-        placeholder="Search measures…"
-        onFocus={(event) => event.currentTarget.select()}
-        onBlur={() => setQuery(selectedName)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setQuery(selectedName);
-          if (event.key === "Enter" && matches.length === 1) {
-            event.preventDefault();
-            setQuery(matches[0].name);
-            onSelect(matches[0].key);
-          }
+        value={open ? query : selectedName}
+        placeholder={selectedName || "Search measures…"}
+        onFocus={openAll}
+        onClick={() => {
+          if (!open) openAll();
         }}
         onChange={(event) => {
-          const value = event.target.value;
-          setQuery(value);
-          const match = series.find(
-            (item) =>
-              item.name.toLowerCase() === value.trim().toLowerCase() ||
-              item.key === value.trim().toLowerCase(),
-          );
-          if (match) onSelect(match.key);
+          setQuery(event.target.value);
+          setActive(0);
+          setOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            close();
+          }
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            if (!open) openAll();
+            else
+              setActive((current) =>
+                Math.max(
+                  0,
+                  Math.min(
+                    matches.length - 1,
+                    current + (event.key === "ArrowDown" ? 1 : -1),
+                  ),
+                ),
+              );
+          }
+          if (event.key === "Enter" && open) {
+            event.preventDefault();
+            if (matches[active]) choose(matches[active]);
+          }
         }}
       />
-      <datalist id="economic-measures">
-        {matches.map((item) => (
-          <option key={item.key} value={item.name}>
-            {item.category === "valuation"
-              ? "Market valuation"
-              : item.category === "macro"
-                ? "Macro indicators"
-                : "Household costs"}
-          </option>
-        ))}
-      </datalist>
-      <span className="sr-only" id="economic-measure-help">
-        Type to search measures. Choose a matching name to change the chart.
+      <span className="economics-selector-caret" aria-hidden="true">
+        ▾
       </span>
-      {normalized && matches.length === 0 && (
-        <span role="status">No matching measures.</span>
+      <span className="sr-only" id="economic-measure-help">
+        Type to search measures. Use arrow keys and Enter to select.
+      </span>
+      {open && (
+        <ul
+          id="economic-measures"
+          role="listbox"
+          aria-label="Measures"
+          ref={list}
+        >
+          {matches.map((item, index) => (
+            <li
+              key={item.key}
+              id={`economic-measure-${item.key}`}
+              role="option"
+              aria-selected={item.key === selected}
+              data-active={index === active}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(item)}
+            >
+              {item.name}
+            </li>
+          ))}
+          {matches.length === 0 && (
+            <li role="presentation">
+              <span role="status">No matching measures.</span>
+            </li>
+          )}
+        </ul>
       )}
     </div>
   );

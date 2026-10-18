@@ -143,7 +143,7 @@ export function Economics() {
                 <summary>Household costs</summary>
                 <div className="table-scroll" tabIndex={0}>
                   <table className="economics-catalog">
-                    <caption>Individual food and household prices</caption>
+                    <caption>Household cost series</caption>
                     <thead>
                       <tr>
                         <th scope="col">Series</th>

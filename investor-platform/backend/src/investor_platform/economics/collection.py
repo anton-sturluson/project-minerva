@@ -58,7 +58,6 @@ def next_regular(provider: str, now: datetime) -> datetime:
     hour: int
     minute: int
     hour, minute = {
-        "bls": (9, 0),
         "bls-macro": (9, 0),
         "usda": (14, 0),
         "eia": (10, 30),
@@ -145,21 +144,17 @@ def collect_payloads(
         """Use an explicitly selected local source snapshot or a fresh publisher request."""
         return (import_dir / name).read_bytes() if import_dir else download(url, body)
 
-    if provider in {"bls", "bls-macro"}:
+    if provider == "bls-macro":
         expected: dict[str, str] = {
             series.source_key: series.key
             for series in SERIES
             if series.source_id == provider and not series.transform
         }
         if import_dir is not None:
-            body: bytes = read(
-                "bls-macro.json" if provider == "bls-macro" else "bls-api-2025-2026.json", BLS_URL
-            )
+            body: bytes = read("bls-macro.json", BLS_URL)
             return [Payload(BLS_URL, body, parse_bls(body, expected), imported=True)]
-        windows: list[tuple[int, int, dict[str, str]]] = (
-            bls_macro_windows(now.year, full_history=initial)
-            if provider == "bls-macro"
-            else [(now.year - (6 if initial else 1), now.year, expected)]
+        windows: list[tuple[int, int, dict[str, str]]] = bls_macro_windows(
+            now.year, full_history=initial
         )
         payloads: list[Payload] = []
         start: int

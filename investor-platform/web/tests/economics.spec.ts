@@ -300,6 +300,7 @@ const macroSeries = [
 
 test("macro overview keeps measures, native periods and provisional valuations clear", async ({
   page,
+  isMobile,
 }) => {
   await page.route("**/api/research/economics", (route) =>
     route.fulfill({
@@ -352,14 +353,35 @@ test("macro overview keeps measures, native periods and provisional valuations c
     .boundingBox();
   expect(chartPosition!.y).toBeLessThan(550);
   const measure = page.getByLabel("Measure", { exact: true });
+  const choices = page.getByRole("listbox", { name: "Measures", exact: true });
   await measure.click();
+  await expect(measure).toHaveAttribute("aria-expanded", "true");
+  await expect(choices.getByRole("option")).toHaveCount(macroSeries.length + 1);
+  await expect(
+    choices.getByRole("option", { name: "Real GDP growth", exact: true }),
+  ).toBeAttached();
+  const dropdown = await page
+    .getByRole("listbox", { name: "Measures", exact: true })
+    .evaluate((element) => ({
+      height: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+  expect(dropdown.height).toBeLessThanOrEqual(280);
+  expect(dropdown.scrollHeight).toBeGreaterThan(dropdown.height);
+  await measure.press("ArrowDown");
+  await expect(measure).toHaveAttribute(
+    "aria-activedescendant",
+    "economic-measure-core-pce-inflation",
+  );
+  await measure.press("ArrowUp");
+  await expect(measure).toHaveAttribute(
+    "aria-activedescendant",
+    "economic-measure-headline-inflation",
+  );
   await measure.pressSequentially("CAP");
   await expect(measure).toHaveValue("CAP");
-  await expect(page.locator("#economic-measures option")).toHaveCount(1);
-  await expect(page.locator("#economic-measures option")).toHaveAttribute(
-    "value",
-    "Shiller CAPE",
-  );
+  await expect(choices.getByRole("option")).toHaveCount(1);
+  await expect(choices.getByRole("option")).toHaveText("Shiller CAPE");
   await expect(
     page.getByRole("img", { name: /Headline CPI inflation/ }),
   ).toBeVisible();
@@ -372,15 +394,25 @@ test("macro overview keeps measures, native periods and provisional valuations c
   await measure.press("Escape");
   await expect(measure).toHaveValue("Shiller CAPE");
   await measure.fill("Buffett");
-  await expect(page.locator("#economic-measures option")).toHaveCount(1);
-  await expect(page.locator("#economic-measures option")).toHaveAttribute(
-    "value",
+  await expect(choices.getByRole("option")).toHaveCount(1);
+  await expect(choices.getByRole("option")).toHaveText(
     "Buffett-style equity/GDP proxy",
   );
+  const buffettOption = choices.getByRole("option", {
+    name: "Buffett-style equity/GDP proxy",
+    exact: true,
+  });
+  if (isMobile) await buffettOption.tap();
+  else await buffettOption.click();
+  await expect(
+    page.getByRole("img", { name: /Buffett-style equity\/GDP proxy/ }),
+  ).toBeVisible();
+  await expect(measure).toHaveAttribute("aria-expanded", "false");
   await measure.fill("No match");
   await page.getByLabel("From", { exact: true }).click();
-  await expect(measure).toHaveValue("Shiller CAPE");
+  await expect(measure).toHaveValue("Buffett-style equity/GDP proxy");
   await measure.fill("Headline CPI inflation");
+  await measure.press("Enter");
   await expect(
     page.getByRole("img", { name: /Headline CPI inflation/ }),
   ).toBeVisible();
@@ -398,6 +430,7 @@ test("macro overview keeps measures, native periods and provisional valuations c
     "2026-08-01",
   );
   await page.getByLabel("Measure", { exact: true }).fill("Real GDP growth");
+  await measure.press("Enter");
   await expect(page.getByLabel("From", { exact: true })).toHaveValue(
     "2026-01-01",
   );

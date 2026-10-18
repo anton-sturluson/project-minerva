@@ -55,9 +55,11 @@ def validate(facts: list[Fact]) -> list[Fact]:
 def parse_bls(
     payload: bytes, expected: dict[str, str] | None = None, *, signed: bool = False
 ) -> list[Fact]:
-    """Read exact food IDs, dates, decimals and missing-value footnotes."""
+    """Read exact BLS IDs, dates, decimals and missing-value footnotes."""
     data: dict = json.loads(payload)
-    expected = expected or {s.source_key: s.key for s in SERIES if s.source_id == "bls"}
+    expected = expected or {
+        s.source_key: s.key for s in SERIES if s.source_id == "bls-macro" and not s.transform
+    }
     if data.get("status") != "REQUEST_SUCCEEDED" or data.get("message"):
         raise ValueError("BLS request failed or returned a warning")
     facts: list[Fact] = []
