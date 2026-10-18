@@ -14,11 +14,16 @@ from harness.ideas.documents import (
     _archive_payload,
     _parse_browser_page,
     archive,
+    canonical_scope,
     is_discovery_url,
     load_sections,
     page_links,
     public_url,
+    read,
+    resolve_scope,
     sections,
+    select_sections,
+    validate_scope,
 )
 
 
@@ -303,3 +308,181 @@ def test_direct_signed_download_cannot_become_a_citation(tmp_path: Path) -> None
     with pytest.raises(ValueError, match="stable manager URL"):
         archive(tmp_path, signed, fetch=fetch)
     assert not (tmp_path / "research/documents").exists()
+
+
+def test_large_original_is_archived_before_selecting_bounded_source_content(
+    tmp_path: Path,
+) -> None:
+    """Keep complete bytes and IDs while the model reads one explicit source range."""
+    payload: bytes = (
+        "<article><h1>Alpha Capital Q3 2026 fund reports</h1>"
+        + "".join(
+            f"<p>Fund section {number}. " + "Source commentary. " * 160 + "</p>"
+            for number in range(125)
+        )
+        + "<p>Selected Global Fund: Acme has pricing power supporting durable margins.</p></article>"
+    ).encode()
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply a large real HTML document to the normal archive parser."""
+        return payload, url
+
+    document: SourceDocument = archive(
+        tmp_path, "https://manager.example.com/report", fetch=fetch
+    )
+    assert (
+        tmp_path / f"research/documents/{document['sha256']}.html"
+    ).read_bytes() == payload
+    assert len(load_sections(tmp_path, document)) == 127
+    result: dict = read(tmp_path, document)
+    assert result["status"] == "need_selection" and result["parts"] == []
+    assert len(result["section_index"]) == 100 and result["next_index_offset"] == 100
+    assert (
+        read(tmp_path, document, index_offset=100)["section_index"][-1]["id"] == "b127"
+    )
+    search: dict = read(tmp_path, document, query="Acme")
+    assert search["total_matches"] == 1 and search["section_index"][0]["id"] == "b127"
+    assert "Acme" in search["section_index"][0]["preview"]
+    selected: SourceDocument = select_sections(tmp_path, document, ["b127"], ["b1"])
+    scope: dict = resolve_scope(tmp_path, selected)
+    assert [part["id"] for part in scope["content"]] == ["b127"]
+    assert [part["id"] for part in scope["identity"]] == ["b1", "b127"]
+    assert len(load_sections(tmp_path, selected)) == 127
+    assert selected["sha256"] == document["sha256"]
+
+
+@pytest.mark.parametrize(
+    ("content", "anchors"),
+    [
+        (["b2", "b4"], []),
+        (["b3", "b2"], []),
+        (["b2", "b2"], []),
+        (["b99"], []),
+        ([], []),
+        (["b2"], ["b2"]),
+        (["b2"], ["b1", "b1"]),
+        (["b2"], ["b99"]),
+    ],
+)
+def test_source_selection_rejects_missing_disordered_and_overlapping_ids(
+    tmp_path: Path, content: list[str], anchors: list[str]
+) -> None:
+    """An explicit range cannot skip source blocks or borrow duplicate anchors."""
+    payload: bytes = b"<article><h1>Alpha Capital Q3 2026</h1><h2>Global Fund</h2><p>Acme has pricing power supporting durable margins and cash generation.</p><h2>Other Fund</h2></article>"
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply two fund headings with unchanged source block IDs."""
+        return payload, url
+
+    document: SourceDocument = archive(
+        tmp_path, "https://manager.example.com/report", fetch=fetch
+    )
+    with pytest.raises(ValueError):
+        select_sections(tmp_path, document, content, anchors)
+
+
+def test_scope_keeps_anchors_out_of_claim_evidence_and_requires_actual_identity_use(
+    tmp_path: Path,
+) -> None:
+    """Publisher context cannot become company thesis evidence or authorize another fund."""
+    from harness.ideas.extraction import Claim, View, materialize, passages
+
+    payload: bytes = b"<article><h1>Alpha Capital Q3 2026</h1><h2>Global Fund</h2><p>Acme has pricing power supporting durable margins and cash generation.</p><h2>Other Fund</h2></article>"
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply the source used by the real evidence materializer."""
+        return payload, url
+
+    document: SourceDocument = archive(
+        tmp_path, "https://manager.example.com/report", fetch=fetch
+    )
+    selected: SourceDocument = select_sections(tmp_path, document, ["b2", "b3"], ["b1"])
+    identity: dict[str, str] = {
+        "fund_block": "b2",
+        "company_block": "b3",
+        "publisher_block": "b1",
+        "period_block": "b1",
+    }
+    validate_scope(selected, identity)
+    with pytest.raises(ValueError, match="selected content"):
+        validate_scope(selected, {**identity, "fund_block": "b4"})
+    with pytest.raises(ValueError, match="Every source anchor"):
+        validate_scope(
+            selected, {**identity, "publisher_block": "b2", "period_block": "b2"}
+        )
+    content: list[SourcePart] = resolve_scope(tmp_path, selected)["content"]
+    view: View = View(
+        instrument="equity",
+        stance="bull",
+        action="not stated",
+        claims=[Claim(text="Acme has pricing power.", passages=["b3.1"])],
+        gap="",
+    )
+    assert (
+        materialize(view, passages(content))["claims"][0]["evidence"][0]["block"]
+        == "b3.1"
+    )
+    bad: View = view.model_copy(
+        update={"claims": [Claim(text="Acme has pricing power.", passages=["b1.1"])]}
+    )
+    with pytest.raises(ValueError, match="unknown source passage"):
+        materialize(bad, passages(content))
+
+
+def test_attribution_anchors_count_toward_the_same_model_budget(tmp_path: Path) -> None:
+    """Small company content cannot hide an oversized attribution context."""
+    payload: bytes = (
+        "<article><p>Publisher "
+        + "Original text. " * 18000
+        + "</p><p>Acme has pricing power and strong cash generation.</p></article>"
+    ).encode()
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply a large attribution block and a small company block."""
+        return payload, url
+
+    document: SourceDocument = archive(
+        tmp_path, "https://manager.example.com/report", fetch=fetch
+    )
+    assert (
+        resolve_scope(tmp_path, select_sections(tmp_path, document, ["b2"]))["content"][
+            0
+        ]["id"]
+        == "b2"
+    )
+    with pytest.raises(ValueError, match="need_selection"):
+        select_sections(tmp_path, document, ["b2"], ["b1"])
+
+
+def test_equivalent_source_scope_encodings_cannot_change_decision_identity(
+    tmp_path: Path,
+) -> None:
+    """Explicit full content and reordered anchors cannot authorize another model attempt."""
+    payload: bytes = b"<article><h1>Alpha Capital Q3 2026</h1><h2>Global Fund</h2><p>Acme has pricing power supporting durable margins and cash generation.</p><p>Alpha Capital manages the Global Fund.</p></article>"
+
+    def fetch(url: str) -> tuple[bytes, str]:
+        """Supply exact source blocks for equivalent evidence scope encodings."""
+        return payload, url
+
+    document: SourceDocument = archive(
+        tmp_path, "https://manager.example.com/report", fetch=fetch
+    )
+    explicit: SourceDocument = select_sections(
+        tmp_path, document, ["b1", "b2", "b3", "b4"]
+    )
+    assert (
+        canonical_scope(tmp_path, document)
+        == canonical_scope(tmp_path, explicit)
+        == ([], [])
+    )
+    first: SourceDocument = select_sections(
+        tmp_path, document, ["b2", "b3"], ["b1", "b4"]
+    )
+    reordered: SourceDocument = select_sections(
+        tmp_path, document, ["b2", "b3"], ["b4", "b1"]
+    )
+    assert (
+        canonical_scope(tmp_path, first)
+        == canonical_scope(tmp_path, reordered)
+        == (["b2", "b3"], ["b1", "b4"])
+    )

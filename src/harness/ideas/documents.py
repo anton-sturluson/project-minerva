@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import NotRequired, TextIO, TypedDict
+from typing import Literal, NotRequired, TextIO, TypedDict
 from urllib.parse import SplitResult, parse_qsl, urljoin, urlsplit
 from uuid import UUID
 
@@ -23,7 +23,9 @@ from lxml import etree, html
 from harness.ideas import store
 
 MAX_BYTES = 25 * 1024 * 1024
+MAX_MODEL_CHARACTERS: int = 250000
 LINK_PAGE_SIZE = 100
+INDEX_PAGE_SIZE: int = 100
 
 
 class SourcePart(TypedDict):
@@ -40,6 +42,35 @@ class SourceDocument(TypedDict):
     sha256: str
     sections: str
     collection: NotRequired[str]
+    section_ids: NotRequired[list[str]]
+    anchor_ids: NotRequired[list[str]]
+
+
+class SectionIndex(TypedDict):
+    """A source location and short heading preview, without changing its ID."""
+
+    id: str
+    characters: int
+    preview: str
+
+
+class ReadResult(TypedDict):
+    """A bounded source scope or explicit instructions to select original sections."""
+
+    status: Literal["ready", "need_selection"]
+    document: SourceDocument
+    parts: list[SourcePart]
+    section_index: list[SectionIndex]
+    next_index_offset: int | None
+    total_matches: int
+    full_block_count: int
+
+
+class SourceScope(TypedDict):
+    """Separate thesis content from attribution context in the same original."""
+
+    content: list[SourcePart]
+    identity: list[SourcePart]
 
 
 class PageLink(TypedDict):
@@ -61,6 +92,10 @@ class BrowseResult(TypedDict):
     total_links: int
     text_error: str | None
     discovery_only: bool
+    need_selection: bool
+    section_index: list[SectionIndex]
+    next_index_offset: int | None
+    full_block_count: int
 
 
 def is_discovery_url(url: str) -> bool:
@@ -184,10 +219,6 @@ def sections(payload: bytes) -> tuple[str, list[dict]]:
     if not parts or sum(len(p["text"]) for p in parts) < 100:
         raise ValueError(
             "Source contains too little readable text; OCR or browser collection needed"
-        )
-    if sum(len(p["text"]) for p in parts) > 250000:
-        raise ValueError(
-            "Document exceeds extraction budget; select a specific fund letter"
         )
     return kind, parts
 
@@ -350,6 +381,7 @@ def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
             except (ValueError, OSError, subprocess.SubprocessError) as recovery:
                 text_error += f"; browser recovery failed ({type(recovery).__name__})"
     document: SourceDocument | None = None
+    reading: ReadResult | None = None
     if discovery_only:
         _archive_discovery(folder, final_url, payload, parts)
     elif text_error is None:
@@ -362,6 +394,8 @@ def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
             requested_url=url,
             collection=collection,
         )
+        reading = read(folder, document)
+        parts = reading["parts"]
     next_offset: int = link_offset + LINK_PAGE_SIZE
     return {
         "url": final_url,
@@ -373,6 +407,10 @@ def browse(folder: Path, url: str, *, link_offset: int = 0) -> BrowseResult:
         "total_links": len(links),
         "text_error": text_error,
         "discovery_only": discovery_only,
+        "need_selection": reading is not None and reading["status"] == "need_selection",
+        "section_index": reading["section_index"] if reading else [],
+        "next_index_offset": reading["next_index_offset"] if reading else None,
+        "full_block_count": reading["full_block_count"] if reading else len(parts),
     }
 
 
@@ -443,7 +481,7 @@ def archive(
     *,
     fetch: Callable[[str], tuple[bytes, str]] = download,
 ) -> SourceDocument:
-    """Archive one original with the existing readable-text eligibility limits."""
+    """Archive the complete readable original independently of model scope limits."""
     payload: bytes
     final_url: str
     payload, final_url = fetch(url)
@@ -453,12 +491,172 @@ def archive(
     return _archive_payload(folder, final_url, payload, kind, parts, requested_url=url)
 
 
-def load_sections(folder: Path, document: dict) -> list[dict]:
+def load_sections(folder: Path, document: dict) -> list[SourcePart]:
+    """Load stable original blocks from the application-generated hash path."""
     # All paths are generated from the archived byte hash, never supplied by the LLM.
-    digest = document["sha256"]
+    digest: str = document["sha256"]
     if not re.fullmatch("[a-f0-9]{64}", digest):
         raise ValueError("Invalid document hash")
     return json.loads((folder / f"research/documents/{digest}.json").read_text())
+
+
+def _scope(document: dict, parts: list[SourcePart]) -> tuple[list[str], list[str]]:
+    """Validate explicit content ranges and separate attribution-only anchors."""
+    ids: list[str] = [part["id"] for part in parts]
+    if "section_ids" not in document and "anchor_ids" not in document:
+        return ids, []
+    content: list[str] = document.get("section_ids", [])
+    anchors: list[str] = document.get("anchor_ids", [])
+    if (
+        not isinstance(content, list)
+        or not content
+        or any(not isinstance(key, str) for key in content)
+        or len(set(content)) != len(content)
+        or any(key not in ids for key in content)
+    ):
+        raise ValueError("Source content needs unique existing section IDs")
+    start: int = ids.index(content[0])
+    if ids[start : start + len(content)] != content:
+        raise ValueError("Source content must be one ordered contiguous section range")
+    if (
+        not isinstance(anchors, list)
+        or any(not isinstance(key, str) for key in anchors)
+        or len(set(anchors)) != len(anchors)
+        or any(key not in ids or key in content for key in anchors)
+    ):
+        raise ValueError("Source anchors need unique existing IDs outside the content")
+    return content, anchors
+
+
+def select_sections(
+    folder: Path,
+    document: SourceDocument,
+    section_ids: list[str],
+    anchor_ids: list[str] | None = None,
+) -> SourceDocument:
+    """Select exact original content and attribution anchors without renumbering."""
+    selected: SourceDocument = {
+        **document,
+        "section_ids": list(section_ids),
+        "anchor_ids": list(anchor_ids or []),
+    }
+    # A prior approval cannot authorize a different evidence scope.
+    selected.pop("identity", None)
+    resolve_scope(folder, selected)
+    return selected
+
+
+def resolve_scope(folder: Path, document: dict) -> SourceScope:
+    """Validate one bounded scope, keeping attribution anchors outside thesis content."""
+    parts: list[SourcePart] = load_sections(folder, document)
+    content: list[str]
+    anchors: list[str]
+    content, anchors = _scope(document, parts)
+    allowed: set[str] = set(content + anchors)
+    scoped: list[SourcePart] = [part for part in parts if part["id"] in allowed]
+    if sum(len(part["text"]) for part in scoped) > MAX_MODEL_CHARACTERS:
+        raise ValueError(
+            "need_selection: select a bounded fund section using the source reader"
+        )
+    content_set: set[str] = set(content)
+    return {
+        "identity": scoped,
+        "content": [part for part in scoped if part["id"] in content_set],
+    }
+
+
+def validate_scope(document: dict, identity: dict) -> None:
+    """Require thesis identity inside content and every anchor used for attribution."""
+    if "section_ids" not in document and "anchor_ids" not in document:
+        return
+    content: set[str] = set(document.get("section_ids", []))
+    anchors: set[str] = set(document.get("anchor_ids", []))
+    if any(
+        identity.get(role + "_block") not in content for role in ("fund", "company")
+    ):
+        raise ValueError(
+            "Fund and company identity must belong to the selected content section"
+        )
+    attribution: set[str] = {
+        identity.get("publisher_block", ""),
+        identity.get("period_block", ""),
+        *identity.get("relationship_blocks", []),
+    }
+    if not anchors <= attribution:
+        raise ValueError(
+            "Every source anchor must support publisher, period or fund relationship identity"
+        )
+
+
+def canonical_scope(folder: Path, document: dict) -> tuple[list[str], list[str]]:
+    """Give equivalent validated evidence scopes the same decision-key representation."""
+    scope: SourceScope = resolve_scope(folder, document)
+    content: list[str] = [part["id"] for part in scope["content"]]
+    content_set: set[str] = set(content)
+    anchors: list[str] = [
+        part["id"] for part in scope["identity"] if part["id"] not in content_set
+    ]
+    all_ids: list[str] = [part["id"] for part in load_sections(folder, document)]
+    return ([], []) if content == all_ids and not anchors else (content, anchors)
+
+
+def read(
+    folder: Path,
+    document: SourceDocument,
+    *,
+    section_ids: list[str] | None = None,
+    anchor_ids: list[str] | None = None,
+    index_offset: int = 0,
+    query: str | None = None,
+) -> ReadResult:
+    """Inspect archived blocks or select a bounded range with stable evidence IDs."""
+    if index_offset < 0:
+        raise ValueError("Section index offset must be nonnegative")
+    if anchor_ids is not None and section_ids is None:
+        raise ValueError("Attribution anchors require an explicit content range")
+    selected: SourceDocument = (
+        select_sections(folder, document, section_ids, anchor_ids)
+        if section_ids is not None
+        else document
+    )
+    parts: list[SourcePart] = load_sections(folder, selected)
+    content: list[str]
+    anchors: list[str]
+    content, anchors = _scope(selected, parts)
+    allowed: set[str] = set(content + anchors)
+    scoped: list[SourcePart] = [part for part in parts if part["id"] in allowed]
+    needs_selection: bool = (
+        sum(len(part["text"]) for part in scoped) > MAX_MODEL_CHARACTERS
+    )
+    next_offset: int = index_offset + INDEX_PAGE_SIZE
+    matches: list[SourcePart] = [
+        part
+        for part in parts
+        if not query or query.casefold() in part["text"].casefold()
+    ]
+    index: list[SectionIndex] = []
+    part: SourcePart
+    for part in matches[index_offset:next_offset]:
+        compact: str = " ".join(part["text"].split())
+        position: int = (
+            max(0, compact.casefold().find(query.casefold()) - 100) if query else 0
+        )
+        index.append(
+            {
+                "id": part["id"],
+                "characters": len(part["text"]),
+                "preview": compact[position : position + 300],
+            }
+        )
+    return {
+        "status": "need_selection" if needs_selection else "ready",
+        "document": selected,
+        "parts": [] if needs_selection else scoped,
+        "section_index": index,
+        "next_index_offset": next_offset if next_offset < len(matches) else None,
+        "total_matches": len(matches),
+        "full_block_count": len(parts),
+    }
 
 
 def attach(run_id: UUID, ordinal: int, url: str) -> dict:
