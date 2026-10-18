@@ -202,6 +202,39 @@ def validate_target(
         and " ".join(observed) not in aliases
         and not evidenced_short_name
     ):
+        # A correct source name plus its matching ticker is a repairable field shape,
+        # never an extra issuer alias or an automatically accepted observation.
+        compound: re.Match[str] | None = re.fullmatch(
+            r"\s*([^()]+?)\s*\(\s*(?:[a-z0-9_.-]+\s*:\s*)?([a-z0-9_.-]+)\s*\)\s*",
+            match.company,
+            flags=re.IGNORECASE,
+        )
+        if (
+            isinstance(match, EvidenceMatch)
+            and compound
+            and compound.group(2).casefold() == ticker
+        ):
+            issuer: str = " ".join(compound.group(1).split())
+            source_pair: str = (
+                r"(?<![a-z0-9])"
+                + re.escape(issuer)
+                + r"\s*\(\s*(?:[a-z0-9_.-]+\s*:\s*)?"
+                + re.escape(ticker)
+                + r"\s*\)"
+            )
+            if re.search(
+                source_pair, " ".join(match.company_quote.split()), flags=re.IGNORECASE
+            ):
+                try:
+                    validate_target(
+                        match.model_copy(update={"company": issuer}), row, parts
+                    )
+                except ValueError:
+                    pass
+                else:
+                    raise MetadataError(
+                        "Company metadata must use the original issuer name OR its matching ticker, never a combined name-plus-ticker label"
+                    )
         raise ValueError(
             "Original document company does not match the discovery company"
         )
@@ -428,7 +461,7 @@ Discovery company={row["company"]}; label={row["fund"]}; symbol={row.get("symbol
 Source URL: {document["url"]}
 {decisions.IDENTITY_POLICY}
 Return observations, not an accept/reject judgment. source_kind reports whether the document is manager-authored original commentary, a third-party account, or unclear. substantive_commentary requires investment reasoning for this company, not a holding weight or performance attribution. publisher is the manager name actually present in publisher_block; fund is the actual fund/strategy actually present in fund_block. Classify the discovery label's scope and select original relationship_blocks proving any manager/member/umbrella link. Do not reject an observed relationship merely because source and discovery labels differ; preserve the evidence for application policy. An unsupported relationship must have no relationship_blocks. umbrella must be the original umbrella name, or empty when inapplicable.
-Select ONE existing block for each publisher_block, fund_block, company_block and period_block. Each name/period must occur verbatim in its OWN block. The fund and company commentary must belong to the same source section. Preserve distinctive fund words. Use the issuer name or ticker actually written in substantive company commentary. period is exact source wording and period_end only normalizes its reporting date. Never use a later reporting period, a stale letter or search crawl date. If evidence is missing, use empty fields or null date and describe what is missing. Do not fabricate or merge block IDs.
+Select ONE existing block for each publisher_block, fund_block, company_block and period_block. Each name/period must occur verbatim in its OWN block. The fund and company commentary must belong to the same source section. Preserve distinctive fund words. Use the issuer name OR its ticker actually written in substantive company commentary, never a combined name-plus-ticker label. For example, return Polaris or PII, not Polaris (PII); return Builders FirstSource or BLDR, not Builders FirstSource (NYSE:BLDR). period is exact source wording and period_end only normalizes its reporting date. Never use a later reporting period, a stale letter or search crawl date. If evidence is missing, use empty fields or null date and describe what is missing. Do not fabricate or merge block IDs.
 Original blocks:\n{json.dumps(parts, ensure_ascii=False)}"""
     feedback: str = ""
     identity: EvidenceIdentity | None = None
@@ -488,6 +521,8 @@ Original blocks:\n{json.dumps(parts, ensure_ascii=False)}"""
         break
     if identity is None:
         raise ValueError("No original identity observations were produced")
+    reason = f"Original source identity accepted under {identity.label_scope} label rules (policy revision {decisions.POLICY_REVISION})."
+    identity = identity.model_copy(update={"reason": reason})
     decision = decisions.EvidenceDecision(
         basis=evidence,
         outcome="accepted",

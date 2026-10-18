@@ -429,3 +429,80 @@ def test_metadata_errors_can_be_repaired_but_policy_errors_remain_final() -> Non
     with pytest.raises(ValueError) as rejected:
         validate(wrong, "Harbor Sustainable Global Fund", parts)
     assert not isinstance(rejected.value, MetadataError)
+
+
+@pytest.mark.parametrize(
+    ("name", "ticker", "combined", "source_label"),
+    [
+        ("Polaris", "PII", "Polaris (PII)", "Polaris (PII)"),
+        (
+            "Builders FirstSource",
+            "BLDR",
+            "Builders FirstSource (NYSE:BLDR)",
+            "Builders FirstSource (NYSE: BLDR)",
+        ),
+    ],
+)
+def test_matching_source_issuer_ticker_composite_requires_metadata_repair(
+    name: str,
+    ticker: str,
+    combined: str,
+    source_label: str,
+) -> None:
+    """Correct paired source identities need one field correction, not a new alias."""
+    from harness.ideas.research import MetadataError
+
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Q2 2026"},
+        {"id": "p2", "text": "Harbor Global Fund"},
+        {"id": "p3", "text": source_label + " has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity(
+        "Harbor Global Fund", "Harbor Capital", "specific"
+    )
+    candidate.company = combined
+    row: dict[str, str] = {
+        "company": name,
+        "fund": "Harbor Global Fund",
+        "symbol": ticker + " US",
+    }
+    with pytest.raises(MetadataError, match="never a combined"):
+        validate_match(
+            resolve_identity(candidate.model_dump(), parts),
+            parts,
+            date(2026, 10, 14),
+            row,
+        )
+    candidate.company = name
+    validate_match(
+        resolve_identity(candidate.model_dump(), parts), parts, date(2026, 10, 14), row
+    )
+
+
+@pytest.mark.parametrize(
+    ("combined", "source_label"),
+    [
+        ("Other Acme (ACME)", "Other Acme (ACME)"),
+        ("Acme (OTHER)", "Acme (OTHER)"),
+        ("Acme (ACME)", "Acme has pricing power, with no matching ticker pair"),
+    ],
+)
+def test_wrong_composite_issuer_ticker_or_missing_source_pair_is_final(
+    combined: str,
+    source_label: str,
+) -> None:
+    """Metadata repair cannot authorize another issuer, ticker or unsupported pair."""
+    from harness.ideas.research import MetadataError
+
+    parts: list[dict[str, str]] = [
+        {"id": "p1", "text": "Harbor Capital Q2 2026"},
+        {"id": "p2", "text": "Harbor Global Fund"},
+        {"id": "p3", "text": source_label + " has pricing power."},
+    ]
+    candidate: EvidenceIdentity = identity(
+        "Harbor Global Fund", "Harbor Capital", "specific"
+    )
+    candidate.company = combined
+    with pytest.raises(ValueError) as failure:
+        validate(candidate, "Harbor Global Fund", parts)
+    assert not isinstance(failure.value, MetadataError)
