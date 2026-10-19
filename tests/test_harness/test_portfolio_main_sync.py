@@ -100,7 +100,7 @@ def test_legacy_transactions_remain_permissive_without_inferring_usd_cash() -> N
         ("total_usd", "Infinity", "total must be numeric"),
         ("date", "", "date is required"),
         ("date", "04/31/2026", "invalid date"),
-        ("type", "Dividend", "action must be buy or sell"),
+        ("type", "Interest", "action must be buy, sell, dividend, dividend_tax or adr_fee"),
     ],
 )
 def test_invalid_main_trade_fields_are_rejected(field: str, value: str, message: str) -> None:
