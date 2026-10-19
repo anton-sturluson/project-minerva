@@ -1,0 +1,481 @@
+"""Authoritative definitions and publication schedules for economics data."""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Source:
+    """Publisher definition, kept in code rather than duplicate database records."""
+
+    id: str
+    name: str
+    url: str
+    publication_frequency: str
+    publication_schedule: str
+    polling_frequency: str
+    cadence_url: str
+    enabled: bool = True
+    disabled_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class Series:
+    """One stable measurement definition with units and interpretation."""
+
+    key: str
+    source_id: str
+    name: str
+    unit: str
+    frequency: str
+    description: str
+    source_url: str
+    source_key: str
+    methodology_notes: str = ""
+    category: str = "household"
+    visible: bool = True
+    transform: str = ""
+    inputs: tuple[str, ...] = ()
+    history_start_year: int | None = None
+
+
+SOURCES: tuple[Source, ...] = (
+    Source(
+        "usda",
+        "USDA",
+        "https://www.fns.usda.gov/research/cnpp/usda-food-plans/cost-food-monthly-reports",
+        "Monthly",
+        "Monthly food-plan report; no fixed release day confirmed.",
+        "Weekdays at 14:00 ET",
+        "https://www.fns.usda.gov/research/cnpp/usda-food-plans/cost-food-monthly-reports",
+    ),
+    Source(
+        "eia",
+        "EIA",
+        "https://www.eia.gov/petroleum/gasdiesel/",
+        "Weekly",
+        "Tuesday about 10:00 ET; Wednesday after federal holidays; Monday observations.",
+        "Tuesday and Wednesday at 10:30 ET",
+        "https://www.eia.gov/petroleum/gasdiesel/schedule.php",
+    ),
+    Source(
+        "fidelity",
+        "Fidelity",
+        "https://about.fidelity.com/data-and-insights",
+        "Quarterly",
+        "Quarterly retirement analysis; no fixed release date confirmed.",
+        "Disabled",
+        "https://about.fidelity.com/data-and-insights",
+        False,
+        "Automated access and redistribution require a permitted route.",
+    ),
+    Source(
+        "redfin",
+        "Redfin",
+        "https://www.redfin.com/news/data-center/",
+        "Quarterly",
+        "Quarterly tracker updates with monthly observations; exact WSJ feed unresolved.",
+        "Disabled",
+        "https://www.redfin.com/news/data-center/",
+        False,
+        "Exact comparable mortgage-payment feed has not been verified.",
+    ),
+    Source(
+        "edmunds",
+        "Edmunds",
+        "https://www.edmunds.com/insights/",
+        "Unknown / irregular",
+        "Monthly transaction-price observations; publication schedule unconfirmed.",
+        "Disabled",
+        "https://help.edmunds.com/hc/en-us/articles/206103257-Accessing-Edmunds-data",
+        False,
+        "Public API closed; matching complete monthly feed unavailable.",
+    ),
+    Source(
+        "opis",
+        "OPIS",
+        "https://www.opis.com/",
+        "Daily",
+        "Daily retail fuel pricing product; delivery depends on subscription.",
+        "Disabled",
+        "https://www.opis.com/product/pricing/oil-prices-forecast-and-history/",
+        False,
+        "Licensed feed required. EIA weekly data is a clearly labelled alternative.",
+    ),
+    Source(
+        "factset",
+        "FactSet",
+        "https://www.factset.com/",
+        "Daily trading observations",
+        "Market data update timing depends on the entitled product.",
+        "Disabled",
+        "https://www.factset.com/",
+        False,
+        "Exact entitled stock-price feed not configured.",
+    ),
+)
+
+BLS_URL: str = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
+USDA_URL: str = "https://fns-prod.azureedge.us/sites/default/files/resource-files/usdamoderatecostplan-sept2007-present.xlsx"
+SERIES: tuple[Series, ...] = (
+    Series(
+        "family-groceries",
+        "usda",
+        "Family grocery budget",
+        "USD/week",
+        "Monthly",
+        "Moderate-cost plan: male and female 19–50, children 6–8 and 9–11",
+        USDA_URL,
+        "moderate-family-four",
+        "Platform calculation: sum four USDA individual weekly costs. Basket methods "
+        "change over time; this is not confirmed as the exact WSJ household.",
+    ),
+    Series(
+        "gasoline",
+        "eia",
+        "Regular gasoline",
+        "USD/gallon",
+        "Weekly",
+        "U.S. regular, all formulations, retail cash price including taxes",
+        "https://www.eia.gov/dnav/pet/hist_xls/EMM_EPMR_PTE_NUS_DPGw.xls",
+        "EMM_EPMR_PTE_NUS_DPG",
+        "Weekly alternative to WSJ's daily OPIS series. "
+        "Monday survey; methodology changed May 14, 2018.",
+    ),
+    Series(
+        "diesel",
+        "eia",
+        "On-highway diesel",
+        "USD/gallon",
+        "Weekly",
+        "Contiguous U.S. No. 2 on-highway diesel cash price including taxes",
+        "https://www.eia.gov/dnav/pet/hist_xls/EMD_EPD2D_PTE_NUS_DPGw.xls",
+        "EMD_EPD2D_PTE_NUS_DPG",
+        "Weekly alternative to WSJ's daily OPIS series. "
+        "Monday survey; methodology changed June 13, 2022.",
+    ),
+)
+
+# Store publisher levels once; the six bounded calculations below are read-time views.
+SOURCES += (
+    Source(
+        "bls-macro",
+        "BLS macroeconomic data",
+        "https://www.bls.gov/data/",
+        "Monthly",
+        "CPI and Employment Situation: 08:30 ET on release-calendar dates.",
+        "Weekdays at 09:00 ET",
+        "https://www.bls.gov/schedule/",
+    ),
+    Source(
+        "bea",
+        "Bureau of Economic Analysis",
+        "https://www.bea.gov/itable/national-gdp-and-personal-income",
+        "Monthly and quarterly",
+        "Personal Income and Outlays monthly; GDP quarterly estimates and revisions.",
+        "Weekdays at 10:00 ET",
+        "https://www.bea.gov/news/schedule",
+    ),
+    Source(
+        "fed",
+        "Federal Reserve Board",
+        "https://www.federalreserve.gov/datadownload/",
+        "Daily and policy decisions",
+        "H.15 business-day yields; target bounds change by policy decision.",
+        "Weekdays at 17:00 ET",
+        "https://www.federalreserve.gov/releases/",
+    ),
+    Source(
+        "freddie",
+        "Freddie Mac PMMS",
+        "https://www.freddiemac.com/pmms",
+        "Weekly",
+        "Normally Thursday noon ET; Wednesday when Thursday is a holiday.",
+        "Wednesday and Thursday at 13:00 ET",
+        "https://www.freddiemac.com/pmms",
+    ),
+    Source(
+        "fed-equity",
+        "Federal Reserve Financial Accounts",
+        "https://www.federalreserve.gov/releases/z1/",
+        "Quarterly",
+        "Quarterly Financial Accounts releases; historical values can revise.",
+        "Mondays at 17:00 ET",
+        "https://www.federalreserve.gov/releases/z1/",
+    ),
+    Source(
+        "fred",
+        "St. Louis Fed financial stress index",
+        "https://fred.stlouisfed.org/series/STLFSI4",
+        "Weekly",
+        "Friday reference dates; release-calendar updates, normally Wednesday.",
+        "Weekdays at 17:00 ET",
+        "https://fred.stlouisfed.org/releases/calendar",
+        False,
+        "Collection awaits a permitted persistence route for this exact index.",
+    ),
+    Source(
+        "shiller",
+        "Robert Shiller",
+        "https://shillerdata.com/",
+        "Monthly",
+        "Monthly workbook; fixed release day and publication time are not established.",
+        "Mondays at 14:00 ET",
+        "https://shillerdata.com/",
+    ),
+)
+
+SERIES += (
+    Series(
+        "cpi-index",
+        "bls-macro",
+        "Consumer price index",
+        "Index, 1982–84=100",
+        "Monthly",
+        "BLS CPI-U, all items, U.S. city average, not seasonally adjusted",
+        "https://www.bls.gov/cpi/",
+        "CUUR0000SA0",
+        category="macro",
+        visible=False,
+        history_start_year=1913,
+    ),
+    Series(
+        "core-pce-index",
+        "bea",
+        "Core PCE price index",
+        "Index, 2017=100",
+        "Monthly",
+        "BEA personal consumption price index excluding food and energy, seasonally adjusted",
+        "https://www.bea.gov/data/personal-consumption-expenditures-price-index-excluding-food-and-energy",
+        "DPCCRG",
+        category="macro",
+        visible=False,
+    ),
+    Series(
+        "real-gdp-growth",
+        "bea",
+        "Real GDP growth",
+        "% annualized",
+        "Quarterly",
+        "BEA real GDP, quarter-on-quarter seasonally adjusted annual rate",
+        "https://www.bea.gov/data/gdp/gross-domestic-product",
+        "A191RL",
+        "Published annualized growth; do not annualize again. Revised with successive estimates.",
+        category="macro",
+    ),
+    Series(
+        "unemployment",
+        "bls-macro",
+        "Unemployment rate",
+        "%",
+        "Monthly",
+        "BLS civilian unemployment rate, seasonally adjusted",
+        "https://www.bls.gov/cps/",
+        "LNS14000000",
+        category="macro",
+        history_start_year=1948,
+    ),
+    Series(
+        "payrolls",
+        "bls-macro",
+        "Nonfarm payrolls",
+        "Thousands of jobs",
+        "Monthly",
+        "BLS total nonfarm employment, seasonally adjusted",
+        "https://www.bls.gov/ces/",
+        "CES0000000001",
+        category="macro",
+        visible=False,
+        history_start_year=1939,
+    ),
+    Series(
+        "real-consumption",
+        "bea",
+        "Real consumer spending",
+        "Billions of chained 2017 USD",
+        "Monthly",
+        "BEA real personal consumption expenditures, seasonally adjusted annual rate",
+        "https://www.bea.gov/data/consumer-spending/main",
+        "DPCERX",
+        category="macro",
+        visible=False,
+    ),
+    Series(
+        "fed-target-lower",
+        "fed",
+        "Fed target lower bound",
+        "%",
+        "Policy changes",
+        "Federal Reserve target range lower bound, reported effective dates",
+        "https://www.federalreserve.gov/monetarypolicy/openmarket.htm",
+        "target-funds:lower",
+        "Range remains effective until the next reported change. Observations are policy events.",
+        category="macro",
+    ),
+    Series(
+        "fed-target-upper",
+        "fed",
+        "Fed target upper bound",
+        "%",
+        "Policy changes",
+        "Federal Reserve target range upper bound, reported effective dates",
+        "https://www.federalreserve.gov/monetarypolicy/openmarket.htm",
+        "target-funds:upper",
+        "Range remains effective until the next reported change. Observations are policy events.",
+        category="macro",
+    ),
+    Series(
+        "treasury-10y",
+        "fed",
+        "10-year Treasury yield",
+        "%",
+        "Daily",
+        "Federal Reserve H.15 10-year constant-maturity Treasury yield",
+        "https://www.federalreserve.gov/releases/h15/",
+        "RIFLGFCY10_N.B",
+        "Business-day observations; missing holiday values are not zero.",
+        category="macro",
+    ),
+    Series(
+        "mortgage-30y",
+        "freddie",
+        "30-year mortgage rate",
+        "%",
+        "Weekly",
+        "Freddie Mac Primary Mortgage Market Survey, 30-year fixed-rate average",
+        "https://www.freddiemac.com/pmms",
+        "Full History:30 yr FRM",
+        "Freddie Mac attribution required. Methodology changed November 2022.",
+        category="macro",
+    ),
+    Series(
+        "financial-stress",
+        "fred",
+        "Financial stress",
+        "Index",
+        "Weekly",
+        "Federal Reserve Bank of St. Louis Financial Stress Index, version 4",
+        "https://fred.stlouisfed.org/series/STLFSI4",
+        "STLFSI4",
+        "Source: Federal Reserve Bank of St. Louis. Negative values mean below-average stress.",
+        category="macro",
+    ),
+    Series(
+        "public-equity",
+        "fed-equity",
+        "Fed publicly traded equity",
+        "Millions of USD",
+        "Quarterly",
+        "Fed Financial Accounts publicly traded corporate equity memo item, quarter-end",
+        "https://www.federalreserve.gov/releases/z1/",
+        "LM883164115.Q",
+        "Includes closed-end funds and ETFs; broader than listed operating-company capitalization.",
+        category="valuation",
+        visible=False,
+    ),
+    Series(
+        "nominal-gdp",
+        "bea",
+        "Nominal GDP",
+        "Billions of USD",
+        "Quarterly",
+        "BEA current-dollar gross domestic product, seasonally adjusted annual rate",
+        "https://www.bea.gov/data/gdp/gross-domestic-product",
+        "A191RC",
+        category="valuation",
+        visible=False,
+    ),
+    Series(
+        "cape",
+        "shiller",
+        "Shiller CAPE",
+        "Ratio",
+        "Monthly",
+        "Robert Shiller standard cyclically adjusted price/earnings ratio",
+        "https://shillerdata.com/",
+        "CAPE",
+        "Standard CAPE, not total-return CAPE. Latest workbook months can use partial prices "
+        "and estimated CPI; provisional observations are marked. Stored at six decimal places; "
+        "original precision is retained in source lineage. Not a short-term timing signal.",
+        category="valuation",
+    ),
+    Series(
+        "headline-inflation",
+        "bls-macro",
+        "Headline inflation",
+        "% year-over-year",
+        "Monthly",
+        "12-month change in the BLS unadjusted CPI-U all-items index",
+        "https://www.bls.gov/cpi/",
+        "CUUR0000SA0",
+        category="macro",
+        transform="yoy",
+        inputs=("cpi-index",),
+    ),
+    Series(
+        "core-pce-inflation",
+        "bea",
+        "Core PCE inflation",
+        "% year-over-year",
+        "Monthly",
+        "12-month change in the BEA core PCE price index",
+        "https://www.bea.gov/data/personal-consumption-expenditures-price-index-excluding-food-and-energy",
+        "DPCCRG",
+        category="macro",
+        transform="yoy",
+        inputs=("core-pce-index",),
+    ),
+    Series(
+        "payroll-growth",
+        "bls-macro",
+        "Monthly payroll growth",
+        "Thousands of jobs",
+        "Monthly",
+        "Change in BLS seasonally adjusted nonfarm payrolls from the prior calendar month",
+        "https://www.bls.gov/ces/",
+        "CES0000000001",
+        category="macro",
+        transform="change",
+        inputs=("payrolls",),
+    ),
+    Series(
+        "payroll-growth-3m",
+        "bls-macro",
+        "Payroll growth, 3-month average",
+        "Thousands of jobs",
+        "Monthly",
+        "Mean of three consecutive calendar-month payroll changes",
+        "https://www.bls.gov/ces/",
+        "CES0000000001",
+        category="macro",
+        transform="change_3m",
+        inputs=("payrolls",),
+    ),
+    Series(
+        "real-consumption-growth",
+        "bea",
+        "Real consumer spending growth",
+        "% year-over-year",
+        "Monthly",
+        "12-month change in BEA real personal consumption expenditures",
+        "https://www.bea.gov/data/consumer-spending/main",
+        "DPCERX",
+        category="macro",
+        transform="yoy",
+        inputs=("real-consumption",),
+    ),
+    Series(
+        "equity-gdp",
+        "fed-equity",
+        "Buffett-style public-equity / GDP proxy",
+        "% of annual GDP",
+        "Quarterly",
+        "100 × Fed public-equity millions / (1,000 × BEA nominal GDP billions), same quarter",
+        "https://www.federalreserve.gov/releases/z1/",
+        "LM883164115.Q/A191RC",
+        "Quarter-end public equity divided by annualized nominal GDP; includes ETFs and closed-end "
+        "funds. This quarterly proxy differs from daily Buffett indicators. Not a timing rule.",
+        category="valuation",
+        transform="equity_gdp",
+        inputs=("public-equity", "nominal-gdp"),
+    ),
+)

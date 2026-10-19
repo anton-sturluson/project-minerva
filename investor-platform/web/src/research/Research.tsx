@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
+import { Economics } from "./Economics";
 import { InstitutionalStockActivity } from "./InstitutionalStockActivity";
 import { percent, quarterLabel } from "../format";
 
@@ -245,10 +246,22 @@ function QuarterlyChanges({
   );
 }
 
-export function Research({ activity }: { activity: boolean }) {
+export function Research({
+  activity,
+  economics = false,
+}: {
+  activity: boolean;
+  economics?: boolean;
+}) {
   return (
     <section
-      id={activity ? "research/activity" : "research"}
+      id={
+        economics
+          ? "research/economics"
+          : activity
+            ? "research/activity"
+            : "research"
+      }
       aria-labelledby="research-heading"
       className="research"
     >
@@ -259,7 +272,10 @@ export function Research({ activity }: { activity: boolean }) {
         className="research-links research-navigation"
         aria-label="Research navigation"
       >
-        <a href="#research" aria-current={!activity ? "page" : undefined}>
+        <a
+          href="#research"
+          aria-current={!activity && !economics ? "page" : undefined}
+        >
           [ Managers ]
         </a>
         <a
@@ -268,8 +284,20 @@ export function Research({ activity }: { activity: boolean }) {
         >
           [ Stock activity ]
         </a>
+        <a
+          href="#research/economics"
+          aria-current={economics ? "page" : undefined}
+        >
+          [ Economics ]
+        </a>
       </nav>
-      {activity ? <InstitutionalStockActivity /> : <ManagersDirectory />}
+      {economics ? (
+        <Economics />
+      ) : activity ? (
+        <InstitutionalStockActivity />
+      ) : (
+        <ManagersDirectory />
+      )}
     </section>
   );
 }

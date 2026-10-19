@@ -20,6 +20,8 @@ Account and ledger failures offer a manual retry. After an uncertain save, retry
 
 See [Daily prices](daily-prices.md) to enable the built-in 5 p.m. Eastern worker and inspect or retry runs. Migration 0013 persists its status.
 
+See [Economics collection](economics.md) for the separate opt-in Research collector, publisher frequencies, initial imports and source evidence storage. It uses the same API lifecycle pattern with source-specific due state; it does not change the daily price schedule.
+
 ## Verification
 
 With PostgreSQL running, from `investor-platform/backend`:

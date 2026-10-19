@@ -28,7 +28,9 @@ function currentPage(hash: string): Page {
     ? "activity"
     : hash === "#post-mortem"
       ? "post-mortem"
-      : hash === "#research" || hash === "#research/activity"
+      : hash === "#research" ||
+          hash === "#research/activity" ||
+          hash === "#research/economics"
         ? "research"
         : "portfolio";
 }
@@ -36,8 +38,7 @@ function currentPage(hash: string): Page {
 export function App() {
   const [hash, setHash] = useState(() => location.hash);
   const page = currentPage(hash);
-  const contentHash =
-    page === "research" && hash === "#research/activity" ? hash : `#${page}`;
+  const contentHash = page === "research" ? hash : `#${page}`;
   useEffect(() => {
     const navigate = () => {
       if (location.hash === "#financials") {
@@ -113,7 +114,10 @@ export function App() {
           <Portfolio page={page} />
         </div>
         {page === "research" && (
-          <Research activity={hash === "#research/activity"} />
+          <Research
+            activity={hash === "#research/activity"}
+            economics={hash === "#research/economics"}
+          />
         )}
       </main>
       <footer className="page-footer">

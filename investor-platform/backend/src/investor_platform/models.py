@@ -235,3 +235,35 @@ class ResearchHolding(Base):
     share_type: Mapped[str] = mapped_column(String(3))
     quantity: Mapped[Decimal] = mapped_column(Numeric(30, 8))
     value_usd: Mapped[Decimal] = mapped_column(Numeric(30, 2))
+
+
+class EconomicObservation(Base):
+    """Append-only changed facts with compact provenance; definitions live in code."""
+
+    __tablename__ = "economic_observations"
+    __table_args__ = (
+        Index("economic_latest", "workspace_id", "series_key", "observation_date", "id"),
+        CheckConstraint("(value IS NULL) = missing", name="economic_missing_value"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    series_key: Mapped[str] = mapped_column(String(60))
+    observation_date: Mapped[date] = mapped_column(Date)
+    value: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    missing: Mapped[bool]
+    provenance: Mapped[dict] = mapped_column(JSONB)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EconomicRefreshState(Base):
+    """One durable scheduling and recovery record per workspace and publisher."""
+
+    __tablename__ = "economic_refresh_state"
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_attempt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_due: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20))
+    failures: Mapped[int] = mapped_column(default=0)
+    error: Mapped[str | None] = mapped_column(String(200))
