@@ -1,6 +1,6 @@
 # Morning brief synthesis contract
 
-The collection script has already populated prepared evidence, `news`, and `prices`. Do not run `scripts/run_morning_brief.sh` or `portfolio sync`: that would restart work already completed before this agent began. Do not repeat collection, browse the web, or start another agent or session. After summary completion, the only additional model work permitted is the Terra selection pass in Section 3; perform the premium-source auto-advance, orchestration, synthesis, and writing in this run.
+The collection script has already populated prepared evidence, `news`, and `prices`. Do not run `scripts/run_morning_brief.sh` or `portfolio sync`: that would restart work already completed before this agent began. Do not repeat collection, browse the web, or start another agent or session. After summary completion, the only additional model work permitted is the selection pass in Section 3; perform the premium-source auto-advance, orchestration, synthesis, and writing in this run.
 
 ## 1. Validate the input
 
@@ -23,15 +23,15 @@ uv run minerva summarize --model gpt-5.6-luna --thinking medium
 - After all calls succeed, persist summaries with parameter binding in one SQLite transaction. Update by `article_key` only where the summary is still NULL or blank.
 - Re-query the same fixed half-open window and require zero eligible blank summaries before selection. Reruns must be idempotent.
 
-## 3. Select non-premium articles with Terra and auto-advance premium sources
+## 3. Select non-premium articles with Sol 6.1 and auto-advance premium sources
 
 Do not read the batch inputs into your context.
 
 1. Create a temporary directory.
 2. Use the exact `prepared_evidence` path from the validated handoff to create `$SELECTION_TMP/relevance-prompt.md`. Copy `scripts/prompts/morning_brief_selection.md`, then append only the top-level `universe` array as `PORTFOLIO_UNIVERSE_JSON`. Do this with a short inline Python or `jq` command without reading the source file into your context.
 
-3. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window whose `source` is not exactly `wsj` or `economist` directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. In a separate `$SELECTION_TMP/auto-advanced-keys.jsonl`, export one `{"article_key":"..."}` object for every complete summary whose `source` is exactly `wsj` or `economist`. Do not include those premium-source rows in Terra's batch inputs.
-4. If batches exist, count them and run the extractor once with concurrency equal to the batch count; otherwise skip Terra selection:
+3. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window whose `source` is not exactly `wsj` or `economist` directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. In a separate `$SELECTION_TMP/auto-advanced-keys.jsonl`, export one `{"article_key":"..."}` object for every complete summary whose `source` is exactly `wsj` or `economist`. Do not include those premium-source rows in the selection model's batch inputs.
+4. If batches exist, count them and run the extractor once with concurrency equal to the batch count; otherwise skip the selection pass:
 
 ```bash
 BATCH_COUNT=$(find "$SELECTION_TMP" -name 'batch-*' -type f | wc -l | tr -d ' ')
@@ -39,18 +39,18 @@ uv run minerva extract-files \
   --questions-file "$SELECTION_TMP/relevance-prompt.md" \
   --files "$SELECTION_TMP/batch-*" \
   --out "$SELECTION_TMP/results" \
-  --model gpt-5.6-terra \
+  --model gpt-6.1-sol \
   --thinking high \
   --concurrency "$BATCH_COUNT"
 ```
 
-5. Extract only the non-null `article_key` values from Terra's JSONL results; do not use Terra's rationales in synthesis. Union those keys with every non-null `article_key` from `auto-advanced-keys.jsonl`. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage and use the source with the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by Terra unless their source is exactly `wsj` or `economist`. Clearly label rumors and third-party interpretations.
+5. Extract only the non-null `article_key` values from the selection model's JSONL results; do not use its rationales in synthesis. Union those keys with every non-null `article_key` from `auto-advanced-keys.jsonl`. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage and use the source with the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by the selection model unless their source is exactly `wsj` or `economist`. Clearly label rumors and third-party interpretations.
 6. Before writing, read up to five of the most recent previous `slack-brief.md` outputs in the dated sibling run directories. Exclude developments already covered unless today's evidence adds a material new fact; if retained, write only the update.
 7. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
 
-Write the canonical `slack_brief_output` from the verified union of Terra selections and auto-advanced premium-source articles. Do not create a separate report or memo.
+Write the canonical `slack_brief_output` from the verified union of model selections and auto-advanced premium-source articles. Do not create a separate report or memo.
 
 Write exactly these four sections in the order shown, with no other text or sections:
 
