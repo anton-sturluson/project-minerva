@@ -1,0 +1,10 @@
+[
+  {"id":"MSFT","ticker":"MSFT","name":"Microsoft","cik":"0000789019","category":"hyperscaler","fiscal_year_end":"0630"},
+  {"id":"AMZN","ticker":"AMZN","name":"Amazon","cik":"0001018724","category":"hyperscaler","fiscal_year_end":"1231"},
+  {"id":"GOOGL","ticker":"GOOGL","name":"Alphabet","cik":"0001652044","category":"hyperscaler","fiscal_year_end":"1231"},
+  {"id":"META","ticker":"META","name":"Meta Platforms","cik":"0001326801","category":"hyperscaler","fiscal_year_end":"1231"},
+  {"id":"ORCL","ticker":"ORCL","name":"Oracle","cik":"0001341439","category":"hyperscaler","fiscal_year_end":"0531"},
+  {"id":"CRWV","ticker":"CRWV","name":"CoreWeave","cik":"0001769628","category":"neocloud","fiscal_year_end":"1231"},
+  {"id":"NBIS","ticker":"NBIS","name":"Nebius","cik":"0001513845","category":"neocloud","fiscal_year_end":"1231"},
+  {"id":"IREN","ticker":"IREN","name":"IREN","cik":"0001878848","category":"neocloud","fiscal_year_end":"0630"}
+]
