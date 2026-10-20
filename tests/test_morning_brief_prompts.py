@@ -11,6 +11,12 @@ def _read_prompt(name: str) -> str:
     return (PROMPT_DIR / name).read_text(encoding="utf-8")
 
 
+def test_final_writer_does_not_restart_collection() -> None:
+    synthesis = _read_prompt("morning_brief_synthesis.md")
+    assert "Do not run `scripts/run_morning_brief.sh` or `portfolio sync`" in synthesis
+    assert "the collection script wrote it before starting this agent" in synthesis
+
+
 def test_collector_uses_luna_with_high_reasoning() -> None:
     runner = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
         encoding="utf-8"

@@ -20,25 +20,27 @@ Direct Google URLs require one numeric `gid` in the query. Minerva preserves `tq
 - Same-day source order is stable. Holdings weights use percentage points. Existing enrichment and Main-filtered watchlist state are preserved.
 - All inputs and metadata are loaded, normalized, and rendered before current-state writes begin. Zero valid Main holdings fails closed.
 
-## Scheduled two-stage flow
+## Single-script daily flow
 
-The scheduler runs one fixed shell launcher, using the already-configured source environment:
+The scheduler runs one entry point with the existing final-writer job ID:
 
 ```bash
-./scripts/run_morning_brief_scheduled.sh --handoff-job "$CHILD_JOB_UUID"
+./scripts/run_morning_brief.sh "$SYNTHESIS_JOB_ID"
 ```
 
-After the existing clean-main checks and fast-forward, it runs the existing `minerva portfolio sync` command, then `openclaw automations run "$CHILD_JOB_UUID" --json`. A failed command stops the launcher: failed sync cannot start the agent. The sync date uses New York time. Missing source settings fail rather than falling back to cached inputs.
+The script computes today's New York date, checks/fast-forwards clean main, and runs the existing portfolio sync from configured sources. It then performs the existing structured/news collection and evidence preparation. Its final command is `openclaw automations run "$SYNTHESIS_JOB_ID" --json`, after the prepared handoff is written and required checks pass. Sync or required-phase failure prevents that call. Existing browser/news collector agents remain part of collection; the final writing agent starts only at the end.
 
-There is no Python helper, receipt, hash, expiry rule, or extra state file. The CLI owns sync and job-admission error handling. Successful startup is silent; failures show the command output. Only the launcher is scheduled; the existing agent job stays disabled for automatic scheduling and is started explicitly after sync. Admission is not completion; the agent delivers the brief.
+There is no second launcher, pre-sync Python helper, receipt, hash, expiry rule, or compatibility mode. The normal phase logs and existing synthesis handoff are reused. Missing source settings fail rather than silently using cached inputs. Only the script is scheduled; the final-writer job stays unscheduled and is explicitly invoked. Admission is not completion; that agent delivers the brief.
 
-### Required child prompt instruction
+### Required final-writer prompt instruction
 
-> Portfolio sync has already succeeded before you started. Use the synced Main portfolio files, not memory or another spreadsheet fetch. Do not run portfolio sync or reconstruct source URLs. Determine `TODAY` in `America/New_York` and run `./scripts/run_morning_brief.sh "$TODAY"` from the main checkout. Follow the existing synthesis instructions.
+> Sync, collection, and preparation have already succeeded. Read today's existing `data/structured/news-pipeline/synthesis-handoff.json` in the dated daily-news report directory, then follow its versioned synthesis instructions and existing editorial overrides. Use the synced Main portfolio and collected evidence. Do not run the pipeline script, portfolio sync, or collection again. Return the completed brief through the existing delivery route.
 
-`run_morning_brief.sh` is collection-only: it reads the synced portfolio and starts with filings. It has no portfolio-sync command, source-URL handling, or sync-mode flags. It trusts the successful preceding command, so do not start this agent independently or overlap runs. Keep the same workspace and current portfolio paths in both stages.
+### Deployment after explicit approval
 
-Deployment requires updating the stored agent prompt to use the plain script command above and remove the former receipt requirement and sync-mode flag. Do not merge, change the live prompt, or rerun the automation until the operator approves the replacement. Private source values and runtime logs remain outside the repository.
+Point the existing 04:00 New York command automation at the single script and final-writer job ID. It now includes collection, so use the existing one-hour run budget for both command and no-output timeouts, not the former ten-minute startup-only budget. Set command delivery to `none` (retain output in run history) and configure an explicit failure alert to the existing destination after the first failure. Keep the final writer's model and announcement destination unchanged; update its stored prompt to consume the prepared handoff without rerunning the script.
+
+Do not merge, change live wiring/prompts, or rerun the automation until the operator approves. Keep one producer; do not independently invoke the writer or overlap portfolio writes. Private source values and runtime logs remain outside the repository.
 
 ## Verify and deploy
 

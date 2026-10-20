@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.morning_brief_fixtures import SYNTHESIS_JOB_ID, pipeline_env
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_SCRIPT = REPO_ROOT / "scripts" / "run_morning_brief.sh"
@@ -36,6 +38,13 @@ set -euo pipefail
 subcommand="${1:-}"
 action="${2:-}"
 printf '%s\n' "$*" >> "${MINERVA_CALL_LOG}"
+if [[ "${subcommand} ${action}" == "${TEST_FAIL_PHASE:-}" ]]; then
+  echo "synthetic ${subcommand} ${action} failure" >&2
+  exit 7
+fi
+if [[ "${subcommand} ${action}" == "brief prep" ]]; then
+  exec "$TEST_PYTHON" "$TEST_FIXTURES" prepare
+fi
 
 if [[ "${subcommand}" == "news" && "${action}" == "exist" ]]; then
   printf '{"seen":[],"unseen":[]}\n'
@@ -115,8 +124,7 @@ PY
   exit 0
 fi
 
-# Aggregate downloads (finnhub, market-data), brief filings/earnings/market/
-# prep: just log and succeed.
+# Portfolio sync, aggregate downloads, and structured collectors only log.
 exit 0
 """
     return _write_executable(tmp_path / "fake-minerva", script)
@@ -131,11 +139,15 @@ def _fake_openclaw(tmp_path: Path) -> Path:
     contract with the news CLI is exercised end-to-end.
     """
     fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    fake_bin.mkdir(exist_ok=True)
     openclaw = _write_executable(
         fake_bin / "openclaw",
         r"""#!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == automations ]]; then
+  exec "$TEST_PYTHON" "$TEST_FIXTURES" "$@"
+fi
+[[ "${1:-}" == agent ]] || exit 91
 message=""
 timeout=""
 agent=""
@@ -260,9 +272,13 @@ def _run_wrapper(
     sources: list[dict[str, object]],
     ir_entries: list[dict[str, object]] | None = None,
     universe_entries: list[dict[str, object]] | None = None,
-    extra_env: dict[str, str] | None = None,
+    extra_env: dict[str, str | None] | None = None,
     run_date: str | None = None,
+    args: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """Run the real pipeline with local sources and command doubles only."""
+    resolved_run_date: str = run_date or date.today().isoformat()
+    env: dict[str, str] = pipeline_env(tmp_path, resolved_run_date)
     ir_entries = ir_entries or []
     if universe_entries is None:
         universe_entries = [
@@ -280,44 +296,26 @@ def _run_wrapper(
     universe_path = tmp_path / "universe.json"
     universe_path.write_text(json.dumps(universe_entries), encoding="utf-8")
 
-    fake_home = tmp_path / "home"
-    fake_home.mkdir(exist_ok=True)
-    temp_state = tmp_path / "tmp"
-    temp_state.mkdir(exist_ok=True)
     coordinator = tmp_path / "coordinator"
     coordinator.mkdir(exist_ok=True)
     attempt_dir = coordinator / "attempts"
     attempt_dir.mkdir(exist_ok=True)
     prompt_log_dir = coordinator / "prompts"
     prompt_log_dir.mkdir(exist_ok=True)
-    bin_dir = tmp_path / "bin"
-    fake_openclaw = (
-        bin_dir / "openclaw" if bin_dir.is_dir() else _fake_openclaw(tmp_path)
-    )
+    _fake_openclaw(tmp_path)
     fake_minerva_path = tmp_path / "fake-minerva"
     fake_minerva = (
         fake_minerva_path if fake_minerva_path.is_file() else _fake_minerva(tmp_path)
     )
-    workspace = tmp_path / "workspace"
-    invest_db = tmp_path / "invest.db"
     call_log = coordinator / "minerva-calls.log"
     call_log.touch()
 
-    env = os.environ.copy()
-    env.pop("MINERVA_NEWS_COLLECTOR_AGENT", None)
     env.update(
         {
-            "HOME": str(fake_home),
-            "PATH": f"{fake_openclaw.parent}:{env['PATH']}",
-            "TMPDIR": str(temp_state),
             "MINERVA_RUNNER": str(fake_minerva),
             "MINERVA_NEWS_SOURCES": str(sources_path),
             "MINERVA_IR_REGISTRY": str(ir_path),
             "MINERVA_PORTFOLIO_UNIVERSE": str(universe_path),
-            "MINERVA_SKIP_STATUS_CHECK": "1",
-            "MINERVA_WORKSPACE_ROOT": str(workspace),
-            "INVEST_DB": str(invest_db),
-            "MINERVA_CALL_LOG": str(call_log),
             "TIMEOUT_LOG": str(coordinator / "timeouts.log"),
             "AGENT_LOG": str(coordinator / "agents.log"),
             "COLLECTOR_START_LOG": str(coordinator / "collector-starts.log"),
@@ -329,14 +327,18 @@ def _run_wrapper(
             "BROWSER_STATE": str(coordinator / "browser-state"),
         }
     )
-    if extra_env:
-        env.update(extra_env)
+    key: str
+    value: str | None
+    for key, value in (extra_env or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
 
-    resolved_run_date = run_date or date.today().isoformat()
     previous_date = date.fromisoformat(resolved_run_date) - timedelta(days=1)
     env.setdefault("PUBLISHED_AT", f"{previous_date.isoformat()}T12:00:00-05:00")
     return subprocess.run(
-        ["bash", str(PIPELINE_SCRIPT), resolved_run_date],
+        ["bash", str(PIPELINE_SCRIPT), *(args if args is not None else [SYNTHESIS_JOB_ID])],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -377,15 +379,11 @@ def _phase_dir(tmp_path: Path, run_date: str) -> Path:
 def test_collector_timeout_validation_precedes_temp_state(
     tmp_path: Path, variable: str, value: str
 ) -> None:
-    temp_state = tmp_path / "tmp"
-    temp_state.mkdir()
-    fake_home = tmp_path / "home"
-    fake_home.mkdir()
-    env = os.environ.copy()
-    env.update({"HOME": str(fake_home), "TMPDIR": str(temp_state), variable: value})
+    env: dict[str, str] = pipeline_env(tmp_path, "2026-07-27")
+    env[variable] = value
 
     result = subprocess.run(
-        ["bash", str(PIPELINE_SCRIPT), "test-invalid-timeout"],
+        ["bash", str(PIPELINE_SCRIPT), SYNTHESIS_JOB_ID],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -396,7 +394,9 @@ def test_collector_timeout_validation_precedes_temp_state(
 
     assert result.returncode == 1
     assert f"{variable} must be a positive integer" in result.stderr
-    assert list(temp_state.iterdir()) == []
+    assert list((tmp_path / "tmp").iterdir()) == []
+    assert not Path(env["TEST_GIT_LOG"]).exists()
+    assert not Path(env["TEST_SYNTHESIS_LOG"]).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +466,9 @@ def test_aggregate_download_phases_run_before_agent_collectors(
     ).read_text(encoding="utf-8").splitlines()
 
     subcommands = [line for line in calls if line]
+    sync_calls: list[str] = [line for line in subcommands if line.startswith("portfolio sync ")]
+    assert len(sync_calls) == 1
+    assert subcommands[0] == sync_calls[0]
     # Finnhub fetches both publication dates intersecting the fixed 04:00
     # window; market data remains anchored to RUN_DATE.
     finnhub_calls = [
@@ -1010,6 +1013,29 @@ def test_thin_brief_refused_when_no_window_evidence(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "no eligible evidence exists in the fixed 04:00 New York window" in result.stderr
     assert "MINERVA_ALLOW_THIN_BRIEF=1" in result.stderr
+    assert not (tmp_path / "coordinator/synthesis.log").exists()
+    assert not (_phase_dir(tmp_path, run_date) / "synthesis-handoff.json").exists()
+    assert "brief prep" not in (tmp_path / "coordinator/minerva-calls.log").read_text()
+
+
+def test_unreadable_evidence_blocks_preparation_and_final_writer(tmp_path: Path) -> None:
+    """An invalid local SQLite file must not admit synthesis."""
+    run_date: str = "2026-07-27"
+    (tmp_path / "invest.db").write_bytes(b"not a sqlite database")
+    result: subprocess.CompletedProcess[str] = _run_wrapper(
+        tmp_path, sources=[], run_date=run_date,
+    )
+
+    assert result.returncode == 1
+    assert "error[window-evidence]" in result.stderr
+    assert "brief prep" not in (tmp_path / "coordinator/minerva-calls.log").read_text()
+    assert not (tmp_path / "coordinator/synthesis.log").exists()
+    assert not (_phase_dir(tmp_path, run_date) / "synthesis-handoff.json").exists()
+    status: dict[str, str | int] = json.loads(
+        (_phase_dir(tmp_path, run_date) / "window-evidence.status.json").read_text()
+    )
+    assert status["status"] == "failed"
+    assert status["exit_status"] == 1
 
 
 def test_thin_brief_allowed_when_override_set(tmp_path: Path) -> None:
@@ -1169,5 +1195,10 @@ def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     ]
     assert "slack-brief.md" in handoff["slack_brief_output"]
 
-    # The script hands delivery back to the outer cron layer.
+    # The fake final writer validates the ready handoff at invocation time.
+    assert (tmp_path / "coordinator/synthesis.log").read_text().splitlines() == [
+        f"automations run {SYNTHESIS_JOB_ID} --json"
+    ]
+    assert Path(handoff["prepared_evidence"]).is_file()
+    assert "synthetic final writer admitted" in result.stdout
     assert "Do not post Slack from this script." in result.stdout

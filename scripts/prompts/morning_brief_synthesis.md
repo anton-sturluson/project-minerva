@@ -1,10 +1,10 @@
 # Morning brief synthesis contract
 
-The collection script has already populated prepared evidence, `news`, and `prices`. Do not repeat collection, browse the web, or start another agent or session. After summary completion, the only additional model work permitted is the Terra selection pass in Section 3; perform the premium-source auto-advance, orchestration, synthesis, and writing in this run.
+The collection script has already populated prepared evidence, `news`, and `prices`. Do not run `scripts/run_morning_brief.sh` or `portfolio sync`: that would restart work already completed before this agent began. Do not repeat collection, browse the web, or start another agent or session. After summary completion, the only additional model work permitted is the Terra selection pass in Section 3; perform the premium-source auto-advance, orchestration, synthesis, and writing in this run.
 
 ## 1. Validate the input
 
-Read the `synthesis-handoff.json` path printed by `scripts/run_morning_brief.sh`. Treat this prompt as the versioned synthesis contract. Before accessing the database, require a JSON object with `status` set to `ready`; require `date`, `window_start`, `window_end`, `db`, `prepared_evidence`, `evidence_stats`, `collector_stats`, `holdings_path`, `watchlist_path`, `instructions`, and `slack_brief_output` with the expected types; and require `instructions` to identify this prompt. Stop with a concise schema/version error if validation fails. Do not infer missing values.
+Read the existing `synthesis-handoff.json` for this run; the collection script wrote it before starting this agent. Treat this prompt as the versioned synthesis contract. Before accessing the database, require a JSON object with `status` set to `ready`; require `date`, `window_start`, `window_end`, `db`, `prepared_evidence`, `evidence_stats`, `collector_stats`, `holdings_path`, `watchlist_path`, `instructions`, and `slack_brief_output` with the expected types; and require `instructions` to identify this prompt. Stop with a concise schema/version error if validation fails. Do not infer missing values.
 
 Use `window_start` and `window_end` exactly as provided with today's collected data.
 

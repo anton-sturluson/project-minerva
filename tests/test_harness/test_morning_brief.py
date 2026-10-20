@@ -13,6 +13,11 @@ from unittest.mock import patch
 
 from harness.commands import brief, portfolio
 from harness.config import HarnessSettings
+from tests.morning_brief_fixtures import (
+    SYNTHESIS_JOB_ID,
+    pipeline_env,
+    write_executable,
+)
 from harness.morning_brief import (
     append_review_log,
     audit_evidence,
@@ -359,168 +364,79 @@ class MorningBriefTests(unittest.TestCase):
             direct_helper_lines,
             ['uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"'],
         )
-        self.assertNotIn("portfolio sync", script)
-        self.assertNotIn("MINERVA_PORTFOLIO_HOLDINGS_SOURCE", script)
-        self.assertNotIn("MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE", script)
-        self.assertNotIn("MINERVA_PORTFOLIO_WATCHLIST_SOURCE", script)
         self.assertNotIn("--use-synced-portfolio", script)
 
-    def test_wrapper_collects_from_synced_portfolio_without_syncing(self) -> None:
-        """Collection starts at filings; portfolio sync belongs to the launcher."""
-        call_log = self.workspace / "calls.log"
-        fake_minerva = self.workspace / "fake-minerva.sh"
-        fake_minerva.write_text(
+    def test_wrapper_syncs_then_prepares_and_starts_final_writer(self) -> None:
+        """Caller settings win; skipping news still requires sync and synthesis."""
+        env: dict[str, str] = pipeline_env(self.workspace, RUN_DATE.isoformat())
+        call_log: Path = Path(env["MINERVA_CALL_LOG"])
+        fake_minerva: Path = write_executable(
+            self.workspace / "fake-minerva.sh",
             "#!/usr/bin/env bash\n"
-            "printf '%s\\n' \"$*\" >> \"$MINERVA_CALL_LOG\"\n",
-            encoding="utf-8",
+            "printf '%s\\n' \"$*\" >> \"$MINERVA_CALL_LOG\"\n"
+            'if [[ "$1 $2" == "brief prep" ]]; then\n'
+            '  exec "$TEST_PYTHON" "$TEST_FIXTURES" prepare\n'
+            "fi\n",
         )
-        fake_minerva.chmod(0o755)
-
-        # A bare python3 helper invocation would select this incompatible
-        # system-Python stand-in. The helper must instead run inside `uv run`.
-        system_python_marker = self.workspace / "system-python-used"
-        fake_bin = self.workspace / "fake-bin"
-        fake_bin.mkdir()
-        fake_python = fake_bin / "python3"
-        fake_python.write_text(
-            "#!/usr/bin/env bash\n"
-            "touch \"$SYSTEM_PYTHON_MARKER\"\n"
-            "echo 'incompatible system python used' >&2\n"
-            "exit 86\n",
-            encoding="utf-8",
+        # A direct system-Python call must not replace the uv helper command.
+        system_python_marker: Path = self.workspace / "system-python-used"
+        write_executable(
+            self.workspace / "bin/python3",
+            '#!/usr/bin/env bash\ntouch "$SYSTEM_PYTHON_MARKER"\nexit 86\n',
         )
-        fake_python.chmod(0o755)
-
-        # A sourced zshrc may provide missing secrets, but explicit caller
-        # configuration must win. Poison every important path/runner here to
-        # catch precedence regressions before they can touch canonical data.
-        fake_home = self.workspace / "fakehome"
-        fake_home.mkdir(exist_ok=True)
-        poisoned_workspace = self.workspace / "poisoned-workspace"
-        (fake_home / ".zshrc").write_text(
+        poisoned_workspace: Path = self.workspace / "poisoned-workspace"
+        (Path(env["HOME"]) / ".zshrc").write_text(
             f"export MINERVA_WORKSPACE_ROOT='{poisoned_workspace}'\n"
             f"export INVEST_DB='{self.workspace / 'poisoned.db'}'\n"
             "export MINERVA_RUNNER='/bin/false'\n"
-            "export FINNHUB_API_KEY='zshrc-only-test-key'\n",
+            "export MINERVA_PORTFOLIO_HOLDINGS_SOURCE='/synthetic/wrong.csv'\n",
             encoding="utf-8",
         )
-
-        env = os.environ.copy()
-        env.update(
-            {
-                "HOME": str(fake_home),
-                "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
-                "SYSTEM_PYTHON_MARKER": str(system_python_marker),
-                "MINERVA_CALL_LOG": str(call_log),
-                "MINERVA_RUNNER": str(fake_minerva),
-                "MINERVA_SKIP_STATUS_CHECK": "1",
-                "MINERVA_SKIP_NEWS": "1",
-                "MINERVA_WORKSPACE_ROOT": str(self.workspace / "workspace"),
-                "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
-                "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
-            }
-        )
-
-        result = subprocess.run(
-            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief.sh"), RUN_DATE.isoformat()],
-            cwd=REPO_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
+        env.update({
+            "SYSTEM_PYTHON_MARKER": str(system_python_marker),
+            "MINERVA_RUNNER": str(fake_minerva),
+            "MINERVA_SKIP_NEWS": "1",
+            "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
+            "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
+        })
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts/run_morning_brief.sh"), SYNTHESIS_JOB_ID],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, check=False,
+            timeout=30,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(system_python_marker.exists())
-        self.assertIn("prepared_evidence:", result.stdout)
-        self.assertIn("manifest:", result.stdout)
-        # Report layout is anchored to MINERVA_WORKSPACE_ROOT so tests never
-        # write into the canonical hard-disk workspace.
-        workspace_root = self.workspace / "workspace"
-        report_dir = (
-            workspace_root / "reports" / "03-daily-news" / RUN_DATE.isoformat()
-        )
-        self.assertTrue(report_dir.is_dir())
         self.assertFalse(poisoned_workspace.exists())
         self.assertFalse((self.workspace / "poisoned.db").exists())
-        # A neutral synthesis handoff artifact is emitted for the cron layer.
-        handoff = (
-            report_dir
-            / "data"
-            / "structured"
-            / "news-pipeline"
-            / "synthesis-handoff.json"
-        )
-        self.assertTrue(handoff.is_file())
-        handoff_payload = json.loads(handoff.read_text(encoding="utf-8"))
-        self.assertNotIn("agent", " ".join(handoff_payload).lower())
-        self.assertTrue(
-            any("minerva summarize" in step or "summarize" in step for step in handoff_payload["steps"])
-        )
+        self.assertIn("prepared_evidence:", result.stdout)
+        self.assertIn("manifest:", result.stdout)
+        self.assertIn("News collection (skipped)", result.stdout)
+        self.assertIn("synthetic final writer admitted", result.stdout)
         self.assertEqual(
             call_log.read_text(encoding="utf-8").splitlines(),
             [
+                f"portfolio sync --date {RUN_DATE.isoformat()} "
+                f"--holdings-source {FIXTURE_DIR / 'holdings.csv'} "
+                f"--transactions-source {FIXTURE_DIR / 'transactions.csv'}",
                 f"brief filings --date {RUN_DATE.isoformat()}",
                 f"brief earnings --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
                 f"brief market --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
                 f"brief prep --date {RUN_DATE.isoformat()}",
             ],
         )
-
-        # The removed mode flag is rejected, not retained as a legacy alias.
-        call_log.unlink()
-        result = subprocess.run(
-            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief.sh"),
-             RUN_DATE.isoformat(), "--use-synced-portfolio"],
-            cwd=REPO_ROOT, env=env, capture_output=True, text=True, check=False,
+        # The final-writer double checks prepared evidence and the ready handoff
+        # when invoked, and rejects collector calls in this news-skipped run.
+        self.assertEqual(
+            Path(env["TEST_SYNTHESIS_LOG"]).read_text().splitlines(),
+            [f"automations run {SYNTHESIS_JOB_ID} --json"],
         )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("usage:", result.stderr)
-        self.assertFalse(call_log.exists())
-
-    def test_wrapper_skips_news_collection_when_env_set(self) -> None:
-        """MINERVA_SKIP_NEWS=1 skips browser/openclaw news agents."""
-        call_log = self.workspace / "calls.log"
-        fake_minerva = self.workspace / "fake-minerva.sh"
-        fake_minerva.write_text(
-            "#!/usr/bin/env bash\n"
-            "printf '%s\\n' \"$*\" >> \"$MINERVA_CALL_LOG\"\n",
-            encoding="utf-8",
+        handoff: Path = (
+            self.workspace / "workspace/reports/03-daily-news" / RUN_DATE.isoformat()
+            / "data/structured/news-pipeline/synthesis-handoff.json"
         )
-        fake_minerva.chmod(0o755)
-
-        fake_home = self.workspace / "fakehome"
-        fake_home.mkdir(exist_ok=True)
-
-        env = os.environ.copy()
-        env.update(
-            {
-                "HOME": str(fake_home),
-                "MINERVA_CALL_LOG": str(call_log),
-                "MINERVA_RUNNER": str(fake_minerva),
-                "MINERVA_SKIP_STATUS_CHECK": "1",
-                "MINERVA_SKIP_NEWS": "1",
-                "MINERVA_WORKSPACE_ROOT": str(self.workspace / "workspace"),
-                "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
-                "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
-            }
-        )
-
-        result = subprocess.run(
-            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief.sh"), RUN_DATE.isoformat()],
-            cwd=REPO_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("News collection (skipped)", result.stdout)
-        # No openclaw agent or news-related minerva calls in the log.
-        logged_commands = call_log.read_text(encoding="utf-8")
-        self.assertNotIn("openclaw", logged_commands)
-        self.assertNotIn("extract-files", logged_commands)
+        self.assertTrue(handoff.is_file())
+        self.assertEqual(json.loads(handoff.read_text())["status"], "ready")
 
 
     def test_portfolio_enrich_uses_symbol_table_without_api_key(self) -> None:
