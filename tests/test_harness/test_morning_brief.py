@@ -466,6 +466,21 @@ class MorningBriefTests(unittest.TestCase):
             ],
         )
 
+        # The scheduled launcher already synced. This opt-in must skip exactly
+        # that command, without source settings or a separate receipt file.
+        expected_commands = call_log.read_text(encoding="utf-8").splitlines()[1:]
+        call_log.unlink()
+        for source in ("HOLDINGS", "TRANSACTIONS", "WATCHLIST"):
+            env.pop(f"MINERVA_PORTFOLIO_{source}_SOURCE")
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief.sh"),
+             RUN_DATE.isoformat(), "--use-synced-portfolio"],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(call_log.read_text(encoding="utf-8").splitlines(), expected_commands)
+        self.assertIn("using previously synced portfolio", result.stdout)
+
     def test_wrapper_skips_news_collection_when_env_set(self) -> None:
         """MINERVA_SKIP_NEWS=1 skips browser/openclaw news agents."""
         call_log = self.workspace / "calls.log"

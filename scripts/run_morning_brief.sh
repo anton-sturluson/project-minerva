@@ -48,10 +48,6 @@ REPORT_DIR="${MINERVA_REPORT_DIR:-${MINERVA_WORKSPACE_ROOT}/reports/03-daily-new
 INVEST_DB="${INVEST_DB:-${MINERVA_WORKSPACE_ROOT}/data/04-database/invest.db}"
 PHASE_DIR="${MINERVA_NEWS_ARTIFACT_DIR:-${REPORT_DIR}/data/structured/news-pipeline}"
 COLLECTOR_ARTIFACT_DIR="${PHASE_DIR}/collectors"
-if [[ "${USE_SYNCED_PORTFOLIO}" == 1 ]]; then
-  uv run --project "${ROOT_DIR}" python \
-    "${ROOT_DIR}/scripts/morning_brief_presync.py" --date "${RUN_DATE}" --validate-only
-fi
 NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 NEWS_SOURCE_ROOTS_DIR="${NEWS_RUN_DIR}/sources"
 PIDS=()
@@ -162,7 +158,7 @@ echo ""
 echo "── Phase 1: Structured data ──"
 
 if [[ "${USE_SYNCED_PORTFOLIO}" == 1 ]]; then
-  echo "  portfolio-sync: using validated pre-sync receipt (no refetch)"
+  echo "  portfolio-sync: using previously synced portfolio (no refetch)"
 else
   portfolio_sync_args=(portfolio sync --date "${RUN_DATE}")
   [[ -n "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE:-}" ]] && portfolio_sync_args+=(--holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}")
