@@ -17,6 +17,12 @@ run_helper() {
   uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"
 }
 RUN_DATE="${1:-$(date +%F)}"
+USE_SYNCED_PORTFOLIO=0
+if [[ "$#" -gt 2 || ( "$#" -eq 2 && "$2" != --use-synced-portfolio ) ]]; then
+  echo "usage: $0 [DATE [--use-synced-portfolio]]" >&2
+  exit 1
+fi
+[[ "${2:-}" != --use-synced-portfolio ]] || USE_SYNCED_PORTFOLIO=1
 MINERVA_EDITORIAL_TIMEOUT="${MINERVA_EDITORIAL_TIMEOUT:-1800}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-1800}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
@@ -42,6 +48,10 @@ REPORT_DIR="${MINERVA_REPORT_DIR:-${MINERVA_WORKSPACE_ROOT}/reports/03-daily-new
 INVEST_DB="${INVEST_DB:-${MINERVA_WORKSPACE_ROOT}/data/04-database/invest.db}"
 PHASE_DIR="${MINERVA_NEWS_ARTIFACT_DIR:-${REPORT_DIR}/data/structured/news-pipeline}"
 COLLECTOR_ARTIFACT_DIR="${PHASE_DIR}/collectors"
+if [[ "${USE_SYNCED_PORTFOLIO}" == 1 ]]; then
+  uv run --project "${ROOT_DIR}" python \
+    "${ROOT_DIR}/scripts/morning_brief_presync.py" --date "${RUN_DATE}" --validate-only
+fi
 NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 NEWS_SOURCE_ROOTS_DIR="${NEWS_RUN_DIR}/sources"
 PIDS=()
@@ -132,8 +142,10 @@ run_minerva_phase() {
     write_status "${PHASE_DIR}/${phase}.status.json" "${phase}" failed \
       "${status}" "${stdout_path}" "${stderr_path}"
     echo "error[${phase}]: failed with status ${status}" >&2
-    echo "error[${phase}]: diagnostics: ${stderr_path}" >&2
-    [[ ! -s "${stderr_path}" ]] || tail -n 20 "${stderr_path}" >&2
+    local diagnostics_path="${stderr_path}"
+    [[ -s "${stderr_path}" || ! -s "${stdout_path}" ]] || diagnostics_path="${stdout_path}"
+    echo "error[${phase}]: diagnostics: ${diagnostics_path}" >&2
+    [[ ! -s "${diagnostics_path}" ]] || tail -c 8192 "${diagnostics_path}" | tail -n 20 >&2
     return "${status}"
   fi
 }
@@ -149,11 +161,15 @@ echo ""
 # ── PHASE 1: Structured data collection ──
 echo "── Phase 1: Structured data ──"
 
-portfolio_sync_args=(portfolio sync --date "${RUN_DATE}")
-[[ -n "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE:-}" ]] && portfolio_sync_args+=(--holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}")
-[[ -n "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE:-}" ]] && portfolio_sync_args+=(--transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
-[[ -n "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] && portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
-run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"
+if [[ "${USE_SYNCED_PORTFOLIO}" == 1 ]]; then
+  echo "  portfolio-sync: using validated pre-sync receipt (no refetch)"
+else
+  portfolio_sync_args=(portfolio sync --date "${RUN_DATE}")
+  [[ -n "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE:-}" ]] && portfolio_sync_args+=(--holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}")
+  [[ -n "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE:-}" ]] && portfolio_sync_args+=(--transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
+  [[ -n "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] && portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
+  run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"
+fi
 
 run_minerva_phase filings brief filings --date "${RUN_DATE}"
 
