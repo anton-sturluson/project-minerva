@@ -102,10 +102,11 @@ def source(
     ),
 ) -> None:
     """Archive an original, with an optional bounded fund section; thesis approval is separate."""
-    from harness.ideas.documents import attach, read
+    from harness.ideas.documents import read
+    from harness.ideas.extraction import attach_source
 
     with store.run_lock(run_id):
-        document: dict = attach(
+        document: dict = attach_source(
             run_id, ordinal, url, section_ids=section_id, anchor_ids=anchor_id
         )
         reading: dict = read(store.run_folder(store.get_run(run_id)), document)
