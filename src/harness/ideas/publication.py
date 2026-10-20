@@ -10,9 +10,9 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 
 from harness.ideas import store
-from harness.ideas.documents import SourceScope, resolve_scope, validate_scope
+from harness.ideas.documents import SourceScope
 from harness.ideas.extraction import View, materialize, passages
-from harness.ideas.research import resolve_identity, validate_match
+from harness.ideas.research import checked_source
 
 
 def escape(text):
@@ -25,15 +25,9 @@ def escape(text):
 
 
 def checked_view(row: dict, run: dict) -> dict:
+    """Validate the original source and materialize claims from selected content only."""
     document: dict = row["document"]
-    scope: SourceScope = resolve_scope(store.run_folder(run), document)
-    validate_scope(document, document["identity"])
-    validate_match(
-        resolve_identity(document["identity"], scope["identity"]),
-        scope["identity"],
-        run["issue_date"],
-        row,
-    )
+    scope: SourceScope = checked_source(row, run, document)[0]
     view: View = View.model_validate(row["view"])
     materialize(view, passages(scope["content"]))
     return view.model_dump(mode="json")

@@ -709,3 +709,12 @@ def resolve_identity(identity: dict, parts: list[dict]) -> Match:
             relationship_quotes=[blocks[block] for block in draft.relationship_blocks],
         )
     return Match.model_validate(data)
+
+
+def checked_source(row: dict, run: dict, document: dict) -> tuple[SourceScope, Match]:
+    """Validate selected source attribution and return separate content and identity evidence."""
+    scope: SourceScope = resolve_scope(store.run_folder(run), document)
+    validate_scope(document, document["identity"])
+    identity: Match = resolve_identity(document["identity"], scope["identity"])
+    validate_match(identity, scope["identity"], run["issue_date"], row)
+    return scope, identity
