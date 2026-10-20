@@ -359,9 +359,14 @@ class MorningBriefTests(unittest.TestCase):
             direct_helper_lines,
             ['uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"'],
         )
+        self.assertNotIn("portfolio sync", script)
+        self.assertNotIn("MINERVA_PORTFOLIO_HOLDINGS_SOURCE", script)
+        self.assertNotIn("MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE", script)
+        self.assertNotIn("MINERVA_PORTFOLIO_WATCHLIST_SOURCE", script)
+        self.assertNotIn("--use-synced-portfolio", script)
 
-    def test_wrapper_orchestrates_command_sequence_with_optional_sources(self) -> None:
-        """The wrapper uses uv Python while preserving its configured CLI runner."""
+    def test_wrapper_collects_from_synced_portfolio_without_syncing(self) -> None:
+        """Collection starts at filings; portfolio sync belongs to the launcher."""
         call_log = self.workspace / "calls.log"
         fake_minerva = self.workspace / "fake-minerva.sh"
         fake_minerva.write_text(
@@ -411,9 +416,6 @@ class MorningBriefTests(unittest.TestCase):
                 "MINERVA_SKIP_STATUS_CHECK": "1",
                 "MINERVA_SKIP_NEWS": "1",
                 "MINERVA_WORKSPACE_ROOT": str(self.workspace / "workspace"),
-                "MINERVA_PORTFOLIO_HOLDINGS_SOURCE": str(FIXTURE_DIR / "holdings.csv"),
-                "MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE": str(FIXTURE_DIR / "transactions.csv"),
-                "MINERVA_PORTFOLIO_WATCHLIST_SOURCE": str(FIXTURE_DIR / "watchlist.json"),
                 "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
                 "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
             }
@@ -458,7 +460,6 @@ class MorningBriefTests(unittest.TestCase):
         self.assertEqual(
             call_log.read_text(encoding="utf-8").splitlines(),
             [
-                f"portfolio sync --date {RUN_DATE.isoformat()} --holdings-source {FIXTURE_DIR / 'holdings.csv'} --transactions-source {FIXTURE_DIR / 'transactions.csv'} --watchlist-source {FIXTURE_DIR / 'watchlist.json'}",
                 f"brief filings --date {RUN_DATE.isoformat()}",
                 f"brief earnings --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
                 f"brief market --date {RUN_DATE.isoformat()} --provider finnhub --source {FIXTURE_DIR / 'market-data.json'}",
@@ -466,20 +467,16 @@ class MorningBriefTests(unittest.TestCase):
             ],
         )
 
-        # The scheduled launcher already synced. This opt-in must skip exactly
-        # that command, without source settings or a separate receipt file.
-        expected_commands = call_log.read_text(encoding="utf-8").splitlines()[1:]
+        # The removed mode flag is rejected, not retained as a legacy alias.
         call_log.unlink()
-        for source in ("HOLDINGS", "TRANSACTIONS", "WATCHLIST"):
-            env.pop(f"MINERVA_PORTFOLIO_{source}_SOURCE")
         result = subprocess.run(
             ["bash", str(REPO_ROOT / "scripts" / "run_morning_brief.sh"),
              RUN_DATE.isoformat(), "--use-synced-portfolio"],
             cwd=REPO_ROOT, env=env, capture_output=True, text=True, check=False,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(call_log.read_text(encoding="utf-8").splitlines(), expected_commands)
-        self.assertIn("using previously synced portfolio", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("usage:", result.stderr)
+        self.assertFalse(call_log.exists())
 
     def test_wrapper_skips_news_collection_when_env_set(self) -> None:
         """MINERVA_SKIP_NEWS=1 skips browser/openclaw news agents."""
@@ -504,9 +501,6 @@ class MorningBriefTests(unittest.TestCase):
                 "MINERVA_SKIP_STATUS_CHECK": "1",
                 "MINERVA_SKIP_NEWS": "1",
                 "MINERVA_WORKSPACE_ROOT": str(self.workspace / "workspace"),
-                "MINERVA_PORTFOLIO_HOLDINGS_SOURCE": str(FIXTURE_DIR / "holdings.csv"),
-                "MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE": str(FIXTURE_DIR / "transactions.csv"),
-                "MINERVA_PORTFOLIO_WATCHLIST_SOURCE": str(FIXTURE_DIR / "watchlist.json"),
                 "MINERVA_BRIEF_EARNINGS_SOURCE": str(FIXTURE_DIR / "market-data.json"),
                 "MINERVA_BRIEF_MARKET_SOURCE": str(FIXTURE_DIR / "market-data.json"),
             }

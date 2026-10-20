@@ -34,11 +34,11 @@ There is no Python helper, receipt, hash, expiry rule, or extra state file. The 
 
 ### Required child prompt instruction
 
-> Portfolio sync has already succeeded before you started. Use the synced Main portfolio files, not memory or another spreadsheet fetch. Do not run portfolio sync or reconstruct source URLs. Determine `TODAY` in `America/New_York` and run `./scripts/run_morning_brief.sh "$TODAY" --use-synced-portfolio` from the main checkout. Follow the existing synthesis instructions. No receipt file is required.
+> Portfolio sync has already succeeded before you started. Use the synced Main portfolio files, not memory or another spreadsheet fetch. Do not run portfolio sync or reconstruct source URLs. Determine `TODAY` in `America/New_York` and run `./scripts/run_morning_brief.sh "$TODAY"` from the main checkout. Follow the existing synthesis instructions.
 
-The flag skips only portfolio sync; other pipeline phases and normal calls without the flag are unchanged. It trusts the successful preceding command, so do not start this agent independently or overlap runs. Keep the same workspace and current portfolio paths in both stages.
+`run_morning_brief.sh` is collection-only: it reads the synced portfolio and starts with filings. It has no portfolio-sync command, source-URL handling, or sync-mode flags. It trusts the successful preceding command, so do not start this agent independently or overlap runs. Keep the same workspace and current portfolio paths in both stages.
 
-Deployment requires updating the stored agent prompt to remove the former receipt requirement. Do not merge, change the live prompt, or restart the job until the operator approves the replacement. Private source values and runtime logs remain outside the repository.
+Deployment requires updating the stored agent prompt to use the plain script command above and remove the former receipt requirement and sync-mode flag. Do not merge, change the live prompt, or rerun the automation until the operator approves the replacement. Private source values and runtime logs remain outside the repository.
 
 ## Verify and deploy
 

@@ -116,7 +116,7 @@ PY
 fi
 
 # Aggregate downloads (finnhub, market-data), brief filings/earnings/market/
-# prep, portfolio sync: just log and succeed.
+# prep: just log and succeed.
 exit 0
 """
     return _write_executable(tmp_path / "fake-minerva", script)

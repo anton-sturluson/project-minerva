@@ -16,13 +16,11 @@ export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
 run_helper() {
   uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"
 }
-RUN_DATE="${1:-$(date +%F)}"
-USE_SYNCED_PORTFOLIO=0
-if [[ "$#" -gt 2 || ( "$#" -eq 2 && "$2" != --use-synced-portfolio ) ]]; then
-  echo "usage: $0 [DATE [--use-synced-portfolio]]" >&2
+if [[ "$#" -gt 1 ]]; then
+  echo "usage: $0 [DATE]" >&2
   exit 1
 fi
-[[ "${2:-}" != --use-synced-portfolio ]] || USE_SYNCED_PORTFOLIO=1
+RUN_DATE="${1:-$(date +%F)}"
 MINERVA_EDITORIAL_TIMEOUT="${MINERVA_EDITORIAL_TIMEOUT:-1800}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-1800}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
@@ -156,16 +154,6 @@ echo ""
 
 # ── PHASE 1: Structured data collection ──
 echo "── Phase 1: Structured data ──"
-
-if [[ "${USE_SYNCED_PORTFOLIO}" == 1 ]]; then
-  echo "  portfolio-sync: using previously synced portfolio (no refetch)"
-else
-  portfolio_sync_args=(portfolio sync --date "${RUN_DATE}")
-  [[ -n "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE:-}" ]] && portfolio_sync_args+=(--holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}")
-  [[ -n "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE:-}" ]] && portfolio_sync_args+=(--transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
-  [[ -n "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] && portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
-  run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"
-fi
 
 run_minerva_phase filings brief filings --date "${RUN_DATE}"
 
