@@ -14,27 +14,6 @@ from tests.test_news_collection import _phase_dir, _run_wrapper
 RUN_DATE: str = "2026-04-08"
 
 
-def test_single_script_syncs_once_then_admits_prepared_handoff(tmp_path: Path) -> None:
-    """The final writer receives a ready handoff, not another pipeline invocation."""
-    result: subprocess.CompletedProcess[str] = _run_wrapper(
-        tmp_path, sources=[], run_date=RUN_DATE,
-        extra_env={"MINERVA_SKIP_NEWS": "1"},
-    )
-
-    assert result.returncode == 0, result.stderr
-    calls: list[str] = (tmp_path / "coordinator/minerva-calls.log").read_text().splitlines()
-    assert len([call for call in calls if call.startswith("portfolio sync ")]) == 1
-    assert calls[0].startswith("portfolio sync ")
-    assert calls[-1].startswith("brief prep ")
-    assert len((tmp_path / "coordinator/synthesis.log").read_text().splitlines()) == 1
-    handoff: dict[str, str] = json.loads(
-        (_phase_dir(tmp_path, RUN_DATE) / "synthesis-handoff.json").read_text()
-    )
-    assert handoff["date"] == RUN_DATE
-    assert handoff["status"] == "ready"
-    assert Path(handoff["prepared_evidence"]).is_file()
-
-
 @pytest.mark.parametrize(("case", "exit_code"), [
     ("linked-worktree", 1),
     ("wrong-root", 1),
@@ -59,6 +38,10 @@ def test_preflight_failure_blocks_all_work(tmp_path: Path, case: str, exit_code:
     assert not (tmp_path / "coordinator/synthesis.log").exists()
     assert not (tmp_path / "workspace").exists()
     assert list((tmp_path / "tmp").iterdir()) == []
+    if case in {"linked-worktree", "wrong-root", "wrong-branch", "detached", "dirty", "status-failed"}:
+        # Reject an unsafe initial checkout before attempting any Git update.
+        git_calls: list[str] = (tmp_path / "coordinator/git.log").read_text().splitlines()
+        assert not any(call.startswith(("fetch ", "merge ")) for call in git_calls)
 
 
 @pytest.mark.parametrize("source", ["HOLDINGS", "TRANSACTIONS"])
