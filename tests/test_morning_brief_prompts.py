@@ -11,6 +11,12 @@ def _read_prompt(name: str) -> str:
     return (PROMPT_DIR / name).read_text(encoding="utf-8")
 
 
+def test_final_writer_does_not_restart_collection() -> None:
+    synthesis = _read_prompt("morning_brief_synthesis.md")
+    assert "Do not run `scripts/run_morning_brief.sh` or `portfolio sync`" in synthesis
+    assert "the collection script wrote it before starting this agent" in synthesis
+
+
 def test_collector_uses_luna_with_high_reasoning() -> None:
     runner = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
         encoding="utf-8"
@@ -21,15 +27,18 @@ def test_collector_uses_luna_with_high_reasoning() -> None:
     assert "fireworks/accounts/fireworks/routers/glm-5p2-fast" not in runner
 
 
-def test_wsj_and_economist_bypass_terra_without_guaranteed_publication() -> None:
+def test_selection_uses_sol61_and_keeps_premium_sources_separate() -> None:
     synthesis = _read_prompt("morning_brief_synthesis.md")
+    selection = synthesis.split("## 3.", 1)[1].split("## 4.", 1)[0]
 
-    assert "--model gpt-5.6-terra" in synthesis
-    assert "--thinking high" in synthesis
-    assert "whose `source` is not exactly `wsj` or `economist`" in synthesis
-    assert "whose `source` is exactly `wsj` or `economist`" in synthesis
-    assert "Do not include those premium-source rows in Terra's batch inputs." in synthesis
-    assert "eligible for final main-agent review, not guaranteed publication" in synthesis
+    assert "--model gpt-6.1-sol" in selection
+    assert "--thinking high" in selection
+    assert "Terra" not in synthesis and "gpt-5.6-terra" not in synthesis
+    assert "summarize --model gpt-5.6-luna --thinking medium" in synthesis
+    assert "whose `source` is not exactly `wsj` or `economist`" in selection
+    assert "whose `source` is exactly `wsj` or `economist`" in selection
+    assert "Do not include those premium-source rows in the selection model's batch inputs." in selection
+    assert "eligible for final main-agent review, not guaranteed publication" in selection
 
 
 def test_worth_knowing_contract_covers_approved_long_term_developments() -> None:

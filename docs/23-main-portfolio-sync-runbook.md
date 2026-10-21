@@ -20,33 +20,27 @@ Direct Google URLs require one numeric `gid` in the query. Minerva preserves `tq
 - Same-day source order is stable. Holdings weights use percentage points. Existing enrichment and Main-filtered watchlist state are preserved.
 - All inputs and metadata are loaded, normalized, and rendered before current-state writes begin. Zero valid Main holdings fails closed.
 
-## Scheduled two-stage flow
+## Single-script daily flow
 
-The scheduler runs a fixed command, not a model-authored sync command:
+The scheduler runs one entry point with the existing final-writer job ID:
 
 ```bash
-./scripts/run_morning_brief_scheduled.sh --handoff-job "$CHILD_JOB_UUID"
+./scripts/run_morning_brief.sh "$SYNTHESIS_JOB_ID"
 ```
 
-1. The launcher requires the primary checkout on named branch `main` with no tracked or untracked changes. It fetches `origin/main`, fast-forwards only, then requires a clean checkout and `HEAD == origin/main`. It never stashes, resets, rebases, or repairs unexpected state. It uses that checkout's `uv` project and `.venv`.
-2. The Python helper requires nonempty `MINERVA_PORTFOLIO_HOLDINGS_SOURCE` and `MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE` from the inherited environment. It does not load shell startup files or construct source URLs. An optional `MINERVA_PORTFOLIO_WATCHLIST_SOURCE` overrides the existing local-watchlist fallback. No cached holdings/transactions fallback is allowed here.
-3. Before each attempt, the helper deletes the previous receipt. After successful `minerva portfolio sync`, it writes version 1 of `portfolio-sync.receipt.json` in the daily `data/structured/news-pipeline/` directory. The receipt contains the requested date, UTC completion time, exact file hashes, and source fingerprints (not private URLs or input paths). Holdings, transactions, watchlist, and universe must still match, and the receipt must be no more than six hours old.
-4. The helper calls `openclaw automations run "$CHILD_JOB_UUID" --json` once. Force is the CLI default, so the separately configured **disabled, agent-only** automation can run on demand. A successful process exit plus explicit enqueue admission and a run ID are required. **Queued is not completed.** There is no polling, sleep, retry, or child-completion claim. Success prints only `NO_REPLY` to avoid duplicate scheduler announcements.
+The script computes today's New York date, checks/fast-forwards clean main, and runs the existing portfolio sync from configured sources. It then performs the existing structured/news collection and evidence preparation. Its final command is `openclaw automations run "$SYNTHESIS_JOB_ID" --json`, after the prepared handoff is written and required checks pass. Sync or required-phase failure prevents that call. Existing browser/news collector agents remain part of collection; the final writing agent starts only at the end.
 
-The parent/operator must configure the scheduler and disabled child separately. This repository does not change automation configuration. Keep one scheduled producer; do not overlap pre-sync with another portfolio writer or a running consumer. The receipt checks the boundary, not concurrent writes after validation.
+There is no second launcher, pre-sync Python helper, receipt, hash, expiry rule, or compatibility mode. The normal phase logs and existing synthesis handoff are reused. Missing source settings fail rather than silently using cached inputs. Only the script is scheduled; the final-writer job stays unscheduled and is explicitly invoked. Admission is not completion; that agent delivers the brief.
 
-### Required child prompt instruction
+### Required final-writer prompt instruction
 
-> Determine `TODAY` in `America/New_York` and run `./scripts/run_morning_brief.sh "$TODAY" --use-synced-portfolio` from the main checkout. Consume only the already-synced Main-only portfolio. Never re-sync portfolio data, regenerate source URLs, or fall back to cached inputs if receipt validation fails. Stop and report the failure. Then follow the existing pipeline's synthesis handoff instructions.
+> Sync, collection, and preparation have already succeeded. Read today's existing `data/structured/news-pipeline/synthesis-handoff.json` in the dated daily-news report directory, then follow its versioned synthesis instructions and existing editorial overrides. Use the synced Main portfolio and collected evidence. Do not run the pipeline script, portfolio sync, or collection again. Return the completed brief through the existing delivery route.
 
-The explicit flag validates the receipt **before any collection phase** and skips only portfolio sync. All other pipeline phases are unchanged. Calls without the flag retain their existing sync behavior. The producer and child must use the same workspace/report/artifact paths; receipt validation rejects a different `MINERVA_PORTFOLIO_UNIVERSE` path. Receipts do not require source configuration in the child.
+### Deployment after explicit approval
 
-### Verification and diagnostics
+Point the existing 04:00 New York command automation at the single script and final-writer job ID. It now includes collection, so use the existing one-hour run budget for both command and no-output timeouts, not the former ten-minute startup-only budget. Set command delivery to `none` (retain output in run history) and configure an explicit failure alert to the existing destination after the first failure. Keep the final writer's model and announcement destination unchanged; update its stored prompt to consume the prepared handoff without rerunning the script.
 
-- `--date YYYY-MM-DD` selects the receipt/run date; the helper defaults to the current New York date. `--sync-only` replaces `--handoff-job` for controlled sync verification without an agent. It still requires configured sources and writes a receipt.
-- `portfolio-sync.json`, `portfolio-sync.stderr.log`, and `portfolio-sync.status.json` retain the normal phase format. Kickoff output and status are separate `portfolio-handoff.*` artifacts. The consumer leaves the original sync status intact.
-- Failures exit nonzero and show bounded diagnostics, using stdout when stderr is empty. A sync/source failure leaves no receipt. A kickoff failure retains the successful sync receipt but marks handoff failed; it does not mean that a child ran.
-- These artifacts and normal sync history can contain private data. Keep them in existing ignored runtime storage, never in commits or public reports. The receipt uses SHA-256 for change detection, not as a signed authorization token.
+Do not merge, change live wiring/prompts, or rerun the automation until the operator approves. Keep one producer; do not independently invoke the writer or overlap portfolio writes. Private source values and runtime logs remain outside the repository.
 
 ## Verify and deploy
 

@@ -10,19 +10,19 @@ unset _CALLER_ENV_EXPORTS
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd -P)"
+cd "${ROOT_DIR}"
 HELPER="${ROOT_DIR}/scripts/morning_brief_helper.py"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${ROOT_DIR}/.uv-cache}"
 run_helper() {
   uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"
 }
-RUN_DATE="${1:-$(date +%F)}"
-USE_SYNCED_PORTFOLIO=0
-if [[ "$#" -gt 2 || ( "$#" -eq 2 && "$2" != --use-synced-portfolio ) ]]; then
-  echo "usage: $0 [DATE [--use-synced-portfolio]]" >&2
+if [[ "$#" != 1 || -z "${1:-}" ]]; then
+  echo "usage: $0 SYNTHESIS_JOB_ID" >&2
   exit 1
 fi
-[[ "${2:-}" != --use-synced-portfolio ]] || USE_SYNCED_PORTFOLIO=1
+SYNTHESIS_JOB_ID="$1"
+RUN_DATE="$(TZ=America/New_York date +%F)"
 MINERVA_EDITORIAL_TIMEOUT="${MINERVA_EDITORIAL_TIMEOUT:-1800}"
 MINERVA_BROWSER_TIMEOUT="${MINERVA_BROWSER_TIMEOUT:-1800}"
 MINERVA_WEBFETCH_TIMEOUT="${MINERVA_WEBFETCH_TIMEOUT:-300}"
@@ -39,6 +39,29 @@ for integer_name in \
     exit 1
   fi
 done
+
+# Keep the existing scheduled-runtime policy in this single entry point.
+fail() { echo "error[preflight]: $*" >&2; exit 1; }
+check_main() {
+  local branch status
+  [[ "$(git rev-parse --git-dir)" == .git ]] || fail "run from the primary checkout"
+  [[ "$(git rev-parse --show-toplevel)" == "${ROOT_DIR}" ]] || fail "unexpected repository root"
+  branch="$(git symbolic-ref --quiet --short HEAD)" || fail "checkout must be on named main"
+  [[ "${branch}" == main ]] || fail "checkout must be on main"
+  status="$(git status --porcelain --untracked-files=all)" || fail "cannot inspect checkout"
+  [[ -z "${status}" ]] || fail "checkout must be clean"
+}
+: "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE:?holdings source must be configured}"
+: "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE:?transactions source must be configured}"
+check_main
+git fetch --quiet origin refs/heads/main:refs/remotes/origin/main
+git merge --ff-only --quiet origin/main
+check_main
+HEAD_REV="$(git rev-parse --verify HEAD)"
+ORIGIN_REV="$(git rev-parse --verify refs/remotes/origin/main)"
+[[ "${HEAD_REV}" == "${ORIGIN_REV}" ]] || fail "HEAD differs from origin/main"
+export UV_PROJECT_ENVIRONMENT="${ROOT_DIR}/.venv"
+
 if ! PREVIOUS_DATE="$(run_helper previous-date "${RUN_DATE}")"; then
   exit 1
 fi
@@ -48,10 +71,6 @@ REPORT_DIR="${MINERVA_REPORT_DIR:-${MINERVA_WORKSPACE_ROOT}/reports/03-daily-new
 INVEST_DB="${INVEST_DB:-${MINERVA_WORKSPACE_ROOT}/data/04-database/invest.db}"
 PHASE_DIR="${MINERVA_NEWS_ARTIFACT_DIR:-${REPORT_DIR}/data/structured/news-pipeline}"
 COLLECTOR_ARTIFACT_DIR="${PHASE_DIR}/collectors"
-if [[ "${USE_SYNCED_PORTFOLIO}" == 1 ]]; then
-  uv run --project "${ROOT_DIR}" python \
-    "${ROOT_DIR}/scripts/morning_brief_presync.py" --date "${RUN_DATE}" --validate-only
-fi
 NEWS_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morning-brief-${RUN_DATE}-XXXXXX")"
 NEWS_SOURCE_ROOTS_DIR="${NEWS_RUN_DIR}/sources"
 PIDS=()
@@ -161,15 +180,11 @@ echo ""
 # ── PHASE 1: Structured data collection ──
 echo "── Phase 1: Structured data ──"
 
-if [[ "${USE_SYNCED_PORTFOLIO}" == 1 ]]; then
-  echo "  portfolio-sync: using validated pre-sync receipt (no refetch)"
-else
-  portfolio_sync_args=(portfolio sync --date "${RUN_DATE}")
-  [[ -n "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE:-}" ]] && portfolio_sync_args+=(--holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}")
-  [[ -n "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE:-}" ]] && portfolio_sync_args+=(--transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
-  [[ -n "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] && portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
-  run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"
-fi
+portfolio_sync_args=(portfolio sync --date "${RUN_DATE}"
+  --holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}"
+  --transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
+[[ -z "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] || portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
+run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"
 
 run_minerva_phase filings brief filings --date "${RUN_DATE}"
 
@@ -567,3 +582,7 @@ echo "phase_artifacts: ${PHASE_DIR}"
 echo "synthesis_handoff: ${HANDOFF_PATH}"
 echo "synthesis_instructions: ${SYNTHESIS_PROMPT}"
 echo "synthesis_step: Follow the versioned instructions to summarize rows in the fixed 04:00 New York window with NULL/blank summary, persist all summaries safely in one transaction, build one ranked shortlist, write the Slack brief, and return its exact contents for cron delivery. Do not post Slack from this script."
+
+# Start the final writer only after sync, collection, preparation, and checks.
+# Its prompt consumes the prepared handoff; it must never launch this script.
+openclaw automations run "${SYNTHESIS_JOB_ID}" --json
