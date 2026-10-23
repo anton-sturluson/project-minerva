@@ -1,0 +1,1130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Minerva · Debt & cash-flow pilot</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --paper: light-dark(#fffef9, #222421);
+        --ink: light-dark(#191b20, #eeeeda);
+        --blue: light-dark(#00009b, #b1bfff);
+        --plum: light-dark(#62256c, #dcafe4);
+        --rule: light-dark(#aaa69a, #686b61);
+        --yellow: light-dark(#f5dc62, #6b5929);
+        --lilac: light-dark(#e8dcf2, #44364e);
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          16px/1.45 "Times New Roman",
+          Times,
+          serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      main,
+      header,
+      footer {
+        max-width: 1100px;
+        margin: auto;
+        padding: 14px;
+      }
+      header {
+        border-bottom: 3px double var(--ink);
+        display: flex;
+        align-items: baseline;
+        gap: 12px 24px;
+        flex-wrap: wrap;
+      }
+      .wordmark {
+        font:
+          bold italic 34px/1 Times,
+          serif;
+        letter-spacing: -2px;
+        color: var(--blue);
+        text-shadow: 2px 2px var(--yellow);
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0;
+      }
+      h2 {
+        font-size: 21px;
+        margin: 14px 0 8px;
+        color: var(--plum);
+      }
+      h3 {
+        font-size: 18px;
+        margin: 12px 0 6px;
+      }
+      p {
+        margin: 8px 0;
+      }
+      a {
+        color: var(--blue);
+        text-underline-offset: 2px;
+      }
+      a:focus-visible,
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 3px;
+      }
+      nav {
+        display: flex;
+        gap: 10px 22px;
+        flex-wrap: wrap;
+        margin: 0 0 14px;
+      }
+      nav a[aria-current="page"] {
+        color: var(--plum);
+        font-weight: bold;
+      }
+      .controls {
+        display: flex;
+        gap: 10px 20px;
+        flex-wrap: wrap;
+        align-items: end;
+        margin-bottom: 12px;
+      }
+      .controls label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font:
+          14px Arial,
+          sans-serif;
+      }
+      select {
+        max-width: 100%;
+        min-height: 36px;
+        border: 1px solid var(--rule);
+        border-radius: 0;
+        background: var(--paper);
+        color: var(--ink);
+        padding: 6px;
+        font:
+          14px Arial,
+          sans-serif;
+      }
+      .muted,
+      figcaption,
+      .note {
+        font:
+          13px/1.45 Arial,
+          sans-serif;
+      }
+      .notice {
+        border-left: 3px solid var(--plum);
+        padding-left: 10px;
+      }
+      .chart {
+        margin: 12px 0;
+        overflow-x: auto;
+      }
+      .chart svg {
+        display: block;
+        width: 100%;
+        min-width: 330px;
+        height: auto;
+      }
+      .chart text {
+        fill: var(--ink);
+        font:
+          13px Arial,
+          sans-serif;
+      }
+      .grid {
+        stroke: var(--rule);
+        stroke-width: 0.5;
+      }
+      .series {
+        fill: none;
+        stroke-width: 2;
+      }
+      .chart figcaption {
+        margin-top: 6px;
+      }
+      .legend {
+        display: flex;
+        gap: 8px 22px;
+        flex-wrap: wrap;
+        font:
+          13px Arial,
+          sans-serif;
+      }
+      .legend span:before {
+        content: "";
+        display: inline-block;
+        width: 16px;
+        height: 3px;
+        vertical-align: middle;
+        margin-right: 6px;
+        background: var(--series);
+      }
+      details {
+        margin: 16px 0;
+        border-top: 1px solid var(--rule);
+        padding-top: 10px;
+      }
+      summary {
+        cursor: pointer;
+        min-height: 28px;
+      }
+      .table-scroll {
+        overflow-x: auto;
+        max-width: 100%;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font:
+          13px/1.4 Arial,
+          sans-serif;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--rule);
+        padding: 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        font-weight: bold;
+      }
+      td.numeric,
+      th.numeric {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      td {
+        overflow-wrap: anywhere;
+      }
+      .wide {
+        min-width: 760px;
+      }
+      .period {
+        white-space: nowrap;
+      }
+      .evidence {
+        max-width: 420px;
+      }
+      .evidence p {
+        margin: 4px 0;
+      }
+      .evidence a {
+        display: inline-block;
+        margin-right: 8px;
+      }
+      .status {
+        font-weight: bold;
+      }
+      .source-id {
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+      }
+      .empty {
+        padding: 16px 0;
+      }
+      .coverage-limit {
+        max-width: 420px;
+      }
+      footer {
+        border-top: 1px solid var(--rule);
+        font-size: 13px;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 600px) {
+        header {
+          gap: 8px 14px;
+        }
+        .wordmark {
+          font-size: 30px;
+        }
+        h1 {
+          font-size: 20px;
+        }
+        .controls {
+          display: grid;
+          grid-template-columns: 1fr;
+        }
+        .controls label {
+          display: grid;
+          grid-template-columns: 70px minmax(0, 1fr);
+        }
+        nav {
+          gap: 8px 16px;
+        }
+        nav a {
+          min-height: 36px;
+          display: inline-flex;
+          align-items: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="wordmark">minerva!</span>
+      <h1>Debt & cash-flow pilot</h1>
+    </header>
+    <main>
+      <nav aria-label="Pilot views">
+        <a href="#financing" data-view="financing">[ Financing events ]</a
+        ><a href="#fiscal" data-view="fiscal">[ Fiscal data ]</a
+        ><a href="#coverage" data-view="coverage">[ Coverage ]</a>
+      </nav>
+      <div class="controls">
+        <label
+          >Issuer
+          <select id="entity" aria-label="Issuer"></select></label
+        ><label id="metric-control" hidden
+          >Measure
+          <select id="metric" aria-label="Measure"></select></label
+        ><label id="basis-control" hidden
+          >Basis
+          <select id="basis" aria-label="Period basis">
+            <option value="3">Discrete quarters</option>
+            <option value="6">Six-month YTD</option>
+            <option value="9">Nine-month YTD</option>
+            <option value="12">Annual</option>
+          </select></label
+        ><label id="instrument-control"
+          >Bonds
+          <select id="instrument" aria-label="Bond type">
+            <option value="all">All closed bonds</option>
+            <option value="nonconvertible">Nonconvertible</option>
+            <option value="convertible">Convertible</option>
+          </select></label
+        >
+      </div>
+      <p id="cutoff" class="muted"></p>
+      <section id="content" aria-live="polite"></section>
+    </main>
+    <footer>Research pilot · <a href="snapshot.json">Data (JSON)</a></footer>
+    <script id="snapshot" type="application/json">
+      __SNAPSHOT_JSON__
+    </script>
+    <script>
+      "use strict";
+      (() => {
+        const data = JSON.parse(
+          document.getElementById("snapshot").textContent,
+        );
+        const content = document.getElementById("content");
+        const entityControl = document.getElementById("entity");
+        const metricControl = document.getElementById("metric");
+        const instrumentControl = document.getElementById("instrument");
+        const basisControl = document.getElementById("basis");
+        const sources = new Map(
+          data.sources.map((source) => [source.id, source]),
+        );
+        const entities = new Map(
+          data.entities.map((entity) => [entity.id, entity]),
+        );
+        const decimal = new Intl.NumberFormat("en-US", {
+          maximumFractionDigits: 2,
+        });
+        const integer = new Intl.NumberFormat("en-US", {
+          maximumFractionDigits: 0,
+        });
+        const dateFormat = new Intl.DateTimeFormat("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        });
+        const colors = ["var(--plum)", "var(--blue)", "var(--ink)", "#a36c22"];
+        const fieldNames = {
+          cfo: "Operating cash flow",
+          cash_capex: "Cash capital expenditure",
+          debt_cash_proceeds: "Debt cash proceeds",
+          debt_cash_repayments: "Debt cash repayments",
+          billed_ig: "Investment-grade billed issuance",
+          billed_hy: "High-yield billed issuance",
+          billed_other: "Other billed issuance",
+          billed_total: "Total billed issuance",
+          ratings_transaction_revenue: "Ratings transaction revenue",
+          ratings_non_transaction_revenue: "Ratings non-transaction revenue",
+        };
+        let view = "financing";
+
+        function node(tag, text, className) {
+          const element = document.createElement(tag);
+          if (text !== undefined && text !== null)
+            element.textContent = String(text);
+          if (className) element.className = className;
+          return element;
+        }
+        function svgNode(tag, attributes, text) {
+          const element = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            tag,
+          );
+          for (const [key, value] of Object.entries(attributes))
+            element.setAttribute(key, String(value));
+          if (text !== undefined) element.textContent = String(text);
+          return element;
+        }
+        function safeLink(url, text) {
+          try {
+            const target = new URL(url);
+            if (
+              !["https:", "http:"].includes(target.protocol) ||
+              target.username ||
+              target.password
+            )
+              return node("span", text);
+            const link = node("a", text);
+            link.href = target.href;
+            link.rel = "noopener noreferrer";
+            link.target = "_blank";
+            return link;
+          } catch {
+            return node("span", text);
+          }
+        }
+        function sourceLinks(ids = []) {
+          const fragment = document.createDocumentFragment();
+          for (const id of [...new Set(ids)]) {
+            const source = sources.get(id);
+            fragment.append(
+              source
+                ? safeLink(source.url, id)
+                : node("span", `${id} (unavailable)`),
+              " ",
+            );
+          }
+          return fragment;
+        }
+        function amount(value, currency = "USD") {
+          return value === null || value === undefined
+            ? "Unavailable"
+            : `${currency} ${integer.format(Number(value))}`;
+        }
+        function date(value) {
+          return value
+            ? dateFormat.format(new Date(`${value}T12:00:00Z`))
+            : "Not stated";
+        }
+        function issuer(id) {
+          const entity = entities.get(id);
+          return entity
+            ? entity.ticker
+              ? `${entity.ticker} · ${entity.name}`
+              : entity.name
+            : id;
+        }
+        function human(value) {
+          return String(value ?? "").replaceAll("_", " ");
+        }
+        function period(row) {
+          const label =
+            !row.duration_months || row.duration_months === 3
+              ? `Q${row.fiscal_quarter}`
+              : row.duration_months === 12
+                ? "annual"
+                : `${row.duration_months}-month YTD`;
+          return `FY${row.fiscal_year} ${label} · ${date(row.start)}–${date(row.end)}`;
+        }
+        function selected(rows) {
+          return rows.filter(
+            (row) =>
+              entityControl.value === "all" ||
+              row.entity_id === entityControl.value,
+          );
+        }
+        function table(headers, rows, className = "wide") {
+          const scroll = node("div", null, "table-scroll");
+          scroll.tabIndex = 0;
+          const result = node("table", null, className);
+          const head = node("thead"),
+            heading = node("tr");
+          for (const header of headers) {
+            const cell = node("th", header);
+            cell.scope = "col";
+            heading.append(cell);
+          }
+          head.append(heading);
+          result.append(head);
+          const body = node("tbody");
+          for (const values of rows) {
+            const row = node("tr");
+            values.forEach((value) => {
+              const cell = node("td");
+              if (value instanceof Node) cell.append(value);
+              else cell.textContent = String(value ?? "");
+              row.append(cell);
+            });
+            body.append(row);
+          }
+          result.append(body);
+          scroll.append(result);
+          return scroll;
+        }
+        function fold(title, build) {
+          const details = node("details"),
+            summary = node("summary", title);
+          details.append(summary);
+          details.addEventListener("toggle", () => {
+            if (details.open && details.children.length === 1)
+              details.append(build());
+            else if (!details.open)
+              while (details.children.length > 1) details.lastChild.remove();
+          });
+          return details;
+        }
+        function legend(series) {
+          const result = node("div", null, "legend");
+          for (const item of series) {
+            const label = node("span", item.name);
+            label.style.setProperty("--series", item.color);
+            result.append(label);
+          }
+          return result;
+        }
+        function chart(series, mode, label, caption, gapDays = 120) {
+          const valid = series.flatMap((item) =>
+            item.points.filter(
+              (point) => point.value !== null && Number.isFinite(point.value),
+            ),
+          );
+          if (!valid.length)
+            return node(
+              "p",
+              "No reported numeric values for this selection.",
+              "empty",
+            );
+          const dates = series.flatMap((item) =>
+            item.points.map((point) => Date.parse(point.date)),
+          );
+          const first = Math.min(...dates),
+            last = Math.max(...dates);
+          let low = Math.min(0, ...valid.map((point) => point.value)),
+            high = Math.max(0, ...valid.map((point) => point.value));
+          if (low === high) high = low + 1;
+          const range = high - low;
+          high += range * 0.08;
+          if (low < 0) low -= range * 0.08;
+          const width = Math.max(330, content.clientWidth);
+          const left = 62,
+            right = width - 18,
+            center = (left + right) / 2;
+          const x = (value) =>
+            first === last
+              ? center
+              : left +
+                ((Date.parse(value) - first) / (last - first)) * (right - left);
+          const y = (value) => 22 + ((high - value) / (high - low)) * 210;
+          const figure = node("figure", null, "chart");
+          figure.tabIndex = 0;
+          const svg = svgNode("svg", {
+            viewBox: `0 0 ${width} 286`,
+            role: "img",
+            "aria-label": label,
+          });
+          for (const value of [low, (low + high) / 2, high]) {
+            svg.append(
+              svgNode("line", {
+                x1: left,
+                x2: right,
+                y1: y(value),
+                y2: y(value),
+                class: "grid",
+              }),
+              svgNode(
+                "text",
+                { x: left - 10, y: y(value) + 4, "text-anchor": "end" },
+                decimal.format(value),
+              ),
+            );
+          }
+          svg.append(
+            svgNode("line", {
+              x1: left,
+              x2: right,
+              y1: y(0),
+              y2: y(0),
+              stroke: "var(--rule)",
+            }),
+          );
+          for (let index = 0; index < series.length; index++) {
+            const item = series[index];
+            let path = "",
+              previous = null;
+            for (const point of item.points) {
+              if (point.value === null || !Number.isFinite(point.value)) {
+                if (path)
+                  svg.append(
+                    svgNode("path", {
+                      d: path,
+                      stroke: item.color,
+                      class: "series",
+                    }),
+                  );
+                path = "";
+                previous = null;
+                continue;
+              }
+              if (mode === "bar") {
+                const width = 8,
+                  offset = (index - (series.length - 1) / 2) * 10;
+                const bar = svgNode("rect", {
+                  x: x(point.date) + offset - width / 2,
+                  y: Math.min(y(0), y(point.value)),
+                  width,
+                  height: Math.max(1, Math.abs(y(0) - y(point.value))),
+                  fill: item.color,
+                });
+                bar.append(
+                  svgNode(
+                    "title",
+                    {},
+                    `${date(point.date)} · ${item.name}: ${decimal.format(point.value)}`,
+                  ),
+                );
+                svg.append(bar);
+              } else {
+                if (
+                  previous &&
+                  Date.parse(point.date) - Date.parse(previous.date) >
+                    gapDays * 86400000
+                ) {
+                  if (path)
+                    svg.append(
+                      svgNode("path", {
+                        d: path,
+                        stroke: item.color,
+                        class: "series",
+                      }),
+                    );
+                  path = "";
+                }
+                path += `${path ? "L" : "M"}${x(point.date)},${y(point.value)} `;
+                const mark = svgNode("circle", {
+                  cx: x(point.date),
+                  cy: y(point.value),
+                  r: 3,
+                  fill: item.color,
+                });
+                mark.append(
+                  svgNode(
+                    "title",
+                    {},
+                    `${period(point)} · ${item.name}: ${decimal.format(point.value)}`,
+                  ),
+                );
+                svg.append(mark);
+                previous = point;
+              }
+            }
+            if (path)
+              svg.append(
+                svgNode("path", {
+                  d: path,
+                  stroke: item.color,
+                  class: "series",
+                }),
+              );
+          }
+          if (first === last)
+            svg.append(
+              svgNode(
+                "text",
+                { x: center, y: 267, "text-anchor": "middle" },
+                date(new Date(first).toISOString().slice(0, 10)),
+              ),
+            );
+          else
+            svg.append(
+              svgNode(
+                "text",
+                { x: left, y: 267 },
+                date(new Date(first).toISOString().slice(0, 10)),
+              ),
+              svgNode(
+                "text",
+                { x: right, y: 267, "text-anchor": "end" },
+                date(new Date(last).toISOString().slice(0, 10)),
+              ),
+            );
+          figure.append(svg, node("figcaption", caption));
+          return figure;
+        }
+        function financing() {
+          const all = selected(data.bond_events).filter(
+            (event) =>
+              event.status === "closed" &&
+              event.closing_date <= data.cutoff_date &&
+              (instrumentControl.value === "all" ||
+                event.instrument_type === instrumentControl.value),
+          );
+          const usd = all.filter((event) => event.currency === "USD");
+          content.append(
+            node("h2", "Closed bond financing"),
+            node(
+              "p",
+              "Verified sample of closed transactions, not complete issuance or an attribution of proceeds to AI.",
+              "notice note",
+            ),
+          );
+          const series = ["nonconvertible", "convertible"].map(
+            (type, index) => {
+              const grouped = new Map();
+              for (const event of usd.filter(
+                (event) => event.instrument_type === type,
+              ))
+                grouped.set(
+                  event.closing_date,
+                  (grouped.get(event.closing_date) ?? 0) +
+                    Number(event.face_amount) / 1e9,
+                );
+              return {
+                name: type === "convertible" ? "Convertible" : "Nonconvertible",
+                color: colors[index],
+                points: [...grouped]
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([date, value]) => ({ date, value })),
+              };
+            },
+          );
+          if (usd.length)
+            content.append(
+              legend(series),
+              chart(
+                series,
+                "bar",
+                "Sampled closed USD bond face amounts by closing date",
+                "USD billions · closing dates; same-day transactions summed within each bond type.",
+              ),
+            );
+          else
+            content.append(
+              node(
+                "p",
+                "No verified closed USD bond events for this selection.",
+                "empty",
+              ),
+            );
+          content.append(
+            fold(`Closed USD events (${usd.length})`, () => eventTable(usd)),
+          );
+          const foreign = all.filter((event) => event.currency !== "USD");
+          if (foreign.length)
+            content.append(
+              fold(
+                `Other currencies (${foreign.length}) · no FX conversion`,
+                () => eventTable(foreign),
+              ),
+            );
+          const other = selected(data.other_financings ?? []);
+          if (other.length)
+            content.append(
+              fold(
+                `Other financing (${other.length}) · excluded from bond chart`,
+                () =>
+                  table(
+                    [
+                      "Issuer",
+                      "Date",
+                      "Instrument / status",
+                      "Amounts (native currency)",
+                      "Exclusion",
+                      "Sources",
+                    ],
+                    other.map((row) => [
+                      issuer(row.entity_id),
+                      date(row.closing_date ?? row.announcement_date),
+                      `${human(row.instrument_type)} · ${human(row.status)}`,
+                      [
+                        row.face_amount !== null &&
+                        row.face_amount !== undefined
+                          ? `Closed face: ${amount(row.face_amount, row.currency)}`
+                          : "",
+                        row.announced_amount
+                          ? `Announced: ${amount(row.announced_amount, row.currency)}`
+                          : "",
+                        row.committed_amount
+                          ? `Committed: ${amount(row.committed_amount, row.currency)}`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join("; "),
+                      row.exclusion_reason,
+                      sourceLinks(row.source_ids),
+                    ]),
+                  ),
+              ),
+            );
+        }
+        function eventTable(events) {
+          return table(
+            [
+              "Closed",
+              "Issuer / legal borrower",
+              "Type",
+              "Face amount",
+              "Tranches / purpose",
+              "Sources",
+            ],
+            events.map((event) => {
+              const detail = node("div");
+              detail.append(node("p", event.purpose));
+              for (const tranche of event.maturities)
+                detail.append(
+                  node(
+                    "p",
+                    `${tranche.date ? date(tranche.date) : (tranche.maturity_year ?? "Maturity not stated")}: ${amount(tranche.face_amount, event.currency)} · ${tranche.coupon_rate === null ? tranche.rate_type : `${tranche.coupon_rate}% ${tranche.rate_type}`}`,
+                  ),
+                );
+              return [
+                date(event.closing_date),
+                `${issuer(event.entity_id)} · ${event.legal_issuer}`,
+                human(event.instrument_type),
+                amount(event.face_amount, event.currency),
+                detail,
+                sourceLinks(event.source_ids),
+              ];
+            }),
+          );
+        }
+        function fiscal() {
+          const spgi = entityControl.value === "SPGI";
+          const basis = spgi ? 3 : Number(basisControl.value);
+          const basisLabel =
+            basis === 3
+              ? "fiscal quarter"
+              : basis === 12
+                ? "fiscal year"
+                : `${basis}-month YTD period`;
+          const periods = spgi
+            ? (data.spgi_periods ?? [])
+            : data.fiscal_periods.filter(
+                (row) =>
+                  row.entity_id === entityControl.value &&
+                  row.end >= "2024-01-01" &&
+                  row.duration_months === basis,
+              );
+          const rows = [...periods].sort((a, b) => a.end.localeCompare(b.end));
+          const keys = spgi
+            ? metricControl.value === "ratings"
+              ? [
+                  "ratings_transaction_revenue",
+                  "ratings_non_transaction_revenue",
+                ]
+              : ["billed_ig", "billed_hy", "billed_other", "billed_total"]
+            : metricControl.value === "debt"
+              ? ["debt_cash_proceeds", "debt_cash_repayments"]
+              : ["cfo", "cash_capex"];
+          content.append(
+            node(
+              "h2",
+              spgi
+                ? `S&P Global · ${metricControl.value === "ratings" ? "Ratings revenue" : "Billed issuance"}`
+                : issuer(entityControl.value),
+            ),
+          );
+          content.append(
+            node(
+              "p",
+              spgi
+                ? "Reported fiscal quarters only; absent quarters are not interpolated."
+                : metricControl.value === "debt"
+                  ? "Company-wide debt cash-flow lines may include loans and leases; they are not bond issuance or AI-only funding."
+                  : "Company-wide cash flows, not AI-only. Cash capex is an outflow magnitude; operating cash flow retains its sign.",
+              "note",
+            ),
+          );
+          const series = keys.map((key, index) => ({
+            name: fieldNames[key],
+            color: colors[index],
+            points: rows.map((row) => ({
+              ...row,
+              date: row.end,
+              value:
+                row[key] === null || row[key] === undefined
+                  ? null
+                  : Number(row[key]) / 1e9,
+            })),
+          }));
+          content.append(
+            legend(series),
+            chart(
+              series,
+              "line",
+              `${issuer(entityControl.value)} ${basisLabel} values in USD billions`,
+              `USD billions per ${basisLabel} · actual period ends; unavailable values and absent periods leave gaps.`,
+              basis === 3 ? 120 : 400,
+            ),
+          );
+          content.append(
+            fold(`Period data (${rows.length})`, () =>
+              table(
+                [
+                  "Fiscal period",
+                  ...keys.map((key) => fieldNames[key]),
+                  "Sources / field status",
+                ],
+                rows.map((row) => [
+                  period(row),
+                  ...keys.map((key) => amount(row[key])),
+                  fiscalEvidence(row, keys, spgi),
+                ]),
+              ),
+            ),
+          );
+          if (!spgi)
+            content.append(
+              fold("About these fields", () => {
+                const notes = node("div");
+                for (const key of keys) {
+                  const definitions = [
+                    ...new Set(
+                      rows.map((row) => row.fields[key]?.scope).filter(Boolean),
+                    ),
+                  ];
+                  notes.append(
+                    node("h3", fieldNames[key]),
+                    node(
+                      "p",
+                      definitions.join("; ") ||
+                        "No reported field definition available.",
+                    ),
+                  );
+                }
+                return notes;
+              }),
+            );
+        }
+        function fiscalEvidence(row, keys, spgi) {
+          const result = node("div", null, "evidence");
+          for (const key of keys) {
+            const block = node("div");
+            block.append(node("strong", `${fieldNames[key]}: `));
+            if (spgi) block.append(sourceLinks(row.source_refs?.[key]));
+            else {
+              const field = row.fields[key];
+              block.append(
+                `${field.status}${field.reason ? ` · ${field.reason}` : ""} `,
+                sourceLinks(field.source_ids),
+              );
+              for (const input of field.derivation_inputs ?? []) {
+                const evidence = node(
+                  "p",
+                  `${input.concept ?? ""} · ${input.start}–${input.end} · ${amount(input.value)} · ${input.accession} `,
+                );
+                if (input.filing_url)
+                  evidence.append(safeLink(input.filing_url, "Filing"));
+                block.append(evidence);
+              }
+            }
+            result.append(block);
+          }
+          for (const note of row.notes ?? []) result.append(node("p", note));
+          return result;
+        }
+        function coverage() {
+          const rows = selected(data.coverage);
+          content.append(
+            node("h2", "Coverage & limitations"),
+            node(
+              "p",
+              "An absent event or quarter is not evidence of zero financing. Field evidence is available below.",
+              "note",
+            ),
+          );
+          if (rows.length)
+            content.append(
+              table(
+                [
+                  "Issuer",
+                  "Dataset",
+                  "Window",
+                  "Status",
+                  "Limitations",
+                  "Sources",
+                ],
+                rows.map((row) => [
+                  issuer(row.entity_id),
+                  human(row.dataset),
+                  `${date(row.window_start)}–${date(row.window_end)}`,
+                  row.status,
+                  row.limitations.join("; "),
+                  sourceLinks(row.source_ids),
+                ]),
+              ),
+            );
+          else
+            content.append(
+              node("p", "No coverage statement for this selection.", "empty"),
+            );
+          const periods = selected(data.fiscal_periods);
+          const spgiPeriods =
+            entityControl.value === "all" || entityControl.value === "SPGI"
+              ? (data.spgi_periods ?? [])
+              : [];
+          content.append(
+            fold(
+              `Field evidence (${periods.length + spgiPeriods.length} periods)`,
+              () => {
+                const auditRows = [
+                  ...periods.flatMap((row) =>
+                    Object.entries(row.fields).map(([key, field]) => [
+                      `${issuer(row.entity_id)} · ${period(row)}`,
+                      field.label,
+                      amount(row[key]),
+                      `${field.scope} · ${field.status}${field.reason ? ` · ${field.reason}` : ""}`,
+                      fiscalEvidence(row, [key], false),
+                    ]),
+                  ),
+                  ...spgiPeriods.flatMap((row) =>
+                    Object.keys(row.source_refs).map((key) => [
+                      `${issuer("SPGI")} · ${period(row)}`,
+                      fieldNames[key],
+                      amount(row[key]),
+                      "S&P Global Ratings · reported quarter",
+                      fiscalEvidence(row, [key], true),
+                    ]),
+                  ),
+                ];
+                return table(
+                  [
+                    "Issuer / reported period",
+                    "Field",
+                    "Value",
+                    "Scope / status",
+                    "Evidence",
+                  ],
+                  auditRows,
+                );
+              },
+            ),
+          );
+          const ids = new Set(rows.flatMap((row) => row.source_ids));
+          for (const row of periods)
+            for (const field of Object.values(row.fields))
+              for (const id of field.source_ids) ids.add(id);
+          for (const event of selected(data.bond_events))
+            for (const id of event.source_ids) ids.add(id);
+          for (const event of selected(data.other_financings ?? []))
+            for (const id of event.source_ids) ids.add(id);
+          if (entityControl.value === "all" || entityControl.value === "SPGI")
+            for (const row of data.spgi_periods ?? [])
+              for (const list of Object.values(row.source_refs ?? {}))
+                for (const id of list) ids.add(id);
+          const relevant = [...ids]
+            .map((id) => sources.get(id))
+            .filter(Boolean);
+          content.append(
+            node("h3", "References"),
+            fold(`Sources (${relevant.length})`, () =>
+              table(
+                ["Source", "Accession / filed", "Retrieved", "SHA-256"],
+                relevant.map((source) => [
+                  safeLink(source.url, source.id),
+                  `${source.accession ?? "—"} · ${source.filed_date ?? "—"}`,
+                  source.retrieved_at,
+                  source.sha256,
+                ]),
+              ),
+            ),
+          );
+        }
+        function render() {
+          view = ["financing", "fiscal", "coverage"].includes(
+            location.hash.slice(1),
+          )
+            ? location.hash.slice(1)
+            : "financing";
+          document.querySelectorAll("nav a").forEach((link) => {
+            if (link.dataset.view === view)
+              link.setAttribute("aria-current", "page");
+            else link.removeAttribute("aria-current");
+          });
+          if (view === "fiscal" && entityControl.value === "all")
+            entityControl.value = data.entities[0]?.id ?? "";
+          entityControl.querySelector('option[value="all"]').disabled =
+            view === "fiscal";
+          document.getElementById("metric-control").hidden = view !== "fiscal";
+          document.getElementById("instrument-control").hidden =
+            view !== "financing";
+          const spgi = entityControl.value === "SPGI";
+          document.getElementById("basis-control").hidden =
+            view !== "fiscal" || spgi;
+          const options = spgi
+            ? [
+                ["billed", "Billed issuance"],
+                ["ratings", "Ratings revenue"],
+              ]
+            : [
+                ["operations", "Operating cash flow & capex"],
+                ["debt", "Debt cash proceeds & repayments"],
+              ];
+          const current = metricControl.value;
+          metricControl.replaceChildren(
+            ...options.map(([value, label]) => {
+              const option = node("option", label);
+              option.value = value;
+              return option;
+            }),
+          );
+          metricControl.value = options.some(([value]) => value === current)
+            ? current
+            : options[0][0];
+          content.replaceChildren();
+          if (!data.entities.length) {
+            content.append(
+              node("p", "No issuers are available in this snapshot.", "empty"),
+            );
+            return;
+          }
+          if (view === "fiscal") fiscal();
+          else if (view === "coverage") coverage();
+          else financing();
+        }
+        entityControl.disabled = data.entities.length === 0;
+        entityControl.append(
+          Object.assign(node("option", "All issuers"), { value: "all" }),
+        );
+        for (const entity of data.entities)
+          entityControl.append(
+            Object.assign(node("option", issuer(entity.id)), {
+              value: entity.id,
+            }),
+          );
+        document.getElementById("cutoff").textContent =
+          `Disclosure cutoff ${date(data.cutoff_date)} · fiscal statements from 2024; financing-event coverage is sampled.`;
+        for (const control of [
+          entityControl,
+          metricControl,
+          basisControl,
+          instrumentControl,
+        ])
+          control.addEventListener("change", render);
+        window.addEventListener("hashchange", render);
+        render();
+      })();
+    </script>
+  </body>
+</html>
