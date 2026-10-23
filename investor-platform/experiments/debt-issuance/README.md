@@ -97,3 +97,42 @@ The event registry contains the remaining primary source URLs. Downloaded source
 materials and generated reports belong in the ignored report directory, never in
 Git. Do not store credentials, local account details or private preview links in
 this experiment's public files.
+
+## Official aggregate comparison (2026-10-23)
+
+`official_comparison.py` reads the SEC's quarterly workbook and two BIS CSV queries,
+without parsing issuer filings. Its `SOURCE_URLS` lists the four exact downloads,
+including BIS metadata. Save those files under an ignored report's `research/`
+folder. SEC requests require a contact-bearing User-Agent. Keep that identity in
+local configuration, never in source control.
+
+```sh
+uv run --project investor-platform/backend --frozen python \
+  investor-platform/experiments/debt-issuance/official_comparison.py \
+  --research-dir hard-disk/reports/debt-official-comparison/research \
+  --output-dir hard-disk/reports/debt-official-comparison
+```
+
+The script uses the existing `openpyxl` dependency. It writes three SVG charts,
+self-contained HTML, exact plotted values in CSV, and source SHA-256 hashes.
+Optional PNG exports can be made from the SVG files with an existing SVG renderer
+(this run used Sharp at 160 DPI); no production dependency is added.
+
+- SEC: 34 quarters from 2018 Q1 to 2026 Q2, plus 12 industry rows for 2026 H1.
+  These are registered, non-convertible U.S.-market bonds over one year, including
+  financial issuers and foreign issuers. Private placements / 144A are excluded.
+- BIS: 136 observations: gross and net international debt-security issuance for
+  U.S.-nationality non-financial groups and U.S.-resident non-financial issuers.
+  These populations differ. Both include all currencies, converted to USD by BIS,
+  and include money-market instruments. Net issuance subtracts redemptions.
+- Do not sum or divide SEC and BIS totals: their sectors, markets and instrument
+  scopes differ. Neither source identifies the AI cohort. LSEG IFR requires
+  paid/authenticated access and was not collected.
+- Validation checks workbook column names, industry reconciliation, BIS dimension
+  codes, USD units, duplicate periods and missing values. Eight new data-contract
+  checks pass; the complete pilot suite passes 27 tests.
+
+Sources: [SEC definitions and download](https://www.sec.gov/data-research/statistics-data-visualizations/corporate-bond-offerings),
+[BIS international debt securities](https://data.bis.org/topics/IDS),
+[BIS API](https://data.bis.org/help/tools),
+[LSEG IFR API documentation](https://deals-api.ifre.com/).
