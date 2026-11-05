@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { MARKET_DATA_TIMEOUT, api, errorMessage } from "../api";
-import { number as formatNumber, percent as formatPercent } from "../format";
+import {
+  number as formatNumber,
+  percent as formatPercent,
+  formatMarketTimestamp,
+} from "../format";
 import { type Ledger } from "../ledger/ledger";
 
 const number = (value: string | null) => formatNumber(value, 1);
@@ -41,7 +45,6 @@ export function Holdings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    let active = true;
     const controller = new AbortController();
     setReport(null);
     setError("");
@@ -52,16 +55,15 @@ export function Holdings({
       MARKET_DATA_TIMEOUT,
     )
       .then((value) => {
-        if (active) setReport(value);
+        if (!controller.signal.aborted) setReport(value);
       })
       .catch((e) => {
-        if (active) setError(errorMessage(e));
+        if (!controller.signal.aborted) setError(errorMessage(e));
       })
       .finally(() => {
-        if (active) setBusy(false);
+        if (!controller.signal.aborted) setBusy(false);
       });
     return () => {
-      active = false;
       controller.abort();
     };
   }, [accountId, ledger, marketRevision]);
@@ -146,10 +148,7 @@ export function Holdings({
         <p className="form-note">
           Prices collected:{" "}
           {report.prices_fetched_at
-            ? new Date(report.prices_fetched_at).toLocaleString("en-US", {
-                timeZone: "America/New_York",
-                timeZoneName: "short",
-              })
+            ? formatMarketTimestamp(report.prices_fetched_at)
             : "time unavailable"}
           .
         </p>

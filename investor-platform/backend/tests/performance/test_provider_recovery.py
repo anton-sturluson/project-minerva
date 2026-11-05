@@ -73,5 +73,4 @@ def test_performance_recovers_empty_provider_history_without_accepting_foreign_p
         assert Decimal(result["value"]) == Decimal("1210")
         assert Decimal(result["return"]) == Decimal(".21")
         assert Decimal(result["SPY"]) == Decimal(".02")
-        assert result["prices_fetched_at"] is not None
         assert "Tiingo daily history" in result["source"]

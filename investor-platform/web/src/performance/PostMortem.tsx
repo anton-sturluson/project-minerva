@@ -57,7 +57,6 @@ export function PostMortem({
   const [revision, setRevision] = useState(0);
   const first = ledger.entries[0]?.effective_date;
   useEffect(() => {
-    let active = true;
     const controller = new AbortController();
     setReports([]);
     setError("");
@@ -79,18 +78,17 @@ export function PostMortem({
       MARKET_DATA_TIMEOUT,
     )
       .then((report) => {
-        if (!active) return;
+        if (controller.signal.aborted) return;
         const periods = report.attribution ?? [];
         setReports(periods);
       })
       .catch((e) => {
-        if (active) setError(errorMessage(e));
+        if (!controller.signal.aborted) setError(errorMessage(e));
       })
       .finally(() => {
-        if (active) setBusy(false);
+        if (!controller.signal.aborted) setBusy(false);
       });
     return () => {
-      active = false;
       controller.abort();
     };
   }, [

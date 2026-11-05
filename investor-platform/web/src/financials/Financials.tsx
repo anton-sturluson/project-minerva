@@ -105,7 +105,6 @@ export function Financials({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   useEffect(() => {
-    let active = true;
     const controller = new AbortController();
     setLoading(true);
     setError(false);
@@ -116,7 +115,7 @@ export function Financials({
     }
     annualFinancials(accountId, year, controller.signal)
       .then((data) => {
-        if (!active) return;
+        if (controller.signal.aborted) return;
         if (
           data.account_id !== accountId ||
           data.calendar_year !== year ||
@@ -126,13 +125,12 @@ export function Financials({
         setReport(data);
       })
       .catch(() => {
-        if (active) setError(true);
+        if (!controller.signal.aborted) setError(true);
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => {
-      active = false;
       controller.abort();
     };
   }, [accountId, year, retry, marketRevision]);

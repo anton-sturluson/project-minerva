@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
+import { formatMarketTimestamp } from "../format";
 
 type MarketStatus = {
   enabled: boolean;
@@ -15,12 +16,7 @@ type MarketStatus = {
 };
 
 const timestamp = (value: string | null) =>
-  value
-    ? new Date(value).toLocaleString("en-US", {
-        timeZone: "America/New_York",
-        timeZoneName: "short",
-      })
-    : "None recorded";
+  value ? formatMarketTimestamp(value) : "None recorded";
 
 export function MarketDataStatus({ revision }: { revision: number }) {
   const [status, setStatus] = useState<MarketStatus | null>(null);

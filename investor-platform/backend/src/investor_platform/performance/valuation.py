@@ -306,6 +306,5 @@ def hypothetical_statistics(
             "quote_end": max(dates) if dates else None,
             "source": report["source"],
             "fetched_at": report["fetched_at"],
-            "prices_fetched_at": report["prices_fetched_at"],
         }
     )

@@ -80,7 +80,6 @@ export function PerformanceComparison({
   const [report, setReport] = useState<PerformanceReport | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
-  const generation = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
   const periodIntent = useRef<Shortcut | "custom">("history");
   const lastComparison = useRef<PerformanceRequest | null>(null);
@@ -91,7 +90,6 @@ export function PerformanceComparison({
         scope: standardAccount ? "account" : request.scope,
       };
       lastComparison.current = comparison;
-      const version = ++generation.current;
       activeRequest.current?.abort();
       const controller = new AbortController();
       activeRequest.current = controller;
@@ -106,17 +104,17 @@ export function PerformanceComparison({
           comparison,
           controller.signal,
         );
-        if (version === generation.current) {
+        if (!controller.signal.aborted) {
           setReport(r);
           if (request.anchor_date) setStart(r.start);
         }
       } catch (e) {
-        if (version === generation.current) {
+        if (!controller.signal.aborted) {
           setReport(null);
           setError(errorMessage(e));
         }
       } finally {
-        if (version === generation.current) setBusy(false);
+        if (!controller.signal.aborted) setBusy(false);
       }
     },
     [account.id, standardAccount],
@@ -141,7 +139,6 @@ export function PerformanceComparison({
       setReport(null);
       void compare(request);
       return () => {
-        generation.current += 1;
         activeRequest.current?.abort();
       };
     }
@@ -175,7 +172,6 @@ export function PerformanceComparison({
         benchmark_mode: initialMode,
       });
     return () => {
-      generation.current += 1;
       activeRequest.current?.abort();
     };
   }, [

@@ -40,6 +40,7 @@ def test_refresh_is_durable_deduplicated_and_keeps_accounts_separate(
         ).json()["id"]
         for i in range(2)
     ]
+    monkeypatch.setattr(db_client.app.state, "daily_prices", True)
     calls, failed = [], {ids[0]}
     now = datetime(2026, 1, 5, 22, tzinfo=UTC)
 
@@ -55,6 +56,8 @@ def test_refresh_is_durable_deduplicated_and_keeps_accounts_separate(
     report, retry = price_refresh.refresh_workspace(database, now=now)
     assert (report["collected"], report["failed"], report["attempts"]) == (1, 1, 1)
     assert retry == now + timedelta(minutes=30)
+    status = db_client.get("/api/market-data/status").json()
+    assert datetime.fromisoformat(status["next_due_at"]) == retry
     assert "sensitive" not in str(report)
     price_refresh.refresh_workspace(database, now=now + timedelta(minutes=1))
     assert len(calls) == 2
@@ -62,6 +65,8 @@ def test_refresh_is_durable_deduplicated_and_keeps_accounts_separate(
     report, next_run = price_refresh.refresh_workspace(database, now=retry)
     assert report["status"] == "complete" and report["collected"] == 2
     assert next_run == now + timedelta(days=1)
+    status = db_client.get("/api/market-data/status").json()
+    assert datetime.fromisoformat(status["next_due_at"]) == next_run
     price_refresh.refresh_workspace(database, now=retry + timedelta(minutes=1))
     assert len(calls) == 4  # A restart cannot run the successful collection again.
     with Session(database) as session:
@@ -335,3 +340,16 @@ def test_retry_collects_new_close_while_normal_reads_keep_accepted_prices(
         workspace_id=LOCAL_WORKSPACE,
     )
     assert max(stored.close) == now.date()
+
+
+def test_empty_account_is_skipped_and_force_retries_completed_run(db_client, database):
+    db_client.post("/api/accounts", json={"name": "Empty fixture", "base_currency": "USD"})
+    now = datetime(2026, 1, 5, 22, tzinfo=UTC)
+    first, due = price_refresh.refresh_workspace(database, now=now)
+    assert first["status"] == "complete"
+    assert (first["skipped"], first["collected"], first["failed"]) == (1, 0, 0)
+    forced, forced_due = price_refresh.refresh_workspace(
+        database, now=now + timedelta(minutes=1), force=True
+    )
+    assert forced["attempts"] == 2 and forced["skipped"] == 1
+    assert forced_due == due == now + timedelta(days=1)

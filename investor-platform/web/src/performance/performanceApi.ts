@@ -52,7 +52,6 @@ export type PerformanceReport = {
   excess_spy: string | null;
   excess_qqq: string | null;
   fetched_at: string;
-  prices_fetched_at?: string | null;
   source: string;
   warnings: string[];
   series: PerformancePoint[];

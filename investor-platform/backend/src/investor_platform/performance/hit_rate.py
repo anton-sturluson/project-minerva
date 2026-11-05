@@ -204,7 +204,6 @@ def hit_rate(account_id: UUID, session: DatabaseSession, actor: CurrentActor) ->
             {
                 **result,
                 "fetched_at": datetime.now(UTC),
-                "prices_fetched_at": market_types.collected_at(histories.values()),
                 "source": " + ".join(sorted({h.source for h in histories.values()}))
                 if candidates
                 else "Saved records",

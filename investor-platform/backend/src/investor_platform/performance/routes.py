@@ -367,7 +367,6 @@ def performance(
             {
                 **result,
                 "fetched_at": datetime.now(UTC),
-                "prices_fetched_at": market_types.collected_at(fetched.values()),
                 "source": " + ".join(
                     sorted({source for h in fetched.values() for source in h.source.split(" + ")})
                 ),

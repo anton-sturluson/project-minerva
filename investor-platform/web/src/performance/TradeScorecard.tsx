@@ -39,7 +39,6 @@ export function TradeScorecard({
   const [statsError, setStatsError] = useState("");
   const [retryStats, setRetryStats] = useState(0);
   useEffect(() => {
-    let active = true;
     const controller = new AbortController();
     setStats(null);
     setStatsError("");
@@ -49,13 +48,12 @@ export function TradeScorecard({
       hypothetical ? MARKET_DATA_TIMEOUT : undefined,
     )
       .then((s) => {
-        if (active) setStats(s);
+        if (!controller.signal.aborted) setStats(s);
       })
       .catch((e) => {
-        if (active) setStatsError(errorMessage(e));
+        if (!controller.signal.aborted) setStatsError(errorMessage(e));
       });
     return () => {
-      active = false;
       controller.abort();
     };
   }, [account.id, ledger, retryStats, hypothetical, marketRevision]);

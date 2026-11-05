@@ -75,20 +75,18 @@ class AccountCollection:
 
     close: date | None = None
     failures: list[dict[str, str]] = field(default_factory=list)
-    skipped: bool = False
 
 
 def collect_account(
     session: Session, account: Account, day: date, refresh_after: datetime
-) -> AccountCollection:
+) -> AccountCollection | None:
     """Warm current prices even when an unrelated historical listing is unavailable."""
     entries: list[LedgerEntry] = [
         e for e in active_entries_for_account(session, account.id) if e.effective_date <= day
     ]
-    result: AccountCollection = AccountCollection()
     if account.base_currency != Currency.USD or not entries:
-        result.skipped = True
-        return result
+        return None
+    result: AccountCollection = AccountCollection()
     start: date = entries[0].effective_date
     provisional: bool = bool(account.reconstruction)
     records: LedgerView = ledger_view(entries, account.base_currency)
@@ -189,7 +187,6 @@ def refresh_workspace(
     """Collect one workspace with durable deduplication and a bounded next retry time."""
     now = (now or datetime.now(UTC)).astimezone(UTC)
     day: date = completed_market_date(now)
-    tomorrow: datetime = scheduled_at(day + timedelta(days=1)).astimezone(UTC)
     identity: tuple[UUID, date] = (workspace_id, day)
     lock: int = int.from_bytes(
         hashlib.sha256(f"price-refresh:{workspace_id}".encode()).digest()[:8], signed=True
@@ -208,14 +205,8 @@ def refresh_workspace(
                 if run and run.report["status"] == RefreshStatus.RUNNING:
                     run.report = {**run.report, "status": RefreshStatus.INTERRUPTED}
                     session.commit()
-                if run and not force:
-                    if (
-                        run.report["status"] == RefreshStatus.COMPLETE
-                        or run.attempts >= MAX_ATTEMPTS
-                    ):
-                        return cast(RefreshReport, run.report), tomorrow
-                    if now < run.attempted_at + RETRY_DELAY:
-                        return cast(RefreshReport, run.report), run.attempted_at + RETRY_DELAY
+                if run and not force and now < next_attempt_at(run):
+                    return cast(RefreshReport, run.report), next_attempt_at(run)
                 previous: PriceRefreshRun | None = session.scalar(
                     select(PriceRefreshRun)
                     .where(PriceRefreshRun.workspace_id == workspace_id)
@@ -245,10 +236,13 @@ def refresh_workspace(
                     select(Account).where(Account.workspace_id == workspace_id)
                 ):
                     try:
-                        outcome: AccountCollection = collect_account(session, account, day, now)
-                        if outcome.skipped:
+                        outcome: AccountCollection | None = collect_account(
+                            session, account, day, now
+                        )
+                        if outcome is None:
                             report["skipped"] += 1
-                        elif outcome.failures:
+                            continue
+                        if outcome.failures:
                             report["failed"] += 1
                             report["failures"].extend(outcome.failures)
                         else:
@@ -271,8 +265,7 @@ def refresh_workspace(
                     report["last_success_at"] = now.isoformat()
                 run.report = dict(report)
                 session.commit()
-                retry: bool = report["status"] != RefreshStatus.COMPLETE and attempts < MAX_ATTEMPTS
-                return report, min(now + RETRY_DELAY, tomorrow) if retry else tomorrow
+                return report, next_attempt_at(run)
         finally:
             try:
                 connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock})
@@ -280,6 +273,14 @@ def refresh_workspace(
             except Exception:
                 connection.invalidate()
                 raise
+
+
+def next_attempt_at(run: PriceRefreshRun) -> datetime:
+    """Use the same bounded retry schedule for collection and its visible status."""
+    tomorrow: datetime = scheduled_at(run.scheduled_date + timedelta(days=1)).astimezone(UTC)
+    if run.report["status"] == RefreshStatus.COMPLETE or run.attempts >= MAX_ATTEMPTS:
+        return tomorrow
+    return min(run.attempted_at + RETRY_DELAY, tomorrow)
 
 
 def last_success_at(
@@ -320,12 +321,8 @@ def collection_status(request: Request, session: DatabaseSession, actor: Current
     if enabled:
         if run is None:
             next_due = now
-        elif run.report["status"] != RefreshStatus.COMPLETE and run.attempts < MAX_ATTEMPTS:
-            next_due = min(
-                run.attempted_at + RETRY_DELAY, scheduled_at(run.scheduled_date + timedelta(days=1))
-            )
         else:
-            next_due = scheduled_at(run.scheduled_date + timedelta(days=1))
+            next_due = next_attempt_at(run)
     return {
         "enabled": enabled,
         "worker_alive": worker is not None and worker.is_alive(),
