@@ -14,8 +14,14 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Engine
 
 from investor_platform.domain import Currency
-from investor_platform.market_data.cache import cached_payload
-from investor_platform.market_data.types import History, HistoryOptions, JsonValue, MarketNumber
+from investor_platform.market_data.cache import CachedPayload, cached_payload
+from investor_platform.market_data.types import (
+    History,
+    HistoryOptions,
+    JsonValue,
+    MarketDataError,
+    MarketNumber,
+)
 
 
 def positive(value: MarketNumber) -> Decimal:
@@ -59,8 +65,10 @@ def history(
     chart: dict[str, JsonValue] = cast(dict[str, JsonValue], payload["chart"])
     result: dict[str, JsonValue] = cast(list[dict[str, JsonValue]], chart["result"])[0]
     meta: dict[str, str] = cast(dict[str, str], result["meta"])
+    if not meta.get("currency"):
+        raise MarketDataError(f"{symbol}: Yahoo quote currency is unavailable")
     if meta["currency"] != currency:
-        raise ValueError(f"Market currency is not {currency}")
+        raise ValueError(f"{symbol}: market currency {meta['currency']} does not match {currency}")
     if meta["instrumentType"] not in instruments:
         raise ValueError("Unexpected market instrument type")
     tz: ZoneInfo = ZoneInfo(meta["exchangeTimezoneName"])
@@ -114,8 +122,10 @@ def history(
                     amount *= ratio
             dividends[d] = dividends.get(d, Decimal(0)) + amount
     if not prices:
-        raise ValueError("No completed market sessions in this period")
-    return History(prices, returns, dividends, set(splits), meta["exchangeName"])
+        raise MarketDataError(f"{symbol}: no completed Yahoo sessions in this period")
+    return History(
+        prices, returns, dividends, set(splits), meta["exchangeName"], fetched_at=datetime.now(UTC)
+    )
 
 
 def cached_history(
@@ -146,7 +156,7 @@ def cached_history(
             "source": result.source,
         }
 
-    body: dict[str, JsonValue] = cached_payload(
+    cached: CachedPayload = cached_payload(
         engine,
         workspace_id,
         "yahoo-v1",
@@ -155,7 +165,9 @@ def cached_history(
         end,
         load,
         refresh_after=refresh_after,
+        max_age=None,
     )
+    body: dict[str, JsonValue] = cached.body
     values: dict[str, dict[date, Decimal]] = {
         name: {
             date.fromisoformat(day): Decimal(value)
@@ -169,4 +181,5 @@ def cached_history(
         splits={date.fromisoformat(day) for day in cast(list[str], body["splits"])},
         exchange=cast(str, body["exchange"]),
         source=cast(str, body["source"]),
+        fetched_at=cached.fetched_at,
     )

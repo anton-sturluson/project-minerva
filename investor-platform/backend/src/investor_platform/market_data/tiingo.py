@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy import Engine
 
 from investor_platform.domain import ACCOUNTING_PRECISION
-from investor_platform.market_data.cache import cached_payload
+from investor_platform.market_data.cache import CachedPayload, cached_payload
 from investor_platform.market_data.listings import EXCHANGES
 from investor_platform.market_data.types import History, JsonValue, MarketDataError, MarketNumber
 from investor_platform.market_data.yahoo import positive
@@ -65,7 +65,7 @@ def payload(
     *,
     fx: bool = False,
     refresh_after: datetime | None = None,
-) -> dict[str, JsonValue]:
+) -> CachedPayload:
     """Load and validate a private dated stock or FX payload before caching it."""
     key: str | None = os.environ.get("TIINGO_API_KEY")
     if not key:
@@ -97,6 +97,7 @@ def payload(
         end,
         load,
         refresh_after=refresh_after,
+        max_age=None,
     )
 
 
@@ -105,6 +106,8 @@ def parse_stock(body: dict[str, JsonValue], symbol: str) -> History:
     meta: dict[str, str] = cast(dict[str, str], body["meta"])
     if meta["ticker"].upper() != symbol.upper():
         raise ValueError("Tiingo symbol identity does not match")
+    if meta.get("currency", "USD") != "USD":
+        raise ValueError(f"{symbol}: Tiingo market currency does not match USD")
     close: dict[date, Decimal] = {}
     adjusted: dict[date, Decimal] = {}
     dividends: dict[date, Decimal] = {}
@@ -153,10 +156,11 @@ def stock_history(
         dict[str, str] | None, (security.market_identity or {}).get(PROVIDER)
     )
     symbol: str = review["symbol"] if review else security.ticker
-    body: dict[str, JsonValue] = payload(
+    cached: CachedPayload = payload(
         engine, workspace_id, symbol, start, end, refresh_after=refresh_after
     )
-    result: History = parse_stock(body, symbol)
+    result: History = parse_stock(cached.body, symbol)
+    result.fetched_at = cached.fetched_at
     if result.exchange not in EXCHANGES[security.exchange]:
         if not (
             review
@@ -207,7 +211,9 @@ def fx_history(
         if currency in {"AUD", "EUR", "GBP", "NZD"}
         else "usd" + currency.lower()
     )
-    return parse_fx(
-        payload(engine, workspace_id, symbol, start, end, fx=True, refresh_after=refresh_after),
-        symbol,
+    cached: CachedPayload = payload(
+        engine, workspace_id, symbol, start, end, fx=True, refresh_after=refresh_after
     )
+    result: History = parse_fx(cached.body, symbol)
+    result.fetched_at = cached.fetched_at
+    return result

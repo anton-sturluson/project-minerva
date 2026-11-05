@@ -27,6 +27,7 @@ from investor_platform.economics.routes import router as economics_router
 from investor_platform.financials.api import router as financial_router
 from investor_platform.ledger.corrections import router as corrections_router
 from investor_platform.ledger.routes import router as ledger_router
+from investor_platform.market_data.price_refresh import router as price_status_router
 from investor_platform.performance.hit_rate import router as hit_rate_router
 from investor_platform.performance.routes import router as performance_router
 from investor_platform.performance.valuation import router as valuation_router
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from investor_platform.market_data.price_refresh import run_worker
 
         worker = Thread(target=run_worker, args=(app.state.engine, stop), daemon=True)
+        app.state.price_worker = worker
         worker.start()
         workers.append(worker)
     if app.state.economics_refresh:
@@ -73,6 +75,7 @@ class Health(BaseModel):
 
     status: str = "ok"
     service: str = "investor-platform"
+    release: str = "development"
 
 
 def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
@@ -99,6 +102,9 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
 
     app = FastAPI(title="Minerva Investor Platform", version="0.1.0", lifespan=lifespan)
     # Opt-in only on the private deployment, never on the synthetic development server.
+    app.state.release = os.environ.get("INVESTOR_RELEASE", "development")
+    app.state.price_worker = None
+    app.include_router(price_status_router)
     app.state.daily_prices = remote and os.environ.get("INVESTOR_DAILY_PRICES") == "1"
     app.state.economics_refresh = remote and os.environ.get("INVESTOR_ECONOMICS_REFRESH") == "1"
     app.include_router(economics_router)
@@ -173,7 +179,7 @@ def create_app(*, web_dist: Path = WEB_DIST) -> FastAPI:
     @app.get("/api/health", response_model=Health)
     def health() -> Health:
         """Return the service identity without querying portfolio records."""
-        return Health()
+        return Health(release=app.state.release)
 
     if remote:
         app.mount("/", StaticFiles(directory=web_dist, html=True), name="web")

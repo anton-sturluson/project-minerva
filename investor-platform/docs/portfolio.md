@@ -72,7 +72,7 @@ Market % is each position’s closing market value divided by portfolio value, i
 
 ## Current holdings valuation
 
-Current holdings fetch only open securities and remain available if the historical performance report fails. A missing quote keeps the affected row unpriced while other rows retain their prices; aggregate value and market weights are withheld until complete. ASX/TSXV quotes use verified listing identity and same-date AUD/USD or CAD/USD closes. Prices must be no more than four calendar days old. Cash is the recorded balance, without modeled distributions. Use Refresh prices to retry. See [ADR 0003](decisions/0003-independent-holdings.md).
+Current holdings fetch only open securities and remain available if the historical performance report fails. A missing quote keeps the affected row unpriced while other rows retain their prices; aggregate value and market weights are withheld until complete. ASX/TSXV quotes use verified listing identity and same-date AUD/USD or CAD/USD closes. Prices must be no more than four calendar days old. Cash is the recorded balance, without modeled distributions. Use Reload data to reread accepted prices, performance, and collection status. This does not force a provider download; the displayed quote and collection dates identify the data used. See [ADR 0003](decisions/0003-independent-holdings.md).
 
 ## Investment income
 

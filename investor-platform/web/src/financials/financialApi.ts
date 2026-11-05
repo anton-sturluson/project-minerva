@@ -67,9 +67,13 @@ export type FinancialReport = {
   weighted_company_per_share?: Record<string, SummaryMeasure>;
 };
 
-export const annualFinancials = (accountId: string, year: number) =>
+export const annualFinancials = (
+  accountId: string,
+  year: number,
+  signal?: AbortSignal,
+) =>
   api<FinancialReport>(
     `/accounts/${accountId}/financials?year=${year}`,
-    undefined,
+    { signal },
     MARKET_DATA_TIMEOUT,
   );

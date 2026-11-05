@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from investor_platform.db import Actor, CurrentActor, DatabaseSession
@@ -18,6 +18,7 @@ from investor_platform.research.snapshots import (
     load_holdings,
     manager_comparison,
     previous_quarter,
+    quarter_end,
     snapshot,
 )
 
@@ -200,11 +201,14 @@ def get_annual_changes(
 ) -> dict:
     """Compare annual net holdings, using the latest loaded quarter for an unfinished year."""
     manager: ResearchManager = owned_manager(session, actor, slug)
-    latest: date | None = session.scalar(
-        select(func.max(ResearchFiling.report_period)).where(
-            ResearchFiling.manager_id == manager.id
+    periods: list[date] = list(
+        session.scalars(
+            select(ResearchFiling.report_period)
+            .where(ResearchFiling.manager_id == manager.id)
+            .distinct()
         )
     )
+    latest: date | None = max((period for period in periods if quarter_end(period)), default=None)
     end: date = latest if latest and latest.year == year else date(year, 12, 31)
     return {
         **manager_comparison(session, manager, end, prior=date(year - 1, 12, 31)),

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import DAYS, correction, ledger, replacement, stock_report, trade
 from httpx import Response
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session
 
 from investor_platform.app import app
@@ -105,7 +105,7 @@ def test_new_trade_correction_and_cancellation_change_cached_attribution(
 def test_price_revision_and_expiry_refresh_cached_report(
     db_client: TestClient,
     portfolio: tuple[str, dict[str, History]],
-    expire_prices: Callable[[], None],
+    database: Engine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A provider refresh and the bounded lifetime each force a fresh result."""
@@ -115,7 +115,16 @@ def test_price_revision_and_expiry_refresh_cached_report(
     original: Record = warm_report(db_client, account).json()
     portfolio[1]["AAA"].close[DAYS[-1]] = Decimal(130)
     portfolio[1]["AAA"].adjusted[DAYS[-1]] = Decimal(130)
-    expire_prices()
+    with Session(database) as session:
+        model: Account = session.get(Account, UUID(account))
+        market_yahoo.cached_history(
+            "AAA",
+            DAYS[0],
+            DAYS[-1],
+            engine=database,
+            workspace_id=model.workspace_id,
+            refresh_after=datetime.now(UTC),
+        )
     refreshed: Response = stock_report(db_client, account)
     assert refreshed.status_code == 200, refreshed.text
     assert Decimal(refreshed.json()["attribution"][0]["gain"]) == 300
@@ -200,6 +209,8 @@ def test_nonmax_provider_revision_invalidates_cached_report(
             row.fetched_at = base if row.symbol.startswith("AAA:") else base + timedelta(seconds=20)
         session.commit()
     original: Record = warm_report(db_client, account).json()
+    assert datetime.fromisoformat(original["prices_fetched_at"]) == base
+    assert datetime.fromisoformat(original["fetched_at"]) > base
     with Session(database) as session:
         rows = list(session.scalars(select(MarketCache)))
         price: MarketCache = next(row for row in rows if row.symbol.startswith("AAA:"))
@@ -214,6 +225,9 @@ def test_nonmax_provider_revision_invalidates_cached_report(
     assert refreshed.status_code == 200, refreshed.text
     assert Decimal(original["attribution"][0]["gain"]) == 210
     assert Decimal(refreshed.json()["attribution"][0]["gain"]) == 300
+    assert datetime.fromisoformat(refreshed.json()["prices_fetched_at"]) == base + timedelta(
+        seconds=10
+    )
 
 
 @pytest.mark.parametrize("change", ["import_evidence", "unrelated_quote"])
@@ -254,3 +268,30 @@ def test_irrelevant_evidence_and_quotes_preserve_cached_response(
     repeated: Response = stock_report(db_client, account)
     assert repeated.status_code == 200
     assert repeated.content == original.content
+
+
+def test_removed_provider_inputs_cannot_restore_a_report_from_an_empty_revision(
+    db_client: TestClient,
+    portfolio: tuple[str, dict[str, History]],
+    database: Engine,
+) -> None:
+    """A provider-cache reset must reacquire inputs rather than revive a prior cold result."""
+    account: str = portfolio[0]
+    original: Response = stock_report(db_client, account)
+    assert original.status_code == 200, original.text
+    with database.begin() as connection:
+        connection.execute(delete(MarketCache))
+    del portfolio[1]["AAA"].close[DAYS[1]]
+    del portfolio[1]["AAA"].adjusted[DAYS[1]]
+
+    incomplete: Response = stock_report(db_client, account)
+    assert incomplete.status_code == 422, incomplete.text
+    assert "Missing close" in incomplete.json()["detail"]
+
+    portfolio[1]["AAA"].close[DAYS[1]] = Decimal(110)
+    portfolio[1]["AAA"].adjusted[DAYS[1]] = Decimal(110)
+    with database.begin() as connection:
+        connection.execute(delete(MarketCache))
+    recovered: Response = stock_report(db_client, account)
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["attribution"] == original.json()["attribution"]

@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
@@ -14,6 +15,14 @@ from investor_platform.models import MarketCache
 CACHE_TTL: timedelta = timedelta(days=1)
 
 
+@dataclass(frozen=True)
+class CachedPayload:
+    """Validated provider payload and the time it was actually collected."""
+
+    body: dict[str, JsonValue]
+    fetched_at: datetime
+
+
 def cached_payload(
     engine: Engine | None,
     workspace_id: UUID | None,
@@ -24,8 +33,9 @@ def cached_payload(
     load: Callable[[date, date], dict[str, JsonValue]],
     *,
     refresh_after: datetime | None = None,
-) -> dict[str, JsonValue]:
-    """Reuse a fresh covering payload or validate and store an expanded date range."""
+    max_age: timedelta | None = CACHE_TTL,
+) -> CachedPayload:
+    """Reuse accepted coverage; explicit collection validates before replacement."""
     identity: tuple[UUID | None, str, str] = (workspace_id, provider, symbol)
     session: Session
     with Session(engine) as session, session.begin():
@@ -38,10 +48,10 @@ def cached_payload(
             cached
             and cached.start <= start
             and cached.end >= end
-            and now - cached.fetched_at < CACHE_TTL
+            and (max_age is None or now - cached.fetched_at < max_age)
             and (refresh_after is None or cached.fetched_at >= refresh_after)
         ):
-            return cached.payload
+            return CachedPayload(cached.payload, cached.fetched_at.astimezone(UTC))
         first: date = min(start, cached.start) if cached else start
         last: date = max(end, cached.end) if cached else end
         # Validate before replacing a good cache. Failures roll back.
@@ -51,4 +61,4 @@ def cached_payload(
             session.add(cached)
         cached.start, cached.end, cached.payload = first, last, body
         cached.fetched_at = datetime.now(UTC)
-        return body
+        return CachedPayload(body, cached.fetched_at)

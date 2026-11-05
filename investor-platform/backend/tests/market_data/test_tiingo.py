@@ -1,4 +1,6 @@
-from datetime import date, timedelta
+import io
+import json
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -11,6 +13,7 @@ from investor_platform.market_data import history as market
 from investor_platform.market_data import tiingo as tiingo
 from investor_platform.market_data import types as market_types
 from investor_platform.market_data import yahoo as market_yahoo
+from investor_platform.market_data.cache import CachedPayload
 from investor_platform.models import MarketCache
 
 START, END = date(2020, 1, 2), date(2020, 1, 3)
@@ -47,6 +50,10 @@ def test_tiingo_keeps_actual_share_units_and_actions():
     assert h.source == "Tiingo daily history"
     with pytest.raises(ValueError, match="identity"):
         tiingo.parse_stock(sample(), "OTHER")
+    foreign = sample()
+    foreign["meta"]["currency"] = "CAD"
+    with pytest.raises(ValueError, match="currency"):
+        tiingo.parse_stock(foreign, "AAA")
 
 
 def test_cache_covers_retries_expands_ranges_and_rejects_bad_refresh(database, monkeypatch):
@@ -60,7 +67,7 @@ def test_cache_covers_retries_expands_ranges_and_rejects_bad_refresh(database, m
         return body["rows"] if "/prices?" in path else body["meta"]
 
     monkeypatch.setattr(tiingo, "get", fetch)
-    assert tiingo.payload(database, LOCAL_WORKSPACE, "AAA", START, END) == body
+    assert tiingo.payload(database, LOCAL_WORKSPACE, "AAA", START, END).body == body
     tiingo.payload(database, LOCAL_WORKSPACE, "AAA", START, START)
     assert len(requests) == 2
     assert all("token" not in path for path in requests)
@@ -71,13 +78,15 @@ def test_cache_covers_retries_expands_ranges_and_rejects_bad_refresh(database, m
     body["rows"] = []
     with pytest.raises(ValueError, match="No Tiingo"):
         tiingo.payload(database, LOCAL_WORKSPACE, "AAA", START, END + timedelta(days=1))
-    assert tiingo.payload(database, LOCAL_WORKSPACE, "AAA", START, END)["rows"]
+    assert tiingo.payload(database, LOCAL_WORKSPACE, "AAA", START, END).body["rows"]
 
 
 def test_historical_exchange_exception_requires_dated_evidence(monkeypatch):
     body = sample()
     body["meta"]["exchangeCode"] = "PINK"
-    monkeypatch.setattr(tiingo, "payload", lambda *args, **kwargs: body)
+    monkeypatch.setattr(
+        tiingo, "payload", lambda *args, **kwargs: CachedPayload(body, datetime.now(UTC))
+    )
     security = SimpleNamespace(
         ticker="AAA", exchange="NASDAQ", currency="USD", market_identity=None
     )
@@ -138,12 +147,59 @@ def test_yahoo_failure_falls_back_only_for_the_required_holding_window(database,
     assert result["AAA"].source == "Tiingo daily history"
 
 
+@pytest.mark.parametrize("currency", [None, "missing", "USD", "CAD"])
+def test_unavailable_yahoo_history_uses_validated_fallback_but_currency_mismatch_rejects(
+    database, monkeypatch, currency
+):
+    monkeypatch.setenv("TIINGO_API_KEY", "synthetic-token")
+
+    def yahoo_response(request, timeout):
+        unavailable = "/chart/AAA?" in request.full_url
+        meta = {
+            "currency": currency if unavailable else "USD",
+            "exchangeName": "NYQ",
+            "instrumentType": "EQUITY",
+            "exchangeTimezoneName": "America/New_York",
+        }
+        if unavailable and currency == "missing":
+            del meta["currency"]
+        closes = [] if unavailable else [100]
+        stamps = [] if unavailable else [int(datetime(2020, 1, 2, 20, tzinfo=UTC).timestamp())]
+        result = {
+            "meta": meta,
+            "timestamp": stamps,
+            "indicators": {"quote": [{"close": closes}], "adjclose": [{"adjclose": closes}]},
+        }
+        return io.BytesIO(json.dumps({"chart": {"result": [result]}}).encode())
+
+    body = sample()
+    monkeypatch.setattr(market_yahoo, "urlopen", yahoo_response)
+    monkeypatch.setattr(
+        tiingo, "get", lambda path, key: body["rows"] if "/prices?" in path else body["meta"]
+    )
+    security = SimpleNamespace(ticker="AAA", exchange="NYSE", currency="USD", market_identity=None)
+    if currency == "CAD":
+        with pytest.raises(ValueError, match="AAA: market currency CAD does not match USD"):
+            market.security_histories(
+                [security], START, END, engine=database, workspace_id=LOCAL_WORKSPACE
+            )
+    else:
+        result = market.security_histories(
+            [security], START, END, engine=database, workspace_id=LOCAL_WORKSPACE
+        )
+        assert result["AAA"].close == {START: Decimal(2), END: Decimal(21)}
+        assert result["AAA"].exchange == "NYQ"
+        assert result["AAA"].source == "Tiingo daily history"
+
+
 def test_pln_valuation_uses_inverse_usd_pair(monkeypatch):
     calls = []
 
     def payload(engine, workspace, symbol, start, end, *, fx, refresh_after=None):
         calls.append((symbol, fx))
-        return {"rows": [{"date": "2020-01-02", "ticker": "usdpln", "close": "4"}]}
+        return CachedPayload(
+            {"rows": [{"date": "2020-01-02", "ticker": "usdpln", "close": "4"}]}, datetime.now(UTC)
+        )
 
     monkeypatch.setattr(tiingo, "payload", payload)
     result = tiingo.fx_history("PLN", START, END, None, LOCAL_WORKSPACE)

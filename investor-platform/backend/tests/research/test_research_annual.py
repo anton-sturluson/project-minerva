@@ -121,3 +121,26 @@ def test_past_year_requires_december_and_amendment_recovery_is_shared(
     filing(database, manager_id, "2025-09-30", "invalid", row("5", "50"), count=2)
     result = db_client.get(endpoint).json()
     assert result["status"] == "unavailable" and "count" in result["reason"]
+
+
+@pytest.mark.parametrize("malformed_period", ["2026-10-01", "2027-01-01"])
+def test_annual_endpoint_ignores_nonquarter_filing_dates(
+    database: Engine, db_client: TestClient, tmp_path: Path, malformed_period: str
+) -> None:
+    """Stored malformed disclosures cannot turn a valid annual comparison into HTTP 422."""
+    manager_id: UUID = registry(database, tmp_path)
+    for period in ["2025-12-31", "2026-03-31", "2026-06-30"]:
+        filing(database, manager_id, period, period, row("5", "50"))
+    filing(database, manager_id, malformed_period, "malformed-period", row("5", "50"))
+    response = db_client.get("/api/research/managers/example/annual-changes?year=2026")
+    assert response.status_code == 200
+    result: dict = response.json()
+    assert result["status"] == "available"
+    assert result["quarter"] == "2026-06-30"
+    assert result["year_to_date"] is True
+
+    filing(database, manager_id, "2026-09-30", "blocked-quarter", row("5", "50"), count=2)
+    blocked: dict = db_client.get("/api/research/managers/example/annual-changes?year=2026").json()
+    assert blocked["quarter"] == "2026-09-30"
+    assert blocked["status"] == "unavailable"
+    assert "count" in blocked["reason"]

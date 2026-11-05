@@ -132,7 +132,7 @@ def cached_report(key: CacheKey) -> bytes | None:
 
 
 def remember_report(key: CacheKey, body: bytes) -> None:
-    """Store only a successfully calculated report under its pre-calculation revision."""
+    """Store a successful report after its input revision remains unchanged."""
     with _lock:
         _reports[key] = (monotonic() + TTL_SECONDS, body)
         _reports.move_to_end(key)

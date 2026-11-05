@@ -8,7 +8,9 @@ export async function api<T>(
   const response = await fetch(`/api${path}`, {
     ...options,
     headers: { "Content-Type": "application/json", ...options?.headers },
-    signal: AbortSignal.timeout(timeout),
+    signal: options?.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(timeout)])
+      : AbortSignal.timeout(timeout),
     cache: "no-store",
   });
   if (!response.ok) {

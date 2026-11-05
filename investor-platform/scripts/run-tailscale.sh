@@ -23,6 +23,7 @@ print("https://" + me["DNSName"].rstrip(".") + ":8444")
 print(login)
 ')
 export INVESTOR_MODE=tailscale
+export INVESTOR_RELEASE="$(git rev-parse --short=12 HEAD)"
 export TAILSCALE_ORIGIN="${identity%%$'\n'*}"
 export TAILSCALE_USER_LOGIN="${identity#*$'\n'}"
 (cd web && pnpm install --frozen-lockfile && pnpm build)

@@ -1,7 +1,8 @@
 """Shared dated market histories and supported collection limits."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TypedDict
 
@@ -36,6 +37,15 @@ class History:
     splits: set[date] = field(default_factory=set)
     exchange: str = ""
     source: str = SOURCE
+    fetched_at: datetime | None = None
+
+
+def collected_at(histories: Iterable[History]) -> datetime | None:
+    """Report the oldest contributing collection, or unknown if any date is missing."""
+    dates: list[datetime | None] = [history.fetched_at for history in histories]
+    if not dates or any(stamp is None for stamp in dates):
+        return None
+    return min(stamp for stamp in dates if stamp is not None)
 
 
 MAX_CLOSE_AGE: timedelta = timedelta(days=4)

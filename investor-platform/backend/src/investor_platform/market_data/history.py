@@ -14,13 +14,14 @@ from sqlalchemy import Engine
 
 from investor_platform.domain import ACCOUNTING_PRECISION
 from investor_platform.market_data import yahoo as market_yahoo
-from investor_platform.market_data.listings import FOREIGN_LISTINGS, symbol_for
+from investor_platform.market_data.listings import FOREIGN_LISTINGS, symbol_for, verify_exchange
 from investor_platform.market_data.types import (
     BENCHMARKS,
     MAX_CLOSE_AGE,
     History,
     HistoryOptions,
     MarketDataError,
+    collected_at,
 )
 
 if TYPE_CHECKING:
@@ -70,6 +71,74 @@ def usd_history(local: History, fx: History) -> History:
         local.splits,
         local.exchange,
         source=" + ".join(sorted({local.source, fx.source})),
+        fetched_at=collected_at((local, fx)),
+    )
+
+
+def listing_history(
+    security: Security | SecurityView,
+    start: date,
+    end: date,
+    *,
+    provisional: bool = False,
+    engine: Engine | None = None,
+    workspace_id: UUID | None = None,
+    refresh_after: datetime | None = None,
+) -> History:
+    """Read one validated listing in its quote currency, with bounded prior closes."""
+    symbol: str = symbol_for(security, provisional=provisional)
+    foreign: tuple[str, str, set[str]] | None = FOREIGN_LISTINGS.get(security.exchange)
+    options: HistoryOptions = {"currency": foreign[1]} if foreign else {}
+    result: History
+    try:
+        result = market_yahoo.cached_history(
+            symbol,
+            start - MAX_CLOSE_AGE,
+            end,
+            engine=engine,
+            workspace_id=workspace_id,
+            refresh_after=refresh_after,
+            **options,
+        )
+    except (OSError, KeyError, TypeError, IndexError):
+        if foreign or engine is None or not os.environ.get("TIINGO_API_KEY"):
+            raise
+        from investor_platform.market_data.tiingo import stock_history
+
+        result = stock_history(
+            security, start, end, engine, workspace_id, refresh_after=refresh_after
+        )
+    verify_exchange(security, result, provisional=provisional)
+    return result
+
+
+def fx_history(
+    currency: str,
+    start: date,
+    end: date,
+    *,
+    engine: Engine | None = None,
+    workspace_id: UUID | None = None,
+    refresh_after: datetime | None = None,
+) -> History:
+    """Read dated USD conversion rates; only provider availability permits fallback."""
+    if engine is not None and os.environ.get("TIINGO_API_KEY"):
+        from investor_platform.market_data import tiingo
+
+        try:
+            return tiingo.fx_history(
+                currency, start, end, engine, workspace_id, refresh_after=refresh_after
+            )
+        except OSError:
+            pass
+    return market_yahoo.cached_history(
+        f"{currency}USD=X",
+        start,
+        end,
+        instruments=("CURRENCY",),
+        engine=engine,
+        workspace_id=workspace_id,
+        refresh_after=refresh_after,
     )
 
 
@@ -90,7 +159,7 @@ def security_histories(
     by_symbol: dict[str, Security | SecurityView] = {
         symbol_for(s, provisional=provisional): s for s in securities
     }
-    requests: dict[str, HistoryOptions] = {b: {} for b in BENCHMARKS}
+    requests: set[str] = set(BENCHMARKS) | set(by_symbol)
     foreign: dict[str, str] = {}
     security: Security | SecurityView
     symbol: str
@@ -100,12 +169,9 @@ def security_histories(
         listing: tuple[str, str, set[str]] | None = FOREIGN_LISTINGS.get(security.exchange)
         if listing:
             currency = listing[1]
-            requests[symbol] = {"currency": currency}
             if convert_fx:
-                requests[f"{currency}USD=X"] = {"instruments": ("CURRENCY",)}
+                requests.add(f"{currency}USD=X")
                 foreign[symbol] = currency
-        else:
-            requests[symbol] = {}
 
     def fetch(symbol: str) -> tuple[str, History | None]:
         """Read one bounded symbol history with the configured validated fallback."""
@@ -114,43 +180,35 @@ def security_histories(
         first, last = (
             (start, end) if symbol in BENCHMARKS else (windows or {}).get(symbol, (start, end))
         )
-        first -= MAX_CLOSE_AGE
         try:
-            if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol.endswith("USD=X"):
-                from investor_platform.market_data.tiingo import fx_history
-
-                try:
-                    return symbol, fx_history(
-                        symbol[:-5], first, last, engine, workspace_id, refresh_after=refresh_after
-                    )
-                except OSError:
-                    # An optional provider outage must not disable validated Yahoo FX.
-                    # Identity/price validation failures still propagate unchanged.
-                    pass
+            if symbol in by_symbol:
+                return symbol, listing_history(
+                    by_symbol[symbol],
+                    first,
+                    last,
+                    provisional=provisional,
+                    engine=engine,
+                    workspace_id=workspace_id,
+                    refresh_after=refresh_after,
+                )
+            if symbol.endswith("USD=X"):
+                return symbol, fx_history(
+                    symbol[:-5],
+                    first - MAX_CLOSE_AGE,
+                    last,
+                    engine=engine,
+                    workspace_id=workspace_id,
+                    refresh_after=refresh_after,
+                )
             return symbol, market_yahoo.cached_history(
                 symbol,
-                first,
+                first - MAX_CLOSE_AGE,
                 last,
                 engine=engine,
                 workspace_id=workspace_id,
                 refresh_after=refresh_after,
-                **requests[symbol],
             )
         except (OSError, KeyError, TypeError, IndexError):
-            if engine is not None and os.environ.get("TIINGO_API_KEY") and symbol in by_symbol:
-                from investor_platform.market_data.tiingo import stock_history
-
-                try:
-                    return symbol, stock_history(
-                        by_symbol[symbol],
-                        first + MAX_CLOSE_AGE,
-                        last,
-                        engine,
-                        workspace_id,
-                        refresh_after=refresh_after,
-                    )
-                except (OSError, KeyError, TypeError, IndexError):
-                    pass
             return symbol, None
 
     pool: ThreadPoolExecutor

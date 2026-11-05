@@ -44,9 +44,11 @@ const shortcutDates = (ledger: Ledger, through: string, shortcut: Shortcut) => {
 export function PerformanceComparison({
   account,
   ledger,
+  marketRevision,
 }: {
   account: Account;
   ledger: Ledger;
+  marketRevision: number;
 }) {
   const standardAccount =
     account.reconstruction?.cash_method === "purchase_shortfall" ||
@@ -79,6 +81,8 @@ export function PerformanceComparison({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
+  const periodIntent = useRef<Shortcut | "custom">("history");
   const lastComparison = useRef<PerformanceRequest | null>(null);
   const compare = useCallback(
     async (request: PerformanceRequest) => {
@@ -88,13 +92,20 @@ export function PerformanceComparison({
       };
       lastComparison.current = comparison;
       const version = ++generation.current;
+      activeRequest.current?.abort();
+      const controller = new AbortController();
+      activeRequest.current = controller;
       setBusy(true);
       setError("");
       setReport((current) =>
         current ? { ...current, scenario: null, scenario_error: null } : null,
       );
       try {
-        const r = await fetchPerformance(account.id, comparison);
+        const r = await fetchPerformance(
+          account.id,
+          comparison,
+          controller.signal,
+        );
         if (version === generation.current) {
           setReport(r);
           if (request.anchor_date) setStart(r.start);
@@ -111,12 +122,27 @@ export function PerformanceComparison({
     [account.id, standardAccount],
   );
   useEffect(() => {
-    if (standardAccount && lastComparison.current) {
-      setScope("account");
+    if (lastComparison.current) {
+      const request = { ...lastComparison.current };
+      if (periodIntent.current !== "custom") {
+        request.end = marketDataThroughDate();
+        const period = shortcutDates(ledger, request.end, periodIntent.current);
+        request.start = period.from;
+        request.anchor_date = period.anchor;
+        setStart(request.start);
+        setEnd(request.end);
+        setAnchor(request.anchor_date);
+      }
+      if (!request.start || !request.end || request.start >= request.end) {
+        setBusy(false);
+        return;
+      }
+      if (standardAccount) setScope("account");
       setReport(null);
-      void compare(lastComparison.current);
+      void compare(request);
       return () => {
         generation.current += 1;
+        activeRequest.current?.abort();
       };
     }
     // Open full history initially; purchase-funded ledger refreshes retain the comparison.
@@ -150,6 +176,7 @@ export function PerformanceComparison({
       });
     return () => {
       generation.current += 1;
+      activeRequest.current?.abort();
     };
   }, [
     account.base_currency,
@@ -157,6 +184,7 @@ export function PerformanceComparison({
     canEstimate,
     standardAccount,
     ledger,
+    marketRevision,
     compare,
   ]);
   function submit(e: FormEvent) {
@@ -172,6 +200,7 @@ export function PerformanceComparison({
     });
   }
   function choosePeriod(shortcut: Shortcut) {
+    periodIntent.current = shortcut;
     const through = marketDataThroughDate();
     const basis: PerformanceBaseline =
       shortcut === "history" ? "history" : "recorded";
@@ -338,6 +367,7 @@ export function PerformanceComparison({
               min={ledger.entries[0]?.effective_date}
               max={end}
               onChange={(e) => {
+                periodIntent.current = "custom";
                 setAnchor(undefined);
                 const from = e.target.value;
                 const basis =
@@ -346,16 +376,15 @@ export function PerformanceComparison({
                     : "recorded";
                 setStart(from);
                 setBaseline(basis);
-                if (standardAccount)
-                  lastComparison.current = {
-                    start: from,
-                    end: end,
-                    exclude_security_ids: [],
-                    baseline: basis,
-                    scope: "account",
-                    anchor_date: undefined,
-                    benchmark_mode: benchmarkMode,
-                  };
+                lastComparison.current = {
+                  start: from,
+                  end: end,
+                  exclude_security_ids: [],
+                  baseline: basis,
+                  scope: standardAccount ? "account" : scope,
+                  anchor_date: undefined,
+                  benchmark_mode: benchmarkMode,
+                };
                 setExcluded([]);
                 setReport(null);
                 setError("");
@@ -373,18 +402,18 @@ export function PerformanceComparison({
               min={start}
               max={marketDataThroughDate()}
               onChange={(e) => {
+                periodIntent.current = "custom";
                 setAnchor(undefined);
                 setEnd(e.target.value);
-                if (standardAccount)
-                  lastComparison.current = {
-                    start: start,
-                    end: e.target.value,
-                    exclude_security_ids: [],
-                    baseline: baseline,
-                    scope: "account",
-                    anchor_date: undefined,
-                    benchmark_mode: benchmarkMode,
-                  };
+                lastComparison.current = {
+                  start: start,
+                  end: e.target.value,
+                  exclude_security_ids: [],
+                  baseline: baseline,
+                  scope: standardAccount ? "account" : scope,
+                  anchor_date: undefined,
+                  benchmark_mode: benchmarkMode,
+                };
                 setExcluded([]);
                 setReport(null);
                 setError("");

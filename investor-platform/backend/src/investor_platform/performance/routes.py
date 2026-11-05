@@ -367,6 +367,7 @@ def performance(
             {
                 **result,
                 "fetched_at": datetime.now(UTC),
+                "prices_fetched_at": market_types.collected_at(fetched.values()),
                 "source": " + ".join(
                     sorted({source for h in fetched.values() for source in h.source.split(" + ")})
                 ),
@@ -376,6 +377,10 @@ def performance(
             report_key is not None
             and not result.get("scenario_error")
             and not result.get("warnings")
+            and report_key
+            == cache_key(
+                session, actor, account, entries, period.model_dump_json(), completed_market_date()
+            )
         ):
             remember_report(report_key, bytes(response.body))
         return response

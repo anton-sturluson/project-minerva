@@ -49,7 +49,9 @@ def test_cache_single_flight_precision_and_period_slicing(database, monkeypatch)
     assert read(START).close  # No caller can mutate another request's cached data.
 
 
-def test_cache_expiry_range_growth_and_failed_refresh_preserves_prices(database, monkeypatch):
+def test_accepted_prices_survive_age_and_failed_refresh_without_inventing_coverage(
+    database, monkeypatch
+):
     calls = []
     fail = False
 
@@ -61,28 +63,39 @@ def test_cache_expiry_range_growth_and_failed_refresh_preserves_prices(database,
 
     monkeypatch.setattr(market_yahoo, "history", download)
 
-    def read(start=START, end=END):
+    def read(start=START, end=END, refresh_after=None):
         return market_yahoo.cached_history(
-            "AAA", start, end, engine=database, workspace_id=LOCAL_WORKSPACE
+            "AAA",
+            start,
+            end,
+            engine=database,
+            workspace_id=LOCAL_WORKSPACE,
+            refresh_after=refresh_after,
         )
 
     read()
     read(START - timedelta(days=1))
     assert calls[-1] == (START - timedelta(days=1), END)
+    previous_collection = datetime.now(UTC) - timedelta(days=2)
     with Session(database) as session, session.begin():
-        session.execute(
-            update(MarketCache).values(fetched_at=datetime.now(UTC) - timedelta(days=2))
-        )
+        session.execute(update(MarketCache).values(fetched_at=previous_collection))
     fail = True
+    retained = read()
+    assert retained.close == {START: Decimal(10), END: Decimal(11)}
+    assert retained.fetched_at == previous_collection
+    assert len(calls) == 2
     with pytest.raises(ValueError):
-        read()
+        read(refresh_after=datetime.now(UTC))
+    with pytest.raises(ValueError):
+        read(end=END + timedelta(days=1))
     with Session(database) as session:
         row = session.query(MarketCache).one()
         assert row.payload["close"][START.isoformat()] == "10"
         assert datetime.now(UTC) - row.fetched_at > timedelta(days=1)
     fail = False
-    read()
-    assert len(calls) == 4
+    refreshed = read(refresh_after=datetime.now(UTC))
+    assert refreshed.fetched_at > previous_collection
+    assert len(calls) == 5
 
 
 def test_cache_separates_workspace_and_validation_options(database, monkeypatch):
@@ -129,6 +142,58 @@ def test_cached_prices_do_not_hide_ledger_edits(db_client, monkeypatch):
     cash(db_client, aid, "deposit", "500")
     assert Decimal(db_client.get(url).json()["value"]) == 1540
     assert len(calls) == 1
+
+
+def test_retained_valuation_shows_actual_quote_and_collection_dates_until_refresh(
+    database, db_client, monkeypatch
+):
+    from helpers import cash, trade
+
+    from investor_platform.performance import valuation
+
+    aid = db_client.post(
+        "/api/accounts", json={"name": "Dated quote fixture", "base_currency": "USD"}
+    ).json()["id"]
+    cash(db_client, aid, "opening_cash", "1000")
+    trade(db_client, aid, quantity="2", price="100", exchange="NYSE")
+    monkeypatch.setattr(valuation, "completed_market_date", lambda: END)
+    closes = {START: Decimal(120)}
+    offline = False
+
+    def download(symbol, first, last):
+        if offline:
+            raise OSError("synthetic provider outage")
+        return market_types.History(closes, {}, exchange="NYQ", source="Synthetic daily history")
+
+    monkeypatch.setattr(market_yahoo, "history", download)
+    url = f"/api/accounts/{aid}/valuation"
+    first = db_client.get(url).json()
+    assert first["end"] == END.isoformat()
+    assert first["holdings"][0]["quote_date"] == START.isoformat()
+    prior = datetime.now(UTC) - timedelta(days=2)
+    with database.begin() as connection:
+        connection.execute(update(MarketCache).values(fetched_at=prior))
+    offline = True
+    retained = db_client.get(url).json()
+    assert retained["value"] == first["value"]
+    assert retained["holdings"][0]["quote_date"] == START.isoformat()
+    assert datetime.fromisoformat(retained["prices_fetched_at"]) == prior
+    assert datetime.fromisoformat(retained["fetched_at"]) > prior
+    assert retained["source"] == "Synthetic daily history"
+    offline = False
+    closes[END] = Decimal(130)
+    market_yahoo.cached_history(
+        "DEMO",
+        START,
+        END,
+        engine=database,
+        workspace_id=LOCAL_WORKSPACE,
+        refresh_after=datetime.now(UTC),
+    )
+    refreshed = db_client.get(url).json()
+    assert refreshed["holdings"][0]["quote_date"] == END.isoformat()
+    assert Decimal(refreshed["value"]) == 1060
+    assert datetime.fromisoformat(refreshed["prices_fetched_at"]) > prior
 
 
 def test_scheduled_refresh_bypasses_ttl_and_reuses_its_results(database, monkeypatch):

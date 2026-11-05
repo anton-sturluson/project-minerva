@@ -48,6 +48,20 @@ def db_client(database):
 
 
 @pytest.fixture
+def reset_market_cache(database):
+    """Start cold when a test replaces its synthetic provider inputs."""
+    from sqlalchemy import delete
+
+    from investor_platform.models import MarketCache
+
+    def reset():
+        with database.begin() as connection:
+            connection.execute(delete(MarketCache))
+
+    return reset
+
+
+@pytest.fixture
 def expire_prices(database):
     """Advance cached inputs past expiry before simulating a changed provider response."""
     from datetime import UTC, datetime, timedelta

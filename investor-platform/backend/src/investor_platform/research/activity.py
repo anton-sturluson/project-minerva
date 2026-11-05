@@ -85,6 +85,7 @@ def activity_for_quarter(
     periods: dict[UUID, set[date]],
     quarter: date,
     available_quarters: list[date],
+    eligibility_by_manager: dict[UUID, Eligibility],
 ) -> dict:
     """Compare each manager at the selected quarter, retaining exclusions and evidence."""
     prior: date = previous_quarter(quarter)
@@ -96,7 +97,7 @@ def activity_for_quarter(
     eligible: list[ResearchManager] = [
         manager
         for manager in managers
-        if manager_eligibility(manager.profile, date.today())["status"] == "eligible"
+        if eligibility_by_manager[manager.id]["status"] == "eligible"
         and {quarter, prior}.issubset(periods.get(manager.id, set()))
     ]
     filings: list[ResearchFiling] = list(
@@ -116,7 +117,7 @@ def activity_for_quarter(
         for manager in managers:
             name: str = manager.profile["name"]
             manager_periods: set[date] = periods.get(manager.id, set())
-            eligibility: Eligibility = manager_eligibility(manager.profile, date.today())
+            eligibility: Eligibility = eligibility_by_manager[manager.id]
             reason: str | None = eligibility["reason"]
             comparison: dict = {}
             changes: list[PositionChange] = []
@@ -245,10 +246,14 @@ def get_activity(
     ):
         if quarter_end(period):
             periods.setdefault(manager_id, set()).add(period)
+    as_of: date = date.today()
+    eligibility_by_manager: dict[UUID, Eligibility] = {
+        manager.id: manager_eligibility(manager.profile, as_of) for manager in managers
+    }
     eligible_ids: set[UUID] = {
         manager.id
         for manager in managers
-        if manager_eligibility(manager.profile, date.today())["status"] == "eligible"
+        if eligibility_by_manager[manager.id]["status"] == "eligible"
     }
     available: list[date] = sorted(
         {
@@ -261,10 +266,14 @@ def get_activity(
         reverse=True,
     )
     if quarter is not None:
-        return activity_for_quarter(session, managers, periods, quarter, available)
+        return activity_for_quarter(
+            session, managers, periods, quarter, available, eligibility_by_manager
+        )
     newest_unavailable: dict | None = None
     for period in available:
-        result: dict = activity_for_quarter(session, managers, periods, period, available)
+        result: dict = activity_for_quarter(
+            session, managers, periods, period, available, eligibility_by_manager
+        )
         if result["included_managers"]:
             return result
         if newest_unavailable is None:
@@ -283,7 +292,7 @@ def get_activity(
             {
                 "slug": manager.slug,
                 "name": manager.profile["name"],
-                "reason": manager_eligibility(manager.profile, date.today())["reason"]
+                "reason": eligibility_by_manager[manager.id]["reason"]
                 or "No adjacent-quarter filing pair has been imported",
             }
             for manager in managers

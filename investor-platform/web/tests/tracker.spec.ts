@@ -153,9 +153,8 @@ test("a ledger save reloads the comparison and ignores a late previous report", 
   await page.getByRole("button", { name: "Save cash entry" }).click();
   await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   await expect(page.getByText("1,300.00", { exact: true })).toBeVisible();
-  const lateResponse = page.waitForResponse("**/performance");
   release();
-  await lateResponse;
+  await page.waitForLoadState("networkidle");
   await expect(page.getByText("1,300.00", { exact: true })).toBeVisible();
   await expect(page.getByText("1,200.00", { exact: true })).toBeHidden();
 });
@@ -306,9 +305,7 @@ test("shows one holdings table above returns and retains recorded positions duri
       json: { detail: "Synthetic holdings outage" },
     }),
   );
-  await page
-    .getByRole("button", { name: "Refresh prices", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Reload data", exact: true }).click();
   await expect(holdings).toContainText("800.0");
   await expect(
     holdings.getByRole("row").filter({ hasText: "AAA" }),
@@ -392,9 +389,7 @@ test("partial holdings quotes remain visible and retry restores complete totals"
     page.getByText("Missing prices · totals unavailable.", { exact: true }),
   ).toBeVisible();
   partial = false;
-  await page
-    .getByRole("button", { name: "Refresh prices", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Reload data", exact: true }).click();
   await expect(
     holdings.getByRole("row", { name: /^Stocks total/ }),
   ).toContainText("1,000.0");
