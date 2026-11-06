@@ -4,7 +4,7 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
 from http.client import HTTPException as HTTPClientError
 from typing import Annotated, NotRequired, TypedDict
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import ACCOUNTING_PRECISION, Currency
 from investor_platform.market_data import tiingo
-from investor_platform.market_data.cache import CACHE_TTL, cached_payload
+from investor_platform.market_data.cache import CachedPayload, cached_payload
 from investor_platform.market_data.listings import PROVIDER_EXCHANGES
 from investor_platform.market_data.types import History
 from investor_platform.market_data.yahoo import cached_history
@@ -54,6 +54,7 @@ class MarketContext(TypedDict):
     first_session: str | None
     last_session: str | None
     session_count: int
+    prices_fetched_at: str | None
     source_urls: list[str]
     mapped_at: NotRequired[str]
     composite_figi: NotRequired[str]
@@ -131,6 +132,7 @@ def resolve_mappings(engine: Engine, workspace_id: UUID, cusips: list[str]) -> d
     """Cache successful, unmatched and ambiguous mappings under the existing private cache."""
     found: dict[str, Mapping] = {}
     now: datetime = datetime.now(UTC)
+    fresh_after: datetime = now - timedelta(days=1)
     with Session(engine) as session:
         cached: MarketCache
         for cached in session.scalars(
@@ -138,10 +140,10 @@ def resolve_mappings(engine: Engine, workspace_id: UUID, cusips: list[str]) -> d
                 MarketCache.workspace_id == workspace_id,
                 MarketCache.provider == MAPPING_PROVIDER,
                 MarketCache.symbol.in_(cusips),
+                MarketCache.fetched_at >= fresh_after,
             )
         ):
-            if now - cached.fetched_at < CACHE_TTL:
-                found[cached.symbol] = cached.payload
+            found[cached.symbol] = cached.payload
     missing: list[str] = [cusip for cusip in cusips if cusip not in found]
     index: int
     for index in range(0, len(missing), 10):
@@ -173,7 +175,8 @@ def resolve_mappings(engine: Engine, workspace_id: UUID, cusips: list[str]) -> d
                 MAPPING_DATE,
                 MAPPING_DATE,
                 load,
-            )
+                refresh_after=fresh_after,
+            ).body
     return found
 
 
@@ -190,6 +193,7 @@ def unavailable(mapping: Mapping, reason: str) -> MarketContext:
         "first_session": None,
         "last_session": None,
         "session_count": 0,
+        "prices_fetched_at": None,
         "source_urls": [],
         "mapped_at": mapping["mapped_at"],
     }
@@ -218,6 +222,7 @@ def summarize(history: History, start: date, end: date, mapping: Mapping) -> Mar
             first_session=min(closes).isoformat(),
             last_session=max(closes).isoformat(),
             session_count=len(closes),
+            prices_fetched_at=history.fetched_at.isoformat() if history.fetched_at else None,
         )
     symbol: str = mapping["symbol"] or ""
     result["source_urls"].append(
@@ -260,10 +265,10 @@ def price_context(
         if not os.environ.get("TIINGO_API_KEY"):
             return unavailable(mapping, "Daily closing prices unavailable for this quarter")
         try:
-            body: dict = tiingo.payload(engine, workspace_id, symbol, start, end)
-            if body.get("meta", {}).get("currency", "USD") != "USD":
-                raise ValueError("Market currency is not USD")
+            cached: CachedPayload = tiingo.payload(engine, workspace_id, symbol, start, end)
+            body: dict = cached.body
             history = tiingo.parse_stock(body, symbol)
+            history.fetched_at = cached.fetched_at
             if history.exchange not in PROVIDER_EXCHANGES:
                 raise ValueError("Unsupported US listing exchange")
         except (

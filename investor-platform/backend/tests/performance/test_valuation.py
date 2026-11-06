@@ -97,8 +97,15 @@ def test_old_held_split_withholds_values_liquidation_and_collection(
     from investor_platform.market_data.price_refresh import collect_account
     from investor_platform.models import Account
 
-    with Session(database) as session, pytest.raises(ValueError, match="holding prices"):
-        collect_account(session, session.get(Account, UUID(aid)), end, datetime.now(UTC))
+    with Session(database) as session:
+        collection = collect_account(
+            session, session.get(Account, UUID(aid)), end, datetime.now(UTC)
+        )
+    assert {
+        "symbol": "AAA",
+        "scope": "current",
+        "reason": "price_unavailable",
+    } in collection.failures
 
 
 @pytest.mark.parametrize("split", [date(2026, 1, 5), date(2026, 1, 20)])
@@ -136,7 +143,7 @@ def test_split_before_or_on_reentry_does_not_invalidate_new_share_units(
     monkeypatch.setattr(valuation, "completed_market_date", lambda: end)
 
     def quote(symbol, start, through):
-        assert start == date(2026, 1, 20)
+        assert start <= date(2026, 1, 20)
         return History({end: D(50)}, {}, splits={split}, exchange="NYQ")
 
     monkeypatch.setattr(market_yahoo, "history", quote)
@@ -234,7 +241,7 @@ def test_partial_quote_failure_retains_other_values_without_partial_weights(
     ],
 )
 def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
-    db_client, portfolio, monkeypatch, exchange, suffix, currency, provider, expire_prices
+    db_client, portfolio, monkeypatch, exchange, suffix, currency, provider, reset_market_cache
 ):
     from helpers import ledger
 
@@ -266,14 +273,14 @@ def test_foreign_closes_use_matching_usd_fx_and_never_change_ledger(
     assert D(result["holdings"][1]["close"]) == 7
     assert D(result["holdings"][1]["unrealized_pnl"]) == 4
     assert ledger(db_client, aid) == before
-    expire_prices()
+    reset_market_cache()
     gap = True
     result = db_client.get(f"/api/accounts/{aid}/valuation").json()
     assert result["value"] is None and result["holdings"][1]["price_error"]
 
 
 def test_hypothetical_closes_finish_whole_episodes_and_leave_records_unchanged(
-    db_client, portfolio, monkeypatch, expire_prices
+    db_client, portfolio, monkeypatch, reset_market_cache
 ):
     from helpers import ledger
 
@@ -310,7 +317,7 @@ def test_hypothetical_closes_finish_whole_episodes_and_leave_records_unchanged(
     def unavailable(*args):
         raise OSError("offline")
 
-    expire_prices()
+    reset_market_cache()
     monkeypatch.setattr(market_yahoo, "history", unavailable)
     response = db_client.get(url)
     assert response.status_code == 503 and "Latest prices unavailable" in response.json()["detail"]

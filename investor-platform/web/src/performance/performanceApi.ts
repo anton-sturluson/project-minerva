@@ -70,10 +70,12 @@ export type PerformanceRequest = {
 export function fetchPerformance(
   accountId: string,
   request: PerformanceRequest,
+  signal?: AbortSignal,
 ) {
   return api<PerformanceReport>(
     `/accounts/${accountId}/performance`,
     {
+      signal,
       method: "POST",
       body: JSON.stringify({
         ...request,

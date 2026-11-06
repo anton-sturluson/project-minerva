@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { MARKET_DATA_TIMEOUT, api, errorMessage } from "../api";
-import { number as formatNumber, percent as formatPercent } from "../format";
+import {
+  number as formatNumber,
+  percent as formatPercent,
+  formatMarketTimestamp,
+} from "../format";
 import { type Ledger } from "../ledger/ledger";
 
 const number = (value: string | null) => formatNumber(value, 1);
 const percent = (value: string | null) => formatPercent(value, 1);
 type Valuation = {
+  prices_fetched_at?: string | null;
   end: string;
   provisional: boolean;
   value: string | null;
@@ -28,38 +33,43 @@ type Valuation = {
 export function Holdings({
   ledger,
   accountId,
+  visible,
+  marketRevision,
+  onRefreshMarket,
 }: {
   ledger: Ledger;
   accountId: string;
+  visible: boolean;
+  marketRevision: number;
+  onRefreshMarket: () => void;
 }) {
   const [report, setReport] = useState<Valuation | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [revision, setRevision] = useState(0);
-  const refresh = useCallback(() => setRevision((n) => n + 1), []);
   useEffect(() => {
-    let active = true;
+    if (!visible) return;
+    const controller = new AbortController();
     setReport(null);
     setError("");
     setBusy(true);
     void api<Valuation>(
       `/accounts/${accountId}/valuation`,
-      undefined,
+      { signal: controller.signal },
       MARKET_DATA_TIMEOUT,
     )
       .then((value) => {
-        if (active) setReport(value);
+        if (!controller.signal.aborted) setReport(value);
       })
       .catch((e) => {
-        if (active) setError(errorMessage(e));
+        if (!controller.signal.aborted) setError(errorMessage(e));
       })
       .finally(() => {
-        if (active) setBusy(false);
+        if (!controller.signal.aborted) setBusy(false);
       });
     return () => {
-      active = false;
+      controller.abort();
     };
-  }, [accountId, ledger, revision]);
+  }, [accountId, ledger, marketRevision, visible]);
   const rows = report
     ? [...report.holdings].sort(
         (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0),
@@ -76,6 +86,10 @@ export function Holdings({
         price_error: null,
         quote_date: null,
       }));
+  const quoteDates =
+    report?.holdings
+      .flatMap((holding) => (holding.quote_date ? [holding.quote_date] : []))
+      .sort() ?? [];
   const total = Number(report?.value ?? 0);
   const cash = report?.cash ?? ledger.balance;
   // Do not normalize a partial set of known bases into a misleading allocation.
@@ -118,13 +132,28 @@ export function Holdings({
     >
       <div className="section-heading">
         <h2 id="holdings-heading">Holdings</h2>
-        <button type="button" disabled={busy} onClick={refresh}>
-          {busy ? "Updating…" : "Refresh prices"}
+        <button type="button" disabled={busy} onClick={onRefreshMarket}>
+          {busy ? "Updating…" : "Reload data"}
         </button>
       </div>
       {error && (
         <p className="error" role="alert">
           {error}
+        </p>
+      )}
+      {quoteDates.length > 0 && (
+        <p className="form-note">
+          Latest closes: {quoteDates[0]}
+          {quoteDates[0] !== quoteDates.at(-1) ? ` – ${quoteDates.at(-1)}` : ""}
+        </p>
+      )}
+      {report && (
+        <p className="form-note">
+          Prices collected:{" "}
+          {report.prices_fetched_at
+            ? formatMarketTimestamp(report.prices_fetched_at)
+            : "time unavailable"}
+          .
         </p>
       )}
       {report && !report.complete && (

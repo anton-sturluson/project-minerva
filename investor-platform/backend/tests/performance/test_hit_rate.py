@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal as D
 from decimal import localcontext
 from types import SimpleNamespace as NS
@@ -10,6 +10,7 @@ from helpers import cash, trade
 from investor_platform.market_data import history as market
 from investor_platform.market_data import types as market_types
 from investor_platform.market_data import yahoo as market_yahoo
+from investor_platform.performance import hit_rate as hit_rate_module
 from investor_platform.performance.hit_rate import calculate_hit_rate
 from investor_platform.performance.positions import position_episodes
 
@@ -47,7 +48,7 @@ def test_profit_can_miss_market_and_loss_can_be_a_hit_with_equal_decision_weight
         [entry("buy", 1, "100", "10000"), entry("sell", 2, "100", "9000")],
         [entry("buy", 2, "1", "100"), entry("sell", 2, "1", "100")],
     ]
-    r = calculate_hit_rate(episodes, 2, histories(), TODAY)
+    r = calculate_hit_rate(episodes, 2, histories(), TODAY, TODAY - timedelta(days=1))
     assert r["open"] == 2 and r["excluded"] == 0
     for b in ("SPY", "QQQ"):
         assert r["benchmarks"][b]["hits"] == 1
@@ -71,7 +72,9 @@ def test_multiple_buys_partial_exits_and_fees_match_fifo_capital():
     assert len(episodes) == 1 and opened == 0
     with localcontext() as ctx:
         ctx.prec = 64
-        row = calculate_hit_rate(episodes, opened, histories(), TODAY)["episodes"][0]
+        row = calculate_hit_rate(episodes, opened, histories(), TODAY, TODAY - timedelta(days=1))[
+            "episodes"
+        ][0]
         expected = D(501) * D("-0.1") + D(501) * D("0.3") + D(2000) * (D(130) / 120 - 1)
         assert row["pnl"] == 2996
         assert row["benchmarks"]["SPY"]["pnl"] == expected
@@ -99,7 +102,7 @@ def test_unavailable_decisions_are_excluded_not_counted_as_misses(case):
         episode[0].effective_date = date(2000, 1, 1)
     else:
         episode[0].security.exchange = "TEST"
-    r = calculate_hit_rate([episode], 0, h, TODAY)
+    r = calculate_hit_rate([episode], 0, h, TODAY, TODAY - timedelta(days=1))
     assert r["excluded"] == 1 and r["episodes"][0]["excluded"]
     assert r["benchmarks"]["SPY"]["hit_rate"] is None
     assert r["benchmarks"]["QQQ"]["evaluated"] == 0
@@ -109,7 +112,7 @@ def test_distribution_on_purchase_date_is_not_earned_and_cent_ties_are_not_hits(
     h = histories()
     h["DEMO"].dividends[DAYS[0]] = D(1)
     episode = [entry("buy", 0, "1", "100"), entry("sell", 0, "1", "100.004")]
-    r = calculate_hit_rate([episode], 0, h, TODAY)
+    r = calculate_hit_rate([episode], 0, h, TODAY, TODAY - timedelta(days=1))
     assert r["excluded"] == 0
     assert r["benchmarks"]["SPY"] == {"hit_rate": 0, "hits": 0, "evaluated": 1, "ties": 1}
 
@@ -145,7 +148,9 @@ def test_route_empty_closed_decisions_ownership_and_provider_failure(
 
     expire_prices()
     monkeypatch.setattr(market_yahoo, "history", unavailable)
-    assert db_client.post(f"/api/accounts/{aid}/hit-rate").status_code == 503
+    retained = db_client.post(f"/api/accounts/{aid}/hit-rate")
+    assert retained.status_code == 200
+    assert retained.json()["benchmarks"] == r.json()["benchmarks"]
     assert db_client.get(f"/api/accounts/{aid}/statistics").status_code == 200
 
 
@@ -208,3 +213,38 @@ def test_hit_rate_fetches_only_each_closed_security_window(db_client, monkeypatc
     result = db_client.post(f"/api/accounts/{aid}/hit-rate")
     assert result.status_code == 200
     assert result.json()["benchmarks"]["SPY"]["evaluated"] == 2
+
+
+@pytest.mark.parametrize("hour, expected_evaluated", [(16, 0), (17, 1)])
+def test_today_closed_decision_becomes_available_at_market_cutoff(
+    db_client, monkeypatch, hour, expected_evaluated
+):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 1, 6, hour, tzinfo=tz)
+
+    monkeypatch.setattr(hit_rate_module, "datetime", Clock)
+    monkeypatch.setattr(market_yahoo, "history", lambda symbol, start, end: histories()[symbol])
+    aid = db_client.post(
+        "/api/accounts", json={"name": "Closing cutoff fixture", "base_currency": "USD"}
+    ).json()["id"]
+    assert cash(db_client, aid, "opening_cash", "1000").status_code == 201
+    assert trade(db_client, aid, quantity="1", exchange="NASDAQ").status_code == 201
+    assert (
+        trade(
+            db_client,
+            aid,
+            "sell",
+            quantity="1",
+            price="110",
+            exchange="NASDAQ",
+            effective_date="2026-01-06",
+        ).status_code
+        == 201
+    )
+
+    response = db_client.post(f"/api/accounts/{aid}/hit-rate")
+    assert response.status_code == 200, response.text
+    assert response.json()["benchmarks"]["SPY"]["evaluated"] == expected_evaluated
+    assert response.json()["excluded"] == 1 - expected_evaluated

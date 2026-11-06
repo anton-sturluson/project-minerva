@@ -1,6 +1,5 @@
 """Recorded holdings priced independently of historical performance."""
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
@@ -22,9 +21,9 @@ from investor_platform.domain import (
 )
 from investor_platform.ledger.schemas import HoldingView, LedgerView
 from investor_platform.ledger.state import active_entries_for_account, ledger_view
+from investor_platform.market_data import history as market_history
 from investor_platform.market_data import listings as market_listings
 from investor_platform.market_data import types as market_types
-from investor_platform.market_data import yahoo as market_yahoo
 from investor_platform.market_data.types import History
 from investor_platform.models import LedgerEntry
 from investor_platform.performance.positions import position_episodes
@@ -87,53 +86,34 @@ def quote_holding(
         "unrealized_pnl": None,
         "quote_date": None,
         "price_error": None,
+        "prices_fetched_at": None,
+        "source": None,
     }
     try:
+        history = market_history.listing_history(
+            security,
+            start,
+            end,
+            provisional=provisional,
+            engine=engine,
+            workspace_id=workspace_id,
+            refresh_after=refresh_after,
+        )
+        day, price = latest(history, end)
+        sources: list[History] = [history]
         foreign = market_listings.FOREIGN_LISTINGS.get(security.exchange)
         if foreign:
-            suffix, currency, exchanges = foreign
-            history = market_yahoo.cached_history(
-                security.ticker + suffix,
-                start,
-                end,
-                currency=currency,
-                engine=engine,
-                workspace_id=workspace_id,
-                refresh_after=refresh_after,
-            )
-            if history.exchange not in exchanges:
-                raise ValueError("Provider listing does not match the recorded exchange")
-            day, price = latest(history, end)
+            currency = foreign[1]
             rate = fx[currency]
             if isinstance(rate, str):
                 raise ValueError(rate)
+            sources.append(rate)
             # Use same-date closing FX; never apply today's FX to a stale local quote.
             if day not in rate.close:
                 raise ValueError("No matching USD exchange rate")
             with localcontext() as ctx:
                 ctx.prec = ACCOUNTING_PRECISION
                 price *= rate.close[day]
-        else:
-            symbol = market_listings.symbol_for(security, provisional=provisional)
-            try:
-                history = market_yahoo.cached_history(
-                    symbol,
-                    start,
-                    end,
-                    engine=engine,
-                    workspace_id=workspace_id,
-                    refresh_after=refresh_after,
-                )
-            except (OSError, KeyError, TypeError, IndexError):
-                if engine is None or not os.environ.get("TIINGO_API_KEY"):
-                    raise
-                from investor_platform.market_data.tiingo import stock_history
-
-                history = stock_history(
-                    security, start, end, engine, workspace_id, refresh_after=refresh_after
-                )
-            market_listings.verify_exchange(security, history, provisional=provisional)
-            day, price = latest(history, end)
         split = next(
             (
                 split
@@ -153,6 +133,8 @@ def quote_holding(
                 value=value,
                 quote_date=day,
                 unrealized_pnl=None if holding.cost_basis is None else value - holding.cost_basis,
+                prices_fetched_at=market_types.collected_at(sources),
+                source=" + ".join(sorted({source.source for source in sources})),
             )
     except (ValueError, OSError, KeyError, TypeError, IndexError, DecimalException):
         row["price_error"] = "Close unavailable: check listing, currency or market data"
@@ -179,11 +161,10 @@ def value_records(
         if h.security.exchange in market_listings.FOREIGN_LISTINGS
     }:
         try:
-            fx[currency] = market_yahoo.cached_history(
-                f"{currency}USD=X",
+            fx[currency] = market_history.fx_history(
+                currency,
                 end - QUOTE_WINDOW,
                 end,
-                instruments=("CURRENCY",),
                 engine=engine,
                 workspace_id=workspace_id,
                 refresh_after=refresh_after,
@@ -221,6 +202,8 @@ def value_records(
                 "unrealized_pnl": None,
                 "quote_date": None,
                 "price_error": "Current quotes require a USD account",
+                "prices_fetched_at": None,
+                "source": None,
             }
             for h in records.holdings
         ]
@@ -240,8 +223,17 @@ def value_records(
         "end": end,
         "provisional": provisional,
         "complete": complete,
-        "source": market_types.SOURCE,
+        "source": " + ".join(
+            sorted(
+                {source for row in rows for source in (row["source"] or "").split(" + ") if source}
+            )
+        ),
         "fetched_at": datetime.now(UTC),
+        "prices_fetched_at": (
+            min(row["prices_fetched_at"] for row in rows)
+            if rows and all(row["prices_fetched_at"] is not None for row in rows)
+            else None
+        ),
     }
 
 

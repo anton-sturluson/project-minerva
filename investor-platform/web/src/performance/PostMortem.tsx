@@ -41,9 +41,11 @@ const dollars = (value: string | null) =>
 export function PostMortem({
   account,
   ledger,
+  marketRevision,
 }: {
   account: Account;
   ledger: Ledger;
+  marketRevision: number;
 }) {
   const [reports, setReports] = useState<Attribution[]>([]);
   const [selected, setSelected] = useState(() =>
@@ -55,7 +57,7 @@ export function PostMortem({
   const [revision, setRevision] = useState(0);
   const first = ledger.entries[0]?.effective_date;
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
     setReports([]);
     setError("");
     setBusy(false);
@@ -65,6 +67,7 @@ export function PostMortem({
     void api<{ attribution: Attribution[] | null }>(
       `/accounts/${account.id}/performance`,
       {
+        signal: controller.signal,
         method: "POST",
         body: JSON.stringify({
           start: first,
@@ -75,20 +78,27 @@ export function PostMortem({
       MARKET_DATA_TIMEOUT,
     )
       .then((report) => {
-        if (!active) return;
+        if (controller.signal.aborted) return;
         const periods = report.attribution ?? [];
         setReports(periods);
       })
       .catch((e) => {
-        if (active) setError(errorMessage(e));
+        if (!controller.signal.aborted) setError(errorMessage(e));
       })
       .finally(() => {
-        if (active) setBusy(false);
+        if (!controller.signal.aborted) setBusy(false);
       });
     return () => {
-      active = false;
+      controller.abort();
     };
-  }, [account.id, account.base_currency, first, ledger, revision]);
+  }, [
+    account.id,
+    account.base_currency,
+    first,
+    ledger,
+    revision,
+    marketRevision,
+  ]);
   const latestYear = Number(marketDataThroughDate().slice(0, 4));
   const firstYear = first ? Number(first.slice(0, 4)) : latestYear;
   const years = Array.from(
@@ -145,6 +155,7 @@ export function PostMortem({
       <Financials
         key={`${account.id}:${selected}`}
         accountId={account.id}
+        marketRevision={marketRevision}
         year={selected === "all" ? null : Number(selected)}
       />
       {!first && <p>No stock history yet.</p>}

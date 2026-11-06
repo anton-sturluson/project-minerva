@@ -16,6 +16,7 @@ from investor_platform.domain import (
     MARKET_TIMEZONE,
     Currency,
     EntryKind,
+    completed_market_date,
 )
 from investor_platform.ledger.accounting import UNIT
 from investor_platform.ledger.state import active_entries_for_account
@@ -31,11 +32,11 @@ ZERO = Decimal(0)
 CENT = Decimal("0.01")
 
 
-def exclusion(episode: list[LedgerEntry], today: date) -> str | None:
+def exclusion(episode: list[LedgerEntry], today: date, market_date: date) -> str | None:
     """Explain why an episode lacks a valid matching benchmark."""
     if any(e.kind in IN_KIND_ENTRIES for e in episode):
         return "Received shares: original purchase dates are unknown"
-    if episode[-1].effective_date >= today:
+    if episode[-1].effective_date > market_date:
         return "Wait for completed closing prices after today's trades"
     if episode[0].effective_date < today - market_types.HISTORY_WINDOW:
         return "Purchase history exceeds the ten-year data window"
@@ -115,7 +116,11 @@ def compare_episode(episode: list[LedgerEntry], histories: dict[str, History]) -
 
 
 def calculate_hit_rate(
-    episodes: list[list[LedgerEntry]], open_count: int, histories: dict[str, History], today: date
+    episodes: list[list[LedgerEntry]],
+    open_count: int,
+    histories: dict[str, History],
+    today: date,
+    market_date: date,
 ) -> dict:
     """Summarize eligible investment decisions and their exclusions."""
     rows = []
@@ -126,7 +131,7 @@ def calculate_hit_rate(
             "exchange": first.security.exchange,
             "opened_on": first.effective_date,
             "closed_on": last.effective_date,
-            "excluded": exclusion(episode, today),
+            "excluded": exclusion(episode, today, market_date),
         }
         if not row["excluded"]:
             try:
@@ -160,8 +165,10 @@ def hit_rate(account_id: UUID, session: DatabaseSession, actor: CurrentActor) ->
     if account.base_currency != Currency.USD:
         raise HTTPException(422, "Hit rate currently requires a USD account")
     episodes, open_count = position_episodes(active_entries_for_account(session, account_id))
-    today = datetime.now(MARKET_TIMEZONE).date()
-    candidates = [e for e in episodes if not exclusion(e, today)]
+    now: datetime = datetime.now(MARKET_TIMEZONE)
+    today: date = now.date()
+    market_date: date = completed_market_date(now)
+    candidates = [e for e in episodes if not exclusion(e, today, market_date)]
     try:
         histories = {}
         if candidates:
@@ -192,7 +199,7 @@ def hit_rate(account_id: UUID, session: DatabaseSession, actor: CurrentActor) ->
             )
         with localcontext() as ctx:
             ctx.prec = ACCOUNTING_PRECISION
-            result = calculate_hit_rate(episodes, open_count, histories, today)
+            result = calculate_hit_rate(episodes, open_count, histories, today, market_date)
         return decimal_json_response(
             {
                 **result,

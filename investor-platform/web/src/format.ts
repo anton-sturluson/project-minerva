@@ -19,3 +19,9 @@ export function formatExactDecimal(value: string, minimumDecimals = 2) {
     (decimals ? "." + decimals : "")
   );
 }
+
+export const formatMarketTimestamp = (value: string) =>
+  new Date(value).toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    timeZoneName: "short",
+  });

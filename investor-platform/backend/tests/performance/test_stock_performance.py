@@ -133,7 +133,7 @@ def test_exclusions_remove_stock_capital_and_income_without_writing(db_client, p
 
 
 def test_cash_reconciliation_and_market_quality_stay_separate(
-    db_client, portfolio, database, expire_prices
+    db_client, portfolio, database, reset_market_cache
 ):
     aid, data = portfolio
     with Session(database) as session:
@@ -143,7 +143,7 @@ def test_cash_reconciliation_and_market_quality_stay_separate(
     assert stock_report(db_client, aid).json()["return"] is not None
     account_report = stock_report(db_client, aid, scope="account").json()
     assert account_report["return"] is None
-    expire_prices()
+    reset_market_cache()
     del data["AAA"].close[DAYS[1]]
     assert stock_report(db_client, aid).status_code == 422
 

@@ -28,33 +28,38 @@ type Stats = {
 export function TradeScorecard({
   account,
   ledger,
+  visible,
+  marketRevision,
 }: {
   account: Account;
   ledger: Ledger;
+  visible: boolean;
+  marketRevision: number;
 }) {
   const [hypothetical, setHypothetical] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsError, setStatsError] = useState("");
   const [retryStats, setRetryStats] = useState(0);
   useEffect(() => {
-    let active = true;
+    if (!visible) return;
+    const controller = new AbortController();
     setStats(null);
     setStatsError("");
     void api<Stats>(
       `/accounts/${account.id}/statistics${hypothetical ? "/hypothetical" : ""}`,
-      undefined,
+      { signal: controller.signal },
       hypothetical ? MARKET_DATA_TIMEOUT : undefined,
     )
       .then((s) => {
-        if (active) setStats(s);
+        if (!controller.signal.aborted) setStats(s);
       })
       .catch((e) => {
-        if (active) setStatsError(errorMessage(e));
+        if (!controller.signal.aborted) setStatsError(errorMessage(e));
       });
     return () => {
-      active = false;
+      controller.abort();
     };
-  }, [account.id, ledger, retryStats, hypothetical]);
+  }, [account.id, ledger, retryStats, hypothetical, marketRevision, visible]);
   return (
     <>
       <h3>

@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from investor_platform.db import Actor, CurrentActor, DatabaseSession
@@ -18,6 +18,7 @@ from investor_platform.research.snapshots import (
     load_holdings,
     manager_comparison,
     previous_quarter,
+    quarter_end,
     snapshot,
 )
 
@@ -34,6 +35,26 @@ def owned_manager(session: Session, actor: Actor, slug: str) -> ResearchManager:
     if manager is None:
         raise HTTPException(404, "Manager not found")
     return manager
+
+
+def coverage_holdings(
+    session: Session, filings: list[ResearchFiling]
+) -> dict[UUID, list[ResearchHolding]]:
+    """Load latest company-count inputs and amendment-overlap evidence in one batch."""
+    latest: dict[UUID, date] = {}
+    required: set[tuple[UUID, date]] = set()
+    filing: ResearchFiling
+    for filing in filings:
+        latest[filing.manager_id] = max(
+            latest.get(filing.manager_id, filing.report_period), filing.report_period
+        )
+        if filing.amendment_type == "NEW HOLDINGS":
+            required.add((filing.manager_id, filing.report_period))
+    required.update(latest.items())
+    return load_holdings(
+        session,
+        [filing for filing in filings if (filing.manager_id, filing.report_period) in required],
+    )
 
 
 def manager_view(
@@ -56,6 +77,8 @@ def manager_view(
             )
         )
     )
+    if holdings is None:
+        holdings = coverage_holdings(session, filings)
     by_period: dict[date, list[ResearchFiling]] = {}
     for filing in filings:
         by_period.setdefault(filing.report_period, []).append(filing)
@@ -154,23 +177,7 @@ def list_managers(session: DatabaseSession, actor: CurrentActor) -> dict:
     grouped: dict[UUID, list[ResearchFiling]] = {}
     for filing in filings:
         grouped.setdefault(filing.manager_id, []).append(filing)
-    amendment_periods: set[tuple[UUID, date]] = {
-        (filing.manager_id, filing.report_period)
-        for filing in filings
-        if filing.amendment_type == "NEW HOLDINGS"
-    }
-    latest_periods: set[tuple[UUID, date]] = {
-        (manager_id, max(filing.report_period for filing in manager_filings))
-        for manager_id, manager_filings in grouped.items()
-    }
-    holdings: dict[UUID, list[ResearchHolding]] = load_holdings(
-        session,
-        [
-            filing
-            for filing in filings
-            if (filing.manager_id, filing.report_period) in amendment_periods | latest_periods
-        ],
-    )
+    holdings: dict[UUID, list[ResearchHolding]] = coverage_holdings(session, filings)
     return {
         "managers": [
             manager_view(session, manager, filings=grouped.get(manager.id, []), holdings=holdings)
@@ -200,11 +207,14 @@ def get_annual_changes(
 ) -> dict:
     """Compare annual net holdings, using the latest loaded quarter for an unfinished year."""
     manager: ResearchManager = owned_manager(session, actor, slug)
-    latest: date | None = session.scalar(
-        select(func.max(ResearchFiling.report_period)).where(
-            ResearchFiling.manager_id == manager.id
+    periods: list[date] = list(
+        session.scalars(
+            select(ResearchFiling.report_period)
+            .where(ResearchFiling.manager_id == manager.id)
+            .distinct()
         )
     )
+    latest: date | None = max((period for period in periods if quarter_end(period)), default=None)
     end: date = latest if latest and latest.year == year else date(year, 12, 31)
     return {
         **manager_comparison(session, manager, end, prior=date(year - 1, 12, 31)),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage, type Account } from "./api";
 import type { Page } from "./App";
 import type { Ledger } from "./ledger/ledger";
+import { MarketDataStatus } from "./performance/MarketDataStatus";
 import { PortfolioOverview } from "./performance/PortfolioOverview";
 import { PostMortem } from "./performance/PostMortem";
 import { formatExactDecimal, number } from "./format";
@@ -16,10 +17,22 @@ export function AccountWorkspace({
   account: Account;
   page: Page;
 }) {
-  const [overviewOpened, setOverviewOpened] = useState(page === "portfolio");
+  const [marketRevision, setMarketRevision] = useState(0);
+  const refreshMarket = useCallback(() => {
+    setMarketRevision((revision) => revision + 1);
+  }, []);
   useEffect(() => {
-    if (page === "portfolio") setOverviewOpened(true);
-  }, [page]);
+    if (page !== "portfolio" && page !== "post-mortem") return;
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") refreshMarket();
+    };
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [page, refreshMarket]);
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,6 +61,9 @@ export function AccountWorkspace({
   }, [load]);
   return (
     <div className="ledger">
+      {(page === "portfolio" || page === "post-mortem") && (
+        <MarketDataStatus key={page} revision={marketRevision} />
+      )}
       {error && (
         <div className="error" role="alert">
           <p>{error}</p>
@@ -64,12 +80,20 @@ export function AccountWorkspace({
       {ledger ? (
         <>
           <div hidden={page !== "portfolio"}>
-            {overviewOpened && (
-              <PortfolioOverview account={account} ledger={ledger} />
-            )}
+            <PortfolioOverview
+              account={account}
+              ledger={ledger}
+              visible={page === "portfolio"}
+              marketRevision={marketRevision}
+              onRefreshMarket={refreshMarket}
+            />
           </div>
           {page === "post-mortem" && (
-            <PostMortem account={account} ledger={ledger} />
+            <PostMortem
+              account={account}
+              ledger={ledger}
+              marketRevision={marketRevision}
+            />
           )}
           <div hidden={page !== "activity"}>
             <div className="balance-line">

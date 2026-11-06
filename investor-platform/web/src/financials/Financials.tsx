@@ -94,16 +94,18 @@ function FinancialNote({
 export function Financials({
   accountId,
   year,
+  marketRevision,
 }: {
   accountId: string;
   year: number | null;
+  marketRevision: number;
 }) {
   const [retry, setRetry] = useState(0);
   const [report, setReport] = useState<FinancialReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
     setLoading(true);
     setError(false);
     setReport(null);
@@ -111,9 +113,9 @@ export function Financials({
       setLoading(false);
       return;
     }
-    annualFinancials(accountId, year)
+    annualFinancials(accountId, year, controller.signal)
       .then((data) => {
-        if (!active) return;
+        if (controller.signal.aborted) return;
         if (
           data.account_id !== accountId ||
           data.calendar_year !== year ||
@@ -123,15 +125,15 @@ export function Financials({
         setReport(data);
       })
       .catch(() => {
-        if (active) setError(true);
+        if (!controller.signal.aborted) setError(true);
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => {
-      active = false;
+      controller.abort();
     };
-  }, [accountId, year, retry]);
+  }, [accountId, year, retry, marketRevision]);
   const rows = [
     ...metrics.map(([key, label]) => ({
       key,

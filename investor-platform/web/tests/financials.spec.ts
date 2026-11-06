@@ -600,12 +600,8 @@ test("portfolio switch clears old figures and never falls back for unavailable a
   await page.getByLabel("Portfolio", { exact: true }).selectOption(other);
   const financials = page.locator(".annual-financials");
   await expect(financials).toContainText("Table unavailable.");
-  const olderResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes(main) && response.url().includes("year=2024"),
-  );
   release();
-  await olderResponse;
+  await page.waitForLoadState("networkidle");
   await expect(
     financials.getByRole("region", { name: "Portfolio-weighted metrics" }),
   ).toHaveCount(0);
@@ -969,4 +965,29 @@ test("a valid cold financial request can finish after the ordinary API deadline"
   await expect(
     page.locator(".annual-financials").getByRole("alert"),
   ).toHaveCount(0);
+});
+
+test("focus reloads current-year financial weights while retaining the selected year", async ({
+  page,
+}) => {
+  let margin = "0.40";
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const year = Number(
+      new URL(route.request().url()).searchParams.get("year"),
+    );
+    const data = report(main, year);
+    data.weighted_ratios.gross_margin.value = margin;
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  const gross = page
+    .getByRole("region", { name: "Portfolio-weighted metrics", exact: true })
+    .getByRole("row", { name: /^Gross margin/ })
+    .getByRole("cell")
+    .nth(0);
+  await expect(gross).toHaveText("40.0%1");
+  margin = "0.50";
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(gross).toHaveText("50.0%1");
+  await expect(page.getByLabel("Post-mortem year")).toHaveValue("2026");
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MARKET_DATA_TIMEOUT, api, errorMessage } from "../api";
 import { number, percent } from "../format";
 
@@ -22,28 +22,46 @@ type Result = {
     benchmarks?: Record<Benchmark, { pnl: string; excess: string }>;
   }[];
 };
-export function HitRate({ accountId }: { accountId: string }) {
+export function HitRate({
+  accountId,
+  visible,
+  marketRevision,
+}: {
+  accountId: string;
+  visible: boolean;
+  marketRevision: number;
+}) {
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function calculate() {
+  const requested = useRef(false);
+  const activeRequest = useRef<AbortController | null>(null);
+  const calculate = useCallback(async () => {
+    requested.current = true;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setBusy(true);
     setError("");
     setResult(null);
     try {
-      setResult(
-        await api<Result>(
-          `/accounts/${accountId}/hit-rate`,
-          { method: "POST" },
-          MARKET_DATA_TIMEOUT,
-        ),
+      const next = await api<Result>(
+        `/accounts/${accountId}/hit-rate`,
+        { method: "POST", signal: controller.signal },
+        MARKET_DATA_TIMEOUT,
       );
+      if (!controller.signal.aborted) setResult(next);
     } catch (e) {
-      setError(errorMessage(e));
+      if (!controller.signal.aborted) setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
-  }
+  }, [accountId]);
+  useEffect(() => {
+    if (!visible) return;
+    if (requested.current) void calculate();
+    return () => activeRequest.current?.abort();
+  }, [calculate, marketRevision, visible]);
   return (
     <section aria-label="Benchmark hit rate">
       <dl className="scorecard">
@@ -88,7 +106,7 @@ export function HitRate({ accountId }: { accountId: string }) {
             </p>
           )}
           <p className="report-date">
-            {result.source} · fetched{" "}
+            {result.source} · calculated{" "}
             {new Date(result.fetched_at).toLocaleString()}
           </p>
         </>

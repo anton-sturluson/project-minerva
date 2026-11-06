@@ -2,7 +2,7 @@
 
 import io
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from urllib.error import HTTPError
 from urllib.request import Request
@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session
 from test_research_activity import manager, position, quarter
 
@@ -185,6 +185,32 @@ def test_endpoint_caches_positive_and_negative_mappings_and_preserves_quarter_st
     ).json()
     assert previous["prices"]["111111111"]["status"] == "unavailable"
     assert previous["prices"]["111111111"]["session_count"] == 0
+
+
+def test_expired_mapping_is_replaced_without_expiring_accepted_prices(
+    database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mapping owns its one-day freshness requirement even though prices retain coverage."""
+    answer: dict = {"data": [mapped_row()]}
+    monkeypatch.setattr(
+        research_market,
+        "urlopen",
+        lambda *args, **kwargs: io.BytesIO(json.dumps([answer]).encode()),
+    )
+    first: dict = research_market.resolve_mappings(database, LOCAL_WORKSPACE, ["111111111"])
+    assert first["111111111"]["symbol"] == "SYNTH"
+    answer = {"warning": "No identifier found"}
+    assert research_market.resolve_mappings(database, LOCAL_WORKSPACE, ["111111111"]) == first
+    with database.begin() as connection:
+        connection.execute(
+            update(MarketCache)
+            .where(MarketCache.provider == research_market.MAPPING_PROVIDER)
+            .values(fetched_at=datetime.now(UTC) - timedelta(days=2))
+        )
+    replaced: dict = research_market.resolve_mappings(database, LOCAL_WORKSPACE, ["111111111"])
+    assert replaced["111111111"]["symbol"] is None
+    assert replaced["111111111"]["reason"] == "No exact US equity mapping available"
+    assert research_market.resolve_mappings(database, LOCAL_WORKSPACE, ["111111111"]) == replaced
 
 
 def test_endpoint_sanitizes_provider_failure_and_recovers_without_retry_loop(

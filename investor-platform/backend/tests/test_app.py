@@ -13,7 +13,11 @@ def client():
 def test_health_is_identifiable_and_not_cached(client):
     response = client.get("/api/health", headers={"Origin": "http://127.0.0.1:5173"})
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "investor-platform"}
+    assert response.json() == {
+        "status": "ok",
+        "service": "investor-platform",
+        "release": "development",
+    }
     assert response.headers["cache-control"] == "no-store"
 
 

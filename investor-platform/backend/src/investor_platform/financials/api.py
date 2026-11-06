@@ -1,6 +1,5 @@
 """Read reviewed financial history using the selected account's dated equity holdings."""
 
-import os
 from datetime import date, timedelta
 from decimal import Decimal, DecimalException
 from typing import Annotated, cast
@@ -20,8 +19,8 @@ from investor_platform.financials.reviewed_releases import fund_listings, read_r
 from investor_platform.financials.types import Record, Row, records
 from investor_platform.ledger.schemas import LedgerView
 from investor_platform.ledger.state import active_entries_for_account, ledger_view
+from investor_platform.market_data import history as market_history
 from investor_platform.market_data import types as market_types
-from investor_platform.market_data import yahoo as market_yahoo
 from investor_platform.models import Account, LedgerEntry
 from investor_platform.performance.valuation import latest, value_records
 
@@ -53,31 +52,13 @@ def reporting_rates(
     for currency in currencies - {"USD"}:
         try:
             history: market_types.History
-            if os.environ.get("TIINGO_API_KEY"):
-                from investor_platform.market_data.tiingo import fx_history
-
-                try:
-                    history = fx_history(
-                        currency, end - timedelta(days=10), end, engine, workspace_id
-                    )
-                except OSError:
-                    history = market_yahoo.cached_history(
-                        f"{currency}USD=X",
-                        end - timedelta(days=10),
-                        end,
-                        instruments=("CURRENCY",),
-                        engine=engine,
-                        workspace_id=workspace_id,
-                    )
-            else:
-                history = market_yahoo.cached_history(
-                    f"{currency}USD=X",
-                    end - timedelta(days=10),
-                    end,
-                    instruments=("CURRENCY",),
-                    engine=engine,
-                    workspace_id=workspace_id,
-                )
+            history = market_history.fx_history(
+                currency,
+                end - timedelta(days=10),
+                end,
+                engine=engine,
+                workspace_id=workspace_id,
+            )
             day: date
             rate: Decimal
             day, rate = latest(history, end)

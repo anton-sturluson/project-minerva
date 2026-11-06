@@ -174,13 +174,13 @@ def test_stock_exclusion_keeps_original_matched_index_deployments(db_client, por
 
 
 def test_missing_price_fails_and_recovers_and_mode_is_validated(
-    db_client, portfolio, expire_prices
+    db_client, portfolio, reset_market_cache
 ):
     aid, data = portfolio
     original = data["AAA"].close.pop(DAYS[1])
     assert stock_report(db_client, aid, benchmark_mode="matched").status_code == 422
     data["AAA"].close[DAYS[1]] = original
-    expire_prices()
+    reset_market_cache()
     assert matched(db_client, aid)["return"] is not None
     assert stock_report(db_client, aid, benchmark_mode="unknown").status_code == 422
 
