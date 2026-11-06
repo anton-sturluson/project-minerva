@@ -26,6 +26,8 @@ export const performance = {
       weight: "0.8333333",
       basis: null,
       unrealized_pnl: null,
+      annualized_unrealized_return: null,
+      annualized_unrealized_return_reason: null,
     },
   ],
   series: [

@@ -28,6 +28,7 @@ from investor_platform.market_data.types import History
 from investor_platform.models import LedgerEntry
 from investor_platform.performance.positions import position_episodes
 from investor_platform.performance.statistics import trade_statistics
+from investor_platform.performance.unrealized_return import annualized_unrealized_return
 
 router = APIRouter(prefix="/api/accounts")
 QUOTE_WINDOW = timedelta(days=10)
@@ -242,15 +243,25 @@ def valuation(account_id: UUID, session: DatabaseSession, actor: CurrentActor) -
     """Serve current recorded holdings independently of a return period."""
     account = owned_account(session, actor, account_id)
     records = ledger_view(active_entries_for_account(session, account_id), account.base_currency)
-    return decimal_json_response(
-        value_records(
-            records,
-            account.base_currency,
-            bool(account.reconstruction),
-            engine=session.get_bind(),
-            workspace_id=actor.workspace_id,
-        )
+    result = value_records(
+        records,
+        account.base_currency,
+        bool(account.reconstruction),
+        engine=session.get_bind(),
+        workspace_id=actor.workspace_id,
     )
+    holdings = {holding.security.id: holding for holding in records.holdings}
+    for row in result["holdings"]:
+        rate, reason = (
+            annualized_unrealized_return(
+                holdings[row["security_id"]].lots, row["value"], row["quote_date"]
+            )
+            if row["value"] is not None and row["quote_date"] is not None
+            else (None, "Market value unavailable")
+        )
+        row["annualized_unrealized_return"] = rate
+        row["annualized_unrealized_return_reason"] = reason
+    return decimal_json_response(result)
 
 
 @router.get("/{account_id}/statistics/hypothetical")

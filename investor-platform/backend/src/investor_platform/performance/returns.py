@@ -14,7 +14,7 @@ from investor_platform.market_data import types as market_types
 from investor_platform.market_data.types import History
 from investor_platform.models import LedgerEntry
 from investor_platform.performance.attribution import StockAttribution
-from investor_platform.performance.daily_returns import daily_return_factor
+from investor_platform.performance.daily_returns import DAYS_PER_YEAR, daily_return_factor
 from investor_platform.performance.deposit_matched_benchmarks import deposit_matched_series
 from investor_platform.performance.income import (
     IncomeReconciliation,
@@ -29,9 +29,6 @@ ZERO = Decimal(0)
 
 
 ONE = Decimal(1)
-
-
-DAYS_PER_YEAR = Decimal("365.25")
 
 
 ACCOUNT_CASH_METHODS: frozenset[str] = frozenset({"purchase_shortfall", "recorded"})

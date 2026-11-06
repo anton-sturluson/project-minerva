@@ -543,6 +543,12 @@ summary:focus-visible {
   max-width: 180px;
   white-space: normal;
 }
+.holdings-table .annualized-reason {
+  display: block;
+  max-width: 220px;
+  white-space: normal;
+  font-size: 11px;
+}
 .holdings-table .cost-weight {
   background: color-mix(in srgb, var(--lilac) 30%, var(--paper));
 }

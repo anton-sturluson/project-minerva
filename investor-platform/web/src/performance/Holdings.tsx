@@ -25,6 +25,8 @@ type Valuation = {
     value: string | null;
     weight: string | null;
     unrealized_pnl: string | null;
+    annualized_unrealized_return: string | null;
+    annualized_unrealized_return_reason: string | null;
     price_error?: string | null;
     quote_date?: string | null;
   }[];
@@ -83,6 +85,8 @@ export function Holdings({
         value: null,
         weight: null,
         unrealized_pnl: null,
+        annualized_unrealized_return: null,
+        annualized_unrealized_return_reason: null,
         price_error: null,
         quote_date: null,
       }));
@@ -166,6 +170,11 @@ export function Holdings({
           Unknown basis · cost totals unavailable.
         </p>
       )}
+      <p className="form-note">
+        Annualized unrealized returns use dates and costs of shares still held
+        through the quoted close. Excludes dividends and realized gains;
+        requires at least one year of remaining purchase history.
+      </p>
       <div className="table-scroll" tabIndex={0} aria-label="Holdings">
         <table className="holdings-table">
           <thead>
@@ -199,6 +208,9 @@ export function Holdings({
                 title={`Unrealized gain or loss in ${ledger.currency} and as a percentage of remaining basis`}
               >
                 Unrealized return ({ledger.currency} / %)
+              </th>
+              <th scope="col" className="number">
+                Annualized unrealized (%)
               </th>
             </tr>
           </thead>
@@ -236,6 +248,16 @@ export function Holdings({
                     <> ({gainPercent(h.unrealized_pnl, h.basis)})</>
                   )}
                 </td>
+                <td
+                  className={`number ${tone(h.annualized_unrealized_return)}`}
+                >
+                  {percent(h.annualized_unrealized_return)}
+                  {h.annualized_unrealized_return_reason && (
+                    <small className="annualized-reason">
+                      {h.annualized_unrealized_return_reason}
+                    </small>
+                  )}
+                </td>
               </tr>
             ))}
             <tr className="cash-row">
@@ -251,6 +273,7 @@ export function Holdings({
               <td className="number cost-weight">
                 {percent(costWeight(cash))}
               </td>
+              <td>—</td>
               <td>—</td>
               <td>—</td>
             </tr>
@@ -280,6 +303,7 @@ export function Holdings({
                   <> ({gainPercent(stockGain, stockBasis)})</>
                 )}
               </td>
+              <td>—</td>
             </tr>
           </tfoot>
         </table>

@@ -246,6 +246,8 @@ test("shows one holdings table above returns and retains recorded positions duri
       },
     }),
   );
+  let annualized: string | null = "0.11803398875";
+  let annualizedReason: string | null = null;
   await page.route("**/valuation", (route) =>
     route.fulfill({
       json: {
@@ -255,6 +257,8 @@ test("shows one holdings table above returns and retains recorded positions duri
           ...h,
           basis: "800",
           unrealized_pnl: "200",
+          annualized_unrealized_return: annualized,
+          annualized_unrealized_return_reason: annualizedReason,
         })),
       },
     }),
@@ -262,6 +266,35 @@ test("shows one holdings table above returns and retains recorded positions duri
   await page.goto("/");
   const holdings = page.getByLabel("Holdings", { exact: true });
   await expect(holdings).toHaveCount(1);
+  await expect(holdings.getByRole("columnheader").last()).toHaveText(
+    "Annualized unrealized (%)",
+  );
+  await expect(holdings.getByRole("columnheader").nth(7)).toHaveText(
+    "Unrealized return (USD / %)",
+  );
+  const annualizedCell = holdings
+    .getByRole("row", { name: /^AAA/ })
+    .getByRole("cell")
+    .last();
+  await expect(annualizedCell).toHaveText("11.8%");
+  await expect(annualizedCell).toHaveClass(/gain/);
+  await expect(
+    holdings.getByRole("row", { name: /^Cash/ }).getByRole("cell").last(),
+  ).toHaveText("—");
+  await expect(
+    holdings
+      .getByRole("row", { name: /^Stocks total/ })
+      .getByRole("cell")
+      .last(),
+  ).toHaveText("—");
+  if (await holdings.evaluate((node) => node.scrollWidth > node.clientWidth)) {
+    await holdings.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect
+      .poll(() => holdings.evaluate((node) => node.scrollLeft))
+      .toBeGreaterThan(0);
+  }
+
   await expect(holdings).toContainText("83.3%");
   await expect(
     page.getByLabel("Portfolio allocation by market value"),
@@ -293,6 +326,17 @@ test("shows one holdings table above returns and retains recorded positions duri
     .boundingBox();
   expect(score!.y).toBeLessThan(table!.y);
   expect(table!.y).toBeLessThan(plot!.y);
+  annualized = "-0.10";
+  await page.getByRole("button", { name: "Reload data", exact: true }).click();
+  await expect(annualizedCell).toHaveText("-10.0%");
+  await expect(annualizedCell).toHaveClass(/loss/);
+  annualized = null;
+  annualizedReason = "Remaining purchases are less than 365 days old";
+  await page.getByRole("button", { name: "Reload data", exact: true }).click();
+  await expect(annualizedCell).toContainText("—");
+  await expect(
+    annualizedCell.getByText(annualizedReason, { exact: true }),
+  ).toBeVisible();
   await page.route("**/performance", (route) =>
     route.fulfill({ status: 503, json: { detail: "Synthetic quote outage" } }),
   );
@@ -312,6 +356,7 @@ test("shows one holdings table above returns and retains recorded positions duri
   ).toContainText("44.4%");
   await expect(total).toContainText("800.0");
   await expect(total).not.toContainText("25.0%");
+  await expect(annualizedCell).toHaveText("—");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -366,6 +411,8 @@ test("partial holdings quotes remain visible and retry restores complete totals"
                   value: null,
                   weight: null,
                   unrealized_pnl: null,
+                  annualized_unrealized_return: null,
+                  annualized_unrealized_return_reason: null,
                   price_error: "Split adjustment required (2026-01-05)",
                 },
               ]

@@ -152,6 +152,7 @@ def ledger_view(entries: Sequence[LedgerEntry], currency: Currency | str) -> Led
                     security=SecurityView.model_validate(securities[security_id]),
                     quantity=quantity,
                     cost_basis=basis,
+                    lots=active,
                 )
             )
     views: list[EntryView] = [

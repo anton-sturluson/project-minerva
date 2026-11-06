@@ -20,6 +20,7 @@ class Lot:
 
     quantity: Decimal
     basis: Decimal | None
+    acquired_on: date | None = None
 
 
 @dataclass
@@ -64,6 +65,7 @@ class ReplayState:
                     Lot(
                         entry.quantity,
                         entry.cost_basis if entry.kind in IN_KIND_ENTRIES else entry.amount,
+                        entry.effective_date if entry.kind == EntryKind.BUY else None,
                     )
                 )
             elif entry.kind == EntryKind.SELL:
