@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from investor_platform.domain import EntryKind
 from investor_platform.market_data.types import History
-from investor_platform.models import Account, LedgerEntry
+from investor_platform.models import Account, LedgerEntry, Security
 
 
 @pytest.fixture
@@ -348,3 +348,70 @@ def test_account_zero_policy_does_not_relabel_the_analytic_stock_sleeve(
     assert "dividend_policy" not in result
     assert not any("unrecorded dividends are zero" in item for item in result["assumptions"])
     assert float(result["return"]) == pytest.approx((111 / 100) * (121 / 110) - 1)
+
+
+def test_default_funded_account_uses_final_review_and_keeps_material_blockers(
+    db_client: TestClient, canonical_portfolio: tuple[str, dict[str, History]], database: Engine
+) -> None:
+    """Final source evidence repairs expected income without altering cash or stock estimates."""
+    account_id, histories = canonical_portfolio
+    histories["AAA"].dividends[DAYS[1]] = Decimal("1.2")
+    assert dividend(db_client, account_id, "12.06").status_code == 201
+    before: dict = ledger(db_client, account_id)
+    request: dict = {
+        "start": str(DAYS[0]),
+        "end": str(DAYS[-1]),
+        "scope": "account",
+        "benchmark_mode": "funded_hold",
+    }
+    endpoint: str = f"/api/accounts/{account_id}/performance"
+    blocked: Response = db_client.post(endpoint, json=request)
+    assert blocked.status_code == 200
+    assert blocked.json()["return"] is None
+    assert len(blocked.json()["warnings"]) == 1
+    stock_before: dict = stock_report(db_client, account_id).json()
+    review: dict = {
+        "ex_date": str(DAYS[1]),
+        "pay_date": str(DAYS[-1]),
+        "gross_per_share": "1.20625",
+        "currency": "USD",
+        "status": "final",
+        "source_url": "https://issuer.example/distributions/2026",
+        "reviewed_on": "2026-02-01",
+    }
+    with Session(database) as session:
+        security: Security = session.scalar(select(Security).where(Security.ticker == "AAA"))
+        security.market_identity = {"reviewed_dividends": [review]}
+        session.commit()
+    recovered: Response = db_client.post(endpoint, json=request)
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["warnings"] == []
+    assert Decimal(recovered.json()["return"]) == Decimal(".22206")
+    assert Decimal(recovered.json()["value"]) == Decimal("1222.06")
+    assert Decimal(recovered.json()["cash"]) == Decimal("12.06")
+    assert ledger(db_client, account_id) == before
+    stock_after: dict = stock_report(db_client, account_id).json()
+    assert stock_after["attribution"] == stock_before["attribution"]
+    assert stock_after["return"] == stock_before["return"]
+
+    with Session(database) as session:
+        security = session.scalar(select(Security).where(Security.ticker == "AAA"))
+        security.market_identity = {
+            "reviewed_dividends": [{**review, "gross_per_share": "1.30625"}]
+        }
+        session.commit()
+    changed: Response = db_client.post(endpoint, json=request)
+    assert changed.status_code == 200
+    assert changed.json()["return"] is None
+    assert len(changed.json()["warnings"]) == 1
+    assert "expected gross 13.06" in changed.json()["warnings"][0]
+    assert ledger(db_client, account_id) == before
+
+    with Session(database) as session:
+        security = session.scalar(select(Security).where(Security.ticker == "AAA"))
+        security.market_identity = {"reviewed_dividends": [{**review, "status": "preliminary"}]}
+        session.commit()
+    invalid: Response = db_client.post(endpoint, json=request)
+    assert invalid.status_code == 422
+    assert "final" in invalid.json()["detail"]
+    assert ledger(db_client, account_id) == before

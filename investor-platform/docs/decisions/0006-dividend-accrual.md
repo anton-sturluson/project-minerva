@@ -8,9 +8,13 @@ Keep dividend recognition separate from cash payment. Income records may identif
 
 Compare each security/ex-date amount against market distribution evidence. Withhold returns for missing, mismatched or unclassified income rather than filling missing cash with an estimate. Provider events alone do not establish a cash payment. For historical reports, retain later recorded payments when their receivable arose within the report. Exclusion scenarios remove security-linked income while preserving account-level interest; a recorded-period exclusion keeps income earned at or before the period's opening close.
 
+For an existing security/ex-date event, reviewed final USD gross-per-share evidence from an issuer or depositary may replace the provider rate used for whole-account reconciliation. Preserve its source and payment-date provenance. Continue using prior-ex-date shares and the existing one-cent mismatch limit; reviews do not create missing events, cash or receivables, and unresolved shortfalls still withhold returns. Stock-only estimates retain raw provider distributions.
+
 ## Why
 
 A payment-date income entry plus estimated ex-date cash counts the same dividend twice. Interest can also accidentally mask a missing dividend when reconciliation aggregates all income by date. Ex-date accrual better represents when dividend income is earned. This follows the GIPS recommendation for dividend accrual without claiming GIPS compliance. ([GIPS handbook, provision 2.B.3](https://www.gipsstandards.org/standards/gips-standards-for-firms/gips-standards-handbook-for-firms/))
+
+A rounded provider amount or an earlier ADR currency-conversion estimate can disagree with the finalized entitlement even when recorded gross income is correct. Final primary evidence addresses that source discrepancy without increasing the tolerance or treating every broker record as complete. Maintaining reviewed event evidence requires source checks; it is not automatic certification of a distribution.
 
 ## Limits
 
