@@ -172,8 +172,8 @@ export function Holdings({
       )}
       <p className="form-note">
         Annualized unrealized returns use dates and costs of shares still held
-        through the quoted close. Excludes dividends and realized gains;
-        requires at least one year of remaining purchase history.
+        through the quoted close. Excludes dividends and realized gains. Short
+        holding periods can magnify annualized gains and losses.
       </p>
       <div className="table-scroll" tabIndex={0} aria-label="Holdings">
         <table className="holdings-table">

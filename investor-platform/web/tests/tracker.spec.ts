@@ -246,7 +246,7 @@ test("shows one holdings table above returns and retains recorded positions duri
       },
     }),
   );
-  let annualized: string | null = "0.11803398875";
+  let annualized: string | null = "0.5625";
   let annualizedReason: string | null = null;
   await page.route("**/valuation", (route) =>
     route.fulfill({
@@ -276,7 +276,7 @@ test("shows one holdings table above returns and retains recorded positions duri
     .getByRole("row", { name: /^AAA/ })
     .getByRole("cell")
     .last();
-  await expect(annualizedCell).toHaveText("11.8%");
+  await expect(annualizedCell).toHaveText("56.3%");
   await expect(annualizedCell).toHaveClass(/gain/);
   await expect(
     holdings.getByRole("row", { name: /^Cash/ }).getByRole("cell").last(),
@@ -331,7 +331,7 @@ test("shows one holdings table above returns and retains recorded positions duri
   await expect(annualizedCell).toHaveText("-10.0%");
   await expect(annualizedCell).toHaveClass(/loss/);
   annualized = null;
-  annualizedReason = "Remaining purchases are less than 365 days old";
+  annualizedReason = "No elapsed holding period";
   await page.getByRole("button", { name: "Reload data", exact: true }).click();
   await expect(annualizedCell).toContainText("—");
   await expect(
