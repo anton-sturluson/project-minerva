@@ -39,7 +39,7 @@ def test_income_is_return_and_unreconciled_distributions_block_returns(db_client
     assert dividend(db_client, aid, pay="2026-01-05").status_code == 201
     assert D(ledger(db_client, aid)["balance"]) == 10
     result = report(db_client, aid).json()
-    assert result["warnings"] == []
+    assert result["blockers"] == []
     assert D(result["return"]) == D(".22")
     assert D(result["value"]) == 1220
 
@@ -117,7 +117,7 @@ def test_zero_balance_breaks_a_continuous_return_period(db_client, portfolio):
     assert "zero-value balance" in result.json()["detail"]
 
 
-def test_provisional_comparison_does_not_invent_missing_dividend_income(
+def test_provisional_comparison_uses_recorded_income_and_retains_market_safeguards(
     db_client, portfolio, database, reset_market_cache
 ):
     from uuid import UUID
@@ -141,8 +141,10 @@ def test_provisional_comparison_does_not_invent_missing_dividend_income(
     result = report(db_client, aid).json()
     assert result["provisional"] is True
     assert result["assumptions"]
-    assert result["return"] is None and result["excess_spy"] is None
-    assert "reconcile dividend" in result["warnings"][0]
+    assert D(result["return"]) == D(".214")
+    assert D(result["excess_spy"]) == D(".194")
+    assert result["blockers"] == []
+    assert "provider estimate 10.00, recorded gross 4.00" in result["advisories"][0]
     assert D(result["value"]) == 1214
     assert ledger(db_client, aid) == before
     # Modeling never relaxes missing-price or corporate-action safeguards.
@@ -237,10 +239,13 @@ def test_excluded_stock_does_not_contribute_recorded_dividends(db_client, portfo
         }
         session.commit()
     data["AAA"].dividends[DAYS[1]] = D("1")
-    assert dividend(db_client, aid).status_code == 201
+    assert dividend(db_client, aid, "4").status_code == 201
     before = ledger(db_client, aid)
     result = scenario(db_client, aid, [before["holdings"][0]["security"]["id"]]).json()
-    assert D(result["cash"]) == 10
+    assert D(result["cash"]) == 4
+    assert D(result["return"]) == D(".214")
+    assert len(result["advisories"]) == 1
+    assert result["scenario"]["advisories"] == []
     assert D(result["scenario"]["cash"]) == 1000
     assert D(result["scenario"]["return"]) == 0
     assert ledger(db_client, aid) == before
@@ -564,7 +569,7 @@ def test_inferred_funding_models_returns_but_rejects_account_exclusions(
         }
         session.commit()
     result = scenario(db_client, aid, [sid], baseline=baseline).json()
-    assert result["warnings"] == []
+    assert result["blockers"] == []
     assert D(result["return"]) == D(".21")
     assert D(result["scenario"]["return"]) == 0
 
@@ -577,7 +582,7 @@ def test_dividend_accrues_before_cash_payment_even_when_report_ends_before_payme
     data["AAA"].dividends[DAYS[1]] = D("1")
     assert dividend(db_client, aid, pay="2026-01-07").status_code == 201
     before = report(db_client, aid).json()
-    assert before["warnings"] == []
+    assert before["blockers"] == []
     assert D(before["cash"]) == 0
     assert D(before["receivables"]) == 10
     assert D(before["return"]) == 0
@@ -608,7 +613,7 @@ def test_interest_does_not_mask_an_unrecorded_dividend(db_client, portfolio):
     )
     result = report(db_client, aid).json()
     assert result["return"] is None
-    assert "recorded 0.00" in result["warnings"][0]
+    assert "no recorded dividend" in result["blockers"][0]
 
 
 def test_deposit_day_gains_use_all_capital_available_that_day(db_client, portfolio):
@@ -647,7 +652,7 @@ def test_stock_lending_income_follows_its_security_in_exclusion_scenarios(db_cli
     )
     before = ledger(db_client, aid)
     result = scenario(db_client, aid, [sid]).json()
-    assert result["warnings"] == []
+    assert result["blockers"] == []
     assert D(result["return"]) == D(".22")
     assert D(result["scenario"]["return"]) == 0
     assert D(result["scenario"]["cash"]) == 1000

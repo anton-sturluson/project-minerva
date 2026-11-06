@@ -1,6 +1,6 @@
 # ADR 0010: Fund purchases and link whole-account returns
 
-Status: accepted
+Status: accepted. The provider-discrepancy veto is superseded by [ADR 0013](0013-separate-recorded-returns-from-market-diagnostics.md); purchase funding and the account-return method remain accepted.
 
 ## Context
 
@@ -19,6 +19,8 @@ Offer ordinary index buy and hold, or index purchases using the same dated contr
 One ledger determines account cash and performance. Sale proceeds are reused without counting them as new contributions. There is no active opening cash placeholder for these accounts. The historical funding dates remain assumptions, and source order matters for same-day purchases and sales. Missing income withholds total return until evidence is entered, unless the owner explicitly selects the labeled zero assumption for unrecorded dividends. Index purchases at the close can produce a different time-weighted return from continuous index exposure because new cash is idle during that session.
 
 ## Related ADRs
+
+- **Preceded by** [ADR 0013](0013-separate-recorded-returns-from-market-diagnostics.md) — supersedes only the provider-discrepancy veto; funding and daily return conventions remain unchanged.
 
 - Supersedes [ADR 0007](0007-stock-performance-scope.md) for purchase-funded account defaults; preserves its analytical stock-only scope.
 - Depends on [ADR 0006](0006-dividend-accrual.md) for dividend accrual and payment treatment.

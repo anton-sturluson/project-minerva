@@ -69,7 +69,7 @@ test("withholds unfunded returns, preserves benchmarks, and recovers from a quot
             cagr: { portfolio: null, SPY: null, QQQ: null },
             excess_spy: null,
             excess_qqq: null,
-            warnings: [
+            blockers: [
               "Cash history needs reconciliation; starting funding was inferred.",
             ],
             series: performance.series.map((point) => ({

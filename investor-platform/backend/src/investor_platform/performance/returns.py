@@ -16,7 +16,11 @@ from investor_platform.models import LedgerEntry
 from investor_platform.performance.attribution import StockAttribution
 from investor_platform.performance.daily_returns import daily_return_factor
 from investor_platform.performance.deposit_matched_benchmarks import deposit_matched_series
-from investor_platform.performance.income import dividend_receivables, market_dividends
+from investor_platform.performance.income import (
+    IncomeReconciliation,
+    market_dividends,
+    reconcile_income,
+)
 from investor_platform.performance.positions import period_securities
 from investor_platform.performance.schemas import Baseline, BenchmarkMode, PerformanceScope
 from investor_platform.performance.trade_matched_benchmarks import trade_matched_series
@@ -207,13 +211,14 @@ def calculate(
     growth = ONE
     previous = None
     previous_day = None
-    warnings = []
+    blockers: list[str] = []
+    advisories: list[str] = []
     known_account_cash: bool = cash_method in ACCOUNT_CASH_METHODS
     canonical_funding: bool = cash_method == "purchase_shortfall" and not any(
         entry.kind == EntryKind.OPENING_CASH for entry in entries
     )
     if not stock_only and funding_status == FundingStatus.INFERRED and not canonical_funding:
-        warnings.append(
+        blockers.append(
             "Cash history needs reconciliation; funding completeness is not confirmed."
             if cash_method == "recorded"
             else "Cash history needs reconciliation; starting funding was inferred."
@@ -225,7 +230,7 @@ def calculate(
         distributions = market_dividends(entries, prices, days[-1])
         receivables = dict.fromkeys(days, ZERO)
     else:
-        receivables, income_warnings = dividend_receivables(
+        income: IncomeReconciliation = reconcile_income(
             entries,
             prices,
             securities,
@@ -233,7 +238,9 @@ def calculate(
             validation_start=start if baseline == Baseline.RECORDED else None,
             assume_unrecorded_zero=dividend_policy == "unrecorded_zero",
         )
-        warnings.extend(income_warnings)
+        receivables = income.receivables
+        blockers.extend(income.blockers)
+        advisories.extend(income.advisories)
     latest_holdings = []
     attribution = StockAttribution(securities) if stock_only else None
     replay_state: ReplayState = ReplayState()
@@ -349,7 +356,7 @@ def calculate(
             }
         )
         previous, previous_day, latest_holdings = value, d, holdings
-    if warnings:
+    if blockers:
         for row in values:
             row["portfolio"] = None
     matched = None
@@ -410,16 +417,8 @@ def calculate(
             ),
             "Assumes no missing trades or external flows; excluded import rows are not included.",
             "Uses exchange-specific listings and dated USD FX; confirm security identity.",
-            (
-                "Recorded dividends accrue on ex-dates and become cash on payment dates. "
-                "Mismatched recorded income withholds returns; interest is recognized when posted."
-                if dividend_policy
-                else (
-                    "Dividends accrue on their recorded ex-dates and become cash on payment dates. "
-                    "Missing or mismatched distributions withhold returns; "
-                    "interest is recognized when posted."
-                )
-            ),
+            "Recorded dividends accrue on ex-dates and become cash on payment dates; "
+            "interest is recognized when posted.",
             "No unrecorded fees or taxes. Benchmarks reinvest distributions.",
         ]
         if provisional
@@ -430,7 +429,8 @@ def calculate(
         "cash": last["cash"],
         "holdings": latest_holdings,
         "series": values,
-        "warnings": warnings,
+        "blockers": blockers,
+        "advisories": advisories,
         "return": last["portfolio"],
         "cagr": {
             key: annualized_return(last[key], days[0], days[-1])
@@ -438,9 +438,14 @@ def calculate(
         },
         "SPY": last["SPY"],
         "QQQ": last["QQQ"],
-        "excess_spy": None if warnings else last["portfolio"] - last["SPY"],
-        "excess_qqq": None if warnings else last["portfolio"] - last["QQQ"],
+        "excess_spy": None if blockers else last["portfolio"] - last["SPY"],
+        "excess_qqq": None if blockers else last["portfolio"] - last["QQQ"],
     }
+    if not stock_only:
+        result["assumptions"].append(
+            "Returns use recorded transactions, not a verified complete broker statement. "
+            "Provider dividend differences are source checks, not adjustments to income."
+        )
     if dividend_policy:
         result["assumptions"].append(
             "Temporary assumption: unrecorded dividends are zero. "

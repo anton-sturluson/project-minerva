@@ -1,6 +1,6 @@
 # ADR 0006: Dividend accrual and cash payment
 
-Status: accepted.
+Status: accepted. The provider-discrepancy veto is superseded by [ADR 0013](0013-separate-recorded-returns-from-market-diagnostics.md); dividend accrual and payment treatment remain accepted.
 
 ## Decision
 
@@ -15,6 +15,10 @@ A payment-date income entry plus estimated ex-date cash counts the same dividend
 ## Limits
 
 No future cash entries are posted. An unrecorded or unpaid entitlement lacking a recorded payment remains a reconciliation gap. Income denominated in USD is not proof that a foreign-currency receivable or cash balance has been correctly valued each day. Provider revisions, special distributions and taxes require source review. Current holdings display cash and stock positions; the historical performance report separately includes receivables.
+
+## Related ADRs
+
+- **Preceded by** [ADR 0013](0013-separate-recorded-returns-from-market-diagnostics.md) — supersedes only the provider-discrepancy veto; recorded dividend accrual remains unchanged.
 
 ## References
 

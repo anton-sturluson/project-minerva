@@ -57,7 +57,7 @@ test("yearly returns use prior year-end, distinguish partial periods and sign be
           ...p,
           portfolio: missing ? null : p.portfolio,
         })),
-        warnings: missing ? ["Synthetic missing income"] : [],
+        blockers: missing ? ["Synthetic required price unavailable"] : [],
       },
     }),
   );

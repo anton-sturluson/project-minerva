@@ -21,7 +21,7 @@ def test_stock_return_ignores_cash_and_uses_ex_date_dividends_once(db_client, po
     result = r.json()
     # $10 ex-date distribution leaves the stock sleeve; broker payment is not added twice.
     assert float(result["return"]) == pytest.approx(1.11 * 1.1 - 1)
-    assert result["warnings"] == []
+    assert result["blockers"] == []
     assert result["scope"] == "stocks"
     assert D(result["cash"]) == 0
     assert D(result["value"]) == 1210

@@ -14,7 +14,8 @@ export const performance = {
   excess_qqq: "0.16",
   fetched_at: "2026-01-07T12:00:00Z",
   source: "Synthetic browser fixture",
-  warnings: [],
+  blockers: [],
+  advisories: [],
   holdings: [
     {
       ticker: "AAA",

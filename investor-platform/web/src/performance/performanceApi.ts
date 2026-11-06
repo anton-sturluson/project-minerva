@@ -53,7 +53,8 @@ export type PerformanceReport = {
   excess_qqq: string | null;
   fetched_at: string;
   source: string;
-  warnings: string[];
+  blockers: string[];
+  advisories: string[];
   series: PerformancePoint[];
 };
 
