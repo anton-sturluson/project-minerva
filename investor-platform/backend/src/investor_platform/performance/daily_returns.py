@@ -4,6 +4,7 @@ from decimal import Decimal
 
 ZERO: Decimal = Decimal(0)
 ONE: Decimal = Decimal(1)
+DAYS_PER_YEAR: Decimal = Decimal("365.25")
 
 
 def daily_return_factor(

@@ -22,6 +22,7 @@ from investor_platform.domain import (
     EntryKind,
     IncomeKind,
 )
+from investor_platform.ledger.accounting import Lot
 
 type LedgerValue = (
     str | int | float | Decimal | bool | None | list[LedgerValue] | dict[str, LedgerValue]
@@ -113,6 +114,7 @@ class HoldingView(BaseModel):
     security: SecurityView
     quantity: WireDecimal
     cost_basis: WireDecimal | None
+    lots: list[Lot] = Field(default_factory=list, exclude=True)
 
 
 class EntryView(BaseModel):

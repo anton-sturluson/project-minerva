@@ -90,11 +90,16 @@ Cash **Fee or tax** entries reduce both cash and investment return. Use **Withdr
 
 The percentage in **Unrealized return** is unrealized P&L divided by the remaining cost basis of each holding; zero or unknown basis displays unavailable. The **Stocks total** row excludes cash and sums stock market value, remaining basis and net unrealized P&L. Its gain percentage uses total P&L / total basis, not an average of individual percentages. Cash remains a separate row, and market/cost allocation weights include cash in their denominators. Missing prices or basis withhold affected aggregate figures instead of adding only known positions.
 
+**Annualized unrealized (%)** is the money-weighted annual rate on the purchase costs of shares still held. It uses the remaining FIFO costs, including purchase fees, and their original purchase dates through the actual quoted close. Partial sales remove their allocated costs; realized sale proceeds and dividends are excluded. For remaining costs `C_i`, purchase dates `d_i` and quote date `D`, solve `market value = sum(C_i × (1 + r)^((D − d_i).days / 365.25))`. A single purchase reduces to CAGR; multiple purchases retain their individual dates. The project uses ACT/365.25, distinct from Excel XIRR's 365-day convention. ([Calculation](../backend/src/investor_platform/performance/unrealized_return.py), [dated cash-flow returns](https://support.microsoft.com/en-us/excel/functions/xirr-function))
+
+The earliest positive cost still held must span at least 365 days, following the existing [annualization policy](performance.md#cagr-and-stock-exclusions). Unknown purchase dates or basis, nonpositive total basis, a quote before a remaining purchase, or no admissible rate leave only this metric unavailable. Opening and transferred shares do not inherit an assumed original purchase date from their receipt date. Same-day costs have zero elapsed time; a terminal value equal to those costs permits a −100% rate on the aged capital, while a lower value has no admissible rate. Cash and **Stocks total** have no annualized figure; individual rates are not averaged or summed.
+
 Holdings figures display one decimal place, including shares, prices, dollar values and percentages. Calculations and stored transactions retain full precision; the shares tooltip retains the recorded quantity. Unrealized dollar returns and percentages share one column, including in the totals row.
 
 ## References
 
 - [Current valuation](../backend/src/investor_platform/performance/valuation.py) — independent pricing and unresolved-split safeguard.
+- [Annualized unrealized return](../backend/src/investor_platform/performance/unrealized_return.py) and [Microsoft XIRR](https://support.microsoft.com/en-us/excel/functions/xirr-function) — remaining dated-cost method and the separate 365 versus 365.25 day conventions.
 - [Ledger implementation](../backend/src/investor_platform/ledger/state.py) — active records and cash writes.
 - [Accounting](../backend/src/investor_platform/ledger/accounting.py) — cash validation and FIFO calculations.
 - [Corrections](../backend/src/investor_platform/ledger/corrections.py) — preview, replacement, void and audit behavior.
