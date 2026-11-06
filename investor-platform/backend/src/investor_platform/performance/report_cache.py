@@ -33,23 +33,25 @@ def cache_key(
     market_date: date,
 ) -> CacheKey:
     """Bind a response to its owner, active ledger, listing evidence and provider revision."""
-    securities: dict[str, tuple[str, str, str, dict | None]] = {}
-    entry: LedgerEntry
-    for entry in entries:
-        security: Security | None
-        for security in (entry.security, entry.income_security):
-            if security is not None:
-                securities[str(security.id)] = (
-                    security.ticker,
-                    security.exchange,
-                    security.currency,
-                    security.market_identity,
-                )
+    securities: dict[UUID, Security] = {
+        security.id: security
+        for entry in entries
+        for security in (entry.security, entry.income_security)
+        if security is not None
+    }
     fingerprint: str = hashlib.sha256(
         json.dumps(
             {
                 "entries": [str(entry.id) for entry in entries],
-                "securities": securities,
+                "securities": {
+                    str(sid): (
+                        security.ticker,
+                        security.exchange,
+                        security.currency,
+                        security.market_identity,
+                    )
+                    for sid, security in securities.items()
+                },
                 "currency": account.base_currency,
                 "provisional": bool(account.reconstruction),
                 "reconstruction": {
@@ -64,25 +66,23 @@ def cache_key(
     ).hexdigest()
     yahoo_symbols: set[str] = set(market_types.BENCHMARKS)
     tiingo_symbols: set[str] = set()
-    for entry in entries:
-        for security in (entry.security, entry.income_security):
-            if security is None:
-                continue
-            yahoo_symbols.add(
-                market_listings.symbol_for(security, provisional=bool(account.reconstruction))
+    security: Security
+    for security in securities.values():
+        yahoo_symbols.add(
+            market_listings.symbol_for(security, provisional=bool(account.reconstruction))
+        )
+        review: dict = (security.market_identity or {}).get("tiingo", {})
+        tiingo_symbols.add("stock:" + review.get("symbol", security.ticker))
+        foreign: tuple | None = market_listings.FOREIGN_LISTINGS.get(security.exchange)
+        if foreign:
+            currency: str = foreign[1]
+            yahoo_symbols.add(f"{currency}USD=X")
+            pair: str = (
+                currency.lower() + "usd"
+                if currency in {"AUD", "EUR", "GBP", "NZD"}
+                else "usd" + currency.lower()
             )
-            review: dict = (security.market_identity or {}).get("tiingo", {})
-            tiingo_symbols.add("stock:" + review.get("symbol", security.ticker))
-            foreign: tuple | None = market_listings.FOREIGN_LISTINGS.get(security.exchange)
-            if foreign:
-                currency: str = foreign[1]
-                yahoo_symbols.add(f"{currency}USD=X")
-                pair: str = (
-                    currency.lower() + "usd"
-                    if currency in {"AUD", "EUR", "GBP", "NZD"}
-                    else "usd" + currency.lower()
-                )
-                tiingo_symbols.add("fx:" + pair)
+            tiingo_symbols.add("fx:" + pair)
     provider: str
     symbol: str
     stamp: datetime

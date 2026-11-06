@@ -8,11 +8,13 @@ import { PerformanceComparison } from "./PerformanceComparison";
 export function PortfolioOverview({
   account,
   ledger,
+  visible,
   marketRevision,
   onRefreshMarket,
 }: {
   account: Account;
   ledger: Ledger;
+  visible: boolean;
   marketRevision: number;
   onRefreshMarket: () => void;
 }) {
@@ -22,12 +24,14 @@ export function PortfolioOverview({
         <TradeScorecard
           account={account}
           ledger={ledger}
+          visible={visible}
           marketRevision={marketRevision}
         />
         {!account.reconstruction && (
           <HitRate
             key={`${account.id}:${ledger.entries.map((e) => e.id).join(",")}`}
             accountId={account.id}
+            visible={visible}
             marketRevision={marketRevision}
           />
         )}
@@ -36,12 +40,14 @@ export function PortfolioOverview({
       <Holdings
         ledger={ledger}
         accountId={account.id}
+        visible={visible}
         marketRevision={marketRevision}
         onRefreshMarket={onRefreshMarket}
       />
       <PerformanceComparison
         account={account}
         ledger={ledger}
+        visible={visible}
         marketRevision={marketRevision}
       />
     </>

@@ -250,3 +250,54 @@ test("same-day return and focus pick up accepted prices after a collector retry"
   await expect(page.getByText("1,400.00", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Performance end")).toHaveValue("2026-10-30");
 });
+
+test("hidden portfolio panels pause reads and resume with the chosen period", async ({
+  page,
+}) => {
+  const overviewReads: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      path.endsWith("/valuation") ||
+      path.endsWith("/statistics") ||
+      (path.endsWith("/performance") && request.postDataJSON().benchmark_mode)
+    )
+      overviewReads.push(path);
+  });
+  await page.goto("/#post-mortem");
+  await expect(
+    page.locator(".annual-financials").getByRole("alert"),
+  ).toBeVisible();
+  expect(overviewReads).toEqual([]);
+  await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Compare performance", exact: true }),
+  ).toBeEnabled();
+  await page.getByLabel("Performance end").fill("2026-10-30");
+  await page
+    .getByRole("button", { name: "Compare performance", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Compare performance", exact: true }),
+  ).toBeEnabled();
+  overviewReads.length = 0;
+  await page
+    .getByRole("link", { name: "[ Post-mortem ]", exact: true })
+    .click();
+  await expect(
+    page.locator(".annual-financials").getByRole("alert"),
+  ).toBeVisible();
+  const refreshedFinancials = page.waitForResponse("**/financials?year=*");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await (await refreshedFinancials).finished();
+  expect(overviewReads).toEqual([]);
+  await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Compare performance", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByLabel("Performance end")).toHaveValue("2026-10-30");
+  expect(overviewReads.some((path) => path.endsWith("/valuation"))).toBe(true);
+  expect(overviewReads.some((path) => path.endsWith("/performance"))).toBe(
+    true,
+  );
+});

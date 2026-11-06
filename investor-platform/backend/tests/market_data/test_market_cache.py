@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from threading import Event
 from uuid import uuid4
 
 import pytest
@@ -196,7 +197,7 @@ def test_retained_valuation_shows_actual_quote_and_collection_dates_until_refres
     assert datetime.fromisoformat(refreshed["prices_fetched_at"]) > prior
 
 
-def test_scheduled_refresh_bypasses_ttl_and_reuses_its_results(database, monkeypatch):
+def test_explicit_collection_replaces_prices_and_reuses_its_revision(database, monkeypatch):
     calls = []
 
     def download(symbol, first, last):
@@ -215,4 +216,60 @@ def test_scheduled_refresh_bypasses_ttl_and_reuses_its_results(database, monkeyp
     assert read(refresh_after=cutoff).close[START] == 2
     assert read(refresh_after=cutoff).close[START] == 2
     assert read().close[START] == 2
+    assert len(calls) == 2
+
+
+def test_accepted_prices_remain_readable_while_collection_waits_for_provider(database, monkeypatch):
+    monkeypatch.setattr(
+        market_yahoo,
+        "history",
+        lambda *args, **kwargs: market_types.History({START: Decimal(10)}, {}),
+    )
+
+    def read(**kwargs):
+        return market_yahoo.cached_history(
+            "AAA", START, END, engine=database, workspace_id=LOCAL_WORKSPACE, **kwargs
+        )
+
+    accepted = read()
+    entered, release = Event(), Event()
+
+    def collecting(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return market_types.History({START: Decimal(20)}, {})
+
+    monkeypatch.setattr(market_yahoo, "history", collecting)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        refresh = pool.submit(read, refresh_after=datetime.now(UTC))
+        assert entered.wait(2)
+        try:
+            available = pool.submit(read).result(timeout=2)
+            assert available.close[START] == 10
+            assert available.fetched_at == accepted.fetched_at
+        finally:
+            release.set()
+        assert refresh.result(timeout=2).close[START] == 20
+    assert read().close[START] == 20
+
+
+def test_concurrent_explicit_collectors_recheck_the_committed_revision(database, monkeypatch):
+    calls = []
+
+    def download(*args, **kwargs):
+        calls.append(True)
+        return market_types.History({START: Decimal(len(calls))}, {})
+
+    monkeypatch.setattr(market_yahoo, "history", download)
+
+    def read(**kwargs):
+        return market_yahoo.cached_history(
+            "AAA", START, END, engine=database, workspace_id=LOCAL_WORKSPACE, **kwargs
+        )
+
+    assert read().close[START] == 1
+    cutoff = datetime.now(UTC)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: read(refresh_after=cutoff), range(4)))
+    assert all(result.close[START] == 2 for result in results)
     assert len(calls) == 2

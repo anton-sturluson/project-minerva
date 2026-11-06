@@ -37,6 +37,26 @@ def owned_manager(session: Session, actor: Actor, slug: str) -> ResearchManager:
     return manager
 
 
+def coverage_holdings(
+    session: Session, filings: list[ResearchFiling]
+) -> dict[UUID, list[ResearchHolding]]:
+    """Load latest company-count inputs and amendment-overlap evidence in one batch."""
+    latest: dict[UUID, date] = {}
+    required: set[tuple[UUID, date]] = set()
+    filing: ResearchFiling
+    for filing in filings:
+        latest[filing.manager_id] = max(
+            latest.get(filing.manager_id, filing.report_period), filing.report_period
+        )
+        if filing.amendment_type == "NEW HOLDINGS":
+            required.add((filing.manager_id, filing.report_period))
+    required.update(latest.items())
+    return load_holdings(
+        session,
+        [filing for filing in filings if (filing.manager_id, filing.report_period) in required],
+    )
+
+
 def manager_view(
     session: Session,
     manager: ResearchManager,
@@ -57,6 +77,8 @@ def manager_view(
             )
         )
     )
+    if holdings is None:
+        holdings = coverage_holdings(session, filings)
     by_period: dict[date, list[ResearchFiling]] = {}
     for filing in filings:
         by_period.setdefault(filing.report_period, []).append(filing)
@@ -155,23 +177,7 @@ def list_managers(session: DatabaseSession, actor: CurrentActor) -> dict:
     grouped: dict[UUID, list[ResearchFiling]] = {}
     for filing in filings:
         grouped.setdefault(filing.manager_id, []).append(filing)
-    amendment_periods: set[tuple[UUID, date]] = {
-        (filing.manager_id, filing.report_period)
-        for filing in filings
-        if filing.amendment_type == "NEW HOLDINGS"
-    }
-    latest_periods: set[tuple[UUID, date]] = {
-        (manager_id, max(filing.report_period for filing in manager_filings))
-        for manager_id, manager_filings in grouped.items()
-    }
-    holdings: dict[UUID, list[ResearchHolding]] = load_holdings(
-        session,
-        [
-            filing
-            for filing in filings
-            if (filing.manager_id, filing.report_period) in amendment_periods | latest_periods
-        ],
-    )
+    holdings: dict[UUID, list[ResearchHolding]] = coverage_holdings(session, filings)
     return {
         "managers": [
             manager_view(session, manager, filings=grouped.get(manager.id, []), holdings=holdings)

@@ -4,7 +4,7 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, DecimalException, localcontext
 from http.client import HTTPException as HTTPClientError
 from typing import Annotated, NotRequired, TypedDict
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import ACCOUNTING_PRECISION, Currency
 from investor_platform.market_data import tiingo
-from investor_platform.market_data.cache import CACHE_TTL, CachedPayload, cached_payload
+from investor_platform.market_data.cache import CachedPayload, cached_payload
 from investor_platform.market_data.listings import PROVIDER_EXCHANGES
 from investor_platform.market_data.types import History
 from investor_platform.market_data.yahoo import cached_history
@@ -132,6 +132,7 @@ def resolve_mappings(engine: Engine, workspace_id: UUID, cusips: list[str]) -> d
     """Cache successful, unmatched and ambiguous mappings under the existing private cache."""
     found: dict[str, Mapping] = {}
     now: datetime = datetime.now(UTC)
+    fresh_after: datetime = now - timedelta(days=1)
     with Session(engine) as session:
         cached: MarketCache
         for cached in session.scalars(
@@ -139,10 +140,10 @@ def resolve_mappings(engine: Engine, workspace_id: UUID, cusips: list[str]) -> d
                 MarketCache.workspace_id == workspace_id,
                 MarketCache.provider == MAPPING_PROVIDER,
                 MarketCache.symbol.in_(cusips),
+                MarketCache.fetched_at >= fresh_after,
             )
         ):
-            if now - cached.fetched_at < CACHE_TTL:
-                found[cached.symbol] = cached.payload
+            found[cached.symbol] = cached.payload
     missing: list[str] = [cusip for cusip in cusips if cusip not in found]
     index: int
     for index in range(0, len(missing), 10):
@@ -174,6 +175,7 @@ def resolve_mappings(engine: Engine, workspace_id: UUID, cusips: list[str]) -> d
                 MAPPING_DATE,
                 MAPPING_DATE,
                 load,
+                refresh_after=fresh_after,
             ).body
     return found
 

@@ -24,9 +24,11 @@ type Result = {
 };
 export function HitRate({
   accountId,
+  visible,
   marketRevision,
 }: {
   accountId: string;
+  visible: boolean;
   marketRevision: number;
 }) {
   const [result, setResult] = useState<Result | null>(null);
@@ -56,9 +58,10 @@ export function HitRate({
     }
   }, [accountId]);
   useEffect(() => {
+    if (!visible) return;
     if (requested.current) void calculate();
     return () => activeRequest.current?.abort();
-  }, [calculate, marketRevision]);
+  }, [calculate, marketRevision, visible]);
   return (
     <section aria-label="Benchmark hit rate">
       <dl className="scorecard">

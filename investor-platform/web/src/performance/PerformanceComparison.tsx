@@ -44,10 +44,12 @@ const shortcutDates = (ledger: Ledger, through: string, shortcut: Shortcut) => {
 export function PerformanceComparison({
   account,
   ledger,
+  visible,
   marketRevision,
 }: {
   account: Account;
   ledger: Ledger;
+  visible: boolean;
   marketRevision: number;
 }) {
   const standardAccount =
@@ -120,6 +122,7 @@ export function PerformanceComparison({
     [account.id, standardAccount],
   );
   useEffect(() => {
+    if (!visible) return;
     if (lastComparison.current) {
       const request = { ...lastComparison.current };
       if (periodIntent.current !== "custom") {
@@ -181,6 +184,7 @@ export function PerformanceComparison({
     standardAccount,
     ledger,
     marketRevision,
+    visible,
     compare,
   ]);
   function submit(e: FormEvent) {

@@ -97,7 +97,6 @@ def payload(
         end,
         load,
         refresh_after=refresh_after,
-        max_age=None,
     )
 
 

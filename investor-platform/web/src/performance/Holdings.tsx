@@ -33,11 +33,13 @@ type Valuation = {
 export function Holdings({
   ledger,
   accountId,
+  visible,
   marketRevision,
   onRefreshMarket,
 }: {
   ledger: Ledger;
   accountId: string;
+  visible: boolean;
   marketRevision: number;
   onRefreshMarket: () => void;
 }) {
@@ -45,6 +47,7 @@ export function Holdings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
+    if (!visible) return;
     const controller = new AbortController();
     setReport(null);
     setError("");
@@ -66,7 +69,7 @@ export function Holdings({
     return () => {
       controller.abort();
     };
-  }, [accountId, ledger, marketRevision]);
+  }, [accountId, ledger, marketRevision, visible]);
   const rows = report
     ? [...report.holdings].sort(
         (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0),

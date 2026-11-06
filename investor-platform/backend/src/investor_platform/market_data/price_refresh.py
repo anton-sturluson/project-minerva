@@ -133,13 +133,43 @@ def collect_account(
     engine: Engine = session.get_bind()
     workspace_id: UUID = account.workspace_id
     listings: list[SecurityView] = [SecurityView.model_validate(s) for s in securities.values()]
+    currency_windows: dict[str, tuple[date, date]] = {}
+    security: SecurityView
+    for security in listings:
+        foreign: tuple[str, str, set[str]] | None = market_listings.FOREIGN_LISTINGS.get(
+            security.exchange
+        )
+        if foreign:
+            first, last = windows[market_listings.symbol_for(security, provisional=provisional)]
+            previous: tuple[date, date] = currency_windows.get(foreign[1], (first, last))
+            currency_windows[foreign[1]] = (min(first, previous[0]), max(last, previous[1]))
+
+    def collect_currency(
+        item: tuple[str, tuple[date, date]],
+    ) -> tuple[str, market_types.History | None]:
+        """Collect each currency once for the historical windows that need it."""
+        currency: str
+        first: date
+        last: date
+        currency, (first, last) = item
+        try:
+            return currency, market.fx_history(
+                currency,
+                first - market_types.MAX_CLOSE_AGE,
+                last,
+                engine=engine,
+                workspace_id=workspace_id,
+                refresh_after=refresh_after,
+            )
+        except (OSError, ValueError, KeyError, TypeError, IndexError, DecimalException):
+            return currency, None
 
     def collect_listing(security: SecurityView) -> dict[str, str] | None:
         """Collect one independent history window without sharing a database session."""
         symbol: str = security.ticker
         try:
             symbol = market_listings.symbol_for(security, provisional=provisional)
-            first, last = windows.get(symbol, (start, day))
+            first, last = windows[symbol]
             history = market.listing_history(
                 security,
                 first,
@@ -153,14 +183,9 @@ def collect_account(
                 security.exchange
             )
             if foreign:
-                fx: market_types.History = market.fx_history(
-                    foreign[1],
-                    first - market_types.MAX_CLOSE_AGE,
-                    last,
-                    engine=engine,
-                    workspace_id=workspace_id,
-                    refresh_after=refresh_after,
-                )
+                fx: market_types.History | None = exchange_rates[foreign[1]]
+                if fx is None:
+                    raise ValueError("Historical exchange rates unavailable")
                 history = market.usd_history(history, fx)
             if not history.close or (
                 security.id in current and result.close and result.close not in history.close
@@ -171,6 +196,9 @@ def collect_account(
         return None
 
     with ThreadPoolExecutor(max_workers=6) as pool:
+        exchange_rates: dict[str, market_types.History | None] = dict(
+            pool.map(collect_currency, currency_windows.items())
+        )
         result.failures.extend(
             failure for failure in pool.map(collect_listing, listings) if failure
         )

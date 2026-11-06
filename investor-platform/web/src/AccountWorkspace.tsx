@@ -17,23 +17,15 @@ export function AccountWorkspace({
   account: Account;
   page: Page;
 }) {
-  const [overviewOpened, setOverviewOpened] = useState(page === "portfolio");
-  useEffect(() => {
-    if (page === "portfolio") setOverviewOpened(true);
-  }, [page]);
   const [marketRevision, setMarketRevision] = useState(0);
-  const previousPage = useRef(page);
   const refreshMarket = useCallback(() => {
     setMarketRevision((revision) => revision + 1);
   }, []);
   useEffect(() => {
-    const returned = previousPage.current !== page;
-    previousPage.current = page;
     if (page !== "portfolio" && page !== "post-mortem") return;
     const refreshVisible = () => {
       if (document.visibilityState === "visible") refreshMarket();
     };
-    if (returned) refreshVisible();
     window.addEventListener("focus", refreshVisible);
     document.addEventListener("visibilitychange", refreshVisible);
     return () => {
@@ -70,7 +62,7 @@ export function AccountWorkspace({
   return (
     <div className="ledger">
       {(page === "portfolio" || page === "post-mortem") && (
-        <MarketDataStatus revision={marketRevision} />
+        <MarketDataStatus key={page} revision={marketRevision} />
       )}
       {error && (
         <div className="error" role="alert">
@@ -88,14 +80,13 @@ export function AccountWorkspace({
       {ledger ? (
         <>
           <div hidden={page !== "portfolio"}>
-            {overviewOpened && (
-              <PortfolioOverview
-                account={account}
-                ledger={ledger}
-                marketRevision={marketRevision}
-                onRefreshMarket={refreshMarket}
-              />
-            )}
+            <PortfolioOverview
+              account={account}
+              ledger={ledger}
+              visible={page === "portfolio"}
+              marketRevision={marketRevision}
+              onRefreshMarket={refreshMarket}
+            />
           </div>
           {page === "post-mortem" && (
             <PostMortem

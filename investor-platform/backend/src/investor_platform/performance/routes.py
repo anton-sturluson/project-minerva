@@ -82,10 +82,12 @@ def performance(
             422,
             "Market comparisons currently require a USD account; FX conversion is not supported",
         )
-    today = datetime.now(MARKET_TIMEZONE).date()
+    now: datetime = datetime.now(MARKET_TIMEZONE)
+    today: date = now.date()
+    market_date: date = completed_market_date(now)
     if (
         period.start >= period.end
-        or period.end > completed_market_date()
+        or period.end > market_date
         or period.start < today - market_types.HISTORY_WINDOW
     ):
         raise HTTPException(
@@ -179,7 +181,7 @@ def performance(
             and not period.exclude_security_ids
         ):
             report_key = cache_key(
-                session, actor, account, entries, period.model_dump_json(), completed_market_date()
+                session, actor, account, entries, period.model_dump_json(), market_date
             )
             body: bytes | None = cached_report(report_key)
             if body is not None:
@@ -218,6 +220,7 @@ def performance(
                 dividend_policy=dividend_policy,
             )
             if estimated:
+                stock_result: dict = result
                 result = build_minimum_funding_comparison(
                     entries,
                     fetched,
@@ -228,16 +231,17 @@ def performance(
                 )
                 if period.scope == PerformanceScope.STOCKS:
                     # Funding determines the index dollars, never the portfolio scope.
-                    stock_result: dict = calculate(
-                        entries,
-                        fetched,
-                        calculation_start,
-                        price_end,
-                        provisional=provisional,
-                        baseline=period.baseline,
-                        funding_status=funding_status,
-                        scope=period.scope,
-                    )
+                    if period.baseline != Baseline.HISTORY or calculation_start != fetch_start:
+                        stock_result = calculate(
+                            entries,
+                            fetched,
+                            calculation_start,
+                            price_end,
+                            provisional=provisional,
+                            baseline=period.baseline,
+                            funding_status=funding_status,
+                            scope=period.scope,
+                        )
                     funded_points: dict[date, dict] = {
                         point["date"]: point for point in result["series"]
                     }
@@ -377,9 +381,7 @@ def performance(
             and not result.get("scenario_error")
             and not result.get("warnings")
             and report_key
-            == cache_key(
-                session, actor, account, entries, period.model_dump_json(), completed_market_date()
-            )
+            == cache_key(session, actor, account, entries, period.model_dump_json(), market_date)
         ):
             remember_report(report_key, bytes(response.body))
         return response

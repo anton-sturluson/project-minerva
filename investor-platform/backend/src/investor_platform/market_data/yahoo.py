@@ -165,7 +165,6 @@ def cached_history(
         end,
         load,
         refresh_after=refresh_after,
-        max_age=None,
     )
     body: dict[str, JsonValue] = cached.body
     values: dict[str, dict[date, Decimal]] = {

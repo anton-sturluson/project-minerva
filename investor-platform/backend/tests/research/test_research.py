@@ -1,14 +1,14 @@
 """Verify public snapshot storage and conservative quarter comparisons."""
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, event, func, select
 from sqlalchemy.orm import Session
 
 from investor_platform.models import ResearchFiling, ResearchHolding, ResearchManager
@@ -731,3 +731,53 @@ def test_directory_company_counts_include_ordinary_latest_filings(
     manager = db_client.get("/api/research/managers").json()["managers"][0]
     assert manager["portfolio_company_count"] is None
     assert manager["portfolio_company_count_quarter"] == "2026-09-30"
+
+
+@pytest.mark.parametrize("overlap", [False, True])
+def test_manager_detail_batches_amendment_holdings_and_preserves_coverage(
+    db_client: TestClient, database: Engine, tmp_path: Path, overlap: bool
+) -> None:
+    """Detail reads reuse selected holdings across amendment checks and latest company count."""
+    manager_id: UUID = registry(database, tmp_path)
+    periods: list[str] = ["2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30"]
+    for index, period in enumerate(periods):
+        filing(database, manager_id, period, f"{index}-original", row("5", "50"))
+        filing(
+            database,
+            manager_id,
+            period,
+            f"{index}-addition",
+            row("1", "10", cusip="123456789" if overlap and index == 3 else "234567890"),
+            amendment="NEW HOLDINGS",
+        )
+    with Session(database) as session:
+        for item in session.scalars(select(ResearchFiling)):
+            item.filed_date = item.report_period + timedelta(days=41 if item.amendment_type else 40)
+        session.commit()
+
+    holding_reads: list[str] = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        if (
+            statement.lstrip().upper().startswith("SELECT")
+            and "FROM research_holdings" in statement
+        ):
+            holding_reads.append(statement)
+
+    event.listen(database, "before_cursor_execute", capture)
+    try:
+        response = db_client.get("/api/research/managers/example")
+    finally:
+        event.remove(database, "before_cursor_execute", capture)
+
+    assert response.status_code == 200, response.text
+    detail: dict = response.json()
+    assert detail["coverage"]["quarters"] == (3 if overlap else 4)
+    assert detail["coverage"]["first_quarter"] == periods[0]
+    assert detail["coverage"]["last_quarter"] == periods[-2 if overlap else -1]
+    assert detail["portfolio_company_count"] == (None if overlap else 2)
+    assert detail["portfolio_company_count_quarter"] == periods[-1]
+    assert [item["accession"] for item in detail["filings"]] == [
+        f"{index}-{kind}" for index in reversed(range(4)) for kind in ("addition", "original")
+    ]
+    assert len(holding_reads) == 1, f"Expected one selected-holdings read, got {len(holding_reads)}"
