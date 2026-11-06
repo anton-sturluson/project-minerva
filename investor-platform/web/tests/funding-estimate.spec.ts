@@ -95,7 +95,7 @@ for (const canonical of [false, true]) {
     );
     await page.route("**/cash", (route) => route.fulfill({ json: {} }));
     let failure = false;
-    let missingIncome = false;
+    let incomeMismatch = false;
     const requests: {
       benchmark_mode: string;
       scope: string;
@@ -133,7 +133,6 @@ for (const canonical of [false, true]) {
     ];
     await page.route("**/performance", (route) => {
       const body = route.request().postDataJSON();
-      const withheld = missingIncome && !zeroDividends;
       requests.push(body);
       if (failure)
         return route.fulfill({
@@ -164,11 +163,11 @@ for (const canonical of [false, true]) {
           dividend_policy: zeroDividends ? "unrecorded_zero" : undefined,
           cash_method: canonical ? "purchase_shortfall" : undefined,
           cagr: {
-            portfolio: withheld || body.baseline === "recorded" ? null : ".08",
+            portfolio: body.baseline === "recorded" ? null : ".08",
             SPY: null,
             QQQ: null,
           },
-          return: withheld ? null : series.at(-1)!.portfolio,
+          return: series.at(-1)!.portfolio,
           SPY: series.at(-1)!.SPY,
           QQQ: series.at(-1)!.QQQ,
           benchmark_values:
@@ -179,12 +178,12 @@ for (const canonical of [false, true]) {
             body.scope === "account" && !canonical
               ? { capital: "1000", estimated_dividends: "50" }
               : undefined,
-          warnings: withheld
-            ? ["AAA: recorded dividend income is missing."]
+          advisories: incomeMismatch
+            ? [
+                "AAA: provider estimate 10.00, recorded 9.00; check source records.",
+              ]
             : [],
-          series: withheld
-            ? series.map((point) => ({ ...point, portfolio: null }))
-            : series,
+          series,
         },
       });
     });
@@ -202,6 +201,9 @@ for (const canonical of [false, true]) {
         "account",
       );
       await expect(page.getByLabel("Performance measure")).toBeEnabled();
+      await expect(page.getByText(/Calculation basis:/)).toContainText(
+        "modeled cash and provider-estimated dividends",
+      );
     }
     await expect(
       table.getByRole("columnheader", { name: "Estimated value (USD)" }),
@@ -372,17 +374,42 @@ for (const canonical of [false, true]) {
       table.getByRole("columnheader", { name: "Estimated value (USD)" }),
     ).toBeVisible();
     if (canonical) {
-      missingIncome = true;
+      incomeMismatch = true;
       await page
         .getByRole("button", { name: "Compare performance", exact: true })
         .click();
+      expect(requests.at(-1)).toMatchObject({
+        scope: "account",
+        benchmark_mode: "funded_hold",
+      });
       await expect(
-        page.locator("#performance").getByRole("alert"),
-      ).toContainText(
-        "AAA: recorded dividend income is missing. Portfolio return is withheld.",
+        page.getByText(/Calculation basis: recorded transactions/),
+      ).toContainText("provisional history");
+      await expect(
+        page.getByText(/Calculation basis: recorded transactions/),
+      ).toContainText("Inferred deposits cover purchase cash shortfalls");
+      await expect(portfolioRow.locator("td").nth(2)).toHaveText("20.00%");
+      await expect(portfolioRow.locator("td").nth(3)).toHaveText("8.00%");
+      await page.getByText("Income source checks (1)", { exact: true }).click();
+      await expect(
+        page.getByText(
+          "AAA: provider estimate 10.00, recorded 9.00; check source records.",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(page.locator("#performance").getByRole("alert")).toHaveCount(
+        0,
       );
-      await expect(portfolioRow.locator("td").nth(2)).toHaveText("—");
-      await expect(portfolioRow.locator("td").nth(3)).toHaveText("—");
+      await expect(page.getByText(/Portfolio return is withheld/)).toHaveCount(
+        0,
+      );
+      await expect(
+        page.getByRole("region", { name: "Yearly performance", exact: true }),
+      ).toContainText("15.00%");
+      await control.selectOption("buy_hold");
+      await expect(portfolioRow).toContainText("20.00%");
+      await control.selectOption("funded_hold");
+      await expect(portfolioRow.locator("td").nth(2)).toHaveText("20.00%");
       await expect(control).toHaveValue("funded_hold");
       await expect(page.getByLabel("Performance measure")).toHaveCount(0);
       await expect(
@@ -421,6 +448,7 @@ for (const canonical of [false, true]) {
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
+      await page.getByText("Income source checks (1)", { exact: true }).click();
       await page.screenshot({
         path: testInfo.outputPath("zero-dividends-policy.png"),
         fullPage: true,
@@ -518,7 +546,7 @@ test("cash reconciliation retains whole-account controls through partial and com
         provisional: true,
         return: withheld ? null : ".20",
         cagr: { portfolio: withheld ? null : ".08", SPY: null, QQQ: null },
-        warnings: withheld
+        blockers: withheld
           ? [
               "Cash history needs reconciliation; starting funding was inferred.",
             ]

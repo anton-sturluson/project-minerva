@@ -278,7 +278,7 @@ def test_recorded_cash_keeps_explicit_zero_dividend_policy_without_hiding_mismat
     portfolio: tuple[str, dict[str, History]],
     policy: bool,
 ) -> None:
-    """Source reconciliation preserves the zero assumption while actual income stays validated."""
+    """Cash reconciliation preserves strict missing-income policy and visible source differences."""
     aid: UUID = setup(database)
     session: Session
     if policy:
@@ -300,8 +300,12 @@ def test_recorded_cash_keeps_explicit_zero_dividend_policy_without_hiding_mismat
     for mode in ("buy_hold", "funded_hold"):
         response = stock_report(db_client, aid, scope="account", benchmark_mode=mode)
         assert response.status_code == 200, response.text
-        assert response.json()["return"] is None
-        assert any("reconcile dividend" in warning for warning in response.json()["warnings"])
+        result: dict = response.json()
+        assert result["blockers"] == []
+        assert len(result["advisories"]) == 1
+        assert D(result["cash"]) == D(".5")
+        assert D(result["value"]) == D("242.5")
+        assert float(result["return"]) == pytest.approx(242.5 / 120 - 1)
 
 
 def test_recorded_opening_cash_is_valid_for_account_but_not_deposit_matched_indexes(

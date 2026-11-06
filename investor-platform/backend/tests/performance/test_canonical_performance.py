@@ -1,5 +1,6 @@
 """Whole-account performance from canonical dated, explicitly inferred cash records."""
 
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from investor_platform.domain import EntryKind
 from investor_platform.market_data.types import History
-from investor_platform.models import Account, LedgerEntry, Security
+from investor_platform.models import Account, LedgerEntry
 
 
 @pytest.fixture
@@ -87,7 +88,7 @@ def test_canonical_account_reuses_sales_and_preserves_returns_between_index_choi
     regular: dict = regular_response.json()
     funded: dict = funded_response.json()
     field: str
-    for field in ("cash", "value", "return", "holdings", "start", "end", "warnings"):
+    for field in ("cash", "value", "return", "holdings", "start", "end", "blockers"):
         assert regular[field] == funded[field]
     assert Decimal(regular["series"][1]["portfolio"]) == Decimal(".1")
     assert Decimal(regular["return"]) == Decimal(".21")
@@ -116,8 +117,9 @@ def test_canonical_funding_does_not_hide_missing_dividend_records(
         assert response.status_code == 200
         result: dict = response.json()
         assert result["return"] is None
+        assert result["warnings"] == result["blockers"]
         assert result["cagr"]["portfolio"] is None
-        assert any("reconcile dividend" in warning for warning in result["warnings"])
+        assert any("reconcile dividend" in warning for warning in result["blockers"])
         assert all(point["portfolio"] is None for point in result["series"])
 
 
@@ -133,7 +135,7 @@ def test_canonical_dividend_receivable_is_income_without_early_spendable_cash(
     )
     assert response.status_code == 200
     result: dict = response.json()
-    assert result["warnings"] == []
+    assert result["blockers"] == []
     assert Decimal(result["series"][1]["cash"]) == 0
     assert Decimal(result["series"][1]["receivables"]) == 10
     assert Decimal(result["cash"]) == 10
@@ -275,7 +277,7 @@ def test_zero_unrecorded_dividends_is_explicit_and_index_independent(
         )
         assert response.status_code == 200, response.text
         result: dict = response.json()
-        assert result["warnings"] == []
+        assert result["blockers"] == []
         assert result["dividend_policy"] == "unrecorded_zero"
         assert any("unrecorded dividends are zero" in item for item in result["assumptions"])
         assert Decimal(result["return"]) == Decimal(".21")
@@ -302,7 +304,7 @@ def test_zero_policy_retains_actual_dividends_and_receivables(
     assert dividend(db_client, account_id, pay=str(DAYS[2]), ex=str(DAYS[1])).status_code == 201
     before: dict = ledger(db_client, account_id)
     result: dict = stock_report(db_client, account_id, scope="account").json()
-    assert result["warnings"] == []
+    assert result["blockers"] == []
     assert Decimal(result["series"][1]["receivables"]) == 10
     assert Decimal(result["series"][1]["cash"]) == 0
     assert Decimal(result["return"]) == Decimal(".22")
@@ -311,12 +313,12 @@ def test_zero_policy_retains_actual_dividends_and_receivables(
 
 
 @pytest.mark.parametrize("problem", ["amount", "unmatched", "unclassified"])
-def test_zero_policy_does_not_hide_problematic_recorded_income(
+def test_zero_policy_preserves_source_advisories_and_method_blockers(
     db_client: TestClient,
     zero_dividend_portfolio: tuple[str, dict[str, History]],
     problem: str,
 ) -> None:
-    """The assumption cannot bypass actual income mismatches or missing attribution."""
+    """Zero-unrecorded policy preserves source differences and blocks missing accrual inputs."""
     account_id: str = zero_dividend_portfolio[0]
     zero_dividend_portfolio[1]["AAA"].dividends[DAYS[1]] = Decimal(1)
     if problem == "amount":
@@ -332,9 +334,16 @@ def test_zero_policy_does_not_hide_problematic_recorded_income(
         )
         assert response.status_code == 200, response.text
         result: dict = response.json()
-        assert result["warnings"]
-        assert result["return"] is None and result["cagr"]["portfolio"] is None
-        assert all(point["portfolio"] is None for point in result["series"])
+        if problem == "amount":
+            assert result["blockers"] == []
+            assert len(result["advisories"]) == 1
+            assert float(result["return"]) == pytest.approx(0.219)
+            assert Decimal(result["cash"]) == 9
+            assert Decimal(result["value"]) == 1219
+        else:
+            assert result["blockers"]
+            assert result["return"] is None and result["cagr"]["portfolio"] is None
+            assert all(point["portfolio"] is None for point in result["series"])
         assert result["dividend_policy"] == "unrecorded_zero"
 
 
@@ -350,68 +359,147 @@ def test_account_zero_policy_does_not_relabel_the_analytic_stock_sleeve(
     assert float(result["return"]) == pytest.approx((111 / 100) * (121 / 110) - 1)
 
 
-def test_default_funded_account_uses_final_review_and_keeps_material_blockers(
-    db_client: TestClient, canonical_portfolio: tuple[str, dict[str, History]], database: Engine
+@pytest.mark.parametrize(
+    "provider_rate, advisory_count",
+    [
+        (Decimal("1.2"), 1),
+        (Decimal("1.9"), 1),
+        (None, 1),
+        (Decimal("1.2054"), 1),
+        (Decimal("1.2056"), 0),
+    ],
+)
+def test_recorded_income_drives_default_account_return_with_source_advisories(
+    db_client: TestClient,
+    canonical_portfolio: tuple[str, dict[str, History]],
+    provider_rate: Decimal | None,
+    advisory_count: int,
 ) -> None:
-    """Final source evidence repairs expected income without altering cash or stock estimates."""
+    """Rounded, conflicting and missing provider rates cannot replace recorded income."""
+    account_id, histories = canonical_portfolio
+    if provider_rate is not None:
+        histories["AAA"].dividends[DAYS[1]] = provider_rate
+    assert dividend(db_client, account_id, "12.06").status_code == 201
+    before: dict = ledger(db_client, account_id)
+    response: Response = db_client.post(
+        f"/api/accounts/{account_id}/performance",
+        json={
+            "start": str(DAYS[0]),
+            "end": str(DAYS[-1]),
+            "scope": "account",
+            "benchmark_mode": "funded_hold",
+        },
+    )
+    assert response.status_code == 200, response.text
+    result: dict = response.json()
+    assert result["blockers"] == []
+    assert len(result["advisories"]) == advisory_count
+    assert result["warnings"] == result["blockers"] == []
+    if provider_rate is None:
+        assert "no matching provider event" in result["advisories"][0]
+    elif advisory_count:
+        assert f"provider estimate {provider_rate * 10:.2f}" in result["advisories"][0]
+        assert "recorded gross 12.06" in result["advisories"][0]
+    assert Decimal(result["return"]) == Decimal(".22206")
+    assert Decimal(result["value"]) == Decimal("1222.06")
+    assert Decimal(result["cash"]) == Decimal("12.06")
+    assert Decimal(result["series"][1]["cash"]) == 0
+    assert Decimal(result["series"][1]["receivables"]) == Decimal("12.06")
+    assert result["series"][-1]["receivables"] == "0"
+    assert Decimal(result["excess_spy"]) == Decimal(".20206")
+    assert ledger(db_client, account_id) == before
+
+
+def test_next_month_source_disagreement_needs_no_per_event_override(
+    db_client: TestClient, canonical_portfolio: tuple[str, dict[str, History]]
+) -> None:
+    """New monthly income follows the same recorded-cash rule without stored exceptions."""
     account_id, histories = canonical_portfolio
     histories["AAA"].dividends[DAYS[1]] = Decimal("1.2")
     assert dividend(db_client, account_id, "12.06").status_code == 201
+    for history in histories.values():
+        for day in (date(2026, 2, 5), date(2026, 2, 6)):
+            history.close[day] = history.close[DAYS[-1]]
+            history.adjusted[day] = history.adjusted[DAYS[-1]]
+    histories["AAA"].dividends[date(2026, 2, 5)] = Decimal("1.21")
+    assert (
+        dividend(db_client, account_id, "12.12", ex="2026-02-05", pay="2026-02-06").status_code
+        == 201
+    )
     before: dict = ledger(db_client, account_id)
-    request: dict = {
-        "start": str(DAYS[0]),
-        "end": str(DAYS[-1]),
-        "scope": "account",
-        "benchmark_mode": "funded_hold",
-    }
-    endpoint: str = f"/api/accounts/{account_id}/performance"
-    blocked: Response = db_client.post(endpoint, json=request)
-    assert blocked.status_code == 200
-    assert blocked.json()["return"] is None
-    assert len(blocked.json()["warnings"]) == 1
-    stock_before: dict = stock_report(db_client, account_id).json()
-    review: dict = {
-        "ex_date": str(DAYS[1]),
-        "pay_date": str(DAYS[-1]),
-        "gross_per_share": "1.20625",
-        "currency": "USD",
-        "status": "final",
-        "source_url": "https://issuer.example/distributions/2026",
-        "reviewed_on": "2026-02-01",
-    }
-    with Session(database) as session:
-        security: Security = session.scalar(select(Security).where(Security.ticker == "AAA"))
-        security.market_identity = {"reviewed_dividends": [review]}
-        session.commit()
-    recovered: Response = db_client.post(endpoint, json=request)
-    assert recovered.status_code == 200, recovered.text
-    assert recovered.json()["warnings"] == []
-    assert Decimal(recovered.json()["return"]) == Decimal(".22206")
-    assert Decimal(recovered.json()["value"]) == Decimal("1222.06")
-    assert Decimal(recovered.json()["cash"]) == Decimal("12.06")
-    assert ledger(db_client, account_id) == before
-    stock_after: dict = stock_report(db_client, account_id).json()
-    assert stock_after["attribution"] == stock_before["attribution"]
-    assert stock_after["return"] == stock_before["return"]
-
-    with Session(database) as session:
-        security = session.scalar(select(Security).where(Security.ticker == "AAA"))
-        security.market_identity = {
-            "reviewed_dividends": [{**review, "gross_per_share": "1.30625"}]
-        }
-        session.commit()
-    changed: Response = db_client.post(endpoint, json=request)
-    assert changed.status_code == 200
-    assert changed.json()["return"] is None
-    assert len(changed.json()["warnings"]) == 1
-    assert "expected gross 13.06" in changed.json()["warnings"][0]
+    response: Response = stock_report(
+        db_client, account_id, scope="account", benchmark_mode="funded_hold", end="2026-02-06"
+    )
+    assert response.status_code == 200, response.text
+    result: dict = response.json()
+    assert result["blockers"] == []
+    assert len(result["advisories"]) == 2
+    assert Decimal(result["cash"]) == Decimal("24.18")
+    assert Decimal(result["value"]) == Decimal("1234.18")
+    assert Decimal(result["return"]) == Decimal(".23418")
     assert ledger(db_client, account_id) == before
 
+
+def test_source_advisory_preserves_annualized_account_return(
+    db_client: TestClient, canonical_portfolio: tuple[str, dict[str, History]], database: Engine
+) -> None:
+    """Long-period CAGR uses the numeric recorded return even when source checks remain."""
+    account_id, histories = canonical_portfolio
+    start: date = date(2025, 1, 2)
     with Session(database) as session:
-        security = session.scalar(select(Security).where(Security.ticker == "AAA"))
-        security.market_identity = {"reviewed_dividends": [{**review, "status": "preliminary"}]}
+        for entry in session.scalars(
+            select(LedgerEntry).where(LedgerEntry.account_id == UUID(account_id))
+        ):
+            entry.effective_date = start
         session.commit()
-    invalid: Response = db_client.post(endpoint, json=request)
-    assert invalid.status_code == 422
-    assert "final" in invalid.json()["detail"]
+    for history in histories.values():
+        history.close[start] = history.close.pop(DAYS[0])
+        history.adjusted[start] = history.adjusted.pop(DAYS[0])
+    histories["AAA"].dividends[DAYS[1]] = Decimal("1.2")
+    assert dividend(db_client, account_id, "12.06").status_code == 201
+    response: Response = stock_report(
+        db_client, account_id, scope="account", benchmark_mode="funded_hold", start=str(start)
+    )
+    assert response.status_code == 200, response.text
+    result: dict = response.json()
+    assert result["blockers"] == [] and len(result["advisories"]) == 1
+    assert Decimal(result["return"]) == Decimal(".22206")
+    assert float(result["cagr"]["portfolio"]) == pytest.approx(1.22206 ** (365.25 / 369) - 1)
+
+
+@pytest.mark.parametrize("provider_rate, available", [(Decimal(1), True), (Decimal(10), False)])
+def test_strict_income_check_requires_a_payable_cent_for_fractional_shares(
+    db_client: TestClient,
+    canonical_portfolio: tuple[str, dict[str, History]],
+    database: Engine,
+    provider_rate: Decimal,
+    available: bool,
+) -> None:
+    """A zero-cent entitlement needs no impossible zero-income row; positive cents still block."""
+    account_id, histories = canonical_portfolio
+    with Session(database) as session:
+        for entry in session.scalars(
+            select(LedgerEntry).where(LedgerEntry.account_id == UUID(account_id))
+        ):
+            entry.amount = Decimal(".1")
+            if entry.kind == EntryKind.BUY:
+                entry.quantity = Decimal(".001")
+        session.commit()
+    histories["AAA"].dividends[DAYS[1]] = provider_rate
+    before: dict = ledger(db_client, account_id)
+    response: Response = stock_report(
+        db_client, account_id, scope="account", benchmark_mode="funded_hold"
+    )
+    assert response.status_code == 200, response.text
+    result: dict = response.json()
+    assert Decimal(result["cash"]) == 0
+    assert Decimal(result["receivables"]) == 0
+    assert Decimal(result["value"]) == Decimal(".121")
+    assert result["advisories"] == []
+    if available:
+        assert result["blockers"] == []
+        assert Decimal(result["return"]) == Decimal(".21")
+    else:
+        assert len(result["blockers"]) == 1
+        assert result["return"] is None
     assert ledger(db_client, account_id) == before

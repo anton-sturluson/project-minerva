@@ -67,7 +67,7 @@ def compare_episode(episode: list[LedgerEntry], histories: dict[str, History]) -
                 if day in history.splits:
                     raise ValueError("Position spans a split; split accounting is unavailable")
                 raise ValueError(
-                    "Position earned a distribution; stock-level income is not recorded"
+                    "Hit-rate comparison does not include distributions for this position"
                 )
     # Require actual sessions on every trade date; no previous/next-day substitution.
     for entry in episode:

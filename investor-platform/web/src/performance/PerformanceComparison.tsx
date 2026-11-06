@@ -476,19 +476,45 @@ export function PerformanceComparison({
         )}
         {report && (
           <>
-            {report.warnings.slice(0, 1).map((w) => (
-              <p key={w} role="alert" className="error">
-                {w} Portfolio return is withheld.
+            {report.blockers.slice(0, 1).map((blocker) => (
+              <p key={blocker} role="alert" className="error">
+                {blocker} Portfolio return is withheld.
               </p>
             ))}
-            {report.warnings.length > 1 && (
+            {report.blockers.length > 1 && (
               <details>
                 <summary>
-                  Other reconciliation checks ({report.warnings.length - 1})
+                  Other calculation blockers ({report.blockers.length - 1})
                 </summary>
                 <ul>
-                  {report.warnings.slice(1).map((w) => (
-                    <li key={w}>{w}</li>
+                  {report.blockers.slice(1).map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {report.scope === "account" && (
+              <p className="form-note">
+                Calculation basis:{" "}
+                {report.funding_estimate
+                  ? "modeled cash and provider-estimated dividends"
+                  : "recorded transactions"}
+                {report.provisional ? " (provisional history)" : ""}.
+                {modeledPortfolio && <> {fundingDescription}</>}
+              </p>
+            )}
+            {report.advisories.length > 0 && (
+              <details>
+                <summary>
+                  Income source checks ({report.advisories.length})
+                </summary>
+                <p className="form-note">
+                  Market estimates are cross-checks of recorded income. Review
+                  material differences against source records.
+                </p>
+                <ul>
+                  {report.advisories.map((advisory) => (
+                    <li key={advisory}>{advisory}</li>
                   ))}
                 </ul>
               </details>

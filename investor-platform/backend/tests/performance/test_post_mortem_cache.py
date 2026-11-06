@@ -41,6 +41,7 @@ def test_repeated_report_preserves_bytes_no_store_and_ownership(
     original: Response = warm_report(db_client, account)
     repeated: Response = stock_report(db_client, account)
     assert repeated.content == original.content
+    assert repeated.json()["warnings"] == repeated.json()["blockers"] == []
     assert repeated.headers["cache-control"] == "no-store"
     assert stock_report(db_client, account, end="2099-01-01").status_code == 422
     assert ledger(db_client, account) == before
