@@ -21,18 +21,6 @@ export function AccountWorkspace({
   const refreshMarket = useCallback(() => {
     setMarketRevision((revision) => revision + 1);
   }, []);
-  useEffect(() => {
-    if (page !== "portfolio" && page !== "post-mortem") return;
-    const refreshVisible = () => {
-      if (document.visibilityState === "visible") refreshMarket();
-    };
-    window.addEventListener("focus", refreshVisible);
-    document.addEventListener("visibilitychange", refreshVisible);
-    return () => {
-      window.removeEventListener("focus", refreshVisible);
-      document.removeEventListener("visibilitychange", refreshVisible);
-    };
-  }, [page, refreshMarket]);
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);

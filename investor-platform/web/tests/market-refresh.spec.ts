@@ -224,7 +224,7 @@ test("status failure leaves portfolio usable and recovers to disabled", async ({
   ).toBeVisible();
 });
 
-test("same-day return and focus pick up accepted prices after a collector retry", async ({
+test("focus preserves results and custom dates; explicit reload picks up accepted prices", async ({
   page,
 }) => {
   let value = "1200";
@@ -246,8 +246,40 @@ test("same-day return and focus pick up accepted prices after a collector retry"
   await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   await expect(page.getByText("1,300.00", { exact: true })).toBeVisible();
   value = "1400";
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/api/"))
+      requests.push(request.url());
+  });
+  const interrupted = await page.evaluate(async () => {
+    const states: boolean[] = [];
+    const section = document.querySelector("#performance")!;
+    const observer = new MutationObserver(() =>
+      states.push(
+        !section.querySelector('[aria-label="Performance summary"]') ||
+          !!section.querySelector('[role="status"]'),
+      ),
+    );
+    observer.observe(section, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    observer.disconnect();
+    return states.some(Boolean);
+  });
+  expect(requests).toEqual([]);
+  expect(interrupted).toBe(false);
+  await expect(page.getByText("1,300.00", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Performance end")).toHaveValue("2026-10-30");
+  await page.getByRole("button", { name: "Reload data", exact: true }).click();
   await expect(page.getByText("1,400.00", { exact: true })).toBeVisible();
+  expect(requests.some((url) => url.endsWith("/performance"))).toBe(true);
   await expect(page.getByLabel("Performance end")).toHaveValue("2026-10-30");
 });
 
@@ -287,9 +319,7 @@ test("hidden portfolio panels pause reads and resume with the chosen period", as
   await expect(
     page.locator(".annual-financials").getByRole("alert"),
   ).toBeVisible();
-  const refreshedFinancials = page.waitForResponse("**/financials?year=*");
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await (await refreshedFinancials).finished();
   expect(overviewReads).toEqual([]);
   await page.getByRole("link", { name: "[ Portfolio ]", exact: true }).click();
   await expect(

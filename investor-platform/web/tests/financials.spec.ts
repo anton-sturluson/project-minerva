@@ -967,7 +967,7 @@ test("a valid cold financial request can finish after the ordinary API deadline"
   ).toHaveCount(0);
 });
 
-test("focus reloads current-year financial weights while retaining the selected year", async ({
+test("financials stay steady on focus and reload when the view is reopened", async ({
   page,
 }) => {
   let margin = "0.40";
@@ -988,6 +988,11 @@ test("focus reloads current-year financial weights while retaining the selected 
   await expect(gross).toHaveText("40.0%1");
   margin = "0.50";
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(gross).toHaveText("40.0%1");
+  await page.getByRole("link", { name: "[ Activity ]", exact: true }).click();
+  await page
+    .getByRole("link", { name: "[ Post-mortem ]", exact: true })
+    .click();
   await expect(gross).toHaveText("50.0%1");
   await expect(page.getByLabel("Post-mortem year")).toHaveValue("2026");
 });
