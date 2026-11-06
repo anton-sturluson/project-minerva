@@ -40,7 +40,17 @@ type SummaryMeasure = {
   comparison?: FinancialComparison;
 };
 
+export type FinancialPeriod = {
+  api_status: "available" | "partial" | "unavailable";
+  calendar_year: number;
+  holdings_date: string;
+  weighted_ratios: Record<string, SummaryMeasure> | null;
+  weighted_company_per_share: Record<string, SummaryMeasure> | null;
+  availability_reason: string | null;
+};
+
 export type FinancialReport = {
+  periods: FinancialPeriod[];
   account_id: string;
   synthetic: boolean;
   calendar_year: number;

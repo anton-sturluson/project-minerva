@@ -102,17 +102,49 @@ def financials(
     result: Record = account_report(
         entries, account, release, year, end, engine, actor.workspace_id
     )
-    prior: Record | None = None
-    reason: str | None = None
-    try:
-        prior = account_report(
-            entries, account, release, year - 1, date(year - 1, 12, 31), engine, actor.workspace_id
+    summary_keys: tuple[str, ...] = (
+        "calendar_year",
+        "holdings_date",
+        "weighted_ratios",
+        "weighted_company_per_share",
+        "availability_reason",
+        "api_status",
+    )
+    periods: list[Record] = [{key: result[key] for key in summary_keys}]
+    for prior_year in (year - 1, year - 2):
+        prior: Record | None = None
+        reason: str | None = None
+        prior_end: date = date(prior_year, 12, 31)
+        try:
+            prior = account_report(
+                entries, account, release, prior_year, prior_end, engine, actor.workspace_id
+            )
+        except HTTPException as error:
+            if error.status_code != 503:
+                raise
+            reason = f"{prior_year} portfolio market prices unavailable"
+            if result["api_status"] == "available":
+                result["api_status"] = "partial"
+        periods.append(
+            {key: prior[key] for key in summary_keys}
+            if prior is not None
+            else {
+                "calendar_year": prior_year,
+                "holdings_date": prior_end.isoformat(),
+                "weighted_ratios": None,
+                "weighted_company_per_share": None,
+                "availability_reason": reason,
+                "api_status": "unavailable",
+            }
         )
-    except HTTPException as error:
-        if error.status_code != 503:
-            raise
-        reason = "Prior portfolio market prices unavailable"
-    add_portfolio_comparisons(result, prior, year, reason=reason)
+        if prior_year == year - 1:
+            add_portfolio_comparisons(
+                result,
+                prior,
+                year,
+                reason="Prior portfolio market prices unavailable" if reason else None,
+            )
+    result["periods"] = periods
     return result
 
 

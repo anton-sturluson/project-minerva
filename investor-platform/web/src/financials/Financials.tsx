@@ -139,32 +139,31 @@ export function Financials({
       key,
       label,
       metric: report?.weighted_ratios[key],
+      group: "weighted_ratios" as const,
       format: "percent" as const,
     })),
     ...perShareMetrics.map(([key, label]) => ({
       key,
       label,
       metric: report?.weighted_company_per_share?.[key],
+      group: "weighted_company_per_share" as const,
       format: "currency" as const,
     })),
   ];
   const priorYear =
     report?.weighted_company_per_share?.weighted_company_eps?.comparison
       ?.prior_year ?? (year === null ? null : year - 1);
-  const notes: FinancialNote[] = [
-    ...rows.map(({ key, label, metric }) => ({
-      id: `${key}-exclusions`,
-      label,
-      exclusions: metric?.exclusions ?? [],
-      basisNotes: metric?.basis_notes ?? [],
-    })),
-    ...rows.map(({ key, label, metric }) => ({
-      id: `${key}-prior-exclusions`,
-      label: `${priorYear} ${label}`,
-      exclusions: metric?.comparison?.exclusions ?? [],
-      basisNotes: metric?.comparison?.basis_notes ?? [],
-    })),
-  ].filter((note) => note.exclusions.length || note.basisNotes.length);
+  const periods = report?.periods ?? [];
+  const notes: FinancialNote[] = periods
+    .flatMap((period) =>
+      rows.map(({ key, label, group }) => ({
+        id: `${key}-${period.calendar_year}-exclusions`,
+        label: `${period.calendar_year} ${label}`,
+        exclusions: period[group]?.[key]?.exclusions ?? [],
+        basisNotes: period[group]?.[key]?.basis_notes ?? [],
+      })),
+    )
+    .filter((note) => note.exclusions.length || note.basisNotes.length);
   const footnotes = new Map(notes.map((note, index) => [note.id, index + 1]));
   return (
     <section
@@ -188,14 +187,14 @@ export function Financials({
       {!loading &&
         !error &&
         report &&
-        (report.api_status === "unavailable" ? (
+        (!periods.some((period) => period.api_status !== "unavailable") ? (
           <p role="status">Table unavailable.</p>
         ) : (
           <>
             <p className="form-note">
-              Holdings as of {report.holdings_date}. Annual financial periods
-              ending in {report.calendar_year}. Retrospective figures;
-              publication dates are not limited to the holdings date.
+              Selected-year holdings as of {report.holdings_date}. Retrospective
+              annual figures; publication dates are not limited to the holdings
+              date. Each year uses its own holdings, weights and exchange rates.
             </p>
             <div
               className="table-scroll"
@@ -207,53 +206,59 @@ export function Financials({
                 <thead>
                   <tr>
                     <th scope="col">Measure</th>
+                    {periods.map((period) => (
+                      <th
+                        key={period.calendar_year}
+                        scope="col"
+                        className="number"
+                      >
+                        {period.calendar_year}
+                      </th>
+                    ))}
                     <th scope="col" className="number">
-                      {report.calendar_year}
-                    </th>
-                    <th scope="col" className="number">
-                      {priorYear}
-                    </th>
-                    <th scope="col" className="number">
-                      % change
+                      % change ({report.calendar_year} vs {priorYear})
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(({ key, label, metric, format }) => (
+                  {rows.map(({ key, label, metric, format, group }) => (
                     <tr key={key}>
                       <th scope="row">{label}</th>
-                      <td
-                        className="number"
-                        aria-describedby={
-                          footnotes.has(`${key}-exclusions`)
-                            ? `${key}-exclusions`
-                            : undefined
-                        }
-                      >
-                        {amount(metric?.value, format)}
-                        {footnotes.has(`${key}-exclusions`) && (
-                          <sup>{footnotes.get(`${key}-exclusions`)}</sup>
-                        )}
-                      </td>
-                      <td
-                        className="number"
-                        aria-describedby={
-                          footnotes.has(`${key}-prior-exclusions`)
-                            ? `${key}-prior-exclusions`
-                            : undefined
-                        }
-                      >
-                        {amount(metric?.comparison?.prior_value, format)}
-                        {footnotes.has(`${key}-prior-exclusions`) && (
-                          <sup>{footnotes.get(`${key}-prior-exclusions`)}</sup>
-                        )}
-                      </td>
+                      {periods.map((period) => {
+                        const noteId = `${key}-${period.calendar_year}-exclusions`;
+                        return (
+                          <td
+                            key={period.calendar_year}
+                            className="number"
+                            aria-describedby={
+                              footnotes.has(noteId) ? noteId : undefined
+                            }
+                            title={period.availability_reason ?? undefined}
+                          >
+                            {amount(period[group]?.[key]?.value, format)}
+                            {footnotes.has(noteId) && (
+                              <sup>{footnotes.get(noteId)}</sup>
+                            )}
+                          </td>
+                        );
+                      })}
                       <td className="number">{change(metric?.comparison)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {periods
+              .filter(
+                (period) =>
+                  period.api_status === "unavailable" &&
+                  period.availability_reason,
+              )
+              .map((period) => (
+                <p key={period.calendar_year} className="form-note">
+                  {period.calendar_year}: {period.availability_reason}.
+                </p>
+              ))}
             {notes.map((note, index) => (
               <FinancialNote key={note.id} note={note} number={index + 1} />
             ))}

@@ -36,20 +36,30 @@ const period = {
 test("post-mortem ranks contributions, switches years, recovers and isolates accounts", async ({
   page,
 }) => {
-  await page.route("**/api/accounts/*/financials?year=*", (route) =>
-    route.fulfill({
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const year = Number(
+      new URL(route.request().url()).searchParams.get("year"),
+    );
+    return route.fulfill({
       json: {
         account_id: new URL(route.request().url()).pathname.split("/")[3],
-        calendar_year: Number(
-          new URL(route.request().url()).searchParams.get("year"),
-        ),
+        calendar_year: year,
+        holdings_date: `${year}-12-31`,
+        periods: [year, year - 1, year - 2].map((calendar_year) => ({
+          calendar_year,
+          holdings_date: `${calendar_year}-12-31`,
+          api_status: "unavailable",
+          weighted_ratios: {},
+          weighted_company_per_share: {},
+          availability_reason: "Reviewed financial data unavailable",
+        })),
         synthetic: false,
         api_status: "unavailable",
         companies: [],
         weighted_ratios: {},
       },
-    }),
-  );
+    });
+  });
   let empty = false;
   await page.route("**/ledger", (route) =>
     route.fulfill({

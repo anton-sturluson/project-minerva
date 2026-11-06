@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type {
   FinancialReport,
   FinancialComparison,
+  FinancialPeriod,
 } from "../src/financials/financialApi";
 
 const main = "00000000-0000-4000-8000-000000000091";
@@ -22,7 +23,8 @@ function report(accountId = main, year = 2026): FinancialReport {
           : "calculated",
     percent_change: year === 2023 ? null : change,
   });
-  return {
+  const data: FinancialReport = {
+    periods: [],
     account_id: accountId,
     synthetic: false,
     calendar_year: year,
@@ -121,6 +123,92 @@ function report(accountId = main, year = 2026): FinancialReport {
       },
     },
   };
+  data.periods = periods(data);
+  return data;
+}
+
+function periods(data: FinancialReport): FinancialPeriod[] {
+  const previous = (metrics: FinancialReport["weighted_ratios"]) =>
+    Object.fromEntries(
+      Object.entries(metrics).map(([key, metric]) => [
+        key,
+        {
+          ...metric,
+          value: metric.comparison?.prior_value ?? null,
+          exclusions: metric.comparison?.exclusions ?? [],
+          basis_notes: metric.comparison?.basis_notes ?? [],
+        },
+      ]),
+    );
+  return [
+    {
+      api_status: data.api_status,
+      availability_reason: null,
+      calendar_year: data.calendar_year,
+      holdings_date: data.holdings_date,
+      weighted_ratios: data.weighted_ratios,
+      weighted_company_per_share: data.weighted_company_per_share ?? {},
+    },
+    {
+      api_status: data.api_status,
+      availability_reason: null,
+      calendar_year: data.calendar_year - 1,
+      holdings_date: `${data.calendar_year - 1}-12-31`,
+      weighted_ratios: previous(data.weighted_ratios),
+      weighted_company_per_share: previous(
+        data.weighted_company_per_share ?? {},
+      ),
+    },
+    {
+      api_status: data.calendar_year === 2023 ? "unavailable" : data.api_status,
+      calendar_year: data.calendar_year - 2,
+      holdings_date: `${data.calendar_year - 2}-12-31`,
+      weighted_ratios:
+        data.calendar_year === 2023
+          ? null
+          : {
+              gross_margin: {
+                label: "Gross margin",
+                value: "0.25",
+                coverage: "1",
+                exclusions: [],
+              },
+              operating_margin: {
+                label: "Operating margin",
+                value: "0.08",
+                coverage: "1",
+                exclusions: [],
+              },
+              fcf_margin_after_disclosed_capex: {
+                label: "FCF margin",
+                value: "0.06",
+                coverage: "1",
+                exclusions: [],
+              },
+            },
+      weighted_company_per_share:
+        data.calendar_year === 2023
+          ? null
+          : {
+              weighted_company_eps: {
+                label: "Weighted company EPS",
+                value: "1.25",
+                coverage: "1",
+                exclusions: [],
+              },
+              weighted_company_fcf_per_share: {
+                label: "Weighted company FCF/share",
+                value: "0.2",
+                coverage: "1",
+                exclusions: [],
+              },
+            },
+      availability_reason:
+        data.calendar_year === 2023
+          ? "Historical market prices unavailable"
+          : null,
+    },
+  ];
 }
 
 async function financialRoute(page: Page) {
@@ -218,6 +306,16 @@ test("selected portfolio financials lead contributors with one shared year and f
       .getByRole("cell")
       .nth(0),
   ).toHaveText("-12.5%2");
+  if (await summary.evaluate((node) => node.scrollWidth > node.clientWidth)) {
+    await summary.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect
+      .poll(() => summary.evaluate((node) => node.scrollLeft))
+      .toBeGreaterThan(0);
+    await summary.evaluate((node) => {
+      node.scrollLeft = 0;
+    });
+  }
   await expect(page.locator(".financial-per-share-table")).toBeHidden();
   await page.getByText("Company details", { exact: true }).click();
   const table = page.getByRole("region", { name: "Company per-share figures" });
@@ -229,7 +327,7 @@ test("selected portfolio financials lead contributors with one shared year and f
   );
   await expect(
     financials.getByText(
-      "1 Gross margin excludes OTH (25.0% weight; insurer).",
+      "1 2026 Gross margin excludes OTH (25.0% weight; insurer).",
       { exact: true },
     ),
   ).toBeVisible();
@@ -283,10 +381,25 @@ test("shared year updates current, prior and changes; all history withholds annu
   });
   const eps = summary.getByRole("row", { name: /^Weighted company EPS/ });
   await expect(eps).toContainText("15.0%");
+  await expect(summary.getByRole("columnheader")).toHaveText([
+    "Measure",
+    "2026",
+    "2025",
+    "2024",
+    "% change (2026 vs 2025)",
+  ]);
+  await expect(eps.getByRole("cell").nth(2)).toHaveText("$1.3");
   await expect(
     summary.getByRole("columnheader", { name: "2025", exact: true }),
   ).toBeVisible();
   await page.getByLabel("Post-mortem year").selectOption("2024");
+  await expect(summary.getByRole("columnheader")).toHaveText([
+    "Measure",
+    "2024",
+    "2023",
+    "2022",
+    "% change (2024 vs 2023)",
+  ]);
   await page.getByText("Company details", { exact: true }).click();
   await expect(
     page
@@ -297,7 +410,12 @@ test("shared year updates current, prior and changes; all history withholds annu
   await expect(
     summary.getByRole("columnheader", { name: "2022", exact: true }),
   ).toBeVisible();
-  await expect(eps.getByText("Unavailable", { exact: true })).toHaveCount(2);
+  await expect(eps.getByText("Unavailable", { exact: true })).toHaveCount(3);
+  await expect(
+    page.getByText("2021: Historical market prices unavailable.", {
+      exact: true,
+    }),
+  ).toBeVisible();
   const count = requested.length;
   await page.getByLabel("Post-mortem year").selectOption("all");
   await expect(page.locator(".annual-financials")).toContainText(
@@ -325,7 +443,7 @@ test("zero figures stay available without zero-revenue notes", async ({
       value: "2.34",
       eps_basis: "diluted",
     };
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
   const summary = page.getByRole("region", {
@@ -384,12 +502,12 @@ test("issuer non-reporting differs from missing data and cash share basis is exp
         reason,
       },
     ];
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
   await expect(
     page.getByText(
-      "3 Weighted company EPS excludes OTH (25.0% weight; not reported).",
+      "3 2026 Weighted company EPS excludes OTH (25.0% weight; not reported).",
       { exact: true },
     ),
   ).toBeVisible();
@@ -480,7 +598,7 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
       eps.value = "7.25";
       fcf.value = "1.75";
     }
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
   const summary = page.getByRole("region", {
@@ -501,7 +619,7 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
   ).toBeVisible();
   await expect(
     page.getByText(
-      "3 FCF margin excludes ZERO (5.0% weight; zero or negative revenue).",
+      "3 2025 FCF margin excludes ZERO (5.0% weight; zero or negative revenue).",
       {
         exact: true,
       },
@@ -516,13 +634,13 @@ test("prior headline matches the prior portfolio and names its own omitted holdi
       .nth(0),
   ).toHaveAttribute(
     "aria-describedby",
-    "fcf_margin_after_disclosed_capex-exclusions",
+    "fcf_margin_after_disclosed_capex-2025-exclusions",
   );
   await expect(eps.getByRole("cell").nth(1)).toHaveAttribute(
     "aria-describedby",
-    "weighted_company_eps-prior-exclusions",
+    "weighted_company_eps-2024-exclusions",
   );
-  await expect(eps.getByRole("cell").nth(2)).toHaveText("-52.4%");
+  await expect(eps.getByRole("cell").nth(3)).toHaveText("-52.4%");
   await page.screenshot({
     path: test.info().outputPath("prior-omissions.png"),
     fullPage: true,
@@ -617,7 +735,7 @@ for (const mismatch of ["account", "year", "synthetic"] as const) {
       if (mismatch === "account") data.account_id = other;
       if (mismatch === "year") data.calendar_year = 2025;
       if (mismatch === "synthetic") data.synthetic = true;
-      return route.fulfill({ json: data });
+      return route.fulfill({ json: { ...data, periods: periods(data) } });
     });
     await page.goto("/#post-mortem");
     const financials = page.locator(".annual-financials");
@@ -640,12 +758,12 @@ test("gross margin keeps a numbered cost-basis note without exclusions", async (
         note: "excludes separately reported depreciation and amortization",
       },
     ];
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
   await expect(
     page.getByText(
-      "1 Gross margin: EXM: excludes separately reported depreciation and amortization.",
+      "1 2026 Gross margin: EXM: excludes separately reported depreciation and amortization.",
       { exact: true },
     ),
   ).toBeVisible();
@@ -714,7 +832,7 @@ test("all prior margin cells show the actual previous portfolio and retain its d
       for (const [key, value] of Object.entries(prior))
         data.weighted_ratios[key].value = value;
     }
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
   const summary = page.getByRole("region", {
@@ -727,7 +845,16 @@ test("all prior margin cells show the actual previous portfolio and retain its d
   ];
   for (const [label, current, prior, change] of expected) {
     const row = summary.getByRole("row", { name: new RegExp(`^${label}`) });
-    await expect(row.getByRole("cell")).toHaveText([current, prior, change]);
+    await expect(row.getByRole("cell")).toHaveText([
+      current,
+      prior,
+      label === "Gross margin"
+        ? "25.0%"
+        : label === "Operating margin"
+          ? "8.0%"
+          : "6.0%",
+      change,
+    ]);
   }
   await expect(
     page.getByText(
@@ -746,7 +873,7 @@ test("all prior margin cells show the actual previous portfolio and retain its d
       .getByRole("row", { name: /^Gross margin/ })
       .getByRole("cell")
       .nth(1),
-  ).toHaveAttribute("aria-describedby", "gross_margin-prior-exclusions");
+  ).toHaveAttribute("aria-describedby", "gross_margin-2025-exclusions");
   await page.getByLabel("Post-mortem year").selectOption("2025");
   for (const [label, value] of [
     ["Gross margin", "25.0%1"],
@@ -761,13 +888,14 @@ test("all prior margin cells show the actual previous portfolio and retain its d
     summary
       .getByRole("row", { name: /^Operating margin/ })
       .getByRole("cell")
-      .nth(2),
+      .nth(3),
   ).toHaveText("N/M");
   await page.getByLabel("Post-mortem year").selectOption("2023");
   for (const [label] of expected) {
     const row = summary.getByRole("row", { name: new RegExp(`^${label}`) });
     await expect(row.getByRole("cell").nth(1)).toHaveText("Unavailable");
     await expect(row.getByRole("cell").nth(2)).toHaveText("Unavailable");
+    await expect(row.getByRole("cell").nth(3)).toHaveText("Unavailable");
   }
 });
 
@@ -828,12 +956,12 @@ test("same-issuer listings keep their own omission weights and detail rows", asy
       },
     ];
     data.weighted_ratios.operating_margin.exclusions = [];
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
   await expect(
     page.getByText(
-      "1 Gross margin excludes CLASSB (20.0% weight; data unavailable).",
+      "1 2026 Gross margin excludes CLASSB (20.0% weight; data unavailable).",
       { exact: true },
     ),
   ).toBeVisible();
@@ -865,7 +993,7 @@ test("same-issuer listings keep their own omission weights and detail rows", asy
   await page.getByLabel("Post-mortem year").selectOption("2025");
   await expect(
     page.getByText(
-      "1 Gross margin excludes CLASSB (20.0% weight; data unavailable).",
+      "1 2025 Gross margin excludes CLASSB (20.0% weight; data unavailable).",
       { exact: true },
     ),
   ).toBeVisible();
@@ -920,12 +1048,14 @@ test("financials disclose the holdings cutoff and linked current and prior filin
       "https://example.com/filings/exm-2026",
       "https://example.com/filings/exm-2025",
     ];
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
-  await expect(page.getByText(/Holdings as of 2026-10-16/)).toBeVisible();
   await expect(
-    page.getByText(/Retrospective figures; publication dates/),
+    page.getByText(/Selected-year holdings as of 2026-10-16/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Retrospective annual figures; publication dates/),
   ).toBeVisible();
   await page.getByText("Company details", { exact: true }).click();
   const sources = page.getByRole("region", {
@@ -977,7 +1107,7 @@ test("financials stay steady on focus and reload when the view is reopened", asy
     );
     const data = report(main, year);
     data.weighted_ratios.gross_margin.value = margin;
-    return route.fulfill({ json: data });
+    return route.fulfill({ json: { ...data, periods: periods(data) } });
   });
   await page.goto("/#post-mortem");
   const gross = page
@@ -995,4 +1125,32 @@ test("financials stay steady on focus and reload when the view is reopened", asy
     .click();
   await expect(gross).toHaveText("50.0%1");
   await expect(page.getByLabel("Post-mortem year")).toHaveValue("2026");
+});
+
+test("an unavailable selected year keeps valid older financial columns", async ({
+  page,
+}) => {
+  await page.route("**/api/accounts/*/financials?year=*", (route) => {
+    const data = report();
+    data.api_status = "unavailable";
+    data.periods[0] = {
+      ...data.periods[0],
+      api_status: "unavailable",
+      weighted_ratios: null,
+      weighted_company_per_share: null,
+      availability_reason: "Reviewed financial data unavailable",
+    };
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#post-mortem");
+  const summary = page.getByRole("region", {
+    name: "Portfolio-weighted metrics",
+  });
+  const eps = summary.getByRole("row", { name: /^Weighted company EPS/ });
+  await expect(eps.getByRole("cell").nth(0)).toHaveText("Unavailable");
+  await expect(eps.getByRole("cell").nth(1)).toHaveText("$3.0");
+  await expect(eps.getByRole("cell").nth(2)).toHaveText("$1.3");
+  await expect(
+    page.getByText("Table unavailable.", { exact: true }),
+  ).toHaveCount(0);
 });
