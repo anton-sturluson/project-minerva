@@ -1115,3 +1115,108 @@ def test_legacy_or_unstructured_review_receipts_require_new_review(omitted: str)
     receipt["sha256"] = hashlib.sha256(str(receipt["content"]).encode()).hexdigest()
     with pytest.raises(ValueError, match="review|explicitly pin"):
         validate_release(release)
+
+
+@pytest.mark.parametrize("oldest_state", ["available", "missing", "price_failure"])
+def test_three_year_summary_uses_each_dated_portfolio_and_preserves_newer_years(
+    admitted_history: tuple[TestClient, Connection[Row], str],
+    monkeypatch: pytest.MonkeyPatch,
+    oldest_state: str,
+) -> None:
+    client, conn, schema = admitted_history
+    rows: list[Record] = []
+    for year in (2023, 2024, 2025):
+        if year == 2023 and oldest_state == "missing":
+            continue
+        for ticker, currency, eps, margin in (
+            ("AAA", "EUR", "2", "0.2"),
+            ("BBB", "USD", "4", "0.6"),
+        ):
+            row = release_row(ticker, currency=currency)
+            row["year"] = year
+            for key in METRICS:
+                record(record(row["metrics"])[key])["value"] = margin if "margin" in key else eps
+            rows.append(row)
+    import_release(conn, schema, release_payload(rows), reviewed=True)
+    account = client.post(
+        "/api/accounts", json={"name": "Synthetic three-year portfolio", "base_currency": "USD"}
+    ).json()["id"]
+    assert cash(client, account, "opening_cash", "10000", day="2023-01-02").status_code == 201
+    for ticker, day in (
+        ("AAA", "2023-01-03"),
+        ("BBB", "2023-01-03"),
+        ("AAA", "2024-01-03"),
+        ("AAA", "2025-01-03"),
+    ):
+        assert (
+            trade(
+                client, account, quantity="1", ticker=ticker, exchange="NYSE", effective_date=day
+            ).status_code
+            == 201
+        )
+    before = ledger(client, account)
+
+    def quotes(view: LedgerView, currency: str, provisional: bool, **options: object) -> dict:
+        result = quote_values(view, currency, provisional, **options)
+        if oldest_state == "price_failure" and options["end"] == date(2023, 12, 31):
+            result["complete"] = False
+        return result
+
+    def fx(currency: str, start: date, end: date, **options: object) -> market_types.History:
+        rate = Decimal(end.year - 2022)
+        return market_types.History({end: rate}, {end: rate})
+
+    monkeypatch.setattr(financial_api, "value_records", quotes)
+    monkeypatch.setattr(financial_api.market_history, "fx_history", fx)
+    response = client.get(f"/api/accounts/{account}/financials?year=2025")
+    assert response.status_code == 200, response.text
+    report = response.json()
+    periods = report["periods"]
+    assert [p["calendar_year"] for p in periods] == [2025, 2024, 2023]
+    assert [p["holdings_date"] for p in periods] == ["2025-12-31", "2024-12-31", "2023-12-31"]
+    assert all("companies" not in p and "periods" not in p for p in periods)
+    for period, expected in zip(periods[:2], ("5.5", "4"), strict=True):
+        assert Decimal(
+            period["weighted_company_per_share"]["weighted_company_eps"]["value"]
+        ) == Decimal(expected)
+    eps = report["weighted_company_per_share"]["weighted_company_eps"]
+    assert Decimal(eps["comparison"]["prior_value"]) == 4
+    assert Decimal(eps["comparison"]["percent_change"]) == Decimal("0.375")
+    assert Decimal(periods[0]["weighted_ratios"]["gross_margin"]["value"]) == Decimal("0.3")
+    oldest = periods[2]
+    if oldest_state == "available":
+        assert oldest["api_status"] == "available"
+        assert oldest["availability_reason"] is None
+        assert Decimal(oldest["weighted_company_per_share"]["weighted_company_eps"]["value"]) == 3
+        assert Decimal(oldest["weighted_ratios"]["gross_margin"]["value"]) == Decimal("0.4")
+        historical = client.get(f"/api/accounts/{account}/financials?year=2024").json()
+        assert [p["calendar_year"] for p in historical["periods"]] == [2024, 2023, 2022]
+        assert (
+            historical["periods"][0]["weighted_company_per_share"]["weighted_company_eps"]["value"]
+            == "4"
+        )
+        assert historical["periods"][2]["api_status"] == "unavailable"
+        missing_selected = client.get(f"/api/accounts/{account}/financials?year=2026").json()
+        assert missing_selected["api_status"] == "unavailable"
+        assert [p["calendar_year"] for p in missing_selected["periods"]] == [2026, 2025, 2024]
+        assert [p["api_status"] for p in missing_selected["periods"]] == [
+            "unavailable",
+            "available",
+            "available",
+        ]
+        assert Decimal(
+            missing_selected["periods"][1]["weighted_company_per_share"]["weighted_company_eps"][
+                "value"
+            ]
+        ) == Decimal("5.5")
+    elif oldest_state == "price_failure":
+        assert oldest["weighted_ratios"] is None
+        assert oldest["weighted_company_per_share"] is None
+        assert oldest["api_status"] == "unavailable"
+        assert oldest["availability_reason"] == "2023 portfolio market prices unavailable"
+        assert report["api_status"] == "partial"
+    else:
+        assert oldest["weighted_company_per_share"]["weighted_company_eps"]["value"] is None
+        assert oldest["availability_reason"] == "Reviewed financial data unavailable"
+        assert oldest["api_status"] == "unavailable"
+    assert ledger(client, account) == before
