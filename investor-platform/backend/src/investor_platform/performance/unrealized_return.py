@@ -23,8 +23,8 @@ def annualized_unrealized_return(
     if any(age < 0 for _, age in dated_costs):
         return None, "Quote precedes a remaining purchase"
     dated_costs = [(cost, age) for cost, age in dated_costs if cost > 0]
-    if max(age for _, age in dated_costs) < 365:
-        return None, "Less than one year of holding history"
+    if max(age for _, age in dated_costs) == 0:
+        return None, "No elapsed holding period"
     try:
         with localcontext() as context:
             context.prec = 28
