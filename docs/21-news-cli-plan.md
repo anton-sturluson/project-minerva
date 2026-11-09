@@ -72,7 +72,7 @@ Focused tests will cover:
 - existence lookup by URL and article key, unseen candidates, empty URLs, malformed JSON, stdin/`--input`, missing database/table behavior, and deterministic in-batch URL/article-key deduplication;
 - proof that existence checks are read-only/query-only and do not change database files;
 - URL-index creation in new and migrated schemas, plus clear errors for malformed source registries while absent optional registries remain valid;
-- shell and prompt integration: physically isolated per-source roots, behavior under a cross-source deletion attempt, deterministic collision-safe raw aggregation (including errors), direct CLI ingestion, one shared no-retry collector helper, a validated configurable global collector pool, validated configurable timeout defaults, one-window/one-tab browser instructions, URL fetches before web-fetch writes, no arbitrary item caps, the official `gemini-3.6-flash` summarization model, and successful-cleanup semantics.
+- shell and prompt integration: physically isolated per-source roots, behavior under a cross-source deletion attempt, deterministic collision-safe raw aggregation (including errors), direct CLI ingestion, one shared no-retry collector helper, a validated configurable global collector pool, validated configurable timeout defaults, one-window/one-tab browser instructions, URL fetches before web-fetch writes, no arbitrary item caps, direct Fireworks `accounts/fireworks/models/glm-5p3-flash` summarization with HIGH reasoning, and successful-cleanup semantics.
 
 ## Verification gates
 

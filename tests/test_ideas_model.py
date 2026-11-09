@@ -15,10 +15,15 @@ def test_stage_defaults_and_explicit_cheap_override(monkeypatch):
     for stage in ("SOURCE", "EXTRACTION", "REVIEW"):
         monkeypatch.delenv(f"MINERVA_IDEAS_{stage}_MODEL", raising=False)
     assert model.resolve_models() == model.StageModels(
-        "gpt-6-luna", "gpt-6-luna", "gpt-6.1-sol"
+        "accounts/fireworks/models/glm-5p3-flash",
+        "accounts/fireworks/models/glm-5p3-flash", "gpt-6.1-sol"
     )
     monkeypatch.setenv("MINERVA_IDEAS_SOURCE_MODEL", "gpt-6.1-sol")
-    assert model.resolve_models().source == "gpt-6.1-sol"
+    monkeypatch.setenv("MINERVA_IDEAS_EXTRACTION_MODEL", "accounts/fireworks/models/glm-5p3")
+    monkeypatch.setenv("MINERVA_IDEAS_REVIEW_MODEL", "gpt-5.5")
+    assert model.resolve_models() == model.StageModels(
+        "gpt-6.1-sol", "accounts/fireworks/models/glm-5p3", "gpt-5.5"
+    )
     assert set(vars(model.resolve_models("gemini-2.5-flash-lite")).values()) == {
         "gemini-2.5-flash-lite"
     }
@@ -62,4 +67,5 @@ def test_openai_structured_response_and_failure_classification(
     assert calls[0]["model"] == "gpt-6-luna"
     assert calls[0]["text_format"] is Answer
     assert calls[0]["store"] is False
+    assert calls[0]["reasoning"] == {"effort": "high"}
     assert list((tmp_path / "research/model").glob("*.response.json"))

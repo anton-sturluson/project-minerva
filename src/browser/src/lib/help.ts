@@ -190,14 +190,14 @@ const COMMANDS: HelpSpec[] = [
   },
   {
     name: "describe",
-    summary: "Use a small vision model to describe the current page.",
+    summary: "Describe the current page with GLM FLASH/high vision.",
     usage: "browser describe [--tab <alias>] [--scope <selector>] [--model <name>]",
     description:
-      "Take a screenshot and accessibility snapshot, send both to a fast vision model, and return a natural-language description. Use this when visual-only state matters more than structural page state.",
+      "Send a screenshot and accessibility tree to Fireworks GLM FLASH/high by default (FIREWORKS_API_KEY). An explicit OpenRouter vision model uses OPENROUTER_API_KEY instead. No model fallback.",
     options: [
       { flag: "--tab <alias>", description: "Run the command against a specific managed tab alias." },
       { flag: "--scope <selector>", description: "Scope the accessibility snapshot while keeping a full-page screenshot." },
-      { flag: "--model <name>", description: "Override the default model (google/gemini-3.1-flash-lite-preview)." },
+      { flag: "--model <name>", description: "Exact Fireworks ID (default accounts/fireworks/models/glm-5p3-flash), or explicit OpenRouter ID. OpenClaw account routes are unsupported." },
     ],
     examples: ["browser describe", 'browser describe --scope "main"'],
     nextSteps: ["browser ask \"what error message is visible?\"", "browser snapshot"],
@@ -207,11 +207,11 @@ const COMMANDS: HelpSpec[] = [
     summary: "Ask a specific visual question about the current page.",
     usage: "browser ask <question> [--tab <alias>] [--scope <selector>] [--model <name>]",
     description:
-      "Take a screenshot and accessibility snapshot, send both to a fast vision model with your question, and return a concise factual answer. Use this when a targeted visual check is cheaper than a screenshot review.",
+      "Send a screenshot and accessibility tree with your question to Fireworks GLM FLASH/high by default (FIREWORKS_API_KEY). An explicit OpenRouter vision model uses OPENROUTER_API_KEY instead. No model fallback.",
     options: [
       { flag: "--tab <alias>", description: "Run the command against a specific managed tab alias." },
       { flag: "--scope <selector>", description: "Scope the accessibility snapshot while keeping a full-page screenshot." },
-      { flag: "--model <name>", description: "Override the default model (google/gemini-3.1-flash-lite-preview)." },
+      { flag: "--model <name>", description: "Exact Fireworks ID (default accounts/fireworks/models/glm-5p3-flash), or explicit OpenRouter ID. OpenClaw account routes are unsupported." },
     ],
     examples: ['browser ask "is the upload progress bar complete?"', 'browser ask "what text is in the error banner?" --scope "main"'],
     nextSteps: ["browser click", "browser wait"],

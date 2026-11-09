@@ -7,6 +7,7 @@ import re
 from abc import ABC, abstractmethod
 
 from jobwatch.models import JobClassification
+from harness.worker_model import WORKER_MODEL, fireworks_model_id, generate_fireworks, is_fireworks_model
 
 _FENCE_RE: re.Pattern[str] = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
@@ -18,7 +19,7 @@ def _parse_json_response(raw: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Failed to parse LLM JSON: {exc}\nRaw output: {raw[:500]}") from exc
+        raise ValueError("Failed to parse LLM JSON") from None
 
 SYSTEM_PROMPT: str = """\
 Classify this job posting into department, role type, and seniority.
@@ -74,16 +75,19 @@ class ClassifierProvider(ABC):
 
 
 class AnthropicClassifier(ClassifierProvider):
-    """Anthropic-backed classifier using the Messages API."""
+    """Legacy opt-in Anthropic classifier; never routes Fireworks models."""
 
     def __init__(
         self,
         model: str = "claude-haiku-4-5-20251001",
         api_key: str | None = None,
-    ):
+    ) -> None:
+        """Construct an explicit Anthropic client without cross-provider routing."""
+        if is_fireworks_model(model):
+            raise ValueError("Use FireworksClassifier for Fireworks models")
         import anthropic
 
-        self._client: anthropic.Anthropic = anthropic.Anthropic(api_key=api_key)
+        self._client: anthropic.Anthropic = anthropic.Anthropic(api_key=api_key, max_retries=0)
         self._model: str = model
 
     @property
@@ -105,7 +109,7 @@ class AnthropicClassifier(ClassifierProvider):
                 messages=[{"role": "user", "content": user_message}],
             )
         except Exception as exc:
-            raise RuntimeError(f"Anthropic API error: {exc}") from exc
+            raise RuntimeError(f"Anthropic API error ({type(exc).__name__})") from None
 
         raw_text: str = response.content[0].text
         data: dict = _parse_json_response(raw_text)
@@ -113,16 +117,19 @@ class AnthropicClassifier(ClassifierProvider):
 
 
 class OpenAIClassifier(ClassifierProvider):
-    """OpenAI-backed classifier using the Chat Completions API."""
+    """Legacy opt-in OpenAI classifier; never routes Fireworks models."""
 
     def __init__(
         self,
         model: str = "gpt-4o-mini",
         api_key: str | None = None,
-    ):
+    ) -> None:
+        """Construct an explicit OpenAI client without cross-provider routing."""
         import openai
 
-        self._client: openai.OpenAI = openai.OpenAI(api_key=api_key)
+        if is_fireworks_model(model):
+            raise ValueError("Use FireworksClassifier for Fireworks models")
+        self._client: openai.OpenAI = openai.OpenAI(api_key=api_key, max_retries=0)
         self._model: str = model
 
     @property
@@ -146,11 +153,49 @@ class OpenAIClassifier(ClassifierProvider):
                 ],
             )
         except Exception as exc:
-            raise RuntimeError(f"OpenAI API error: {exc}") from exc
+            raise RuntimeError(f"OpenAI API error ({type(exc).__name__})") from None
 
         raw_text: str = response.choices[0].message.content
         data: dict = _parse_json_response(raw_text)
         return JobClassification(**data)
+
+
+class FireworksClassifier(ClassifierProvider):
+    """Default GLM FLASH/HIGH classifier with validated structured output."""
+
+    def __init__(self, model: str = WORKER_MODEL, api_key: str | None = None) -> None:
+        """Keep explicit Fireworks model IDs unchanged and use environment auth."""
+        self._model: str = fireworks_model_id(model)
+        self._api_key: str | None = api_key
+
+    @property
+    def model_name(self) -> str:
+        """Return the exact direct Fireworks model ID used for classification."""
+        return self._model
+
+    def classify(
+        self, title: str, department_raw: str | None, description: str | None
+    ) -> JobClassification:
+        """Validate a complete JSON answer with reasoning; never switch providers."""
+        prompt: str = f"{SYSTEM_PROMPT}\n\n{build_user_message(title, department_raw, description)}"
+        text: str = generate_fireworks(
+            prompt, model=self._model, api_key=self._api_key,
+            max_tokens=16384, schema=JobClassification,
+        )
+        return JobClassification.model_validate_json(text)
+
+
+def create_classifier(
+    provider: str = "fireworks", *, model: str | None = None
+) -> ClassifierProvider:
+    """Select one provider explicitly; legacy clients remain opt-in only."""
+    if provider == "fireworks":
+        return FireworksClassifier(model=model or WORKER_MODEL)
+    if provider == "anthropic":
+        return AnthropicClassifier(**({"model": model} if model else {}))
+    if provider == "openai":
+        return OpenAIClassifier(**({"model": model} if model else {}))
+    raise ValueError("Unsupported classifier provider")
 
 
 def classify_postings(

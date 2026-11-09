@@ -1,4 +1,4 @@
-"""Bounded, schema-constrained model calls with explicit stage routing; traces stay on disk."""
+"""Bounded, schema-validated model calls with explicit stage routing; traces stay on disk."""
 
 import os
 from dataclasses import dataclass
@@ -11,6 +11,7 @@ from google.genai import errors, types
 from pydantic import BaseModel
 
 from harness.ideas import store
+from harness.worker_model import WORKER_MODEL, generate_fireworks, is_fireworks_model
 
 
 @dataclass(frozen=True)
@@ -23,15 +24,18 @@ class StageModels:
 def resolve_models(override: str | None = None) -> StageModels:
     """An explicit --model overrides every stage; otherwise use stage settings."""
     return StageModels(
-        source=override or os.environ.get("MINERVA_IDEAS_SOURCE_MODEL", "gpt-6-luna"),
+        source=override or os.environ.get("MINERVA_IDEAS_SOURCE_MODEL", WORKER_MODEL),
         extraction=override
-        or os.environ.get("MINERVA_IDEAS_EXTRACTION_MODEL", "gpt-6-luna"),
+        or os.environ.get("MINERVA_IDEAS_EXTRACTION_MODEL", WORKER_MODEL),
         review=override or os.environ.get("MINERVA_IDEAS_REVIEW_MODEL", "gpt-6.1-sol"),
     )
 
 
 def check_model(model: str) -> None:
-    if model.startswith("gpt-"):
+    """Require the selected provider's key, without trying another provider."""
+    if is_fireworks_model(model):
+        key: str = "FIREWORKS_API_KEY"
+    elif model.startswith("gpt-"):
         key = "OPENAI_API_KEY"
     elif model.startswith("gemini-"):
         key = "GEMINI_API_KEY"
@@ -64,13 +68,21 @@ def provider_schema(schema: type[BaseModel]) -> dict:
 def generate(
     prompt: str, schema: type[BaseModel], folder: Path, *, model: str
 ) -> BaseModel:
+    """Validate one structured result from the selected provider, without fallback."""
     check_model(model)
-    name = f"research/model/{uuid4()}"
+    name: str = f"research/model/{uuid4()}"
     store.json_artifact(
         folder,
         name + ".request.json",
         {"model": model, "schema": schema.model_json_schema(), "prompt": prompt},
     )
+    if is_fireworks_model(model):
+        try:
+            text: str = generate_fireworks(prompt, model=model, schema=schema)
+        except (RuntimeError, ValueError) as exc:
+            raise ModelError(f"Fireworks structured request failed ({type(exc).__name__})") from None
+        store.json_artifact(folder, name + ".response.json", {"text": text})
+        return schema.model_validate_json(text)
     if model.startswith("gpt-"):
         try:
             with openai.OpenAI(timeout=180, max_retries=0) as client:
@@ -78,7 +90,7 @@ def generate(
                     model=model,
                     input=prompt,
                     text_format=schema,
-                    reasoning={"effort": "low"},
+                    reasoning={"effort": "high"},
                     max_output_tokens=10000,
                     store=False,
                 )
@@ -97,7 +109,9 @@ def generate(
     try:
         with genai.Client(
             api_key=os.environ["GEMINI_API_KEY"],
-            http_options=types.HttpOptions(timeout=60000),
+            http_options=types.HttpOptions(
+                timeout=60000, retry_options=types.HttpRetryOptions(attempts=1)
+            ),
         ) as client:
             response = client.models.generate_content(
                 model=model,

@@ -23,7 +23,7 @@ def captured_generation(tmp_path: Path, monkeypatch) -> dict:
     monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
     monkeypatch.setattr(
         "harness.commands.extract.get_settings",
-        lambda: HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key"),
+        lambda: HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", fireworks_api_key="test-key"),
     )
     return captured
 
@@ -61,8 +61,8 @@ def test_summarize_reads_stdin_with_new_default(captured_generation: dict) -> No
 
     assert result.exit_code == 0
     assert result.output == "Model summary\n"
-    assert captured_generation["model"] == "gemini-3.6-flash"
-    assert captured_generation["thinking"] == "minimal"
+    assert captured_generation["model"] == "accounts/fireworks/models/glm-5p3-flash"
+    assert captured_generation["thinking"] == "high"
     assert "Résumé source" in captured_generation["prompt"]
 
 

@@ -87,7 +87,9 @@ Safety rules:
 
 ## Oracle commands
 
-`browser describe` and `browser ask` capture a screenshot and accessibility tree, then call OpenRouter. Set `OPENROUTER_API_KEY` in the environment or a nearby `.env` file. Other commands do not require an external API.
+`browser describe` and `browser ask` default to direct Fireworks `accounts/fireworks/models/glm-5p3-flash` with `reasoning_effort=high`. Set `FIREWORKS_API_KEY` in the host-owned environment. The model receives a screenshot and accessibility tree. [Fireworks lists image input as supported for GLM 5.3 Flash](https://fireworks.ai/models/fireworks/glm-5p3-flash).
+
+An explicit legacy OpenRouter vision model (`--model google/gemini-3.1-flash-lite-preview`, for example) retains screenshot plus accessibility-tree input and uses only `https://openrouter.ai/api/v1/chat/completions` with `OPENROUTER_API_KEY`. Its exact model ID is preserved and provider fallbacks are disabled. Direct or `fireworks/`-qualified Fireworks IDs use only `https://api.fireworks.ai/inference/v1/chat/completions`; non-fast GLM IDs are not aliases for FLASH. Known text-only GLM 5.3 routes are rejected before image capture or a provider call because this oracle requires image input; no vision-model substitution occurs. OpenClaw account routes such as `openai-zdr/...` are rejected, not sent to OpenRouter. Keys are read only from the environment, never nearby credential files. No route retries with another provider or model. Model names do not establish account-level ZDR. Other commands do not require an external API.
 
 ## Development and verification
 
@@ -98,7 +100,7 @@ npm run build       # compile src/ to dist/
 npm run smoke       # invoke every command through offline fakes
 ```
 
-The smoke suite parses and dispatches every command without starting the WebSocket server, connecting to Chrome, closing tabs, or calling OpenRouter. Live Chrome behavior still requires manually loading the unpacked extension; automated tests intentionally do not perform destructive live-browser operations.
+The smoke suite parses and dispatches every command without starting the WebSocket server, connecting to Chrome, closing tabs, or calling any model provider. Live Chrome behavior still requires manually loading the unpacked extension; automated tests intentionally do not perform destructive live-browser operations.
 
 ## Notes
 

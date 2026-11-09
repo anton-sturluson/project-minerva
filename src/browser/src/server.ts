@@ -9,9 +9,10 @@ import { validateCommandInput } from "./lib/parse.js";
 import { BRIDGE_TIMEOUT_GRACE_MS, BRIDGE_WS_PORT, CLOSE_IDLE_TIMEOUT_MS, DEFAULT_EXTRACT_LIMIT, DEFAULT_HTML_LIMIT, FALLBACK_PORT, FriendlyError, SOCKET_PATH } from "./lib/types.js";
 import type { BridgeAction, BrowserState, CommandName, CommandRequest, CommandResponse } from "./lib/types.js";
 
-const DEFAULT_ORACLE_MODEL = "google/gemini-3.1-flash-lite-preview";
+const DEFAULT_ORACLE_MODEL = "accounts/fireworks/models/glm-5p3-flash";
+const FIREWORKS_ENDPOINT = "https://api.fireworks.ai/inference/v1/chat/completions";
 const LOCATION_TIMEOUT_MS = 1_000;
-const OPENROUTER_TIMEOUT_MS = 60_000;
+const ORACLE_TIMEOUT_MS = 60_000;
 
 const DESCRIBE_SYSTEM_PROMPT = `You are a browser state oracle inside a browser automation tool.
 You receive a screenshot and an accessibility tree of a web page.
@@ -148,61 +149,19 @@ async function getCurrentLocation(
   return { url: "about:blank", title: "" };
 }
 
-function parseEnvValue(raw: string): string {
-  const trimmed = raw.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-async function readEnvFile(envPath: string): Promise<Record<string, string>> {
-  try {
-    const content = await fs.readFile(envPath, "utf8");
-    const entries: Record<string, string> = {};
-    for (const line of content.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) {
-        continue;
-      }
-      const separatorIndex = trimmed.indexOf("=");
-      if (separatorIndex === -1) {
-        continue;
-      }
-      const key = trimmed.slice(0, separatorIndex).trim();
-      const value = trimmed.slice(separatorIndex + 1);
-      if (key) {
-        entries[key] = parseEnvValue(value);
-      }
+function oracleRoute(requestedModel?: string) {
+  const model = (requestedModel || DEFAULT_ORACLE_MODEL).replace(/^fireworks\//, "");
+  if (model.startsWith("accounts/fireworks/")) {
+    if (/^accounts\/fireworks\/(?:models\/glm-5p3|routers\/glm-5p3-(?:fast|spot))$/.test(model)) {
+      throw new FriendlyError("This GLM route is text-only; the browser oracle requires image input. No fallback was attempted.");
     }
-    return entries;
-  } catch {
-    return {};
+    return { model, endpoint: FIREWORKS_ENDPOINT, keyName: "FIREWORKS_API_KEY", fireworks: true };
   }
-}
-
-async function loadApiKey(): Promise<string> {
-  if (process.env.OPENROUTER_API_KEY) {
-    return process.env.OPENROUTER_API_KEY;
+  // OpenClaw account routes are not OpenRouter model IDs.
+  if (!model.includes("/") || model.startsWith("openai-zdr/") || model.startsWith("fireworks/")) {
+    throw new FriendlyError("Use an accounts/fireworks model ID or an explicit OpenRouter model ID. OpenClaw account routes are unsupported.");
   }
-
-  const candidatePaths = [
-    path.resolve(process.cwd(), ".env"),
-    path.resolve(process.cwd(), "..", ".env"),
-    path.resolve(process.cwd(), "..", "..", ".env"),
-  ];
-
-  for (const envPath of candidatePaths) {
-    const values = await readEnvFile(envPath);
-    if (values.OPENROUTER_API_KEY) {
-      return values.OPENROUTER_API_KEY;
-    }
-  }
-
-  throw new FriendlyError("OPENROUTER_API_KEY is not set. Set it in the environment or in the .env file.");
+  return { model, endpoint: "https://openrouter.ai/api/v1/chat/completions", keyName: "OPENROUTER_API_KEY", fireworks: false };
 }
 
 function extractChatText(payload: unknown): string {
@@ -215,8 +174,11 @@ function extractChatText(payload: unknown): string {
     throw new FriendlyError("API response did not include a message.");
   }
 
+  if (firstChoice.finish_reason !== "stop" || firstChoice.message.refusal) {
+    throw new FriendlyError("Oracle returned an incomplete answer or refusal.");
+  }
   const content = firstChoice.message.content;
-  if (typeof content === "string") {
+  if (typeof content === "string" && content.trim()) {
     return content.trim();
   }
 
@@ -243,8 +205,10 @@ function extractChatText(payload: unknown): string {
 
 async function runOracle(params: OracleParams, commandBridge: CommandBridge): Promise<string> {
   try {
-    // Extension requests are intentionally serialized, so capture these in
-    // sequence and give each operation its own full timeout budget.
+    const route = oracleRoute(params.model);
+    const apiKey = process.env[route.keyName];
+    if (!apiKey) throw new FriendlyError(`${route.keyName} is not set in the environment.`);
+    // Capture sequentially so both extension requests get their full timeout.
     const screenshotResult = await commandBridge.call(
       "screenshot",
       { maxWidth: 1280, quality: 70, format: "jpeg", ...(params.tabId ? { tabId: params.tabId } : {}) },
@@ -266,21 +230,22 @@ async function runOracle(params: OracleParams, commandBridge: CommandBridge): Pr
       throw new FriendlyError("Extension did not return snapshot data.");
     }
 
-    const apiKey = await loadApiKey();
-    const model = params.model || DEFAULT_ORACLE_MODEL;
     const userText = params.question
       ? `Accessibility tree:\n${snapshotResult.snapshot}\n\nQuestion:\n${params.question}`
       : `Accessibility tree:\n${snapshotResult.snapshot}`;
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(route.endpoint, {
       method: "POST",
-      signal: AbortSignal.timeout(OPENROUTER_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ORACLE_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model,
+        model: route.model,
+        ...(route.fireworks
+          ? { reasoning_effort: "high", max_tokens: 16384 }
+          : { provider: { allow_fallbacks: false } }),
         messages: [
           { role: "system", content: params.prompt },
           {
@@ -295,8 +260,7 @@ async function runOracle(params: OracleParams, commandBridge: CommandBridge): Pr
     });
 
     if (!response.ok) {
-      const details = (await response.text().catch(() => "")).slice(0, 500);
-      throw new FriendlyError(`OpenRouter request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`);
+      throw new FriendlyError(`Oracle provider request failed (HTTP ${response.status}). No fallback was attempted.`);
     }
 
     const payload = (await response.json()) as unknown;
@@ -306,13 +270,12 @@ async function runOracle(params: OracleParams, commandBridge: CommandBridge): Pr
       throw error;
     }
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new FriendlyError(`OpenRouter request timed out after ${OPENROUTER_TIMEOUT_MS / 1000}s.`);
+      throw new FriendlyError(`Oracle request timed out after ${ORACLE_TIMEOUT_MS / 1000}s.`);
     }
     if (error instanceof TypeError) {
-      throw new FriendlyError(`Oracle request failed (network error: ${error.message}). Check connectivity and OPENROUTER_API_KEY.`);
+      throw new FriendlyError("Oracle request failed (network error). Check connectivity and the selected provider's environment key.");
     }
-    const message = error instanceof Error ? error.message : String(error);
-    throw new FriendlyError(`Oracle failed unexpectedly: ${message}`);
+    throw new FriendlyError("Oracle failed unexpectedly. No fallback was attempted.");
   }
 }
 

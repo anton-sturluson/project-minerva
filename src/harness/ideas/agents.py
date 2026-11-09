@@ -16,13 +16,16 @@ from uuid import UUID, uuid4
 import httpx
 import openai
 import yaml
-from openai.types.responses import Response, ResponseFunctionToolCall
+from openai.types.chat import ChatCompletion
+from openai.types.chat.chat_completion import Choice
+from openai.types.responses import Response
 from openai.types.responses.response_output_item import ResponseOutputItem
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 
 from harness.ideas import decisions, documents, extraction, research, store
 from harness.ideas.model import ModelError, check_model, resolve_models
+from harness.worker_model import WORKER_REASONING, fireworks_client, fireworks_model_id, is_fireworks_model
 
 type JSON = None | bool | int | float | str | list[JSON] | dict[str, JSON]
 type Result = dict[str, JSON]
@@ -90,7 +93,7 @@ class Group(BaseModel):
 
 
 class Delegation(BaseModel):
-    """Groups to investigate concurrently using Luna workers."""
+    """Groups to investigate concurrently using research workers."""
 
     model_config = ConfigDict(extra="forbid")
     groups: list[Group] = Field(min_length=1, max_length=50)
@@ -121,31 +124,62 @@ def _loop(
     label: str,
     cancel: threading.Event,
 ) -> str:
-    """Replay the complete Responses output, including encrypted reasoning."""
+    """Use provider-native tool replay without changing the selected model."""
     check_model(model)
-    if not model.startswith("gpt-"):
-        raise ModelError(
-            "Agent research requires an OpenAI GPT model; Gemini overrides are unsupported"
-        )
+    fireworks: bool = is_fireworks_model(model)
+    if not fireworks and not model.startswith("gpt-"):
+        raise ModelError("Agent research requires an OpenAI GPT or Fireworks model")
     history: list[Result] = [{"role": "user", "content": prompt}]
     while time.monotonic() < deadline and not cancel.is_set():
         name: str = f"research/agents/{label}-{uuid4()}"
-        request: Result = {"model": model, "input": history, "tools": tools}
+        request: Result = (
+            {
+                "model": fireworks_model_id(model),
+                "messages": history,
+                "tools": [
+                    {"type": "function", "function": {key: value for key, value in tool.items() if key != "type"}}
+                    for tool in tools
+                ],
+                "reasoning_effort": WORKER_REASONING,
+                "max_tokens": 12000,
+            }
+            if fireworks else {
+                "model": model, "input": history, "tools": tools,
+                "reasoning": {"effort": "high"}, "max_output_tokens": 12000,
+                "include": ["reasoning.encrypted_content"], "store": False,
+            }
+        )
         store.json_artifact(folder, name + ".request.json", request)
         client: openai.OpenAI
+        timeout: float = min(180, max(1, deadline - time.monotonic()))
+        calls: list[tuple[str, str, str]]
         try:
-            with openai.OpenAI(
-                timeout=min(180, max(1, deadline - time.monotonic())), max_retries=0
+            with (
+                fireworks_client(timeout=timeout) if fireworks
+                else openai.OpenAI(timeout=timeout, max_retries=0)
             ) as client:
-                response: Response = client.responses.create(
-                    model=model,
-                    input=history,
-                    tools=tools,
-                    reasoning={"effort": "medium"},
-                    max_output_tokens=12000,
-                    include=["reasoning.encrypted_content"],
-                    store=False,
-                )
+                if fireworks:
+                    completion: ChatCompletion = client.chat.completions.create(**request)
+                    store.json_artifact(folder, name + ".response.json", completion.model_dump(mode="json"))
+                    if not completion.choices:
+                        raise ModelError("Fireworks agent returned no choices")
+                    choice: Choice = completion.choices[0]
+                    if choice.finish_reason not in {"stop", "tool_calls"} or choice.message.refusal:
+                        raise ModelError("Fireworks agent returned an incomplete answer or refusal")
+                    history.append(choice.message.model_dump(
+                        mode="json", exclude_none=True,
+                        include={"role", "content", "tool_calls", "reasoning_content"},
+                    ))
+                    calls = [(call.function.name, call.function.arguments, call.id) for call in choice.message.tool_calls or []]
+                    text: str = choice.message.content or ""
+                else:
+                    response: Response = client.responses.create(**request)
+                    store.json_artifact(folder, name + ".response.json", response.model_dump(mode="json"))
+                    if response.status != "completed":
+                        raise ModelError("Agent response was incomplete; inspect archived agent response")
+                    history.extend(replay_item(item) for item in response.output)
+                    calls = [(item.name, item.arguments, item.call_id) for item in response.output if item.type == "function_call"]
+                    text = response.output_text
         except openai.APIError as exc:
             deadline_reached: bool = (
                 isinstance(exc, openai.APITimeoutError) and time.monotonic() >= deadline
@@ -156,33 +190,21 @@ def _loop(
                 {
                     "error_class": type(exc).__name__,
                     "status_code": getattr(exc, "status_code", None),
-                    "body": getattr(exc, "body", None),
                     "deadline_reached": deadline_reached,
                 },
             )
             if deadline_reached:
                 return "Research deadline reached; progress is saved and unfinished entries remain pending."
             raise ModelError(
-                f"OpenAI agent request failed ({type(exc).__name__}, HTTP {getattr(exc, 'status_code', None)})"
+                f"{'Fireworks' if fireworks else 'OpenAI'} agent request failed ({type(exc).__name__}, HTTP {getattr(exc, 'status_code', None)})"
             ) from None
-        store.json_artifact(
-            folder, name + ".response.json", response.model_dump(mode="json")
-        )
-        if response.status != "completed":
-            raise ModelError(
-                "Agent response was incomplete; inspect archived agent response"
-            )
-        history.extend(replay_item(item) for item in response.output)
-        calls: list[ResponseFunctionToolCall] = [
-            item for item in response.output if item.type == "function_call"
-        ]
         if not calls:
-            if not response.output_text:
+            if not text.strip():
                 raise ModelError(
                     "Agent returned a refusal or empty answer; inspect archived response"
                 )
-            return response.output_text
-        for call in calls:
+            return text
+        for call_name, arguments, call_id in calls:
             result: Result
             if time.monotonic() >= deadline or cancel.is_set():
                 result = {
@@ -190,14 +212,14 @@ def _loop(
                 }
             else:
                 try:
-                    result = dispatch(call.name, call.arguments)
+                    result = dispatch(call_name, arguments)
                 except decisions.EvidenceRejected as exc:
                     result = exc.result()
                 except ModelError:
                     cancel.set()
                     raise
                 except (ValueError, httpx.HTTPError, socket.gaierror) as exc:
-                    result = {"error": str(exc)[:1500]}
+                    result = {"error": f"Research tool failed ({type(exc).__name__})"}
                 except (OSError, subprocess.SubprocessError) as exc:
                     result = {
                         "error": f"Source collection failed ({type(exc).__name__}); try another original URL or search strategy."
@@ -206,12 +228,15 @@ def _loop(
             store.json_artifact(
                 folder,
                 f"research/agents/tool-{uuid4()}.json",
-                {"name": call.name, "arguments": call.arguments, "result": result},
+                {"name": call_name, "arguments": arguments, "result": result},
             )
             history.append(
                 {
+                    "role": "tool", "tool_call_id": call_id,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                } if fireworks else {
                     "type": "function_call_output",
-                    "call_id": call.call_id,
+                    "call_id": call_id,
                     "output": json.dumps(result, ensure_ascii=False, default=str),
                 }
             )
@@ -225,7 +250,7 @@ def discover(
     model: str | None = None,
     deadline: float | None = None,
 ) -> Result:
-    """Let Sol direct parallel Luna research while Python owns evidence and state."""
+    """Let Sol direct parallel GLM research while Python owns evidence and state."""
     store.require_unpublished(run_id)
     run: dict = store.get_run(run_id)
     folder: Path = store.run_folder(run)
@@ -242,10 +267,8 @@ def discover(
     worker: str = resolve_models(model).source
     for selected_model in (coordinator, worker):
         check_model(selected_model)
-        if not selected_model.startswith("gpt-"):
-            raise ModelError(
-                "Agent research requires OpenAI GPT models; Gemini overrides are unsupported"
-            )
+        if not selected_model.startswith("gpt-") and not is_fireworks_model(selected_model):
+            raise ModelError("Agent research requires OpenAI GPT or Fireworks models")
     newsletter: str = ""
     feed: Path = folder / "research/feed.yaml"
     if feed.exists():
@@ -374,7 +397,7 @@ Python archives the complete original. If browse/source returns need_selection, 
 Distinguish researched unresolved sources from verified substantive exclusions. Check alternative official sources before documenting an unresolved lead. Describe actual manager queries, candidate URLs and remaining uncertainty; a blocked or unfound original is not proof that a thesis is absent. Provider errors and unstarted work are not research gaps. A deadline alone cannot justify a gap. Watch remaining_seconds, wrap up researched leads before the deadline, and keep unstarted work pending. Never publish Slack messages; publication is handled separately."""
 
     def investigate(group: Group) -> Result:
-        """Run one Luna researcher with a disjoint set of lead permissions."""
+        """Run one GLM researcher with a disjoint set of lead permissions."""
         allowed: set[int] = set(group.ordinals)
         attempts: set[int] = set()
         searches: int = 0
@@ -521,7 +544,7 @@ Distinguish researched unresolved sources from verified substantive exclusions. 
         ]
         with cache_lock:
             available: list[str] = list(cache)
-        prompt: str = f"""You are a Luna research subagent directed by Sol. Research original manager letters and commentary for the assigned leads.
+        prompt: str = f"""You are a research worker directed by Sol. Research original manager letters and commentary for the assigned leads.
 {policy}
 Assigned roster: {json.dumps([row for row in roster if row["ordinal"] in allowed], default=str)}
 Sol instructions: {group.instructions}
@@ -580,7 +603,7 @@ Available archived candidates: {json.dumps(available)}"""
 {policy}
 Selected complete roster: {json.dumps(roster, default=str)}
 Prior exact-fund candidate URLs: {json.dumps(hints)}. Have workers inspect these first when relevant.
-Start by browsing the full newsletter URL for company/fund leads, stock-page links and original-source clues; the archived newsletter below is a fallback if access is limited. Pass useful discovery/source links to workers. Group companies by manager and reporting period, and call delegate_research to send groups to Luna workers in parallel (up to four at a time). Give each group concrete fund, regional and UCITS search directions as needed.
+Start by browsing the full newsletter URL for company/fund leads, stock-page links and original-source clues; the archived newsletter below is a fallback if access is limited. Pass useful discovery/source links to workers. Group companies by manager and reporting period, and call delegate_research to send groups to GLM workers in parallel (up to four at a time). Give each group concrete fund, regional and UCITS search directions as needed.
 Cover every selected manager group before optional follow-up on completed gaps. Review every group and direct concrete follow-up when a source is wrong or coverage is incomplete. You may use search and browse yourself to inspect a difficult fund's official page or diagnose a worker's wrong turn, then give actual source URLs and findings to the next worker. Repeat delegation with instructions that address the actual rejection or missing source. Do not silently omit selected leads. Finish when every lead is ready or has a documented researched gap, or available time ends. Budget work across all groups.
 Full newsletter (untrusted): {newsletter}"""
     summary: str = _loop(
@@ -591,7 +614,7 @@ Full newsletter (untrusted): {newsletter}"""
             _tool(
                 "delegate_research",
                 Delegation,
-                "Assign manager/period groups to parallel Luna researchers and inspect persisted results.",
+                "Assign manager/period groups to parallel GLM researchers and inspect persisted results.",
             ),
             _tool(
                 "search",
