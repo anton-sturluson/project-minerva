@@ -266,6 +266,16 @@ def _run_dir(result: subprocess.CompletedProcess[str]) -> Path:
     return Path(match.group(1))
 
 
+def test_worker_and_synthesis_defaults_are_explicit_without_fallback() -> None:
+    """Pin the script's default routes while the stubbed tests cover CLI overrides."""
+    source: str = SCRIPT.read_text(encoding="utf-8")
+    assert 'COLLECTOR_MODEL="${MINERVA_E2E_COLLECTOR_MODEL:-fireworks/accounts/fireworks/models/glm-5p3-flash}"' in source
+    assert 'SUMMARY_MODEL="${MINERVA_E2E_SUMMARY_MODEL:-accounts/fireworks/models/glm-5p3-flash}"' in source
+    assert 'SOL_MODEL="${MINERVA_E2E_SOL_MODEL:-openai/gpt-6.1-sol}"' in source
+    assert "--thinking high" in source
+    assert "--fallback" not in source
+
+
 def test_default_refuses_network_or_agent_execution(tmp_path: Path) -> None:
     result = subprocess.run(
         ["bash", str(SCRIPT), "--article-url", ARTICLE_URL],
@@ -333,7 +343,8 @@ def test_stubbed_pipeline_constructs_commands_and_verifies_outputs(
     ]
     assert "news ingest --input - --db" in agents[0]["message"]
     assert str(tmp_path / "fake-minerva.py") in agents[0]["message"]
-    assert "summarize --model summary-test-model" in agents[1]["message"]
+    assert "summarize --model summary-test-model --thinking high" in agents[1]["message"]
+    assert all(item["thinking"] == "high" for item in agents)
 
 
 def test_provider_failure_is_phase_specific_and_preserves_artifacts(

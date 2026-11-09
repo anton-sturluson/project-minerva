@@ -15,7 +15,7 @@ from jobwatch.ats.ashby import AshbyClient
 from jobwatch.ats.ashby_ssr import AshbySSRClient
 from jobwatch.ats.base import ATSClient
 from jobwatch.ats.greenhouse import GreenhouseClient
-from jobwatch.classifier import AnthropicClassifier, ClassifierProvider, OpenAIClassifier
+from jobwatch.classifier import ClassifierProvider, create_classifier
 from jobwatch.config import COMPANY_REGISTRY, CompanyConfig, Settings
 from jobwatch.db import JobWatchDB
 from jobwatch.models import (
@@ -244,9 +244,9 @@ def main():
         help="Path to SQLite database (default: data/jobwatch.db)",
     )
     parser.add_argument(
-        "--classifier", type=str, default="anthropic",
-        choices=["anthropic", "openai"],
-        help="LLM classifier provider (default: anthropic)",
+        "--classifier", type=str, default="fireworks",
+        choices=["fireworks", "anthropic", "openai"],
+        help="Classifier provider (default: fireworks GLM FLASH/high; others are legacy opt-in)",
     )
     parser.add_argument(
         "--model", type=str, default=None,
@@ -263,15 +263,7 @@ def main():
 
     settings: Settings = Settings(db_path=Path(args.db_path))
 
-    classifier_kwargs: dict = {}
-    if args.model:
-        classifier_kwargs["model"] = args.model
-
-    classifier: ClassifierProvider
-    if args.classifier == "anthropic":
-        classifier = AnthropicClassifier(**classifier_kwargs)
-    else:
-        classifier = OpenAIClassifier(**classifier_kwargs)
+    classifier: ClassifierProvider = create_classifier(args.classifier, model=args.model)
 
     db: JobWatchDB = JobWatchDB(settings.db_path)
     db.init_db()

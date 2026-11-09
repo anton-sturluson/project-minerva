@@ -1,4 +1,4 @@
-"""LLM extraction and summarization commands backed by Gemini or OpenAI."""
+"""LLM extraction and summaries with Fireworks defaults and explicit legacy providers."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from harness.commands.common import (
 )
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
+from harness.worker_model import WORKER_MODEL, WORKER_REASONING, fireworks_model_id, generate_fireworks, is_fireworks_model
 
 EXTRACT_HELP = (
     "LLM-powered information extraction from large text documents.\n\n"
@@ -37,7 +38,7 @@ SUMMARIZE_HELP = (
     "Examples:\n"
     "  minerva summarize --file earnings-call.txt\n"
     "  cat filing.md | minerva summarize --max-tokens 2000\n"
-    "  minerva summarize -f notes.md --model gemini-3.6-flash --thinking high\n"
+    f"  minerva summarize -f notes.md --model {WORKER_MODEL} --thinking high\n"
 )
 
 EXTRACT_FILES_HELP = (
@@ -53,16 +54,15 @@ EXTRACT_FILES_HELP = (
     "    -o data/extractions/summary\n"
     "  minerva extract-files --questions-file questions.md \\\n"
     "    --files 'data/sources/**/*.md' --out data/extractions/summary \\\n"
-    "    --model gemini-3.6-flash --thinking minimal --concurrency 4\n"
+    f"    --model {WORKER_MODEL} --thinking high --concurrency 4\n"
     "  minerva extract-files -q questions.md -f 'data/**/*.md' -o out \\\n"
-    "    --model gpt-5.5 --concurrency 2\n"
+    "    --model gpt-6.1-sol --thinking high --concurrency 2\n"
 )
 
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL: str = WORKER_MODEL
 DEFAULT_MAX_TOKENS = 16384
 DEFAULT_CONCURRENCY = 4
 MODEL_ALIASES: dict[str, str] = {
-    # Gemini 3.6 Flash already uses Google's stable provider model code; no alias needed.
     # OpenClaw/user-facing shorthand; Google GenAI expects the preview model id today.
     "gemini-3-flash": "gemini-3-flash-preview",
     # Accept provider-qualified OpenClaw-style names while sending OpenAI its model id.
@@ -185,7 +185,7 @@ def extract_command(
         )
     except Exception as exc:  # noqa: BLE001
         return error_result(
-            f"extraction failed: {exc}",
+            f"extraction failed ({type(exc).__name__})",
             "verify the input source, API key, and model name, then retry",
             [
                 "`extract \"What is the revenue by segment?\" --file apple-10k.md`",
@@ -206,7 +206,7 @@ def extract_cli_command(
         "-q",
         help="Markdown file containing the question/prompt pack to apply to the input document.",
     ),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Model to use (Gemini or OpenAI)."),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Fireworks GLM FLASH/high by default; explicit Gemini/OpenAI models supported."),
     max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens."),
     thinking: str | None = typer.Option(
         None,
@@ -301,7 +301,7 @@ def summarize_command(
         )
     except Exception as exc:  # noqa: BLE001
         return error_result(
-            f"summarization failed: {exc}",
+            f"summarization failed ({type(exc).__name__})",
             "verify the input, API key, and model name, then retry",
             [
                 "`minerva summarize --file document.txt`",
@@ -322,7 +322,7 @@ def summarize_cli_command(
         help="Path to a UTF-8 text file. Omit to read from stdin.",
     ),
     model: str = typer.Option(
-        DEFAULT_MODEL, "--model", help="Model to use (Gemini or OpenAI)."
+        DEFAULT_MODEL, "--model", help="Fireworks GLM FLASH/high by default; explicit Gemini/OpenAI models supported."
     ),
     max_tokens: int = typer.Option(
         DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum summary output tokens."
@@ -522,7 +522,7 @@ def extract_files_cli_command(
         "-q",
         help="Markdown file containing the question/prompt pack to apply to each source file.",
     ),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Model to use (Gemini or OpenAI)."),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Fireworks GLM FLASH/high by default; explicit Gemini/OpenAI models supported."),
     max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens per file."),
     thinking: str | None = typer.Option(
         None,
@@ -808,6 +808,8 @@ def _resolve_default_thinking(
 ) -> ThinkingLevel | None:
     if explicit is not None:
         return _coerce_thinking_level(explicit)
+    if is_fireworks_model(model) or _api_model_name(model) == "gpt-6.1-sol":
+        return ThinkingLevel(WORKER_REASONING)
     if _is_gemini_3_flash(model):
         return ThinkingLevel.MINIMAL
     return None
@@ -831,6 +833,12 @@ def _build_thinking_config(model: str, thinking: str | ThinkingLevel | None):
     if thinking is None:
         return None
     level = _coerce_thinking_level(thinking)
+    if is_fireworks_model(model):
+        if level not in {ThinkingLevel.LOW, ThinkingLevel.MEDIUM, ThinkingLevel.HIGH}:
+            raise ValueError("Fireworks reasoning must be low|medium|high")
+        return None
+    if _is_openai_model(model):
+        return None  # OpenAI reasoning is handled in _generate_openai_answer.
 
     try:
         from google.genai import types as genai_types
@@ -853,9 +861,6 @@ def _build_thinking_config(model: str, thinking: str | ThinkingLevel | None):
         raise ValueError(
             f"`--thinking {level.value}` is not supported for Gemini 2.5 models; use off|adaptive"
         )
-
-    if _is_openai_model(model):
-        return None  # OpenAI reasoning is handled in _generate_openai_answer.
 
     raise ValueError(
         f"`--thinking` is not configured for model `{model}`; omit `--thinking` to skip thinking config"
@@ -884,6 +889,10 @@ def _is_gemini_25(model: str) -> bool:
     return model.startswith("gemini-2.5")
 
 def _api_model_name(model: str) -> str:
+    if is_fireworks_model(model):
+        return fireworks_model_id(model)
+    if model.startswith("openai/"):
+        return model.removeprefix("openai/")
     return MODEL_ALIASES.get(model, model)
 
 def _is_openai_model(model: str) -> bool:
@@ -891,22 +900,31 @@ def _is_openai_model(model: str) -> bool:
     return model.startswith("openai/") or api_model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4"))
 
 def _api_key_for_model(settings: HarnessSettings, model: str) -> str | None:
+    if is_fireworks_model(model):
+        return settings.fireworks_api_key
     if _is_openai_model(model):
         return settings.openai_api_key
     return settings.gemini_api_key
 
 def _missing_api_key_result(model: str, start: float) -> CommandResult:
+    if is_fireworks_model(model):
+        return error_result(
+            "FIREWORKS_API_KEY is not set",
+            "set FIREWORKS_API_KEY in the host-owned environment and retry",
+            [],
+            start,
+        )
     if _is_openai_model(model):
         return error_result(
             "OPENAI_API_KEY is not set",
-            "set OPENAI_API_KEY and retry, or choose a Gemini model with GEMINI_API_KEY configured",
-            ["`export OPENAI_API_KEY=...`", "`--model gemini-3.6-flash`"],
+            "configure OPENAI_API_KEY through the host-owned credential environment and retry the same model",
+            [],
             start,
         )
     return error_result(
         "GEMINI_API_KEY is not set",
-        "set GEMINI_API_KEY and retry, or choose an OpenAI model with OPENAI_API_KEY configured",
-        ["`export GEMINI_API_KEY=...`", "`--model gpt-5.5`"],
+        "configure GEMINI_API_KEY through the host-owned credential environment and retry the same model",
+        [],
         start,
     )
 # ---------------------------------------------------------------------------
@@ -921,6 +939,14 @@ def _generate_answer(
     thinking: str | ThinkingLevel | None,
     api_key: str,
 ) -> str:
+    if is_fireworks_model(model):
+        return generate_fireworks(
+            prompt,
+            model=model,
+            max_tokens=max_tokens,
+            reasoning_effort=str(thinking or WORKER_REASONING),
+            api_key=api_key,
+        )
     if _is_openai_model(model):
         return _generate_openai_answer(
             prompt=prompt,
@@ -929,6 +955,8 @@ def _generate_answer(
             thinking=thinking,
             api_key=api_key,
         )
+    if not model.startswith("gemini-"):
+        raise ValueError("Unsupported extraction model provider")
     return _generate_gemini_answer(
         prompt=prompt,
         model=model,
@@ -949,7 +977,7 @@ def _generate_gemini_answer(
         from google import genai
     except ModuleNotFoundError as exc:
         raise RuntimeError("google-genai is not installed") from exc
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options={"retry_options": {"attempts": 1}})
     config = _build_generate_config(model, max_tokens, thinking)
     response = client.models.generate_content(model=_api_model_name(model), contents=prompt, config=config)
     text = getattr(response, "text", None)
@@ -971,7 +999,7 @@ def _generate_openai_answer(
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise RuntimeError("openai is not installed") from exc
 
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, max_retries=0)
     kwargs: dict[str, Any] = {
         "model": _api_model_name(model),
         "input": prompt,
@@ -1073,18 +1101,22 @@ def _read_files_from(files_from: str) -> list[tuple[str, Path | None]]:
         )
     return entries
 
+class _TextInputError(ValueError):
+    """Safe local text-validation error, with no provider response details."""
+
+
 def _read_extraction_text(path: Path) -> str:
     if path.suffix.lower() in UNSUPPORTED_TEXT_EXTRACTION_EXTENSIONS:
-        raise ValueError(
+        raise _TextInputError(
             f"unsupported non-text file type `{path.suffix}`; convert to text first or use the OpenClaw pdf/image tools"
         )
     raw = path.read_bytes()
     if b"\x00" in raw[:8192]:
-        raise ValueError("file appears to be binary; convert to UTF-8 text before using extract-files")
+        raise _TextInputError("file appears to be binary; convert to UTF-8 text before using extract-files")
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ValueError("file is not valid UTF-8 text; convert it before using extract-files") from exc
+        raise _TextInputError("file is not valid UTF-8 text; convert it before using extract-files") from None
 
 def _plan_output_paths(files: list[Path], out_root: Path) -> list[tuple[Path, Path]]:
     common = _common_parent(files)
@@ -1155,7 +1187,10 @@ async def _run_extractions(
                 target.write_text(answer.strip() + "\n", encoding="utf-8")
             except Exception as exc:  # noqa: BLE001
                 entry["status"] = ExtractionStatus.ERROR
-                entry["error"] = f"{type(exc).__name__}: {exc}"
+                entry["error"] = (
+                    str(exc) if isinstance(exc, _TextInputError)
+                    else f"Extraction failed ({type(exc).__name__})"
+                )
             entry["finished_at"] = datetime.now(timezone.utc).isoformat()
             return entry
 

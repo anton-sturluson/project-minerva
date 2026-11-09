@@ -16,6 +16,7 @@ import yaml
 
 from harness.ideas import store
 from harness.ideas.model import ModelError, StageModels, check_model, resolve_models
+from harness.worker_model import is_fireworks_model
 from harness.ideas.roster import parse_roster
 
 FEED = "https://hfbestideas.substack.com/feed"
@@ -114,7 +115,7 @@ def resume(
     model: str | None = None,
     retry_gaps: bool = False,
 ) -> dict:
-    """Let Sol direct parallel Luna research while preserving completed evidence."""
+    """Let Sol direct parallel GLM research while preserving completed evidence."""
     from harness.ideas.agents import discover
 
     if not 1 <= limit <= 50:
@@ -134,10 +135,9 @@ def resume(
             selected: str
             for selected in (*asdict(models).values(), coordinator):
                 check_model(selected)
-                if not selected.startswith("gpt-"):
-                    raise ValueError(
-                        "Agent research requires GPT models; use --model gpt-6-luna for cheaper diagnostics."
-                    )
+            for selected in (models.source, coordinator):
+                if not (selected.startswith("gpt-") or is_fireworks_model(selected)):
+                    raise ValueError("Agent research requires OpenAI GPT or Fireworks models")
             store.json_artifact(
                 store.run_folder(run),
                 f"research/attempts/{uuid4()}.json",

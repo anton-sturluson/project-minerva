@@ -332,7 +332,7 @@ else
       if failure_reason=$(openclaw agent --json \
         --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
         --timeout "${timeout}" \
-        --model openai/gpt-5.6-luna \
+        --model fireworks/accounts/fireworks/models/glm-5p3-flash \
         --thinking high \
         --session-id "${session_id}" \
         --message "${prompt}" 2>/dev/null | \

@@ -19,7 +19,7 @@ any messaging/posting command; this run is artifact-only.
    temporary article files:
 
    ```bash
-   cd {{ROOT_Q}} && printf '%s' "$content" | {{MINERVA}} summarize --model {{SUMMARY_MODEL_Q}}
+   cd {{ROOT_Q}} && printf '%s' "$content" | {{MINERVA}} summarize --model {{SUMMARY_MODEL_Q}} --thinking high
    ```
 
 3. Treat an empty summary or non-zero summarizer exit as a hard failure. Keep
