@@ -22,7 +22,7 @@ def test_collector_uses_luna_with_high_reasoning() -> None:
         encoding="utf-8"
     )
 
-    assert "--model openai/gpt-5.6-luna" in runner
+    assert "--model openai-zdr/gpt-6-luna" in runner
     assert "--thinking high" in runner
     assert "fireworks/accounts/fireworks/routers/glm-5p2-fast" not in runner
 
@@ -34,7 +34,7 @@ def test_selection_uses_sol61_and_keeps_premium_sources_separate() -> None:
     assert "--model gpt-6.1-sol" in selection
     assert "--thinking high" in selection
     assert "Terra" not in synthesis and "gpt-5.6-terra" not in synthesis
-    assert "summarize --model gpt-5.6-luna --thinking medium" in synthesis
+    assert "summarize --model gpt-6-luna --thinking medium" in synthesis
     assert "whose `source` is not exactly `wsj` or `economist`" in selection
     assert "whose `source` is exactly `wsj` or `economist`" in selection
     assert "Do not include those premium-source rows in the selection model's batch inputs." in selection

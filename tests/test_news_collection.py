@@ -246,6 +246,10 @@ command="${1:-}"
 shift || true
 case "${command}" in
   open)
+    if [[ "${TEST_BROWSER_FAIL:-0}" == 1 ]]; then
+      printf '[error] synthetic browser bridge failure\n'
+      exit 1
+    fi
     alias="t$(cat "${BROWSER_STATE}" 2>/dev/null || echo 0)"
     next=$(( ${alias#t} + 1 ))
     printf '%s\n' "${next}" > "${BROWSER_STATE}"
@@ -1202,3 +1206,19 @@ def test_synthesis_handoff_is_emitted_with_fixed_window(tmp_path: Path) -> None:
     assert Path(handoff["prepared_evidence"]).is_file()
     assert "synthetic final writer admitted" in result.stdout
     assert "Do not post Slack from this script." in result.stdout
+
+
+def test_browser_lease_failure_preserves_diagnostic_and_stops_writer(tmp_path: Path) -> None:
+    """A failed browser lease reports its cause and does not admit the writer."""
+    result = _run_wrapper(
+        tmp_path,
+        sources=[{
+            "id": "wsj", "name": "Wall Street Journal",
+            "url": "https://example.test/wsj", "access": "browser",
+        }],
+        run_date=date.today().isoformat(),
+        extra_env={"TEST_BROWSER_FAIL": "1"},
+    )
+    assert result.returncode == 1
+    assert "synthetic browser bridge failure" in result.stderr
+    assert not (tmp_path / "coordinator/synthesis.log").exists()

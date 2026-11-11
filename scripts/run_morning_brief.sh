@@ -332,7 +332,7 @@ else
       if failure_reason=$(openclaw agent --json \
         --agent "${MINERVA_NEWS_COLLECTOR_AGENT}" \
         --timeout "${timeout}" \
-        --model openai/gpt-5.6-luna \
+        --model openai-zdr/gpt-6-luna \
         --thinking high \
         --session-id "${session_id}" \
         --message "${prompt}" 2>/dev/null | \
@@ -384,6 +384,7 @@ else
     local browser_output alias existing
     if ! browser_output=$(browser open "about:blank" --new --window --no-delay); then
       echo "error[collectors]: unable to create browser lease window" >&2
+      printf '%s\n' "${browser_output}" >&2
       return 1
     fi
     alias=$(printf '%s\n' "${browser_output}" | \
