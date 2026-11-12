@@ -250,6 +250,11 @@ def test_build_thinking_config_gemini_3_rejects_off() -> None:
         extract._build_thinking_config("gemini-3-flash", "off")
 
 
+def test_build_thinking_config_gemini_3_rejects_xhigh() -> None:
+    with pytest.raises(ValueError, match="not supported for Gemini 3"):
+        extract._build_thinking_config("gemini-3-flash", "xhigh")
+
+
 def test_build_thinking_config_gemini_25_uses_thinking_budget() -> None:
     cfg_off = extract._build_thinking_config("gemini-2.5-pro", "off")
     assert cfg_off.thinking_budget == 0
@@ -464,6 +469,44 @@ def test_extract_files_requires_question_source(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert b"question" in result.stderr.lower() or b"prompt" in result.stderr.lower()
+
+
+def test_extract_files_sends_terra_xhigh_to_openai(tmp_path: Path, monkeypatch) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
+    source = tmp_path / "batch-1.jsonl"
+    source.write_text('{"title": "A report"}\n', encoding="utf-8")
+    captured: dict = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class Response:
+                status = "completed"
+                output_text = '{"article_key":"one"}'
+
+            return Response()
+
+    class FakeClient:
+        def __init__(self, *, api_key: str):
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr("openai.OpenAI", FakeClient)
+    out = tmp_path / "out"
+    result = extract.extract_files_command(
+        question="Select relevant articles",
+        files=[str(source)],
+        out=str(out),
+        model="gpt-6.1-terra",
+        thinking="xhigh",
+        concurrency=1,
+        settings=settings,
+    )
+
+    assert result.exit_code == 0, result.stderr.decode()
+    assert captured["model"] == "gpt-6.1-terra"
+    assert captured["reasoning"] == {"effort": "xhigh"}
+    assert (out / "batch-1.md").read_text() == '{"article_key":"one"}\n'
 
 
 def test_extract_files_requires_at_least_one_file(tmp_path: Path) -> None:
