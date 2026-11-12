@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+from typer.testing import CliRunner
+
+from harness.cli import app
+
 from harness.commands import evidence
 from harness.workflows.evidence.audit import run_audit
 from harness.workflows.evidence.ledger import upsert_evidence
@@ -78,3 +82,18 @@ def test_run_audit_filters_by_categories(tmp_path: Path) -> None:
     assert " A " not in captured["prompt"]
     assert "audit-" in Path(result["memo_path"]).name
     assert "industry-report" in Path(result["memo_path"]).name
+
+
+def test_evidence_audit_cli_uses_current_default_model(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "company"
+    evidence.init_command(root=str(root), ticker="TEST", company_name="Test", slug="test")
+    monkeypatch.setattr(
+        evidence, "default_audit_llm", lambda api_key=None: lambda *, prompt, model: "Ready"
+    )
+
+    result = CliRunner().invoke(app, ["evidence", "audit", "--root", str(root)])
+
+    assert result.exit_code == 0, result.output
+    memos = list(resolve_company_root(root).audits_dir.glob("audit-*.md"))
+    assert len(memos) == 1
+    assert "- model: gpt-6.1-sol" in memos[0].read_text(encoding="utf-8")

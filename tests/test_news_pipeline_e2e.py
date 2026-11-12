@@ -204,6 +204,7 @@ def _run(
     *,
     extra_args: list[str] | None = None,
     extra_env: dict[str, str] | None = None,
+    default_models: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     run_root = tmp_path / "runs"
     fake_minerva = _fake_minerva(tmp_path)
@@ -248,6 +249,13 @@ def _run(
         "--summary-model",
         "summary-test-model",
     ]
+    if default_models:
+        for option in ("--collector-model", "--sol-model", "--summary-model"):
+            index = args.index(option)
+            del args[index : index + 2]
+        for name in ("MINERVA_E2E_COLLECTOR_MODEL", "MINERVA_E2E_SOL_MODEL", "MINERVA_E2E_SUMMARY_MODEL"):
+            env.pop(name, None)
+        env["EXPECTED_SUMMARY_MODEL"] = "gpt-6-luna"
     args.extend(extra_args or [])
     return subprocess.run(
         args,
@@ -366,3 +374,18 @@ def test_verification_rejects_null_summaries_and_keeps_run_for_inspection(
     assert (run_dir / "dry-run-brief.md").is_file()
     with sqlite3.connect(run_dir / "scratch.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM news WHERE summary IS NULL").fetchone()[0] == 2
+
+
+def test_stubbed_pipeline_uses_current_default_models(tmp_path: Path) -> None:
+    result = _run(tmp_path, default_models=True)
+
+    assert result.returncode == 0, result.stderr
+    agents = [
+        json.loads(line)
+        for line in (tmp_path / "agents.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [(item["agent"], item["model"]) for item in agents] == [
+        ("collector-test", "openai-zdr/gpt-6-luna"),
+        ("sol-test", "openai-zdr/gpt-6.1-sol"),
+    ]
+    assert "summarize --model gpt-6-luna" in agents[1]["message"]
