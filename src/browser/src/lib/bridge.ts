@@ -15,6 +15,7 @@ export interface ExtensionBridgeOptions {
   host?: string;
   port?: number;
   handshakeTimeoutMs?: number;
+  startupGraceMs?: number;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -30,6 +31,8 @@ function isHelloMessage(value: unknown): value is BridgeHelloMessage {
   );
 }
 
+// The extension can wake via its 30-second reconnect alarm after a server cold start.
+const STARTUP_GRACE_MS = 35_000;
 const EXTENSION_DIR = fileURLToPath(new URL("../../extension", import.meta.url));
 
 function isBridgeResponse(value: unknown): value is BridgeResponse {
@@ -48,6 +51,7 @@ export class ExtensionBridge {
   private readonly wss: WebSocketServer;
   private readonly readyPromise: Promise<void>;
   private readonly handshakeTimeoutMs: number;
+  private startupDeadline: number;
   private readonly candidates = new Map<WebSocket, NodeJS.Timeout>();
   private extensionSocket: WebSocket | null = null;
   private readonly pending = new Map<string, PendingRequest>();
@@ -57,6 +61,7 @@ export class ExtensionBridge {
 
   constructor(options: ExtensionBridgeOptions = {}) {
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? 3_000;
+    this.startupDeadline = Date.now() + (options.startupGraceMs ?? STARTUP_GRACE_MS);
     this.wss = new WebSocketServer({
       host: options.host ?? "127.0.0.1",
       port: options.port ?? BRIDGE_WS_PORT,
@@ -133,6 +138,7 @@ export class ExtensionBridge {
       previous.close(1012, "Replaced by an authenticated extension connection");
     }
     this.extensionSocket = socket;
+    this.startupDeadline = 0;
     this.lastSeenAt = Date.now();
   }
 
@@ -158,6 +164,9 @@ export class ExtensionBridge {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    while (!this.isConnected() && Date.now() < this.startupDeadline && !signal?.aborted) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(200, this.startupDeadline - Date.now())));
+    }
     if (signal?.aborted) {
       throw new FriendlyError(`Command cancelled before extension request (${action}).`);
     }

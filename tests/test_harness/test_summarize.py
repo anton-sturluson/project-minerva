@@ -23,7 +23,7 @@ def captured_generation(tmp_path: Path, monkeypatch) -> dict:
     monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
     monkeypatch.setattr(
         "harness.commands.extract.get_settings",
-        lambda: HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", fireworks_api_key="test-key"),
+        lambda: HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", openai_api_key="test-key"),
     )
     return captured
 
@@ -61,13 +61,13 @@ def test_summarize_reads_stdin_with_new_default(captured_generation: dict) -> No
 
     assert result.exit_code == 0
     assert result.output == "Model summary\n"
-    assert captured_generation["model"] == "accounts/fireworks/models/glm-5p3-flash"
+    assert captured_generation["model"] == "gpt-6-luna"
     assert captured_generation["thinking"] == "high"
     assert "Résumé source" in captured_generation["prompt"]
 
 
 def test_summarize_rejects_non_utf8_stdin_actionably(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", openai_api_key="test-key")
     result = extract.summarize_command(stdin=b"\xff\xfe", settings=settings)
 
     assert result.exit_code == 1

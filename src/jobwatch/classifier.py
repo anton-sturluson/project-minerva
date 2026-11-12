@@ -117,11 +117,11 @@ class AnthropicClassifier(ClassifierProvider):
 
 
 class OpenAIClassifier(ClassifierProvider):
-    """Legacy opt-in OpenAI classifier; never routes Fireworks models."""
+    """OpenAI classifier; never routes Fireworks models."""
 
     def __init__(
         self,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-6-luna",
         api_key: str | None = None,
     ) -> None:
         """Construct an explicit OpenAI client without cross-provider routing."""
@@ -144,6 +144,19 @@ class OpenAIClassifier(ClassifierProvider):
     ) -> JobClassification:
         user_message: str = build_user_message(title, department_raw, description)
         try:
+            if self._model == "gpt-6-luna":
+                result = self._client.responses.parse(
+                    model=self._model,
+                    instructions=SYSTEM_PROMPT,
+                    input=user_message,
+                    text_format=JobClassification,
+                    reasoning={"effort": "high"},
+                    max_output_tokens=16384,
+                    store=False,
+                )
+                if result.status != "completed" or result.output_parsed is None:
+                    raise ValueError("OpenAI returned an incomplete classification or refusal")
+                return result.output_parsed
             response = self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=256,
@@ -161,7 +174,7 @@ class OpenAIClassifier(ClassifierProvider):
 
 
 class FireworksClassifier(ClassifierProvider):
-    """Default GLM FLASH/HIGH classifier with validated structured output."""
+    """Explicit Fireworks classifier with validated structured output."""
 
     def __init__(self, model: str = WORKER_MODEL, api_key: str | None = None) -> None:
         """Keep explicit Fireworks model IDs unchanged and use environment auth."""
@@ -186,9 +199,9 @@ class FireworksClassifier(ClassifierProvider):
 
 
 def create_classifier(
-    provider: str = "fireworks", *, model: str | None = None
+    provider: str = "openai", *, model: str | None = None
 ) -> ClassifierProvider:
-    """Select one provider explicitly; legacy clients remain opt-in only."""
+    """Select one provider explicitly; never fall back to another."""
     if provider == "fireworks":
         return FireworksClassifier(model=model or WORKER_MODEL)
     if provider == "anthropic":

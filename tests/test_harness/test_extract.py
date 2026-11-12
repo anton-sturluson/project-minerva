@@ -17,7 +17,7 @@ from harness.config import HarnessSettings
 
 
 def test_extract_command_reads_file_and_calls_model(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     file_path = tmp_path / "doc.txt"
     file_path.write_text("Revenue is $10M.", encoding="utf-8")
     captured: dict = {}
@@ -38,7 +38,7 @@ def test_extract_command_reads_file_and_calls_model(tmp_path: Path, monkeypatch)
 
 
 def test_extract_command_reports_missing_input(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
 
     result = extract.extract_command(question="What is revenue?", settings=settings)
 
@@ -47,7 +47,7 @@ def test_extract_command_reports_missing_input(tmp_path: Path) -> None:
 
 
 def test_extract_command_reports_missing_question(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     file_path = tmp_path / "doc.txt"
     file_path.write_text("hello", encoding="utf-8")
 
@@ -59,7 +59,7 @@ def test_extract_command_reports_missing_question(tmp_path: Path) -> None:
 
 def test_extract_command_does_not_read_stdin_when_file_provided(tmp_path: Path, monkeypatch) -> None:
     """When --file is provided, stdin must not contribute (or hang)."""
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     file_path = tmp_path / "doc.txt"
     file_path.write_text("file content", encoding="utf-8")
     captured: dict = {}
@@ -131,7 +131,7 @@ def test_extract_command_gpt55_uses_openai_key_without_gemini_key(tmp_path: Path
 
 
 def test_extract_questions_file_preserves_markdown_formatting(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     questions_file = tmp_path / "questions.md"
     questions_file.write_text(
         "# Topics\n\n- Revenue by segment\n- Key risks\n\n## Notes\n\n1. Cite sections.\n2. Be concise.\n",
@@ -163,7 +163,7 @@ def test_extract_questions_file_preserves_markdown_formatting(tmp_path: Path, mo
 
 
 def test_extract_combines_positional_and_questions_file_in_one_call(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     questions_file = tmp_path / "questions.md"
     questions_file.write_text("- Question A\n- Question B\n", encoding="utf-8")
     file_path = tmp_path / "doc.md"
@@ -192,7 +192,7 @@ def test_extract_combines_positional_and_questions_file_in_one_call(tmp_path: Pa
 
 
 def test_extract_questions_file_empty_fails_cleanly(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     questions_file = tmp_path / "empty.md"
     questions_file.write_text("   \n\n", encoding="utf-8")
     file_path = tmp_path / "doc.md"
@@ -209,7 +209,7 @@ def test_extract_questions_file_empty_fails_cleanly(tmp_path: Path) -> None:
 
 
 def test_extract_questions_file_missing_path_fails_cleanly(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     file_path = tmp_path / "doc.md"
     file_path.write_text("body", encoding="utf-8")
 
@@ -290,8 +290,8 @@ def test_api_model_name_maps_provider_qualified_openai_alias() -> None:
     assert extract._api_model_name("gpt-5.5") == "gpt-5.5"
 
 
-def test_extract_command_defaults_to_glm_flash_with_high_thinking(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+def test_extract_command_defaults_to_luna_with_high_thinking(tmp_path: Path, monkeypatch) -> None:
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     file_path = tmp_path / "doc.md"
     file_path.write_text("body", encoding="utf-8")
     captured: dict = {}
@@ -304,7 +304,7 @@ def test_extract_command_defaults_to_glm_flash_with_high_thinking(tmp_path: Path
 
     extract.extract_command(question="Q", file_path=str(file_path), settings=settings)
 
-    assert captured["model"] == "accounts/fireworks/models/glm-5p3-flash"
+    assert captured["model"] == "gpt-6-luna"
     assert captured["thinking"] == "high"
 
 
@@ -332,7 +332,7 @@ def test_extract_command_explicit_thinking_passes_through(tmp_path: Path, monkey
 
 
 def test_extract_command_invalid_thinking_returns_clean_error(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     file_path = tmp_path / "doc.md"
     file_path.write_text("body", encoding="utf-8")
     called = {"value": False}
@@ -360,7 +360,7 @@ def test_extract_command_invalid_thinking_returns_clean_error(tmp_path: Path, mo
 
 
 def test_dispatch_supports_questions_file_with_file(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     questions_file = tmp_path / "q.md"
     questions_file.write_text("- A\n- B\n", encoding="utf-8")
     source = tmp_path / "src.md"
@@ -383,7 +383,7 @@ def test_dispatch_supports_questions_file_with_file(tmp_path: Path, monkeypatch)
 
 
 def test_dispatch_supports_short_file_and_questions_flags(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     questions_file = tmp_path / "q.md"
     questions_file.write_text("Short question", encoding="utf-8")
     source = tmp_path / "src.md"
@@ -451,7 +451,7 @@ def test_dispatch_supports_thinking_flag(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_extract_files_requires_question_source(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     src = tmp_path / "src.md"
     src.write_text("body", encoding="utf-8")
     out = tmp_path / "out"
@@ -467,7 +467,7 @@ def test_extract_files_requires_question_source(tmp_path: Path) -> None:
 
 
 def test_extract_files_requires_at_least_one_file(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     out = tmp_path / "out"
 
     result = extract.extract_files_command(
@@ -482,7 +482,7 @@ def test_extract_files_requires_at_least_one_file(tmp_path: Path) -> None:
 
 
 def test_extract_files_glob_no_matches_fails(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     out = tmp_path / "out"
 
     result = extract.extract_files_command(
@@ -496,7 +496,7 @@ def test_extract_files_glob_no_matches_fails(tmp_path: Path) -> None:
 
 
 def test_extract_files_one_call_per_file_writes_outputs(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     sources = tmp_path / "sources"
     sources.mkdir()
     (sources / "a.md").write_text("Alpha body.", encoding="utf-8")
@@ -529,13 +529,13 @@ def test_extract_files_one_call_per_file_writes_outputs(tmp_path: Path, monkeypa
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     assert len(manifest["entries"]) == 2
     assert all(entry["status"] == "ok" for entry in manifest["entries"])
-    assert manifest["model"] == "accounts/fireworks/models/glm-5p3-flash"
-    assert manifest["api_model"] == "accounts/fireworks/models/glm-5p3-flash"
+    assert manifest["model"] == "gpt-6-luna"
+    assert manifest["api_model"] == "gpt-6-luna"
     assert manifest["thinking"] == "high"
 
 
 def test_extract_files_questions_file_passes_pack(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     sources = tmp_path / "sources"
     sources.mkdir()
     src = sources / "doc.md"
@@ -565,7 +565,7 @@ def test_extract_files_questions_file_passes_pack(tmp_path: Path, monkeypatch) -
 
 
 def test_extract_files_force_required_to_overwrite(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     sources = tmp_path / "sources"
     sources.mkdir()
     src = sources / "a.md"
@@ -601,7 +601,7 @@ def test_extract_files_force_required_to_overwrite(tmp_path: Path, monkeypatch) 
 
 
 def test_extract_files_partial_failure_writes_manifest_and_exits_nonzero(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     sources = tmp_path / "sources"
     sources.mkdir()
     (sources / "good.md").write_text("ok body", encoding="utf-8")
@@ -718,6 +718,7 @@ def test_generate_openai_answer_uses_responses_api(monkeypatch) -> None:
             captured.update(kwargs)
 
             class Response:
+                status = "completed"
                 output_text = "openai answer"
 
             return Response()
@@ -745,7 +746,7 @@ def test_generate_openai_answer_uses_responses_api(monkeypatch) -> None:
 
 
 def test_extract_files_mirrors_relative_paths(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     sources = tmp_path / "sources"
     (sources / "10-K").mkdir(parents=True)
     (sources / "10-K" / "item-1.md").write_text("a", encoding="utf-8")
@@ -770,7 +771,7 @@ def test_extract_files_mirrors_relative_paths(tmp_path: Path, monkeypatch) -> No
 
 
 def test_extract_files_dispatch_supports_repeated_files(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     a = tmp_path / "a.md"
     a.write_text("alpha", encoding="utf-8")
     b = tmp_path / "b.md"
@@ -800,7 +801,7 @@ def test_extract_files_dispatch_supports_repeated_files(tmp_path: Path, monkeypa
 
 
 def test_extract_files_dispatch_supports_short_flags(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     a = tmp_path / "a.md"
     a.write_text("alpha", encoding="utf-8")
     qfile = tmp_path / "questions.md"
@@ -824,7 +825,7 @@ def test_extract_files_dispatch_supports_short_flags(tmp_path: Path, monkeypatch
 
 
 def test_extract_files_dispatch_supports_short_files_from(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     a = tmp_path / "a.md"
     a.write_text("alpha", encoding="utf-8")
     list_file = tmp_path / "files.txt"
@@ -845,7 +846,7 @@ def test_extract_files_dispatch_supports_short_files_from(tmp_path: Path, monkey
 
 
 def test_extract_files_supports_files_from_for_curated_scattered_files(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     root = tmp_path / "reports"
     oracle = root / "oracle" / "data"
     microsoft = root / "microsoft" / "filings"
@@ -920,7 +921,7 @@ def test_extract_files_cli_accepts_files_from_without_files(tmp_path: Path, monk
 
 
 def test_extract_files_records_non_text_files_as_failures(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, fireworks_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key")
     sources = tmp_path / "sources"
     sources.mkdir()
     (sources / "good.md").write_text("ok body", encoding="utf-8")

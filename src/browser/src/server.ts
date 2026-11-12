@@ -9,7 +9,8 @@ import { validateCommandInput } from "./lib/parse.js";
 import { BRIDGE_TIMEOUT_GRACE_MS, BRIDGE_WS_PORT, CLOSE_IDLE_TIMEOUT_MS, DEFAULT_EXTRACT_LIMIT, DEFAULT_HTML_LIMIT, FALLBACK_PORT, FriendlyError, SOCKET_PATH } from "./lib/types.js";
 import type { BridgeAction, BrowserState, CommandName, CommandRequest, CommandResponse } from "./lib/types.js";
 
-const DEFAULT_ORACLE_MODEL = "accounts/fireworks/models/glm-5p3-flash";
+const DEFAULT_ORACLE_MODEL = "gpt-6-luna";
+const OPENAI_ENDPOINT = "https://api.openai.com/v1/responses";
 const FIREWORKS_ENDPOINT = "https://api.fireworks.ai/inference/v1/chat/completions";
 const LOCATION_TIMEOUT_MS = 1_000;
 const ORACLE_TIMEOUT_MS = 60_000;
@@ -150,18 +151,25 @@ async function getCurrentLocation(
 }
 
 function oracleRoute(requestedModel?: string) {
-  const model = (requestedModel || DEFAULT_ORACLE_MODEL).replace(/^fireworks\//, "");
+  const requested = requestedModel || DEFAULT_ORACLE_MODEL;
+  if (requested.startsWith("fireworks/") && !requested.startsWith("fireworks/accounts/fireworks/")) {
+    throw new FriendlyError("Use a valid Fireworks model ID for the Fireworks provider. No fallback was attempted.");
+  }
+  const model = requested.replace(/^fireworks\//, "");
+  if (model.startsWith("gpt-")) {
+    return { model, endpoint: OPENAI_ENDPOINT, keyName: "OPENAI_API_KEY", openai: true, fireworks: false };
+  }
   if (model.startsWith("accounts/fireworks/")) {
     if (/^accounts\/fireworks\/(?:models\/glm-5p3|routers\/glm-5p3-(?:fast|spot))$/.test(model)) {
       throw new FriendlyError("This GLM route is text-only; the browser oracle requires image input. No fallback was attempted.");
     }
-    return { model, endpoint: FIREWORKS_ENDPOINT, keyName: "FIREWORKS_API_KEY", fireworks: true };
+    return { model, endpoint: FIREWORKS_ENDPOINT, keyName: "FIREWORKS_API_KEY", openai: false, fireworks: true };
   }
   // OpenClaw account routes are not OpenRouter model IDs.
   if (!model.includes("/") || model.startsWith("openai-zdr/") || model.startsWith("fireworks/")) {
-    throw new FriendlyError("Use an accounts/fireworks model ID or an explicit OpenRouter model ID. OpenClaw account routes are unsupported.");
+    throw new FriendlyError("Use a bare OpenAI model ID, an accounts/fireworks model ID, or an explicit OpenRouter model ID. OpenClaw account routes are unsupported.");
   }
-  return { model, endpoint: "https://openrouter.ai/api/v1/chat/completions", keyName: "OPENROUTER_API_KEY", fireworks: false };
+  return { model, endpoint: "https://openrouter.ai/api/v1/chat/completions", keyName: "OPENROUTER_API_KEY", openai: false, fireworks: false };
 }
 
 function extractChatText(payload: unknown): string {
@@ -203,6 +211,23 @@ function extractChatText(payload: unknown): string {
   throw new FriendlyError("API response did not include text content.");
 }
 
+function extractResponsesText(payload: unknown): string {
+  if (!isObject(payload) || payload.status !== "completed" || !Array.isArray(payload.output)) {
+    throw new FriendlyError("Oracle returned an incomplete answer or refusal.");
+  }
+  const parts = payload.output.flatMap((item: unknown) =>
+    isObject(item) && item.type === "message" && Array.isArray(item.content) ? item.content : [],
+  );
+  if (parts.some((part: unknown) => isObject(part) && part.type === "refusal")) {
+    throw new FriendlyError("Oracle returned an incomplete answer or refusal.");
+  }
+  const text = parts.flatMap((part: unknown) =>
+    isObject(part) && part.type === "output_text" && typeof part.text === "string" ? [part.text] : [],
+  ).join("\n").trim();
+  if (!text) throw new FriendlyError("API response did not include text content.");
+  return text;
+}
+
 async function runOracle(params: OracleParams, commandBridge: CommandBridge): Promise<string> {
   try {
     const route = oracleRoute(params.model);
@@ -241,7 +266,19 @@ async function runOracle(params: OracleParams, commandBridge: CommandBridge): Pr
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
+      body: JSON.stringify(route.openai ? {
+        model: route.model,
+        reasoning: { effort: "high" },
+        max_output_tokens: 16384,
+        store: false,
+        input: [
+          { role: "system", content: params.prompt },
+          { role: "user", content: [
+            { type: "input_text", text: userText },
+            { type: "input_image", image_url: screenshotResult.dataUrl },
+          ] },
+        ],
+      } : {
         model: route.model,
         ...(route.fireworks
           ? { reasoning_effort: "high", max_tokens: 16384 }
@@ -264,7 +301,7 @@ async function runOracle(params: OracleParams, commandBridge: CommandBridge): Pr
     }
 
     const payload = (await response.json()) as unknown;
-    return extractChatText(payload);
+    return route.openai ? extractResponsesText(payload) : extractChatText(payload);
   } catch (error) {
     if (error instanceof FriendlyError) {
       throw error;

@@ -133,3 +133,40 @@ test("bridge rejects stale extension protocol handshakes", async () => {
     await bridge.close();
   }
 });
+
+
+test("a command waits for the extension at startup and is dispatched once", async () => {
+  const port = await unusedPort();
+  const bridge = new ExtensionBridge({ port, startupGraceMs: 500 });
+  await bridge.ready();
+  const command = bridge.call("open", { url: "about:blank" }, 1_000);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const extension = await openSocket(port);
+  let requests = 0;
+  extension.on("message", (raw) => {
+    const request = JSON.parse(raw.toString()) as { id: string };
+    requests += 1;
+    extension.send(JSON.stringify({ id: request.id, ok: true, data: "opened" }));
+  });
+  extension.send(JSON.stringify(validHello));
+  try {
+    assert.equal(await command, "opened");
+    assert.equal(requests, 1);
+    await closeSocket(extension);
+    await assert.rejects(bridge.call("open", {}, 1_000), /bridge is not connected/);
+  } finally {
+    await closeSocket(extension);
+    await bridge.close();
+  }
+});
+
+test("a command fails without dispatch when the extension never connects", async () => {
+  const port = await unusedPort();
+  const bridge = new ExtensionBridge({ port, startupGraceMs: 25 });
+  await bridge.ready();
+  try {
+    await assert.rejects(bridge.call("open", {}, 1_000), /bridge is not connected/);
+  } finally {
+    await bridge.close();
+  }
+});

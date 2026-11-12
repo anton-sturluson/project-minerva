@@ -190,14 +190,14 @@ const COMMANDS: HelpSpec[] = [
   },
   {
     name: "describe",
-    summary: "Describe the current page with GLM FLASH/high vision.",
+    summary: "Describe the current page with Luna 6 vision.",
     usage: "browser describe [--tab <alias>] [--scope <selector>] [--model <name>]",
     description:
-      "Send a screenshot and accessibility tree to Fireworks GLM FLASH/high by default (FIREWORKS_API_KEY). An explicit OpenRouter vision model uses OPENROUTER_API_KEY instead. No model fallback.",
+      "Send a screenshot and accessibility tree to OpenAI Luna 6/high by default (OPENAI_API_KEY). Explicit Fireworks and OpenRouter vision models use their own provider keys. No model fallback.",
     options: [
       { flag: "--tab <alias>", description: "Run the command against a specific managed tab alias." },
       { flag: "--scope <selector>", description: "Scope the accessibility snapshot while keeping a full-page screenshot." },
-      { flag: "--model <name>", description: "Exact Fireworks ID (default accounts/fireworks/models/glm-5p3-flash), or explicit OpenRouter ID. OpenClaw account routes are unsupported." },
+      { flag: "--model <name>", description: "Bare OpenAI model ID (default gpt-6-luna), exact Fireworks ID, or explicit OpenRouter ID. OpenClaw account routes are unsupported." },
     ],
     examples: ["browser describe", 'browser describe --scope "main"'],
     nextSteps: ["browser ask \"what error message is visible?\"", "browser snapshot"],
@@ -207,11 +207,11 @@ const COMMANDS: HelpSpec[] = [
     summary: "Ask a specific visual question about the current page.",
     usage: "browser ask <question> [--tab <alias>] [--scope <selector>] [--model <name>]",
     description:
-      "Send a screenshot and accessibility tree with your question to Fireworks GLM FLASH/high by default (FIREWORKS_API_KEY). An explicit OpenRouter vision model uses OPENROUTER_API_KEY instead. No model fallback.",
+      "Send a screenshot and accessibility tree with your question to OpenAI Luna 6/high by default (OPENAI_API_KEY). Explicit Fireworks and OpenRouter vision models use their own provider keys. No model fallback.",
     options: [
       { flag: "--tab <alias>", description: "Run the command against a specific managed tab alias." },
       { flag: "--scope <selector>", description: "Scope the accessibility snapshot while keeping a full-page screenshot." },
-      { flag: "--model <name>", description: "Exact Fireworks ID (default accounts/fireworks/models/glm-5p3-flash), or explicit OpenRouter ID. OpenClaw account routes are unsupported." },
+      { flag: "--model <name>", description: "Bare OpenAI model ID (default gpt-6-luna), exact Fireworks ID, or explicit OpenRouter ID. OpenClaw account routes are unsupported." },
     ],
     examples: ['browser ask "is the upload progress bar complete?"', 'browser ask "what text is in the error banner?" --scope "main"'],
     nextSteps: ["browser click", "browser wait"],
