@@ -1,4 +1,4 @@
-"""LLM extraction and summaries with Fireworks defaults and explicit legacy providers."""
+"""LLM extraction and summaries with explicit provider routing."""
 
 from __future__ import annotations
 
@@ -23,7 +23,9 @@ from harness.commands.common import (
 )
 from harness.config import HarnessSettings, get_settings
 from harness.output import CommandResult, OutputEnvelope
-from harness.worker_model import WORKER_MODEL, WORKER_REASONING, fireworks_model_id, generate_fireworks, is_fireworks_model
+from harness.worker_model import WORKER_REASONING, fireworks_model_id, generate_fireworks, is_fireworks_model
+
+DEFAULT_MODEL: str = "gpt-6-luna"
 
 EXTRACT_HELP = (
     "LLM-powered information extraction from large text documents.\n\n"
@@ -38,7 +40,7 @@ SUMMARIZE_HELP = (
     "Examples:\n"
     "  minerva summarize --file earnings-call.txt\n"
     "  cat filing.md | minerva summarize --max-tokens 2000\n"
-    f"  minerva summarize -f notes.md --model {WORKER_MODEL} --thinking high\n"
+    f"  minerva summarize -f notes.md --model {DEFAULT_MODEL} --thinking high\n"
 )
 
 EXTRACT_FILES_HELP = (
@@ -54,12 +56,11 @@ EXTRACT_FILES_HELP = (
     "    -o data/extractions/summary\n"
     "  minerva extract-files --questions-file questions.md \\\n"
     "    --files 'data/sources/**/*.md' --out data/extractions/summary \\\n"
-    f"    --model {WORKER_MODEL} --thinking high --concurrency 4\n"
+    f"    --model {DEFAULT_MODEL} --thinking high --concurrency 4\n"
     "  minerva extract-files -q questions.md -f 'data/**/*.md' -o out \\\n"
     "    --model gpt-6.1-sol --thinking high --concurrency 2\n"
 )
 
-DEFAULT_MODEL: str = WORKER_MODEL
 DEFAULT_MAX_TOKENS = 16384
 DEFAULT_CONCURRENCY = 4
 MODEL_ALIASES: dict[str, str] = {
@@ -206,7 +207,7 @@ def extract_cli_command(
         "-q",
         help="Markdown file containing the question/prompt pack to apply to the input document.",
     ),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Fireworks GLM FLASH/high by default; explicit Gemini/OpenAI models supported."),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Luna 6/high by default; explicit Fireworks, Gemini and OpenAI models supported."),
     max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens."),
     thinking: str | None = typer.Option(
         None,
@@ -322,7 +323,7 @@ def summarize_cli_command(
         help="Path to a UTF-8 text file. Omit to read from stdin.",
     ),
     model: str = typer.Option(
-        DEFAULT_MODEL, "--model", help="Fireworks GLM FLASH/high by default; explicit Gemini/OpenAI models supported."
+        DEFAULT_MODEL, "--model", help="Luna 6/high by default; explicit Fireworks, Gemini and OpenAI models supported."
     ),
     max_tokens: int = typer.Option(
         DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum summary output tokens."
@@ -522,7 +523,7 @@ def extract_files_cli_command(
         "-q",
         help="Markdown file containing the question/prompt pack to apply to each source file.",
     ),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Fireworks GLM FLASH/high by default; explicit Gemini/OpenAI models supported."),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Luna 6/high by default; explicit Fireworks, Gemini and OpenAI models supported."),
     max_tokens: int = typer.Option(DEFAULT_MAX_TOKENS, "--max-tokens", help="Maximum output tokens per file."),
     thinking: str | None = typer.Option(
         None,
@@ -808,7 +809,7 @@ def _resolve_default_thinking(
 ) -> ThinkingLevel | None:
     if explicit is not None:
         return _coerce_thinking_level(explicit)
-    if is_fireworks_model(model) or _api_model_name(model) == "gpt-6.1-sol":
+    if is_fireworks_model(model) or _api_model_name(model) in {"gpt-6-luna", "gpt-6.1-sol"}:
         return ThinkingLevel(WORKER_REASONING)
     if _is_gemini_3_flash(model):
         return ThinkingLevel.MINIMAL
@@ -1016,19 +1017,24 @@ def _generate_openai_answer(
     return text
 
 def _openai_response_text(response: Any) -> str:
-    output_text = getattr(response, "output_text", None)
-    if output_text:
-        return str(output_text)
+    """Return only complete, non-refusal output from the Responses API."""
+    if getattr(response, "status", None) != "completed":
+        raise ValueError("OpenAI returned an incomplete response")
 
     parts: list[str] = []
     for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) == "message" and getattr(item, "status", None) != "completed":
+            raise ValueError("OpenAI returned an incomplete message")
         for content in getattr(item, "content", []) or []:
-            text = getattr(content, "text", None)
+            content_type = content.get("type") if isinstance(content, dict) else getattr(content, "type", None)
+            if content_type == "refusal":
+                raise ValueError("OpenAI refused the request")
+            text = content.get("text") if isinstance(content, dict) else getattr(content, "text", None)
             if text:
                 parts.append(str(text))
-            elif isinstance(content, dict) and content.get("text"):
-                parts.append(str(content["text"]))
-    return "\n".join(parts)
+    if parts:
+        return "\n".join(parts)
+    return str(getattr(response, "output_text", "") or "")
 # ---------------------------------------------------------------------------
 # extract-files internals
 # ---------------------------------------------------------------------------

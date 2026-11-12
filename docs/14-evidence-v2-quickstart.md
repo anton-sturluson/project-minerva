@@ -123,7 +123,7 @@ minerva evidence audit \
 
 Optional flags:
 - `--categories sec-annual,sec-quarterly` — scope the audit to specific categories
-- `--model gpt-5.5` — override the model (default: `gpt-5.5`)
+- `--model gpt-6.1-sol` — override the model (default: `gpt-6.1-sol`)
 - `--api-key-env-var OPENAI_API_KEY` — env var containing the API key
 
 The audit memo is the readiness signal for downstream analysis. If the memo says coverage is thin, collect or save more sources, register them with `add-source`, and rerun `audit`.

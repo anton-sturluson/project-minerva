@@ -11,7 +11,7 @@ from google.genai import errors, types
 from pydantic import BaseModel
 
 from harness.ideas import store
-from harness.worker_model import WORKER_MODEL, generate_fireworks, is_fireworks_model
+from harness.worker_model import generate_fireworks, is_fireworks_model
 
 
 @dataclass(frozen=True)
@@ -24,9 +24,9 @@ class StageModels:
 def resolve_models(override: str | None = None) -> StageModels:
     """An explicit --model overrides every stage; otherwise use stage settings."""
     return StageModels(
-        source=override or os.environ.get("MINERVA_IDEAS_SOURCE_MODEL", WORKER_MODEL),
+        source=override or os.environ.get("MINERVA_IDEAS_SOURCE_MODEL", "gpt-6-luna"),
         extraction=override
-        or os.environ.get("MINERVA_IDEAS_EXTRACTION_MODEL", WORKER_MODEL),
+        or os.environ.get("MINERVA_IDEAS_EXTRACTION_MODEL", "gpt-6-luna"),
         review=override or os.environ.get("MINERVA_IDEAS_REVIEW_MODEL", "gpt-6.1-sol"),
     )
 

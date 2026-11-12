@@ -505,7 +505,7 @@ Precedence rules:
 
 ### LLM Provider Abstraction
 
-The classifier uses a provider-agnostic interface. The current CLI/factory default is direct Fireworks `accounts/fireworks/models/glm-5p3-flash` with HIGH reasoning and schema-validated JSON, authenticated by `FIREWORKS_API_KEY` in the host-owned environment. `--classifier fireworks --model accounts/fireworks/models/...` preserves an explicit Fireworks model ID. Anthropic Haiku (`--classifier anthropic`) and OpenAI GPT-4o-mini (`--classifier openai`) are legacy opt-in adapters; their model IDs remain provider-specific. There is no automatic model or provider fallback. Evaluate accuracy and schema adherence with a labeled eval set, not theoretical price alone. Weekly volume is small enough that cost is not the primary constraint.
+The classifier uses a provider-agnostic interface. The current CLI/factory default is direct OpenAI `gpt-6-luna` with high reasoning and schema-validated JSON, authenticated by `OPENAI_API_KEY` in the host-owned environment. `--classifier fireworks --model accounts/fireworks/models/...` preserves an explicit Fireworks model ID. Anthropic Haiku (`--classifier anthropic`) and explicitly selected OpenAI models remain opt-in and provider-specific. There is no automatic model or provider fallback. Evaluate accuracy and schema adherence with a labeled eval set, not theoretical price alone. Weekly volume is small enough that cost is not the primary constraint.
 
 ---
 

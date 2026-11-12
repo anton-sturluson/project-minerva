@@ -244,9 +244,9 @@ def main():
         help="Path to SQLite database (default: data/jobwatch.db)",
     )
     parser.add_argument(
-        "--classifier", type=str, default="fireworks",
+        "--classifier", type=str, default="openai",
         choices=["fireworks", "anthropic", "openai"],
-        help="Classifier provider (default: fireworks GLM FLASH/high; others are legacy opt-in)",
+        help="Classifier provider (default: OpenAI Luna 6/high)",
     )
     parser.add_argument(
         "--model", type=str, default=None,
