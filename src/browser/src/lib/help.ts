@@ -193,11 +193,11 @@ const COMMANDS: HelpSpec[] = [
     summary: "Use a small vision model to describe the current page.",
     usage: "browser describe [--tab <alias>] [--scope <selector>] [--model <name>]",
     description:
-      "Take a screenshot and accessibility snapshot, send both to a fast vision model, and return a natural-language description. Use this when visual-only state matters more than structural page state.",
+      "Send a screenshot and accessibility snapshot to OpenAI Luna 6/high by default (OPENAI_API_KEY), and return a description. Use this when visual-only state matters more than structural page state.",
     options: [
       { flag: "--tab <alias>", description: "Run the command against a specific managed tab alias." },
       { flag: "--scope <selector>", description: "Scope the accessibility snapshot while keeping a full-page screenshot." },
-      { flag: "--model <name>", description: "Override the default model (google/gemini-3.1-flash-lite-preview)." },
+      { flag: "--model <name>", description: "Bare OpenAI model ID (default gpt-6-luna) or explicit OpenRouter model ID." },
     ],
     examples: ["browser describe", 'browser describe --scope "main"'],
     nextSteps: ["browser ask \"what error message is visible?\"", "browser snapshot"],
@@ -207,11 +207,11 @@ const COMMANDS: HelpSpec[] = [
     summary: "Ask a specific visual question about the current page.",
     usage: "browser ask <question> [--tab <alias>] [--scope <selector>] [--model <name>]",
     description:
-      "Take a screenshot and accessibility snapshot, send both to a fast vision model with your question, and return a concise factual answer. Use this when a targeted visual check is cheaper than a screenshot review.",
+      "Send a screenshot and accessibility snapshot with your question to OpenAI Luna 6/high by default (OPENAI_API_KEY). Use this when a targeted visual check is cheaper than a screenshot review.",
     options: [
       { flag: "--tab <alias>", description: "Run the command against a specific managed tab alias." },
       { flag: "--scope <selector>", description: "Scope the accessibility snapshot while keeping a full-page screenshot." },
-      { flag: "--model <name>", description: "Override the default model (google/gemini-3.1-flash-lite-preview)." },
+      { flag: "--model <name>", description: "Bare OpenAI model ID (default gpt-6-luna) or explicit OpenRouter model ID." },
     ],
     examples: ['browser ask "is the upload progress bar complete?"', 'browser ask "what text is in the error banner?" --scope "main"'],
     nextSteps: ["browser click", "browser wait"],

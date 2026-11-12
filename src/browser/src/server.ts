@@ -9,9 +9,9 @@ import { validateCommandInput } from "./lib/parse.js";
 import { BRIDGE_TIMEOUT_GRACE_MS, BRIDGE_WS_PORT, CLOSE_IDLE_TIMEOUT_MS, DEFAULT_EXTRACT_LIMIT, DEFAULT_HTML_LIMIT, FALLBACK_PORT, FriendlyError, SOCKET_PATH } from "./lib/types.js";
 import type { BridgeAction, BrowserState, CommandName, CommandRequest, CommandResponse } from "./lib/types.js";
 
-const DEFAULT_ORACLE_MODEL = "google/gemini-3.1-flash-lite-preview";
+const DEFAULT_ORACLE_MODEL = "gpt-6-luna";
 const LOCATION_TIMEOUT_MS = 1_000;
-const OPENROUTER_TIMEOUT_MS = 60_000;
+const ORACLE_TIMEOUT_MS = 60_000;
 
 const DESCRIBE_SYSTEM_PROMPT = `You are a browser state oracle inside a browser automation tool.
 You receive a screenshot and an accessibility tree of a web page.
@@ -215,12 +215,18 @@ function extractChatText(payload: unknown): string {
     throw new FriendlyError("API response did not include a message.");
   }
 
+  if (firstChoice.finish_reason !== "stop" || firstChoice.message.refusal) {
+    throw new FriendlyError("Oracle returned an incomplete answer or refusal.");
+  }
   const content = firstChoice.message.content;
-  if (typeof content === "string") {
+  if (typeof content === "string" && content.trim()) {
     return content.trim();
   }
 
   if (Array.isArray(content)) {
+    if (content.some((part) => isObject(part) && (part.type === "refusal" || part.refusal))) {
+      throw new FriendlyError("Oracle returned an incomplete answer or refusal.");
+    }
     const text = content
       .map((part) => {
         if (!isObject(part)) {
@@ -241,8 +247,32 @@ function extractChatText(payload: unknown): string {
   throw new FriendlyError("API response did not include text content.");
 }
 
+function extractResponsesText(payload: unknown): string {
+  if (!isObject(payload) || payload.status !== "completed" || !Array.isArray(payload.output)) {
+    throw new FriendlyError("Oracle returned an incomplete answer or refusal.");
+  }
+  const parts = payload.output.flatMap((item: unknown) =>
+    isObject(item) && item.type === "message" && Array.isArray(item.content) ? item.content : [],
+  );
+  if (parts.some((part: unknown) => isObject(part) && part.type === "refusal")) {
+    throw new FriendlyError("Oracle returned an incomplete answer or refusal.");
+  }
+  const text = parts.flatMap((part: unknown) =>
+    isObject(part) && part.type === "output_text" && typeof part.text === "string" ? [part.text] : [],
+  ).join("\n").trim();
+  if (!text) throw new FriendlyError("API response did not include text content.");
+  return text;
+}
+
 async function runOracle(params: OracleParams, commandBridge: CommandBridge): Promise<string> {
   try {
+    const model = params.model || DEFAULT_ORACLE_MODEL;
+    if (model.startsWith("openai-zdr/")) {
+      throw new FriendlyError("OpenClaw account routes are unsupported; use a bare OpenAI model ID or an explicit OpenRouter model ID.");
+    }
+    const useOpenAI = model.startsWith("gpt-");
+    const apiKey = useOpenAI ? process.env.OPENAI_API_KEY : await loadApiKey();
+    if (!apiKey) throw new FriendlyError("OPENAI_API_KEY is not set in the environment.");
     // Extension requests are intentionally serialized, so capture these in
     // sequence and give each operation its own full timeout budget.
     const screenshotResult = await commandBridge.call(
@@ -266,20 +296,31 @@ async function runOracle(params: OracleParams, commandBridge: CommandBridge): Pr
       throw new FriendlyError("Extension did not return snapshot data.");
     }
 
-    const apiKey = await loadApiKey();
-    const model = params.model || DEFAULT_ORACLE_MODEL;
     const userText = params.question
       ? `Accessibility tree:\n${snapshotResult.snapshot}\n\nQuestion:\n${params.question}`
       : `Accessibility tree:\n${snapshotResult.snapshot}`;
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(
+      useOpenAI ? "https://api.openai.com/v1/responses" : "https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      signal: AbortSignal.timeout(OPENROUTER_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ORACLE_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
+      body: JSON.stringify(useOpenAI ? {
+        model,
+        reasoning: { effort: "high" },
+        max_output_tokens: 16384,
+        store: false,
+        input: [
+          { role: "system", content: params.prompt },
+          { role: "user", content: [
+            { type: "input_text", text: userText },
+            { type: "input_image", image_url: screenshotResult.dataUrl },
+          ] },
+        ],
+      } : {
         model,
         messages: [
           { role: "system", content: params.prompt },
@@ -295,24 +336,22 @@ async function runOracle(params: OracleParams, commandBridge: CommandBridge): Pr
     });
 
     if (!response.ok) {
-      const details = (await response.text().catch(() => "")).slice(0, 500);
-      throw new FriendlyError(`OpenRouter request failed (${response.status} ${response.statusText})${details ? `: ${details}` : ""}`);
+      throw new FriendlyError(`Oracle provider request failed (HTTP ${response.status}). No fallback was attempted.`);
     }
 
     const payload = (await response.json()) as unknown;
-    return extractChatText(payload);
+    return useOpenAI ? extractResponsesText(payload) : extractChatText(payload);
   } catch (error) {
     if (error instanceof FriendlyError) {
       throw error;
     }
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new FriendlyError(`OpenRouter request timed out after ${OPENROUTER_TIMEOUT_MS / 1000}s.`);
+      throw new FriendlyError(`Oracle request timed out after ${ORACLE_TIMEOUT_MS / 1000}s.`);
     }
     if (error instanceof TypeError) {
-      throw new FriendlyError(`Oracle request failed (network error: ${error.message}). Check connectivity and OPENROUTER_API_KEY.`);
+      throw new FriendlyError("Oracle request failed (network error). Check connectivity and the selected provider's environment key.");
     }
-    const message = error instanceof Error ? error.message : String(error);
-    throw new FriendlyError(`Oracle failed unexpectedly: ${message}`);
+    throw new FriendlyError("Oracle failed unexpectedly. No fallback was attempted.");
   }
 }
 
