@@ -147,7 +147,8 @@ class OpenAIClassifier(ClassifierProvider):
             if self._model == "gpt-6-luna":
                 result = self._client.responses.parse(
                     model=self._model,
-                    input=f"{SYSTEM_PROMPT}\n\n{user_message}",
+                    instructions=SYSTEM_PROMPT,
+                    input=user_message,
                     text_format=JobClassification,
                     reasoning={"effort": "high"},
                     max_output_tokens=16384,
