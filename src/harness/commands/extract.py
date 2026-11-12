@@ -105,6 +105,7 @@ class ThinkingLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    XHIGH = "xhigh"
     ADAPTIVE = "adaptive"
 
 
@@ -211,7 +212,7 @@ def extract_cli_command(
     thinking: str | None = typer.Option(
         None,
         "--thinking",
-        help="Thinking level: off|minimal|low|medium|high|adaptive (model-aware).",
+        help="Thinking level: off|minimal|low|medium|high|xhigh|adaptive (model-aware).",
     ),
 ) -> None:
     """Run a single extraction call against an input document.
@@ -330,7 +331,7 @@ def summarize_cli_command(
     thinking: str | None = typer.Option(
         None,
         "--thinking",
-        help="Thinking level: off|minimal|low|medium|high|adaptive (model-aware).",
+        help="Thinking level: off|minimal|low|medium|high|xhigh|adaptive (model-aware).",
     ),
 ) -> None:
     """Summarize one UTF-8 text input and print only the summary."""
@@ -527,7 +528,7 @@ def extract_files_cli_command(
     thinking: str | None = typer.Option(
         None,
         "--thinking",
-        help="Thinking level: off|minimal|low|medium|high|adaptive (model-aware).",
+        help="Thinking level: off|minimal|low|medium|high|xhigh|adaptive (model-aware).",
     ),
     concurrency: int = typer.Option(DEFAULT_CONCURRENCY, "--concurrency", help="Bounded concurrency (>=1)."),
     force: bool = typer.Option(False, "--force", help="Overwrite existing output files."),
@@ -840,7 +841,7 @@ def _build_thinking_config(model: str, thinking: str | ThinkingLevel | None):
         raise RuntimeError("google-genai is not installed") from exc
 
     if _is_gemini_3(model):
-        if level in {ThinkingLevel.OFF, ThinkingLevel.ADAPTIVE}:
+        if level in {ThinkingLevel.OFF, ThinkingLevel.XHIGH, ThinkingLevel.ADAPTIVE}:
             raise ValueError(
                 f"`--thinking {level.value}` is not supported for Gemini 3 models; "
                 "use minimal|low|medium|high"
@@ -981,7 +982,7 @@ def _generate_openai_answer(
     }
     if thinking is not None:
         level = _coerce_thinking_level(thinking)
-        if level in {ThinkingLevel.LOW, ThinkingLevel.MEDIUM, ThinkingLevel.HIGH}:
+        if level in {ThinkingLevel.LOW, ThinkingLevel.MEDIUM, ThinkingLevel.HIGH, ThinkingLevel.XHIGH}:
             kwargs["reasoning"] = {"effort": level.value}
     response = client.responses.create(**kwargs)
     status = getattr(response, "status", None)
