@@ -1,6 +1,7 @@
 """Behavioral tests for the top-level summarize command."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -23,7 +24,7 @@ def captured_generation(tmp_path: Path, monkeypatch) -> dict:
     monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
     monkeypatch.setattr(
         "harness.commands.extract.get_settings",
-        lambda: HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key"),
+        lambda: HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", openai_api_key="openai-test-key"),
     )
     return captured
 
@@ -61,13 +62,13 @@ def test_summarize_reads_stdin_with_new_default(captured_generation: dict) -> No
 
     assert result.exit_code == 0
     assert result.output == "Model summary\n"
-    assert captured_generation["model"] == "gemini-3.6-flash"
-    assert captured_generation["thinking"] == "minimal"
+    assert captured_generation["model"] == "gpt-6-luna"
+    assert captured_generation["thinking"] == "high"
     assert "Résumé source" in captured_generation["prompt"]
 
 
 def test_summarize_rejects_non_utf8_stdin_actionably(tmp_path: Path) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key")
+    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", openai_api_key="openai-test-key")
     result = extract.summarize_command(stdin=b"\xff\xfe", settings=settings)
 
     assert result.exit_code == 1
@@ -82,3 +83,29 @@ def test_bare_summarize_shows_help_without_calling_model() -> None:
     assert "Usage:" in result.output
     assert "--file" in result.output
     assert "What went wrong" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("status", "output", "error"),
+    [
+        ("incomplete", [], "did not complete"),
+        ("completed", [SimpleNamespace(content=[{"type": "refusal", "refusal": "no"}])], "refused"),
+        ("completed", [{"content": [SimpleNamespace(type="refusal")]}], "refused"),
+    ],
+)
+def test_summarize_rejects_incomplete_or_refused_responses(
+    tmp_path: Path, monkeypatch, status: str, output: list, error: str
+) -> None:
+    response = SimpleNamespace(status=status, output_text="partial summary", output=output)
+    client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs: response))
+    monkeypatch.setattr("openai.OpenAI", lambda **kwargs: client)
+    monkeypatch.setattr(
+        "harness.commands.extract.get_settings",
+        lambda: HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key"),
+    )
+
+    result = runner.invoke(app, ["summarize"], input="Source material")
+
+    assert result.exit_code != 0
+    assert error in result.output
+    assert "partial summary" not in result.output

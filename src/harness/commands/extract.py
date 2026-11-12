@@ -37,7 +37,7 @@ SUMMARIZE_HELP = (
     "Examples:\n"
     "  minerva summarize --file earnings-call.txt\n"
     "  cat filing.md | minerva summarize --max-tokens 2000\n"
-    "  minerva summarize -f notes.md --model gemini-3.6-flash --thinking high\n"
+    "  minerva summarize -f notes.md --model gpt-6-luna --thinking high\n"
 )
 
 EXTRACT_FILES_HELP = (
@@ -53,12 +53,12 @@ EXTRACT_FILES_HELP = (
     "    -o data/extractions/summary\n"
     "  minerva extract-files --questions-file questions.md \\\n"
     "    --files 'data/sources/**/*.md' --out data/extractions/summary \\\n"
-    "    --model gemini-3.6-flash --thinking minimal --concurrency 4\n"
+    "    --model gpt-6-luna --thinking high --concurrency 4\n"
     "  minerva extract-files -q questions.md -f 'data/**/*.md' -o out \\\n"
-    "    --model gpt-5.5 --concurrency 2\n"
+    "    --model gpt-6.1-sol --concurrency 2\n"
 )
 
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_MAX_TOKENS = 16384
 DEFAULT_CONCURRENCY = 4
 MODEL_ALIASES: dict[str, str] = {
@@ -808,6 +808,8 @@ def _resolve_default_thinking(
 ) -> ThinkingLevel | None:
     if explicit is not None:
         return _coerce_thinking_level(explicit)
+    if model == "gpt-6-luna":
+        return ThinkingLevel.HIGH
     if _is_gemini_3_flash(model):
         return ThinkingLevel.MINIMAL
     return None
@@ -906,7 +908,7 @@ def _missing_api_key_result(model: str, start: float) -> CommandResult:
     return error_result(
         "GEMINI_API_KEY is not set",
         "set GEMINI_API_KEY and retry, or choose an OpenAI model with OPENAI_API_KEY configured",
-        ["`export GEMINI_API_KEY=...`", "`--model gpt-5.5`"],
+        ["`export GEMINI_API_KEY=...`", "`--model gpt-6-luna`"],
         start,
     )
 # ---------------------------------------------------------------------------
@@ -982,6 +984,19 @@ def _generate_openai_answer(
         if level in {ThinkingLevel.LOW, ThinkingLevel.MEDIUM, ThinkingLevel.HIGH}:
             kwargs["reasoning"] = {"effort": level.value}
     response = client.responses.create(**kwargs)
+    status = getattr(response, "status", None)
+    if status != "completed":
+        raise RuntimeError(f"OpenAI response did not complete (status: {status or 'unknown'})")
+    for item in getattr(response, "output", []) or []:
+        contents = (
+            item.get("content", []) if isinstance(item, dict) else getattr(item, "content", [])
+        )
+        for content in contents or []:
+            content_type = (
+                content.get("type") if isinstance(content, dict) else getattr(content, "type", None)
+            )
+            if content_type == "refusal":
+                raise RuntimeError("OpenAI refused the request")
     text = _openai_response_text(response)
     if not text:
         raise ValueError("OpenAI returned an empty response")
