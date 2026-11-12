@@ -717,6 +717,7 @@ def test_generate_openai_answer_uses_responses_api(monkeypatch) -> None:
             captured.update(kwargs)
 
             class Response:
+                status = "completed"
                 output_text = "openai answer"
 
             return Response()

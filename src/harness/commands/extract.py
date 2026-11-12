@@ -984,6 +984,19 @@ def _generate_openai_answer(
         if level in {ThinkingLevel.LOW, ThinkingLevel.MEDIUM, ThinkingLevel.HIGH}:
             kwargs["reasoning"] = {"effort": level.value}
     response = client.responses.create(**kwargs)
+    status = getattr(response, "status", None)
+    if status != "completed":
+        raise RuntimeError(f"OpenAI response did not complete (status: {status or 'unknown'})")
+    for item in getattr(response, "output", []) or []:
+        contents = (
+            item.get("content", []) if isinstance(item, dict) else getattr(item, "content", [])
+        )
+        for content in contents or []:
+            content_type = (
+                content.get("type") if isinstance(content, dict) else getattr(content, "type", None)
+            )
+            if content_type == "refusal":
+                raise RuntimeError("OpenAI refused the request")
     text = _openai_response_text(response)
     if not text:
         raise ValueError("OpenAI returned an empty response")

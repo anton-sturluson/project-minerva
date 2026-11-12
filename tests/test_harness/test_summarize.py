@@ -1,6 +1,7 @@
 """Behavioral tests for the top-level summarize command."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -82,3 +83,29 @@ def test_bare_summarize_shows_help_without_calling_model() -> None:
     assert "Usage:" in result.output
     assert "--file" in result.output
     assert "What went wrong" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("status", "output", "error"),
+    [
+        ("incomplete", [], "did not complete"),
+        ("completed", [SimpleNamespace(content=[{"type": "refusal", "refusal": "no"}])], "refused"),
+        ("completed", [{"content": [SimpleNamespace(type="refusal")]}], "refused"),
+    ],
+)
+def test_summarize_rejects_incomplete_or_refused_responses(
+    tmp_path: Path, monkeypatch, status: str, output: list, error: str
+) -> None:
+    response = SimpleNamespace(status=status, output_text="partial summary", output=output)
+    client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs: response))
+    monkeypatch.setattr("openai.OpenAI", lambda **kwargs: client)
+    monkeypatch.setattr(
+        "harness.commands.extract.get_settings",
+        lambda: HarnessSettings(workspace_root=tmp_path, openai_api_key="test-key"),
+    )
+
+    result = runner.invoke(app, ["summarize"], input="Source material")
+
+    assert result.exit_code != 0
+    assert error in result.output
+    assert "partial summary" not in result.output
