@@ -87,7 +87,9 @@ Safety rules:
 
 ## Oracle commands
 
-`browser describe` and `browser ask` capture a screenshot and accessibility tree, then call OpenRouter. Set `OPENROUTER_API_KEY` in the environment or a nearby `.env` file. Other commands do not require an external API.
+`browser describe` and `browser ask` send a screenshot and accessibility tree to OpenAI `gpt-6-luna` with high reasoning through the Responses API. Set `OPENAI_API_KEY` in the environment. The API request uses `store: false`; that alone does not establish account-level ZDR.
+
+An explicit OpenRouter vision model such as `--model google/gemini-3.1-flash-lite-preview` continues to use OpenRouter and `OPENROUTER_API_KEY` from the environment or a nearby `.env` file. Bare `gpt-` model IDs use OpenAI; OpenClaw account routes such as `openai-zdr/...` are unsupported. No provider or model fallback is attempted. Other commands do not require an external API.
 
 ## Development and verification
 
