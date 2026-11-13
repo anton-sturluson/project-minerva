@@ -1,0 +1,935 @@
+{
+  "bond_events": [
+    {
+      "id": "amzn-2026-03-13-usd",
+      "entity_id": "AMZN",
+      "legal_issuer": "Amazon.com, Inc.",
+      "pricing_date": null,
+      "closing_date": "2026-03-13",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "37000000000",
+      "instrument_type": "nonconvertible",
+      "maturities": [
+        {
+          "date": "2028-03-13",
+          "maturity_year": 2028,
+          "face_amount": "1750000000.00",
+          "coupon_rate": null,
+          "rate_type": "floating"
+        },
+        {
+          "date": "2029-03-13",
+          "maturity_year": 2029,
+          "face_amount": "1000000000",
+          "coupon_rate": null,
+          "rate_type": "floating"
+        },
+        {
+          "date": "2028-03-13",
+          "maturity_year": 2028,
+          "face_amount": "2250000000.00",
+          "coupon_rate": "3.850",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2029-03-13",
+          "maturity_year": 2029,
+          "face_amount": "3000000000",
+          "coupon_rate": "4.000",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2031-03-13",
+          "maturity_year": 2031,
+          "face_amount": "5000000000",
+          "coupon_rate": "4.250",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2033-03-13",
+          "maturity_year": 2033,
+          "face_amount": "4000000000",
+          "coupon_rate": "4.550",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2036-03-13",
+          "maturity_year": 2036,
+          "face_amount": "6000000000",
+          "coupon_rate": "4.875",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2046-03-13",
+          "maturity_year": 2046,
+          "face_amount": "2500000000.0",
+          "coupon_rate": "5.650",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2056-03-13",
+          "maturity_year": 2056,
+          "face_amount": "5500000000.0",
+          "coupon_rate": "5.800",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2066-03-13",
+          "maturity_year": 2066,
+          "face_amount": "3000000000",
+          "coupon_rate": "5.950",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2076-03-13",
+          "maturity_year": 2076,
+          "face_amount": "3000000000",
+          "coupon_rate": "6.050",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "Not stated in the reviewed closing report.",
+      "source_ids": [
+        "amzn-usd",
+        "amzn-usd-terms"
+      ]
+    },
+    {
+      "id": "amzn-2026-03-16-eur",
+      "entity_id": "AMZN",
+      "legal_issuer": "Amazon.com, Inc.",
+      "pricing_date": null,
+      "closing_date": "2026-03-16",
+      "status": "closed",
+      "currency": "EUR",
+      "face_amount": "14500000000",
+      "instrument_type": "nonconvertible",
+      "maturities": [
+        {
+          "date": "2028-03-16",
+          "maturity_year": 2028,
+          "face_amount": "1750000000.00",
+          "coupon_rate": null,
+          "rate_type": "floating"
+        },
+        {
+          "date": "2028-03-16",
+          "maturity_year": 2028,
+          "face_amount": "1250000000.00",
+          "coupon_rate": "2.800",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2030-03-16",
+          "maturity_year": 2030,
+          "face_amount": "2000000000",
+          "coupon_rate": "3.100",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2032-03-16",
+          "maturity_year": 2032,
+          "face_amount": "2250000000.00",
+          "coupon_rate": "3.350",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2035-03-16",
+          "maturity_year": 2035,
+          "face_amount": "2500000000.0",
+          "coupon_rate": "3.700",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2039-03-16",
+          "maturity_year": 2039,
+          "face_amount": "2250000000.00",
+          "coupon_rate": "4.050",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2045-03-16",
+          "maturity_year": 2045,
+          "face_amount": "1250000000.00",
+          "coupon_rate": "4.450",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2064-03-16",
+          "maturity_year": 2064,
+          "face_amount": "1250000000.00",
+          "coupon_rate": "4.850",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "Not stated in the reviewed closing report.",
+      "source_ids": [
+        "amzn-eur",
+        "amzn-eur-terms"
+      ]
+    },
+    {
+      "id": "googl-2026-02-13-usd",
+      "entity_id": "GOOGL",
+      "legal_issuer": "Alphabet Inc.",
+      "pricing_date": null,
+      "closing_date": "2026-02-13",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "20000000000",
+      "instrument_type": "nonconvertible",
+      "maturities": [
+        {
+          "date": "2029-02-15",
+          "maturity_year": 2029,
+          "face_amount": "2500000000.0",
+          "coupon_rate": "3.700",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2031-02-15",
+          "maturity_year": 2031,
+          "face_amount": "3000000000",
+          "coupon_rate": "4.100",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2033-02-15",
+          "maturity_year": 2033,
+          "face_amount": "3000000000",
+          "coupon_rate": "4.400",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2036-02-15",
+          "maturity_year": 2036,
+          "face_amount": "4250000000.00",
+          "coupon_rate": "4.800",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2046-02-15",
+          "maturity_year": 2046,
+          "face_amount": "1500000000.0",
+          "coupon_rate": "5.500",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2056-02-15",
+          "maturity_year": 2056,
+          "face_amount": "4000000000",
+          "coupon_rate": "5.650",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2066-02-15",
+          "maturity_year": 2066,
+          "face_amount": "1750000000.00",
+          "coupon_rate": "5.750",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "Not stated in the reviewed closing report.",
+      "source_ids": [
+        "goog",
+        "goog-usd-terms",
+        "goog-terms-8",
+        "goog-terms-9",
+        "goog-terms-10",
+        "goog-terms-11",
+        "goog-terms-12",
+        "goog-terms-13"
+      ]
+    },
+    {
+      "id": "googl-2026-02-13-gbp",
+      "entity_id": "GOOGL",
+      "legal_issuer": "Alphabet Inc.",
+      "pricing_date": null,
+      "closing_date": "2026-02-13",
+      "status": "closed",
+      "currency": "GBP",
+      "face_amount": "5500000000",
+      "instrument_type": "nonconvertible",
+      "maturities": [
+        {
+          "date": "2029-02-13",
+          "maturity_year": 2029,
+          "face_amount": "750000000.00",
+          "coupon_rate": "4.125",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2032-11-13",
+          "maturity_year": 2032,
+          "face_amount": "1250000000.00",
+          "coupon_rate": "4.625",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2041-11-13",
+          "maturity_year": 2041,
+          "face_amount": "1250000000.00",
+          "coupon_rate": "5.500",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2058-02-13",
+          "maturity_year": 2058,
+          "face_amount": "1250000000.00",
+          "coupon_rate": "5.875",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2126-02-13",
+          "maturity_year": 2126,
+          "face_amount": "1000000000",
+          "coupon_rate": "6.125",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "Not stated in the reviewed closing report.",
+      "source_ids": [
+        "goog",
+        "goog-gbp-terms",
+        "goog-terms-3",
+        "goog-terms-4",
+        "goog-terms-5",
+        "goog-terms-6"
+      ]
+    },
+    {
+      "id": "meta-2025-11-03-usd",
+      "entity_id": "META",
+      "legal_issuer": "Meta Platforms, Inc.",
+      "pricing_date": null,
+      "closing_date": "2025-11-03",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "30000000000",
+      "instrument_type": "nonconvertible",
+      "maturities": [
+        {
+          "date": "2030-11-15",
+          "maturity_year": 2030,
+          "face_amount": "4000000000",
+          "coupon_rate": "4.200",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2032-11-15",
+          "maturity_year": 2032,
+          "face_amount": "4000000000",
+          "coupon_rate": "4.600",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2035-11-15",
+          "maturity_year": 2035,
+          "face_amount": "6500000000.0",
+          "coupon_rate": "4.875",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2045-11-15",
+          "maturity_year": 2045,
+          "face_amount": "4500000000.0",
+          "coupon_rate": "5.500",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2055-11-15",
+          "maturity_year": 2055,
+          "face_amount": "6500000000.0",
+          "coupon_rate": "5.625",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2065-11-15",
+          "maturity_year": 2065,
+          "face_amount": "4500000000.0",
+          "coupon_rate": "5.750",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "Not stated in the reviewed closing report.",
+      "source_ids": [
+        "meta",
+        "meta-terms"
+      ]
+    },
+    {
+      "id": "orcl-2026-02-04-usd",
+      "entity_id": "ORCL",
+      "legal_issuer": "Oracle Corporation",
+      "pricing_date": null,
+      "closing_date": "2026-02-04",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "25000000000",
+      "instrument_type": "nonconvertible",
+      "maturities": [
+        {
+          "date": "2029-02-04",
+          "maturity_year": 2029,
+          "face_amount": "500000000.0",
+          "coupon_rate": null,
+          "rate_type": "floating"
+        },
+        {
+          "date": "2029-02-04",
+          "maturity_year": 2029,
+          "face_amount": "3000000000",
+          "coupon_rate": "4.550",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2031-02-04",
+          "maturity_year": 2031,
+          "face_amount": "3500000000.0",
+          "coupon_rate": "4.950",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2033-05-04",
+          "maturity_year": 2033,
+          "face_amount": "3000000000",
+          "coupon_rate": "5.350",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2036-02-04",
+          "maturity_year": 2036,
+          "face_amount": "5000000000",
+          "coupon_rate": "5.700",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2046-02-04",
+          "maturity_year": 2046,
+          "face_amount": "2250000000.00",
+          "coupon_rate": "6.550",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2056-02-04",
+          "maturity_year": 2056,
+          "face_amount": "5000000000",
+          "coupon_rate": "6.700",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2066-02-04",
+          "maturity_year": 2066,
+          "face_amount": "2750000000.00",
+          "coupon_rate": "6.850",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "General corporate needs, including capital spending, debt repayment, investments or acquisitions, dividends and share repurchases.",
+      "source_ids": [
+        "orcl",
+        "orcl-terms"
+      ]
+    },
+    {
+      "id": "crwv-2025-07-25-usd",
+      "entity_id": "CRWV",
+      "legal_issuer": "CoreWeave, Inc.",
+      "pricing_date": null,
+      "closing_date": "2025-07-25",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "1750000000",
+      "instrument_type": "nonconvertible",
+      "maturities": [
+        {
+          "date": "2031-02-01",
+          "maturity_year": 2031,
+          "face_amount": "1750000000.00",
+          "coupon_rate": "9.000",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "General corporate needs, including debt repayment, and offering fees and expenses.",
+      "source_ids": [
+        "crwv"
+      ]
+    },
+    {
+      "id": "nbis-2026-08-24-usd",
+      "entity_id": "NBIS",
+      "legal_issuer": "Nebius Group N.V.",
+      "pricing_date": null,
+      "closing_date": "2026-08-24",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "5750000000",
+      "instrument_type": "convertible",
+      "maturities": [
+        {
+          "date": null,
+          "maturity_year": 2030,
+          "face_amount": "3450000000.00",
+          "coupon_rate": "0.50",
+          "rate_type": "fixed"
+        },
+        {
+          "date": null,
+          "maturity_year": 2034,
+          "face_amount": "2300000000.0",
+          "coupon_rate": "4.50",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "Data center construction and expansion, full-stack AI cloud development, GPU procurement, and general corporate needs.",
+      "source_ids": [
+        "nbis",
+        "nbis-6k"
+      ]
+    },
+    {
+      "id": "iren-2025-12-08-usd",
+      "entity_id": "IREN",
+      "legal_issuer": "IREN Limited",
+      "pricing_date": null,
+      "closing_date": "2025-12-08",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "2300000000",
+      "instrument_type": "convertible",
+      "maturities": [
+        {
+          "date": "2032-06-01",
+          "maturity_year": 2032,
+          "face_amount": "1150000000.00",
+          "coupon_rate": "0.25",
+          "rate_type": "fixed"
+        },
+        {
+          "date": "2033-06-01",
+          "maturity_year": 2033,
+          "face_amount": "1150000000.00",
+          "coupon_rate": "1.00",
+          "rate_type": "fixed"
+        }
+      ],
+      "purpose": "Capped calls, repurchases of existing convertible notes, and general corporate and working-capital needs; accompanied by a separate equity offering.",
+      "source_ids": [
+        "iren"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "amzn-usd",
+      "url": "https://www.sec.gov/Archives/edgar/data/1018724/000110465926027729/tm266670d8_8k.htm",
+      "sha256": "61d43870cdc5d154d447b8b90027f281e849743a7c6ec33f6ca5e7926955d9cf",
+      "retrieved_at": "2026-10-20T13:11:00.974587+00:00",
+      "accession": "0001104659-26-027729",
+      "filed_date": "2026-03-13"
+    },
+    {
+      "id": "amzn-eur",
+      "url": "https://www.sec.gov/Archives/edgar/data/1018724/000110465926028556/tm266670d9_8k.htm",
+      "sha256": "4a7324881665a3803f91e4ed82d43a720857e529d481f50c505800bbc1366866",
+      "retrieved_at": "2026-10-20T13:11:01.457181+00:00",
+      "accession": "0001104659-26-028556",
+      "filed_date": "2026-03-16"
+    },
+    {
+      "id": "goog",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885d8k.htm",
+      "sha256": "3b14ddee091c255e3bb356624d9d0bdd77345bef90b5950cc50b910e610e96b7",
+      "retrieved_at": "2026-10-20T13:11:01.981510+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "meta",
+      "url": "https://www.sec.gov/Archives/edgar/data/1326801/000119312525262593/d75422d8k.htm",
+      "sha256": "4bf25e92c7cbdc7219820ec64a59897c3abad1b6ccf41d25eb4f74a626b2c191",
+      "retrieved_at": "2026-10-20T13:11:02.513742+00:00",
+      "accession": "0001193125-25-262593",
+      "filed_date": "2025-11-03"
+    },
+    {
+      "id": "orcl",
+      "url": "https://www.sec.gov/Archives/edgar/data/1341439/000119312526037840/d23732d8k.htm",
+      "sha256": "f6fa322f301da5b751601aab7097694de091006d1e5229ae8b8bd9446fe1592b",
+      "retrieved_at": "2026-10-20T13:11:02.965429+00:00",
+      "accession": "0001193125-26-037840",
+      "filed_date": "2026-02-04"
+    },
+    {
+      "id": "crwv",
+      "url": "https://www.sec.gov/Archives/edgar/data/1769628/000119312525165924/d73657d8k.htm",
+      "sha256": "942f27593d6fc6bb1661134ad29795a34bd5025d1e755e2b7670f9c7bdaacbfe",
+      "retrieved_at": "2026-10-20T13:11:03.411953+00:00",
+      "accession": "0001193125-25-165924",
+      "filed_date": "2025-07-28"
+    },
+    {
+      "id": "nbis",
+      "url": "https://nebius.com/newsroom/nebius-group-announces-closing-of-private-offering-of-convertible-senior-notes-with-aggregate-gross-proceeds-of-approximately-5-75-billion",
+      "sha256": "1b777b09bfa41d2dd020a3a9dea3033f605aaa6bc8fe587539b1edc0e0049519",
+      "retrieved_at": "2026-10-20T13:11:04.432091+00:00",
+      "accession": null,
+      "filed_date": null
+    },
+    {
+      "id": "nbis-6k",
+      "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926100347/tm2623863d1_6k.htm",
+      "sha256": "1eaad85b8ec5966df543609fc203a2a1cf52ebc067902e9f7d7d2ce1cd9fe952",
+      "retrieved_at": "2026-10-20T13:11:04.928092+00:00",
+      "accession": "0001104659-26-100347",
+      "filed_date": "2026-08-24"
+    },
+    {
+      "id": "iren",
+      "url": "https://www.sec.gov/Archives/edgar/data/1878848/000114036125044888/ef20060782_8k.htm",
+      "sha256": "e0b0f04670bbcd00bce15d0181c131faff989e09fba3afffb167635554487320",
+      "retrieved_at": "2026-10-20T13:11:05.451894+00:00",
+      "accession": "0001140361-25-044888",
+      "filed_date": "2025-12-08"
+    },
+    {
+      "id": "lambda",
+      "url": "https://lambda.ai/blog/lambda-closes-926-million-senior-secured-term-loan-b-facility",
+      "sha256": "b46a64dd30fba66af1b1bc18e5fcd15f720e53a73fe3d82c62c6b66be976f39c",
+      "retrieved_at": "2026-10-20T13:11:05.877078+00:00",
+      "accession": null,
+      "filed_date": null
+    },
+    {
+      "id": "nscale",
+      "url": "https://www.nscale.com/press-releases/pre-ipo-convertible-financing",
+      "sha256": "fd06dac0639c34bf17f691be4e7933e6b5528dc767ddeba0b43dc050f70d0496",
+      "retrieved_at": "2026-10-20T13:11:06.363141+00:00",
+      "accession": null,
+      "filed_date": null
+    },
+    {
+      "id": "crusoe",
+      "url": "https://www.crusoe.ai/resources/newsroom/crusoe-announces-series-f-funding",
+      "sha256": "e28be3793b4294df48c9a499ef56608c187e47def31624497a95a2828d1202ec",
+      "retrieved_at": "2026-10-20T13:11:06.793305+00:00",
+      "accession": null,
+      "filed_date": null
+    },
+    {
+      "id": "amzn-usd-terms",
+      "url": "https://www.sec.gov/Archives/edgar/data/1018724/000110465926027729/tm266670d8_ex4-1.htm",
+      "sha256": "e83df17a8d7ec7cfdb8002ef2f706afeae060598c6a6a8ba62c422192c95363b",
+      "retrieved_at": "2026-10-20T13:13:26.995620+00:00",
+      "accession": "0001104659-26-027729",
+      "filed_date": "2026-03-13"
+    },
+    {
+      "id": "amzn-eur-terms",
+      "url": "https://www.sec.gov/Archives/edgar/data/1018724/000110465926028556/tm266670d9_ex4-1.htm",
+      "sha256": "087a2a8c17489665f16f3df20a6867d2e064873bd900b267f93ea84504b4ad1e",
+      "retrieved_at": "2026-10-20T13:13:27.242484+00:00",
+      "accession": "0001104659-26-028556",
+      "filed_date": "2026-03-16"
+    },
+    {
+      "id": "meta-terms",
+      "url": "https://www.sec.gov/Archives/edgar/data/1326801/000119312525262593/d75422dex41.htm",
+      "sha256": "4c9c8cdbb6cd5486e7ebdf6a6814e189ef07dafe1498430afeb67bca5fce64e1",
+      "retrieved_at": "2026-10-20T13:13:27.417914+00:00",
+      "accession": "0001193125-25-262593",
+      "filed_date": "2025-11-03"
+    },
+    {
+      "id": "orcl-terms",
+      "url": "https://www.sec.gov/Archives/edgar/data/1341439/000119312526037840/d23732dex41.htm",
+      "sha256": "82d3a41611f851ef812f1a51fe88d5f9e8dc7a7c24bff84003f8aad7baec55d2",
+      "retrieved_at": "2026-10-20T13:13:27.590719+00:00",
+      "accession": "0001193125-26-037840",
+      "filed_date": "2026-02-04"
+    },
+    {
+      "id": "goog-usd-terms",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex47.htm",
+      "sha256": "5de2d30e84230cc52a49b2bf32781fddbcc8dc4d000c5d8068c46a7853cc04b3",
+      "retrieved_at": "2026-10-20T13:13:27.741953+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-gbp-terms",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex42.htm",
+      "sha256": "5a18a07152fa4bea7a8e782b4e6f3774458f5b591ba1e6ce2e101df8973a9e7b",
+      "retrieved_at": "2026-10-20T13:13:27.954312+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-3",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex43.htm",
+      "sha256": "8e911291572e964f97be4062efbe010b00dd25d66bac71afbbd29cf1760c3320",
+      "retrieved_at": "2026-10-20T13:13:56.453777+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-4",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex44.htm",
+      "sha256": "3d9546709748901b0b9ec0712990848d00bebb4ab8de0ae1357730d864baa794",
+      "retrieved_at": "2026-10-20T13:13:56.583024+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-5",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex45.htm",
+      "sha256": "b45a60dc101fe6226500912bb1d17278ef10dc00de0203ec81826026c027f0d9",
+      "retrieved_at": "2026-10-20T13:13:56.694949+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-6",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex46.htm",
+      "sha256": "7e4fb7ff94b33349d59b10d1f961c1a82b0b81eca161b1a0fb12c2d595560321",
+      "retrieved_at": "2026-10-20T13:13:56.861973+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-8",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex48.htm",
+      "sha256": "23a0c16411314ff747fee7a7496245cd1092877aac070331236e6b5570eda790",
+      "retrieved_at": "2026-10-20T13:13:56.990164+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-9",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex49.htm",
+      "sha256": "80fa1d2a1ce612b11378906c925963177b023e270f6782c844fed7f9e8a3a8c5",
+      "retrieved_at": "2026-10-20T13:13:57.112797+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-10",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex410.htm",
+      "sha256": "9c029c2d26aa610346b555a5f03f7c7a58487054a0f8aeed61d7ead2b9cd808a",
+      "retrieved_at": "2026-10-20T13:13:57.256885+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-11",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex411.htm",
+      "sha256": "5f3b46d52bf9d51697003b52b33a18b26610c80db71267fe6a3de741e882497b",
+      "retrieved_at": "2026-10-20T13:13:57.383216+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-12",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex412.htm",
+      "sha256": "d460555ead6de7b916279cde1f40d59cb424588aa6bc4e5a6ce365b5d13f6d07",
+      "retrieved_at": "2026-10-20T13:13:57.502363+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    },
+    {
+      "id": "goog-terms-13",
+      "url": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526051423/d946885dex413.htm",
+      "sha256": "deb8d632d76979e3427783151de080657fa03173194acdd2260b5b88e0ec8211",
+      "retrieved_at": "2026-10-20T13:13:57.662179+00:00",
+      "accession": "0001193125-26-051423",
+      "filed_date": "2026-02-13"
+    }
+  ],
+  "coverage": [
+    {
+      "entity_id": "MSFT",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI.",
+        "No qualifying new-cash notes example verified in this bounded review. Historical Activision exchange notes are outside the stated window; absence is not zero issuance."
+      ],
+      "source_ids": []
+    },
+    {
+      "entity_id": "AMZN",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI."
+      ],
+      "source_ids": [
+        "amzn-eur",
+        "amzn-eur-terms",
+        "amzn-usd",
+        "amzn-usd-terms"
+      ]
+    },
+    {
+      "entity_id": "GOOGL",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI."
+      ],
+      "source_ids": [
+        "goog",
+        "goog-gbp-terms",
+        "goog-terms-10",
+        "goog-terms-11",
+        "goog-terms-12",
+        "goog-terms-13",
+        "goog-terms-3",
+        "goog-terms-4",
+        "goog-terms-5",
+        "goog-terms-6",
+        "goog-terms-8",
+        "goog-terms-9",
+        "goog-usd-terms"
+      ]
+    },
+    {
+      "entity_id": "META",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI."
+      ],
+      "source_ids": [
+        "meta",
+        "meta-terms"
+      ]
+    },
+    {
+      "entity_id": "ORCL",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI."
+      ],
+      "source_ids": [
+        "orcl",
+        "orcl-terms"
+      ]
+    },
+    {
+      "entity_id": "CRWV",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI."
+      ],
+      "source_ids": [
+        "crwv"
+      ]
+    },
+    {
+      "entity_id": "NBIS",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI.",
+        "Announcement supports maturity years only; month and day are null pending review of the August 20 terms filing. Full exercised purchase options are included once in face value."
+      ],
+      "source_ids": [
+        "nbis",
+        "nbis-6k"
+      ]
+    },
+    {
+      "entity_id": "IREN",
+      "dataset": "bond_events",
+      "window_start": "2025-01-01",
+      "window_end": "2026-10-20",
+      "status": "partial",
+      "limitations": [
+        "Curated closed-event examples only; not a complete issuance history. Missing events and periods must not be treated as zero.",
+        "Amounts are gross face value in native currency; no FX conversion and no claim that all proceeds fund AI."
+      ],
+      "source_ids": [
+        "iren"
+      ]
+    }
+  ],
+  "other_financings": [
+    {
+      "id": "lambda-2026-08-27-tlb",
+      "entity_id": "LAMBDA",
+      "legal_issuer": "Special-purpose borrower not named in reviewed release; parent Lambda, Inc.",
+      "announcement_date": "2026-08-27",
+      "closing_date": "2026-08-27",
+      "instrument_type": "term_loan_b",
+      "status": "closed",
+      "currency": "USD",
+      "face_amount": "926000000",
+      "announced_amount": "926000000",
+      "committed_amount": null,
+      "exclusion_reason": "Senior secured GPU-backed term loan B facility, not notes issuance.",
+      "source_ids": [
+        "lambda"
+      ]
+    },
+    {
+      "id": "nscale-2026-09-25-convertible-financing",
+      "entity_id": "NSCALE",
+      "legal_issuer": "Nscale; exact issuing subsidiary not established in reviewed release",
+      "announcement_date": "2026-09-25",
+      "closing_date": null,
+      "instrument_type": "convertible_loan_notes",
+      "status": "mixed_closed_and_committed",
+      "currency": "USD",
+      "face_amount": "2360000000",
+      "announced_amount": "3360000000",
+      "committed_amount": "1000000000",
+      "exclusion_reason": "Release combines an initial closing with a future NVIDIA commitment; pilot excludes this private convertible loan-note financing pending instrument-level review.",
+      "source_ids": [
+        "nscale"
+      ]
+    },
+    {
+      "id": "crusoe-2026-09-17-series-f",
+      "entity_id": "CRUSOE",
+      "legal_issuer": "Crusoe; exact issuing subsidiary not established in reviewed release",
+      "announcement_date": "2026-09-17",
+      "closing_date": null,
+      "instrument_type": "equity",
+      "status": "initial_close_total_anticipated",
+      "currency": "USD",
+      "face_amount": null,
+      "announced_amount": "3900000000",
+      "committed_amount": null,
+      "exclusion_reason": "Series F equity; headline amount is an anticipated round total, not verified closed bond proceeds.",
+      "source_ids": [
+        "crusoe"
+      ]
+    }
+  ]
+}
