@@ -8,7 +8,6 @@ import re
 import sqlite3
 import sys
 import time as time_module
-from contextlib import closing
 from datetime import date, datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -17,7 +16,6 @@ from zoneinfo import ZoneInfo
 
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 IR_BATCH_SIZE = 10
-SELECTION_BATCH_SIZE = 30
 _PLACEHOLDER = re.compile(r"{{([A-Z_]+)}}")
 
 
@@ -250,77 +248,6 @@ def window_evidence(
     return result
 
 
-def export_selection(db: Path, window_start: str, window_end: str, directory: Path) -> int:
-    """Export model inputs and retain the authoritative batch-to-key mapping."""
-    start = datetime.fromisoformat(window_start)
-    end = datetime.fromisoformat(window_end)
-    if start.utcoffset() is None or end.utcoffset() is None or start >= end:
-        raise ValueError("selection window must have ordered, timezone-aware bounds")
-    batches_dir = directory / "batches"
-    batches_dir.mkdir()
-    uri = f"{db.absolute().as_uri()}?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True)) as connection:
-        rows = connection.execute(
-            "SELECT article_key, url, title, source, published_at, summary FROM news "
-            "WHERE published_at >= ? AND published_at < ? "
-            "AND summary IS NOT NULL AND trim(summary) <> '' ORDER BY article_key",
-            (start.timestamp(), end.timestamp()),
-        ).fetchall()
-
-    batches: dict[str, list[str]] = {}
-    premium: list[str] = []
-    model_rows: list[tuple[Any, ...]] = []
-    for row in rows:
-        if row[3] in ("wsj", "economist"):
-            premium.append(row[0])
-        else:
-            model_rows.append(row)
-    for offset in range(0, len(model_rows), SELECTION_BATCH_SIZE):
-        batch_name = f"batch-{offset // SELECTION_BATCH_SIZE:03d}"
-        batch = model_rows[offset : offset + SELECTION_BATCH_SIZE]
-        batches[batch_name] = [row[0] for row in batch]
-        with (batches_dir / batch_name).open("w", encoding="utf-8") as output:
-            for article_id, row in enumerate(batch, start=1):
-                record = dict(
-                    zip(("url", "title", "source", "published_at", "summary"), row[1:])
-                )
-                record["article_id"] = article_id
-                output.write(json.dumps(record, ensure_ascii=False) + "\n")
-    _write_json(
-        directory / "selection-map.json", {"batches": batches, "premium": premium}
-    )
-    return len(batches)
-
-
-def resolve_selection(directory: Path) -> list[str]:
-    """Resolve selected batch-local IDs and include all premium-source keys."""
-    mapping = json.loads((directory / "selection-map.json").read_text(encoding="utf-8"))
-    selected = set(mapping["premium"])
-    for batch_name, keys in mapping["batches"].items():
-        result_path = directory / "results" / f"{batch_name}.md"
-        lines = result_path.read_text(encoding="utf-8").splitlines()
-        if not lines:
-            raise ValueError(f"empty selection result: {result_path}")
-        seen: set[int] = set()
-        for line_number, line in enumerate(lines, start=1):
-            try:
-                result = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"invalid JSON at {result_path}:{line_number}") from exc
-            if not isinstance(result, dict) or "article_id" not in result:
-                raise ValueError(f"missing article_id at {result_path}:{line_number}")
-            article_id = result["article_id"]
-            if article_id is None and len(lines) == 1:
-                continue
-            if type(article_id) is not int or not 1 <= article_id <= len(keys):
-                raise ValueError(f"invalid article_id at {result_path}:{line_number}")
-            if article_id in seen:
-                raise ValueError(f"duplicate article_id at {result_path}:{line_number}")
-            seen.add(article_id)
-            selected.add(keys[article_id - 1])
-    return sorted(selected)
-
-
 def collector_summary(launched_path: Path, artifact_root: Path) -> dict[str, Any]:
     """Aggregate per-collector status artifacts in launch order."""
     launched = (
@@ -495,14 +422,6 @@ def _main(command: str, args: list[str]) -> None:
                 Path(db), parse_run_date(run_date), skipped=len(args) == 4
             ),
         )
-    elif command == "selection-export":
-        _require(command, args, 4)
-        db, start, end, directory = args
-        print(export_selection(Path(db), start, end, Path(directory)))
-    elif command == "selection-resolve":
-        _require(command, args, 1)
-        for article_key in resolve_selection(Path(args[0])):
-            print(json.dumps({"article_key": article_key}))
     elif command == "render-prompt":
         _render_prompt_command(args)
     elif command == "validate-openclaw":

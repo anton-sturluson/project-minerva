@@ -12,6 +12,6 @@ Prefer filings, investor relations, and regulators, then WSJ, Economist, and Reu
 
 Return only JSONL, one line per selected article:
 
-{"article_id":1,"rationale":"why this article could change long-term value or risk"}
+{"article_key":"exact-key-from-input","rationale":"why this article could change long-term value or risk"}
 
-Use each selected article's exact integer `article_id` from this batch once. If nothing qualifies, return only `{"article_id":null,"rationale":"No article qualifies."}`.
+If nothing qualifies, return `{"article_key":null,"rationale":"No article qualifies."}`.
