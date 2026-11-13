@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 import yaml
+from urllib3.exceptions import ReadTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -1348,14 +1349,25 @@ def read_text_source(source: str, *, accept: str | None = None) -> tuple[str, st
         headers: dict[str, str] = {}
         if accept:
             headers["Accept"] = accept
-        response = _http_session().get(source, timeout=30, headers=headers if headers else None)
-        # Retry once on 429 (rate limit)
-        if response.status_code == 429:
-            retry_after = int(response.headers.get("Retry-After", "2"))
-            import time as _time_mod
-            _time_mod.sleep(min(retry_after, 10))
-            response = _http_session().get(source, timeout=30, headers=headers if headers else None)
-        response.raise_for_status()
+        for attempt in range(2):
+            try:
+                response = _http_session().get(source, timeout=30, headers=headers if headers else None)
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                body_timeout = (
+                    isinstance(exc, requests.ConnectionError)
+                    and bool(exc.args)
+                    and isinstance(exc.args[0], ReadTimeoutError)
+                )
+                if attempt or not (isinstance(exc, requests.Timeout) or body_timeout):
+                    raise
+                time.sleep(2)
+                continue
+            if attempt == 0 and (response.status_code == 429 or 500 <= response.status_code < 600):
+                retry_after = int(response.headers.get("Retry-After", "2")) if response.status_code == 429 else 2
+                time.sleep(min(retry_after, 10))
+                continue
+            response.raise_for_status()
+            break
         suffix = Path(parsed.path).suffix or _suffix_from_content_type(response.headers.get("content-type", ""))
         return response.text, suffix or ".json"
     candidate = Path(source).expanduser()
