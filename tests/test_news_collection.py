@@ -38,6 +38,21 @@ set -euo pipefail
 subcommand="${1:-}"
 action="${2:-}"
 printf '%s\n' "$*" >> "${MINERVA_CALL_LOG}"
+if [[ "${subcommand} ${action}" == "portfolio sync" && "${TEST_REAL_SYNC:-}" == 1 ]]; then
+  exec "$TEST_PYTHON" - "$@" <<'PYCODE'
+import os
+import sys
+import requests
+from harness.cli import app
+
+if os.environ.get("TEST_SYNC_SOURCE_FAILURE") == "1":
+    def fail_request(*args, **kwargs):
+        raise requests.Timeout("synthetic source timeout")
+    requests.Session.get = fail_request
+sys.argv = ["minerva", *sys.argv[1:]]
+app()
+PYCODE
+fi
 if [[ "${subcommand} ${action}" == "${TEST_FAIL_PHASE:-}" ]]; then
   echo "synthetic ${subcommand} ${action} failure" >&2
   exit 7

@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from datetime import date
+
+from harness.portfolio_state import sync_portfolio
 from tests.morning_brief_fixtures import SYNTHESIS_JOB_ID
 from tests.test_news_collection import _phase_dir, _run_wrapper
 
@@ -110,22 +113,27 @@ def test_failed_preparation_never_starts_final_writer(
 @pytest.mark.parametrize("saved_portfolio", [True, False])
 def test_sync_failure_uses_saved_portfolio_or_fails_without_one(tmp_path: Path, saved_portfolio: bool) -> None:
     """A failed refresh can continue only when the saved universe can be used."""
-    universe_path: Path = tmp_path / "workspace/data/01-portfolio/current/universe.json"
+    workspace: Path = tmp_path / "workspace"
+    portfolio: Path = workspace / "data/01-portfolio"
+    universe_path: Path = portfolio / "current/universe.json"
     if saved_portfolio:
-        universe_path.parent.mkdir(parents=True)
-        universe_path.write_text(json.dumps([
-            {"security_id": "NVDA", "ticker": "NVDA", "company_name": "Saved NVIDIA"},
-        ]))
+        holdings_source: Path = tmp_path / "saved-holdings.csv"
+        holdings_source.write_text("ticker,company,weight,shares\nNVDA,Saved NVIDIA,100,1\n")
+        sync_portfolio(workspace, as_of=date.fromisoformat(RUN_DATE), holdings_source=str(holdings_source))
+        saved_files: dict[Path, bytes] = {path: path.read_bytes() for path in portfolio.rglob("*") if path.is_file()}
     result: subprocess.CompletedProcess[str] = _run_wrapper(
         tmp_path, sources=[], run_date=RUN_DATE,
-        extra_env={"MINERVA_SKIP_NEWS": "1", "TEST_FAIL_PHASE": "portfolio sync", "TEST_REAL_FILINGS": "1"},
+        extra_env={
+            "MINERVA_SKIP_NEWS": "1", "TEST_REAL_SYNC": "1", "TEST_SYNC_SOURCE_FAILURE": "1",
+            "TEST_REAL_FILINGS": "1", "MINERVA_PORTFOLIO_HOLDINGS_SOURCE": "https://example.com/holdings.csv",
+        },
     )
 
     phase_dir: Path = _phase_dir(tmp_path, RUN_DATE)
     status: dict[str, str | int] = json.loads((phase_dir / "portfolio-sync.status.json").read_text())
     assert status["status"] == "failed"
-    assert status["exit_status"] == 7
-    assert "synthetic portfolio sync failure" in result.stderr
+    assert status["exit_status"] == 75
+    assert "synthetic source timeout" in result.stderr
     assert "warning[portfolio-sync]" in result.stderr
     if saved_portfolio:
         assert result.returncode == 0, result.stderr
@@ -133,11 +141,59 @@ def test_sync_failure_uses_saved_portfolio_or_fails_without_one(tmp_path: Path, 
         filings: dict = json.loads(raw_filings.read_text())
         assert any(company["security"]["company_name"] == "Saved NVIDIA" for company in filings["companies"])
         assert json.loads(universe_path.read_text())[0]["company_name"] == "Saved NVIDIA"
+        assert {path: path.read_bytes() for path in portfolio.rglob("*") if path.is_file()} == saved_files
         assert (tmp_path / "coordinator/synthesis.log").is_file()
     else:
         assert result.returncode != 0
         assert "portfolio universe is empty" in result.stderr
         assert not (tmp_path / "coordinator/synthesis.log").exists()
+
+
+def test_sync_write_failure_stops_before_using_partial_portfolio(tmp_path: Path) -> None:
+    """A local write error must not admit synthesis with mixed portfolio state."""
+    workspace: Path = tmp_path / "workspace"
+    old_holdings: Path = tmp_path / "old-holdings.csv"
+    old_holdings.write_text("ticker,company,weight,shares\nALFA,Old company,100,1\n")
+    sync_portfolio(workspace, as_of=date.fromisoformat(RUN_DATE), holdings_source=str(old_holdings))
+    watchlist: Path = workspace / "data/01-portfolio/current/watchlist.json"
+    watchlist.chmod(0o444)
+    try:
+        result: subprocess.CompletedProcess[str] = _run_wrapper(
+            tmp_path, sources=[], run_date=RUN_DATE,
+            extra_env={"MINERVA_SKIP_NEWS": "1", "TEST_REAL_SYNC": "1"},
+        )
+    finally:
+        watchlist.chmod(0o644)
+
+    assert result.returncode == 1
+    assert "Permission denied" in result.stderr
+    assert "warning[portfolio-sync]" not in result.stderr
+    assert not (tmp_path / "coordinator/synthesis.log").exists()
+    holdings: list[dict[str, object]] = json.loads((watchlist.parent / "holdings.json").read_text())
+    universe: list[dict[str, object]] = json.loads((watchlist.parent / "universe.json").read_text())
+    assert {holding["ticker"] for holding in holdings} == {"MSFT", "NVDA"}
+    assert universe[0]["ticker"] == "ALFA"
+
+
+@pytest.mark.parametrize("source_failure", [False, True])
+def test_sync_status_write_failure_stops_pipeline(tmp_path: Path, source_failure: bool) -> None:
+    """A failed status artifact must not be mistaken for a safe source failure."""
+    status_path: Path = _phase_dir(tmp_path, RUN_DATE) / "portfolio-sync.status.json"
+    status_path.mkdir(parents=True)
+    extra_env: dict[str, str | None] = {"MINERVA_SKIP_NEWS": "1"}
+    if source_failure:
+        extra_env.update({
+            "TEST_REAL_SYNC": "1", "TEST_SYNC_SOURCE_FAILURE": "1",
+            "MINERVA_PORTFOLIO_HOLDINGS_SOURCE": "https://example.com/holdings.csv",
+        })
+    result: subprocess.CompletedProcess[str] = _run_wrapper(
+        tmp_path, sources=[], run_date=RUN_DATE, extra_env=extra_env,
+    )
+
+    assert result.returncode == 1
+    assert "portfolio-sync.status.json" in result.stderr
+    assert "warning[portfolio-sync]" not in result.stderr
+    assert not (tmp_path / "coordinator/synthesis.log").exists()
 
 
 def test_handoff_write_failure_never_starts_final_writer(tmp_path: Path) -> None:
