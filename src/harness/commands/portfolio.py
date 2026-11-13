@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Mapping
 
+import requests
 import typer
 
 from harness.commands.common import abort_with_help, elapsed_ms, error_result, parse_flag_args, show_help_if_bare
@@ -112,13 +113,17 @@ def sync_command(
             transactions_gid=transactions_gid,
         )
     except Exception as exc:
-        return error_result(
+        result = error_result(
             f"failed to sync portfolio state: {exc}",
             "provide holdings and transaction sources or configure a sheet export",
             ["`portfolio sync --holdings-source ./holdings.csv --transactions-source ./transactions.csv`"],
             start,
             help_text=PORTFOLIO_HELP,
         )
+        # Source requests complete before sync starts writing portfolio files.
+        if isinstance(exc, requests.RequestException):
+            result.exit_code = 75
+        return result
     lines = [
         f"as_of: {summary['as_of']}",
         f"holdings: {summary['holdings_count']}",
