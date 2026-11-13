@@ -184,7 +184,9 @@ portfolio_sync_args=(portfolio sync --date "${RUN_DATE}"
   --holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}"
   --transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
 [[ -z "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] || portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
-run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"
+if ! run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"; then
+  echo "warning[portfolio-sync]: continuing with the last saved portfolio" >&2
+fi
 
 run_minerva_phase filings brief filings --date "${RUN_DATE}"
 

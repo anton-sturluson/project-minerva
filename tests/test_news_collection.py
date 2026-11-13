@@ -42,6 +42,22 @@ if [[ "${subcommand} ${action}" == "${TEST_FAIL_PHASE:-}" ]]; then
   echo "synthetic ${subcommand} ${action} failure" >&2
   exit 7
 fi
+if [[ "${subcommand} ${action}" == "brief filings" && "${TEST_REAL_FILINGS:-}" == 1 ]]; then
+  exec "$TEST_PYTHON" - <<'PYCODE'
+import json
+import os
+from datetime import date
+from pathlib import Path
+from harness.morning_brief import collect_filings
+
+result = collect_filings(
+    Path(os.environ["MINERVA_WORKSPACE_ROOT"]),
+    run_date=date.fromisoformat(os.environ["TEST_RUN_DATE"]),
+    source=str(Path(os.environ["TEST_REPO_ROOT"]) / "tests/fixtures/morning_brief/filings.json"),
+)
+print(json.dumps(result, default=str))
+PYCODE
+fi
 if [[ "${subcommand} ${action}" == "brief prep" ]]; then
   exec "$TEST_PYTHON" "$TEST_FIXTURES" prepare
 fi

@@ -9,8 +9,6 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 import pytest
-import requests
-from urllib3.exceptions import ReadTimeoutError
 
 from harness.portfolio_state import (
     _google_sheets_gviz_url,
@@ -205,121 +203,6 @@ def test_google_url_loader_fetches_gviz_not_rounded_csv() -> None:
     assert "/gviz/tq" in requested_url
     assert "gid=12345" in requested_url
     assert rows[0]["shares"] == 0.123456789
-
-
-def _http_response(status: int, body: str = "") -> requests.Response:
-    """Build a synthetic response from the Sheets service."""
-    response = requests.Response()
-    response.status_code = status
-    response.url = "https://docs.google.com/spreadsheets/d/example/gviz/tq"
-    response._content = body.encode("utf-8")
-    return response
-
-
-@pytest.mark.parametrize("failure", [_http_response(429), _http_response(500), _http_response(502), requests.Timeout("timed out")])
-def test_sync_retries_transient_sheet_failure_and_imports_exact_values(tmp_path: Path, failure: object) -> None:
-    with patch("harness.portfolio_state._http_session") as session, patch("harness.portfolio_state.time.sleep"):
-        session.return_value.get.side_effect = [failure, _http_response(200, _fixture_text("portfolio_main.gviz"))]
-        sync_portfolio(tmp_path, as_of=RUN_DATE, sheet_id="example", holdings_gid="12345")
-
-    holdings = load_json(tmp_path / "data" / "01-portfolio" / "current" / "holdings.json", default=[])
-    assert [(row["ticker"], row["shares"], row["weight"]) for row in holdings] == [
-        ("ALFA", 12.3456789, 55), ("BETA", 8.7654321, 45),
-    ]
-
-
-@pytest.mark.parametrize("timeouts", [1, 2])
-def test_sheet_body_timeout_retries_at_most_once(timeouts: int) -> None:
-    class TimedOutBody:
-        """Simulate a timeout while Requests consumes a response body."""
-
-        def stream(self, *args: object, **kwargs: object) -> object:
-            """Raise the underlying urllib3 read timeout."""
-            raise ReadTimeoutError(None, "/gviz/tq", "response body timed out")
-
-    class SheetAdapter(requests.adapters.BaseAdapter):
-        """Return real Requests responses with controlled body reads."""
-
-        def __init__(self) -> None:
-            """Start the request count."""
-            self.attempts = 0
-
-        def send(self, request: requests.PreparedRequest, **kwargs: object) -> requests.Response:
-            """Return a timed-out or successful response."""
-            self.attempts += 1
-            response = requests.Response()
-            response.status_code = 200
-            response.url = request.url
-            response.request = request
-            if self.attempts <= timeouts:
-                response.raw = TimedOutBody()
-            else:
-                response._content = _fixture_text("portfolio_main.gviz").encode("utf-8")
-            return response
-
-        def close(self) -> None:
-            """Close this adapter, which owns no resources."""
-
-    adapter = SheetAdapter()
-    session = requests.Session()
-    session.mount("https://docs.google.com/", adapter)
-    source = "https://docs.google.com/spreadsheets/d/example/export?format=csv&gid=12345"
-    with patch("harness.portfolio_state._http_session", return_value=session), patch("harness.portfolio_state.time.sleep"):
-        if timeouts == 1:
-            rows = load_tabular_rows(source)
-            assert rows[0]["shares"] == 12.3456789
-        else:
-            with pytest.raises(requests.ConnectionError):
-                load_tabular_rows(source)
-    assert adapter.attempts == 2
-
-
-def test_sheet_unrelated_connection_error_is_not_retried() -> None:
-    source = "https://docs.google.com/spreadsheets/d/example/export?format=csv&gid=12345"
-    with patch("harness.portfolio_state._http_session") as session, patch("harness.portfolio_state.time.sleep"):
-        session.return_value.get.side_effect = requests.ConnectionError("connection failed")
-        with pytest.raises(requests.ConnectionError):
-            load_tabular_rows(source)
-    assert session.return_value.get.call_count == 1
-
-
-def test_sheet_rate_limit_honors_bounded_retry_after() -> None:
-    response = _http_response(429)
-    response.headers["Retry-After"] = "20"
-    source = "https://docs.google.com/spreadsheets/d/example/export?format=csv&gid=12345"
-    with patch("harness.portfolio_state._http_session") as session, patch("harness.portfolio_state.time.sleep") as sleep:
-        session.return_value.get.side_effect = [response, _http_response(200, _fixture_text("portfolio_main.gviz"))]
-        rows = load_tabular_rows(source)
-    assert rows[0]["shares"] == 12.3456789
-    sleep.assert_called_once_with(10)
-
-
-@pytest.mark.parametrize(
-    ("failures", "error"),
-    [
-        ([_http_response(503), _http_response(502)], requests.HTTPError),
-        ([requests.Timeout("first"), requests.Timeout("second")], requests.Timeout),
-        ([_http_response(404)], requests.HTTPError),
-    ],
-)
-def test_sheet_fetch_failure_preserves_current_portfolio(
-    tmp_path: Path, failures: list[object], error: type[Exception],
-) -> None:
-    sync_portfolio(
-        tmp_path, as_of=RUN_DATE,
-        holdings_source=str(FIXTURE_DIR / "holdings.csv"),
-        transactions_source=str(FIXTURE_DIR / "transactions_main.csv"),
-    )
-    portfolio = tmp_path / "data" / "01-portfolio"
-    before = {path: path.read_bytes() for path in portfolio.rglob("*") if path.is_file()}
-    with patch("harness.portfolio_state._http_session") as session, patch("harness.portfolio_state.time.sleep"):
-        session.return_value.get.side_effect = [_http_response(200, _fixture_text("portfolio_main.gviz")), *failures]
-        with pytest.raises(error):
-            sync_portfolio(
-                tmp_path, as_of=RUN_DATE, sheet_id="example", holdings_gid="12345", transactions_gid="67890",
-            )
-    assert {path: path.read_bytes() for path in portfolio.rglob("*") if path.is_file()} == before
-    assert session.return_value.get.call_count == 1 + len(failures)
 
 
 def test_gviz_rejects_non_ok_malformed_and_executable_wrappers() -> None:

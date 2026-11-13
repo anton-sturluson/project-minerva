@@ -82,7 +82,6 @@ def test_only_one_synthesis_job_argument_is_accepted(tmp_path: Path, args: list[
 
 
 @pytest.mark.parametrize(("extra_env", "phase", "exit_code", "diagnostic"), [
-    ({"TEST_FAIL_PHASE": "portfolio sync"}, "portfolio-sync", 7, "synthetic portfolio sync failure"),
     ({"TEST_FAIL_PHASE": "brief earnings"}, "earnings", 7, "synthetic brief earnings failure"),
     ({"TEST_FAIL_PHASE": "brief prep"}, "prep", 7, "synthetic brief prep failure"),
     ({"TEST_MANIFEST_MODE": "error"}, "manifest-check", 1, "blocking morning-brief collection errors"),
@@ -106,8 +105,39 @@ def test_failed_preparation_never_starts_final_writer(
     status: dict[str, str | int] = json.loads((phase_dir / f"{phase}.status.json").read_text())
     assert status["status"] == "failed"
     assert status["exit_status"] == exit_code
-    if phase == "portfolio-sync":
-        assert len((tmp_path / "coordinator/minerva-calls.log").read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("saved_portfolio", [True, False])
+def test_sync_failure_uses_saved_portfolio_or_fails_without_one(tmp_path: Path, saved_portfolio: bool) -> None:
+    """A failed refresh can continue only when the saved universe can be used."""
+    universe_path: Path = tmp_path / "workspace/data/01-portfolio/current/universe.json"
+    if saved_portfolio:
+        universe_path.parent.mkdir(parents=True)
+        universe_path.write_text(json.dumps([
+            {"security_id": "NVDA", "ticker": "NVDA", "company_name": "Saved NVIDIA"},
+        ]))
+    result: subprocess.CompletedProcess[str] = _run_wrapper(
+        tmp_path, sources=[], run_date=RUN_DATE,
+        extra_env={"MINERVA_SKIP_NEWS": "1", "TEST_FAIL_PHASE": "portfolio sync", "TEST_REAL_FILINGS": "1"},
+    )
+
+    phase_dir: Path = _phase_dir(tmp_path, RUN_DATE)
+    status: dict[str, str | int] = json.loads((phase_dir / "portfolio-sync.status.json").read_text())
+    assert status["status"] == "failed"
+    assert status["exit_status"] == 7
+    assert "synthetic portfolio sync failure" in result.stderr
+    assert "warning[portfolio-sync]" in result.stderr
+    if saved_portfolio:
+        assert result.returncode == 0, result.stderr
+        raw_filings: Path = tmp_path / f"workspace/reports/03-daily-news/{RUN_DATE}/data/raw/filings.json"
+        filings: dict = json.loads(raw_filings.read_text())
+        assert any(company["security"]["company_name"] == "Saved NVIDIA" for company in filings["companies"])
+        assert json.loads(universe_path.read_text())[0]["company_name"] == "Saved NVIDIA"
+        assert (tmp_path / "coordinator/synthesis.log").is_file()
+    else:
+        assert result.returncode != 0
+        assert "portfolio universe is empty" in result.stderr
+        assert not (tmp_path / "coordinator/synthesis.log").exists()
 
 
 def test_handoff_write_failure_never_starts_final_writer(tmp_path: Path) -> None:
