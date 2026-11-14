@@ -150,7 +150,7 @@ run_minerva_phase() {
   local status
   if run "$@" >"${stdout_path}" 2>"${stderr_path}"; then
     write_status "${PHASE_DIR}/${phase}.status.json" "${phase}" ok 0 \
-      "${stdout_path}" "${stderr_path}"
+      "${stdout_path}" "${stderr_path}" || return 1
     if [[ -s "${stdout_path}" ]]; then
       echo "  ${phase}: $(tail -n 1 "${stdout_path}")"
     else
@@ -159,7 +159,7 @@ run_minerva_phase() {
   else
     status=$?
     write_status "${PHASE_DIR}/${phase}.status.json" "${phase}" failed \
-      "${status}" "${stdout_path}" "${stderr_path}"
+      "${status}" "${stdout_path}" "${stderr_path}" || return 1
     echo "error[${phase}]: failed with status ${status}" >&2
     local diagnostics_path="${stderr_path}"
     [[ -s "${stderr_path}" || ! -s "${stdout_path}" ]] || diagnostics_path="${stdout_path}"
@@ -184,7 +184,16 @@ portfolio_sync_args=(portfolio sync --date "${RUN_DATE}"
   --holdings-source "${MINERVA_PORTFOLIO_HOLDINGS_SOURCE}"
   --transactions-source "${MINERVA_PORTFOLIO_TRANSACTIONS_SOURCE}")
 [[ -z "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE:-}" ]] || portfolio_sync_args+=(--watchlist-source "${MINERVA_PORTFOLIO_WATCHLIST_SOURCE}")
-run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"
+if run_minerva_phase portfolio-sync "${portfolio_sync_args[@]}"; then
+  :
+else
+  sync_status=$?
+  # Exit 75 means a source request failed before portfolio writes began.
+  if [[ "${sync_status}" -ne 75 ]]; then
+    exit "${sync_status}"
+  fi
+  echo "warning[portfolio-sync]: continuing with the last saved portfolio" >&2
+fi
 
 run_minerva_phase filings brief filings --date "${RUN_DATE}"
 

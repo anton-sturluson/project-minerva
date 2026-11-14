@@ -27,12 +27,12 @@ def test_collector_uses_luna_with_high_reasoning() -> None:
     assert "fireworks/accounts/fireworks/routers/glm-5p2-fast" not in runner
 
 
-def test_selection_uses_terra61_and_keeps_premium_sources_separate() -> None:
+def test_selection_uses_sol61_and_keeps_premium_sources_separate() -> None:
     synthesis = _read_prompt("morning_brief_synthesis.md")
     selection = synthesis.split("## 3.", 1)[1].split("## 4.", 1)[0]
 
-    assert "--model gpt-6.1-terra" in selection
-    assert "--thinking xhigh" in selection
+    assert "--model gpt-6.1-sol" in selection
+    assert "--thinking high" in selection
     assert "summarize --model gpt-6-luna --thinking medium" in synthesis
     assert "whose `source` is not exactly `wsj` or `economist`" in selection
     assert "whose `source` is exactly `wsj` or `economist`" in selection

@@ -23,7 +23,7 @@ uv run minerva summarize --model gpt-6-luna --thinking medium
 - After all calls succeed, persist summaries with parameter binding in one SQLite transaction. Update by `article_key` only where the summary is still NULL or blank.
 - Re-query the same fixed half-open window and require zero eligible blank summaries before selection. Reruns must be idempotent.
 
-## 3. Select non-premium articles with Terra 6.1 and auto-advance premium sources
+## 3. Select non-premium articles with Sol 6.1 and auto-advance premium sources
 
 Do not read the batch inputs into your context.
 
@@ -39,8 +39,8 @@ uv run minerva extract-files \
   --questions-file "$SELECTION_TMP/relevance-prompt.md" \
   --files "$SELECTION_TMP/batch-*" \
   --out "$SELECTION_TMP/results" \
-  --model gpt-6.1-terra \
-  --thinking xhigh \
+  --model gpt-6.1-sol \
+  --thinking high \
   --concurrency "$BATCH_COUNT"
 ```
 

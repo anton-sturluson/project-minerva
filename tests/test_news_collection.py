@@ -38,9 +38,40 @@ set -euo pipefail
 subcommand="${1:-}"
 action="${2:-}"
 printf '%s\n' "$*" >> "${MINERVA_CALL_LOG}"
+if [[ "${subcommand} ${action}" == "portfolio sync" && "${TEST_REAL_SYNC:-}" == 1 ]]; then
+  exec "$TEST_PYTHON" - "$@" <<'PYCODE'
+import os
+import sys
+import requests
+from harness.cli import app
+
+if os.environ.get("TEST_SYNC_SOURCE_FAILURE") == "1":
+    def fail_request(*args, **kwargs):
+        raise requests.Timeout("synthetic source timeout")
+    requests.Session.get = fail_request
+sys.argv = ["minerva", *sys.argv[1:]]
+app()
+PYCODE
+fi
 if [[ "${subcommand} ${action}" == "${TEST_FAIL_PHASE:-}" ]]; then
   echo "synthetic ${subcommand} ${action} failure" >&2
   exit 7
+fi
+if [[ "${subcommand} ${action}" == "brief filings" && "${TEST_REAL_FILINGS:-}" == 1 ]]; then
+  exec "$TEST_PYTHON" - <<'PYCODE'
+import json
+import os
+from datetime import date
+from pathlib import Path
+from harness.morning_brief import collect_filings
+
+result = collect_filings(
+    Path(os.environ["MINERVA_WORKSPACE_ROOT"]),
+    run_date=date.fromisoformat(os.environ["TEST_RUN_DATE"]),
+    source=str(Path(os.environ["TEST_REPO_ROOT"]) / "tests/fixtures/morning_brief/filings.json"),
+)
+print(json.dumps(result, default=str))
+PYCODE
 fi
 if [[ "${subcommand} ${action}" == "brief prep" ]]; then
   exec "$TEST_PYTHON" "$TEST_FIXTURES" prepare
