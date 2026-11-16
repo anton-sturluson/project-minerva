@@ -47,7 +47,7 @@ uv run minerva extract-files \
 5. Stop if the extractor fails. Resolve selections against the corresponding unchanged batch using the extractor manifest, and union them with the auto-advanced keys. The following command validates every index before writing any selected keys; a failure stops selection without a partial union. Do not use rationales in synthesis.
 
 ```bash
-python3 scripts/resolve_morning_brief_selection.py "$SELECTION_TMP"
+uv run minerva brief resolve-selection --selection-dir "$SELECTION_TMP"
 ```
 
 Use `selected-keys.jsonl` for the verified union. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage and use the source with the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by the selection model unless their source is exactly `wsj` or `economist`. Clearly label rumors and third-party interpretations.

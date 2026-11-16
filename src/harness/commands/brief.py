@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -30,6 +31,7 @@ BRIEF_HELP = (
     "  minerva brief macro-collect --date 2026-04-08\n"
     "  minerva brief earnings --date 2026-04-08 --source ./market-data.json\n"
     "  minerva brief prep --date 2026-04-08\n"
+    "  minerva brief resolve-selection --selection-dir ./selection\n"
 )
 
 app = typer.Typer(help=BRIEF_HELP, no_args_is_help=True)
@@ -42,6 +44,11 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
 
     subcommand = args[0]
     try:
+        if subcommand == "resolve-selection":
+            parsed = parse_flag_args(args[1:])
+            if not parsed.get("selection-dir"):
+                raise ValueError("--selection-dir is required")
+            return resolve_selection_command(selection_dir=str(parsed["selection-dir"]))
         if subcommand == "filings":
             parsed = parse_flag_args(args[1:])
             return filings_command(
@@ -102,6 +109,53 @@ def dispatch(args: list[str], settings: HarnessSettings, stdin: bytes = b"") -> 
         return CommandResult.from_text("", stderr=str(exc), exit_code=1)
 
     return CommandResult.from_text("", stderr=_usage_error(f"unknown `brief` subcommand `{subcommand}`"), exit_code=1)
+
+def resolve_selection_command(*, selection_dir: str) -> CommandResult:
+    """Resolve selected batch indices and auto-advanced keys."""
+    start = time.perf_counter()
+    root = Path(selection_dir)
+    try:
+        manifest = (
+            json.loads((root / "results/manifest.json").read_text())
+            if any(root.glob("batch-*")) else {"entries": []}
+        )
+        keys: set[str] = set()
+        for entry in manifest["entries"]:
+            if entry["status"] != "ok":
+                raise ValueError("selection extraction failed")
+            rows = [json.loads(line) for line in Path(entry["source"]).read_text().splitlines()]
+            if any(
+                type(row["index"]) is not int or row["index"] != i
+                for i, row in enumerate(rows, 1)
+            ):
+                raise ValueError("invalid batch indices")
+            seen: set[int] = set()
+            selections = Path(entry["output"]).read_text().splitlines()
+            if not selections:
+                raise ValueError("empty selection result")
+            for line in selections:
+                index = json.loads(line)["index"]
+                if index is None:
+                    continue
+                if type(index) is not int or not 1 <= index <= len(rows) or index in seen:
+                    raise ValueError("invalid or duplicate selection index")
+                seen.add(index)
+                keys.add(rows[index - 1]["article_key"])
+        for line in (root / "auto-advanced-keys.jsonl").read_text().splitlines():
+            key = json.loads(line)["article_key"]
+            if key is not None:
+                keys.add(key)
+        (root / "selected-keys.jsonl").write_text(
+            "".join(json.dumps({"article_key": key}) + "\n" for key in sorted(keys))
+        )
+    except Exception as exc:
+        return error_result(
+            f"failed to resolve selection: {exc}",
+            "check the selection batches and extractor results, then retry",
+            ["`brief resolve-selection --selection-dir ./selection`"],
+            start,
+        )
+    return CommandResult.from_text(str(root / "selected-keys.jsonl"), duration_ms=elapsed_ms(start))
 
 def filings_command(
     *,
@@ -294,6 +348,12 @@ def review_log_command(*, run_date, notes: str, settings: HarnessSettings) -> Co
             start,
         )
     return CommandResult.from_text(_summary_lines(summary), duration_ms=elapsed_ms(start))
+
+@app.command("resolve-selection", help="Resolve selected batch indices to article keys.")
+def resolve_selection_cli(
+    selection_dir: str = typer.Option(..., "--selection-dir", help="Selection temporary directory."),
+) -> None:
+    _print(resolve_selection_command(selection_dir=selection_dir))
 
 @app.command("filings", help="Collect overnight SEC filings for the monitored universe.")
 def filings_cli(
