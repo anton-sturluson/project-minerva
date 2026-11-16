@@ -27,7 +27,7 @@ from investor_platform.models import MarketCache, ResearchFiling, ResearchHoldin
 from investor_platform.research.snapshots import previous_quarter, quarter_end
 
 router: APIRouter = APIRouter(prefix="/api/research/activity")
-MAPPING_PROVIDER: str = "openfigi-cusip-us-v1"
+MAPPING_PROVIDER: str = "openfigi-cusip-us-v2"
 MAPPING_DATE: date = date(2000, 1, 1)
 MAPPING_URL: str = "https://api.openfigi.com/v3/mapping"
 
@@ -91,11 +91,22 @@ def parse_mapping(body: dict) -> Mapping:
     composite: str
     symbol: str
     composite, symbol = next(iter(identities))
-    if not re.fullmatch(r"[A-Z][A-Z0-9]{0,9}", symbol):
+    if not (
+        re.fullmatch(r"[A-Z][A-Z0-9]{0,9}", symbol)
+        or (
+            re.fullmatch(r"[A-Z][A-Z0-9]{0,9}/[A-Z]", symbol)
+            and all(row.get("securityType") == "Common Stock" for row in rows)
+        )
+    ):
         result["reason"] = "Mapped ticker format is unsupported by the price provider"
         return result
     result.update(symbol=symbol, composite_figi=composite, reason=None)
     return result
+
+
+def provider_symbol(symbol: str) -> str:
+    """Translate an accepted OpenFIGI share-class ticker for price providers."""
+    return symbol.replace("/", "-")
 
 
 def fetch_mappings(cusips: list[str]) -> list[Mapping]:
@@ -107,7 +118,7 @@ def fetch_mappings(cusips: list[str]) -> list[Mapping]:
         data=json.dumps(
             [
                 {
-                    "idType": "ID_CUSIP",
+                    "idType": "ID_CINS" if cusip[0].isalpha() else "ID_CUSIP",
                     "idValue": cusip,
                     "exchCode": "US",
                     "currency": "USD",
@@ -224,7 +235,7 @@ def summarize(history: History, start: date, end: date, mapping: Mapping) -> Mar
             session_count=len(closes),
             prices_fetched_at=history.fetched_at.isoformat() if history.fetched_at else None,
         )
-    symbol: str = mapping["symbol"] or ""
+    symbol: str = provider_symbol(mapping["symbol"] or "")
     result["source_urls"].append(
         f"https://api.tiingo.com/tiingo/daily/{quote(symbol, safe='')}/prices"
         if history.source == "Tiingo daily history"
@@ -239,7 +250,7 @@ def price_context(
     """Reuse validated cached daily histories with the configured optional Tiingo fallback."""
     if mapping["reason"] or not mapping["symbol"]:
         return unavailable(mapping, mapping["reason"] or "Security mapping unavailable")
-    symbol: str = mapping["symbol"]
+    symbol: str = provider_symbol(mapping["symbol"])
     history: History
     try:
         history = cached_history(

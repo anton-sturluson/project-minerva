@@ -30,6 +30,7 @@ def mapped_row(symbol: str = "SYNTH", composite: str = "BBG000000001") -> dict:
         "compositeFIGI": composite,
         "marketSector": "Equity",
         "exchCode": "US",
+        "securityType": "Common Stock",
     }
 
 
@@ -39,7 +40,20 @@ def mapped_row(symbol: str = "SYNTH", composite: str = "BBG000000001") -> dict:
         ([], "No exact"),
         ([mapped_row(), mapped_row(composite="BBG000000002")], "Ambiguous"),
         ([mapped_row(), mapped_row(symbol="OTHER")], "Ambiguous"),
-        ([mapped_row(symbol="SYNTH/A")], "unsupported"),
+        (
+            [{k: v for k, v in mapped_row(symbol="SYNTH/A").items() if k != "securityType"}],
+            "unsupported",
+        ),
+        ([mapped_row(symbol="SYNTH/A") | {"securityType": "Warrant"}], "unsupported"),
+        (
+            [
+                mapped_row(symbol="SYNTH/A"),
+                mapped_row(symbol="SYNTH/A") | {"securityType": "Preferred Stock"},
+            ],
+            "unsupported",
+        ),
+        ([mapped_row(symbol="SYNTH/A"), mapped_row(symbol="SYNTH-A")], "Ambiguous"),
+        ([mapped_row(symbol="SYNTH/AB")], "unsupported"),
         ([mapped_row(symbol="SYNTH.A")], "unsupported"),
         ([mapped_row() | {"marketSector": "Corp"}], "verified"),
         ([mapped_row() | {"exchCode": "LN"}], "verified"),
@@ -438,3 +452,152 @@ def test_malformed_price_does_not_abort_other_security_results(
     assert prices["111111111"]["average_close_usd"] is None
     assert prices["222222222"]["status"] == "available"
     assert Decimal(prices["222222222"]["average_close_usd"]) == 40
+
+
+@pytest.mark.parametrize("provider", ["yahoo", "tiingo"])
+def test_endpoint_maps_cins_and_class_shares_to_provider_symbols(
+    database: Engine, db_client: TestClient, monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
+    """Preserve OpenFIGI identity while requesting valid symbols from each price provider."""
+    with Session(database) as session:
+        owner: ResearchManager = manager(session, "class shares", "1001")
+        quarter(
+            session,
+            owner,
+            "2026-06-30",
+            [position("111111111", "10", "100"), position("A11111111", "10", "100")],
+        )
+        session.add(
+            MarketCache(
+                workspace_id=LOCAL_WORKSPACE,
+                provider="openfigi-cusip-us-v1",
+                symbol="111111111",
+                start=date(2000, 1, 1),
+                end=date(2000, 1, 1),
+                payload={
+                    "symbol": None,
+                    "composite_figi": None,
+                    "reason": "old failure",
+                    "mapped_at": datetime.now(UTC).isoformat(),
+                },
+                fetched_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+
+    def mappings(request: Request, timeout: int) -> io.BytesIO:
+        """Validate the external mapping jobs and return two exact identities."""
+        jobs: list[dict] = json.loads(request.data)
+        assert jobs == [
+            {
+                "idType": "ID_CUSIP",
+                "idValue": "111111111",
+                "exchCode": "US",
+                "currency": "USD",
+                "marketSecDes": "Equity",
+            },
+            {
+                "idType": "ID_CINS",
+                "idValue": "A11111111",
+                "exchCode": "US",
+                "currency": "USD",
+                "marketSecDes": "Equity",
+            },
+        ]
+        return io.BytesIO(
+            json.dumps(
+                [
+                    {"data": [mapped_row("SYNTH/A")]},
+                    {"data": [mapped_row("OTHER", "BBG000000002")]},
+                ]
+            ).encode()
+        )
+
+    def yahoo(request: Request, timeout: int) -> io.BytesIO:
+        """Return Yahoo-shaped history or force the Tiingo fallback."""
+        assert any(f"/{symbol}?" in request.full_url for symbol in ("SYNTH-A", "OTHER"))
+        if provider == "tiingo":
+            raise OSError("Synthetic primary-provider outage")
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "chart": {
+                        "result": [
+                            {
+                                "meta": {
+                                    "currency": "USD",
+                                    "instrumentType": "EQUITY",
+                                    "exchangeTimezoneName": "UTC",
+                                    "exchangeName": "NMS",
+                                },
+                                "timestamp": [
+                                    int(datetime(2026, 4, 1, 12, tzinfo=UTC).timestamp())
+                                ],
+                                "indicators": {
+                                    "quote": [{"close": [40]}],
+                                    "adjclose": [{"adjclose": [40]}],
+                                },
+                            }
+                        ]
+                    }
+                }
+            ).encode()
+        )
+
+    def fallback(path: str, key: str) -> dict | list[dict]:
+        """Serve Tiingo listing metadata and daily prices."""
+        symbol: str = path.split("/")[1]
+        assert symbol in {"SYNTH-A", "OTHER"}
+        if "/prices?" not in path:
+            return {"ticker": symbol, "exchangeCode": "NASDAQ", "currency": "USD"}
+        return [
+            {
+                "date": "2026-04-01T00:00:00Z",
+                "close": "40",
+                "adjClose": "40",
+                "divCash": "0",
+                "splitFactor": "1",
+            }
+        ]
+
+    monkeypatch.setattr(research_market, "urlopen", mappings)
+    monkeypatch.setattr(market, "urlopen", yahoo)
+    monkeypatch.setattr(tiingo, "get", fallback)
+    if provider == "tiingo":
+        monkeypatch.setenv("TIINGO_API_KEY", "synthetic-test-token")
+    else:
+        monkeypatch.delenv("TIINGO_API_KEY", raising=False)
+    response: Response = db_client.get(
+        "/api/research/activity/market-context?quarter=2026-06-30&cusips=111111111,A11111111"
+    )
+    assert response.status_code == 200
+    prices: dict = response.json()["prices"]
+    assert all(
+        item["status"] == "available" and item["average_close_usd"] == "40"
+        for item in prices.values()
+    )
+    assert prices["111111111"]["symbol"] == "SYNTH/A"
+    assert prices["A11111111"]["symbol"] == "OTHER"
+    expected_url: str = (
+        "https://api.tiingo.com/tiingo/daily/SYNTH-A/prices"
+        if provider == "tiingo"
+        else "https://finance.yahoo.com/quote/SYNTH-A/history/"
+    )
+    assert prices["111111111"]["source_urls"][-1] == expected_url
+    with Session(database) as session:
+        providers: set[str] = set(session.scalars(select(MarketCache.provider)))
+        assert {"openfigi-cusip-us-v1", "openfigi-cusip-us-v2"} <= providers
+
+    def offline(*args: str, **kwargs: str) -> None:
+        """Confirm fresh mapping and price results survive a provider outage."""
+        raise OSError("Synthetic provider outage")
+
+    monkeypatch.setattr(research_market, "urlopen", offline)
+    monkeypatch.setattr(market, "urlopen", offline)
+    monkeypatch.setattr(tiingo, "get", offline)
+    assert (
+        db_client.get(
+            "/api/research/activity/market-context?quarter=2026-06-30&cusips=111111111,A11111111"
+        ).json()
+        == response.json()
+    )
