@@ -30,7 +30,7 @@ Do not read the batch inputs into your context.
 1. Create a temporary directory.
 2. Use the exact `prepared_evidence` path from the validated handoff to create `$SELECTION_TMP/relevance-prompt.md`. Copy `scripts/prompts/morning_brief_selection.md`, then append only the top-level `universe` array as `PORTFOLIO_UNIVERSE_JSON`. Do this with a short inline Python or `jq` command without reading the source file into your context.
 
-3. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window whose `source` is not exactly `wsj` or `economist` directly into JSONL batches of 30 articles each. Each line must contain `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. In a separate `$SELECTION_TMP/auto-advanced-keys.jsonl`, export one `{"article_key":"..."}` object for every complete summary whose `source` is exactly `wsj` or `economist`. Do not include those premium-source rows in the selection model's batch inputs.
+3. Use `sqlite3` and standard shell tools to export every complete summary in the fixed window whose `source` is not exactly `wsj` or `economist` directly into JSONL batches of 30 articles each. Each line must contain `index`, `article_key`, `url`, `title`, `source`, `published_at`, and `summary`. Set `index` to the line’s 1-based position in its batch, restarting at 1 for each batch. Keep each batch unchanged until its results are decoded. In a separate `$SELECTION_TMP/auto-advanced-keys.jsonl`, export one `{"article_key":"..."}` object for every complete summary whose `source` is exactly `wsj` or `economist`. Do not include those premium-source rows in the selection model's batch inputs.
 4. If batches exist, count them and run the extractor once with concurrency equal to the batch count; otherwise skip the selection pass:
 
 ```bash
@@ -44,7 +44,46 @@ uv run minerva extract-files \
   --concurrency "$BATCH_COUNT"
 ```
 
-5. Extract only the non-null `article_key` values from the selection model's JSONL results; do not use its rationales in synthesis. Union those keys with every non-null `article_key` from `auto-advanced-keys.jsonl`. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage and use the source with the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by the selection model unless their source is exactly `wsj` or `economist`. Clearly label rumors and third-party interpretations.
+5. Stop if the extractor fails. Resolve selections against the corresponding unchanged batch using the extractor manifest, and union them with the auto-advanced keys. The following command validates every index before writing any selected keys; a failure stops selection without a partial union. Do not use rationales in synthesis.
+
+```bash
+SELECTION_TMP="$SELECTION_TMP" python3 - <<'PYCODE'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["SELECTION_TMP"])
+manifest = json.loads((root / "results/manifest.json").read_text()) if any(root.glob("batch-*")) else {"entries": []}
+keys = set()
+for entry in manifest["entries"]:
+    if entry["status"] != "ok":
+        raise ValueError("selection extraction failed")
+    rows = [json.loads(line) for line in Path(entry["source"]).read_text().splitlines()]
+    if any(type(row["index"]) is not int or row["index"] != i for i, row in enumerate(rows, 1)):
+        raise ValueError("invalid batch indices")
+    seen = set()
+    selections = Path(entry["output"]).read_text().splitlines()
+    if not selections:
+        raise ValueError("empty selection result")
+    for line in selections:
+        index = json.loads(line)["index"]
+        if index is None:
+            continue
+        if type(index) is not int or not 1 <= index <= len(rows) or index in seen:
+            raise ValueError("invalid or duplicate selection index")
+        seen.add(index)
+        keys.add(rows[index - 1]["article_key"])
+for line in (root / "auto-advanced-keys.jsonl").read_text().splitlines():
+    key = json.loads(line)["article_key"]
+    if key is not None:
+        keys.add(key)
+(root / "selected-keys.jsonl").write_text(
+    "".join(json.dumps({"article_key": key}) + "\n" for key in sorted(keys))
+)
+PYCODE
+```
+
+Use `selected-keys.jsonl` for the verified union. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage and use the source with the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by the selection model unless their source is exactly `wsj` or `economist`. Clearly label rumors and third-party interpretations.
 6. Before writing, read up to five of the most recent previous `slack-brief.md` outputs in the dated sibling run directories. Exclude developments already covered unless today's evidence adds a material new fact; if retained, write only the update.
 7. Delete the temporary directory after selection.
 

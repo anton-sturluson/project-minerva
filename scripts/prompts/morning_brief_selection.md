@@ -12,6 +12,6 @@ Prefer filings, investor relations, and regulators, then WSJ, Economist, and Reu
 
 Return only JSONL, one line per selected article:
 
-{"article_key":"exact-key-from-input","rationale":"why this article could change long-term value or risk"}
+{"index":2,"rationale":"why this article could change long-term value or risk"}
 
-If nothing qualifies, return `{"article_key":null,"rationale":"No article qualifies."}`.
+Return the selected article’s 1-based `index` from the input, not its `article_key`. If nothing qualifies, return `{"index":null,"rationale":"No article qualifies."}`.
