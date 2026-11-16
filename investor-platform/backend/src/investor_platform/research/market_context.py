@@ -60,6 +60,15 @@ class MarketContext(TypedDict):
     composite_figi: NotRequired[str]
 
 
+def supported_mapping_ticker(symbol: str, rows: list[dict]) -> bool:
+    """Accept simple tickers and common-stock share-class tickers."""
+    if re.fullmatch(r"[A-Z][A-Z0-9]{0,9}", symbol):
+        return True
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{0,9}/[A-Z]", symbol):
+        return False
+    return all(row.get("securityType") == "Common Stock" for row in rows)
+
+
 def parse_mapping(body: dict) -> Mapping:
     """Require every returned US equity identity to agree on one composite and ticker."""
     result: Mapping = {
@@ -91,13 +100,7 @@ def parse_mapping(body: dict) -> Mapping:
     composite: str
     symbol: str
     composite, symbol = next(iter(identities))
-    if not (
-        re.fullmatch(r"[A-Z][A-Z0-9]{0,9}", symbol)
-        or (
-            re.fullmatch(r"[A-Z][A-Z0-9]{0,9}/[A-Z]", symbol)
-            and all(row.get("securityType") == "Common Stock" for row in rows)
-        )
-    ):
+    if not supported_mapping_ticker(symbol, rows):
         result["reason"] = "Mapped ticker format is unsupported by the price provider"
         return result
     result.update(symbol=symbol, composite_figi=composite, reason=None)
