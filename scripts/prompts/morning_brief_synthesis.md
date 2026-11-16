@@ -47,40 +47,7 @@ uv run minerva extract-files \
 5. Stop if the extractor fails. Resolve selections against the corresponding unchanged batch using the extractor manifest, and union them with the auto-advanced keys. The following command validates every index before writing any selected keys; a failure stops selection without a partial union. Do not use rationales in synthesis.
 
 ```bash
-SELECTION_TMP="$SELECTION_TMP" python3 - <<'PYCODE'
-import json
-import os
-from pathlib import Path
-
-root = Path(os.environ["SELECTION_TMP"])
-manifest = json.loads((root / "results/manifest.json").read_text()) if any(root.glob("batch-*")) else {"entries": []}
-keys = set()
-for entry in manifest["entries"]:
-    if entry["status"] != "ok":
-        raise ValueError("selection extraction failed")
-    rows = [json.loads(line) for line in Path(entry["source"]).read_text().splitlines()]
-    if any(type(row["index"]) is not int or row["index"] != i for i, row in enumerate(rows, 1)):
-        raise ValueError("invalid batch indices")
-    seen = set()
-    selections = Path(entry["output"]).read_text().splitlines()
-    if not selections:
-        raise ValueError("empty selection result")
-    for line in selections:
-        index = json.loads(line)["index"]
-        if index is None:
-            continue
-        if type(index) is not int or not 1 <= index <= len(rows) or index in seen:
-            raise ValueError("invalid or duplicate selection index")
-        seen.add(index)
-        keys.add(rows[index - 1]["article_key"])
-for line in (root / "auto-advanced-keys.jsonl").read_text().splitlines():
-    key = json.loads(line)["article_key"]
-    if key is not None:
-        keys.add(key)
-(root / "selected-keys.jsonl").write_text(
-    "".join(json.dumps({"article_key": key}) + "\n" for key in sorted(keys))
-)
-PYCODE
+python3 scripts/resolve_morning_brief_selection.py "$SELECTION_TMP"
 ```
 
 Use `selected-keys.jsonl` for the verified union. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage and use the source with the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by the selection model unless their source is exactly `wsj` or `economist`. Clearly label rumors and third-party interpretations.

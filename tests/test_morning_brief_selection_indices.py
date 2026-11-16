@@ -1,23 +1,23 @@
-"""Exercise the selection mapping in the synthesis contract."""
+"""Exercise the morning brief selection resolver."""
 
 import json
-import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
 
-PROMPT = (
+SCRIPT = (
     Path(__file__).resolve().parents[1]
-    / "scripts/prompts/morning_brief_synthesis.md"
+    / "scripts/resolve_morning_brief_selection.py"
 )
 
 
 def _run_mapping(
     tmp_path: Path, results: list[list[dict]], *, bad_batch: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    """Run the prompt's mapping command with synthetic extractor results."""
+    """Run the resolver with synthetic extractor results."""
     entries = []
     for number, selections in enumerate(results):
         batch = tmp_path / f"batch-{number}.jsonl"
@@ -36,12 +36,8 @@ def _run_mapping(
     if entries:
         (tmp_path / "results/manifest.json").write_text(json.dumps({"entries": list(reversed(entries))}))
     (tmp_path / "auto-advanced-keys.jsonl").write_text('{"article_key":"premium"}\n')
-    command = PROMPT.read_text().split("```bash\nSELECTION_TMP=", 1)[1]
-    command = command.split("\n```", 1)[0]
     return subprocess.run(
-        "SELECTION_TMP=" + command,
-        shell=True,
-        env={**os.environ, "SELECTION_TMP": str(tmp_path)},
+        [sys.executable, str(SCRIPT), str(tmp_path)],
         text=True,
         capture_output=True,
         check=False,
