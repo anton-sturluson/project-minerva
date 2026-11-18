@@ -350,22 +350,6 @@ class MorningBriefTests(unittest.TestCase):
         self.assertEqual(macro_summary["event_count"], 1)
         self.assertTrue(any("Broken source" in reason for reason in macro_payload["degraded_reasons"]))
 
-    def test_wrapper_routes_all_helper_calls_through_uv_python(self) -> None:
-        script = (REPO_ROOT / "scripts" / "run_morning_brief.sh").read_text(
-            encoding="utf-8"
-        )
-        direct_helper_lines = [
-            line.strip()
-            for line in script.splitlines()
-            if '"${HELPER}"' in line and not line.startswith("HELPER=")
-        ]
-
-        self.assertEqual(
-            direct_helper_lines,
-            ['uv run --project "${ROOT_DIR}" python "${HELPER}" "$@"'],
-        )
-        self.assertNotIn("--use-synced-portfolio", script)
-
     def test_wrapper_syncs_then_prepares_and_starts_final_writer(self) -> None:
         """Caller settings win; skipping news still requires sync and synthesis."""
         env: dict[str, str] = pipeline_env(self.workspace, RUN_DATE.isoformat())

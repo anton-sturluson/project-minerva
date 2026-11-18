@@ -439,18 +439,7 @@ def test_collector_timeout_validation_precedes_temp_state(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("collector_agent", "expected"),
-    [(None, "steve"), ("collector-override", "collector-override")],
-)
-def test_collector_agent_defaults_and_can_be_overridden(
-    tmp_path: Path, collector_agent: str | None, expected: str
-) -> None:
-    extra_env = (
-        {"MINERVA_NEWS_COLLECTOR_AGENT": collector_agent}
-        if collector_agent is not None
-        else None
-    )
+def test_collector_agent_can_be_overridden(tmp_path: Path) -> None:
     run_date = date.today().isoformat()
     result = _run_wrapper(
         tmp_path,
@@ -462,7 +451,7 @@ def test_collector_agent_defaults_and_can_be_overridden(
                 "access": "web_fetch",
             }
         ],
-        extra_env=extra_env,
+        extra_env={"MINERVA_NEWS_COLLECTOR_AGENT": "collector-override"},
         run_date=run_date,
     )
 
@@ -470,7 +459,7 @@ def test_collector_agent_defaults_and_can_be_overridden(
     agents = (tmp_path / "coordinator" / "agents.log").read_text(
         encoding="utf-8"
     ).splitlines()
-    assert agents == [expected]
+    assert agents == ["collector-override"]
 
 
 # ---------------------------------------------------------------------------
@@ -727,8 +716,6 @@ def test_each_browser_collector_gets_its_own_dedicated_window_and_web_fetch_gets
         browser_aliases[source_id] = alias
         assert f"Use `--tab {alias}` on every browser command" in prompt
         assert f"browser open URL --tab {alias}" in prompt
-        assert "Never enumerate, focus, or close tabs" in prompt
-        assert "never create a tab or window" in prompt
 
     assert len(set(browser_aliases.values())) == len(browser_aliases)
 

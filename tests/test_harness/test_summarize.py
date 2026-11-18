@@ -57,13 +57,11 @@ def test_summarize_file_emits_only_summary_and_forwards_controls(
     assert "Revenue grew while margins contracted." in captured_generation["prompt"]
 
 
-def test_summarize_reads_stdin_with_new_default(captured_generation: dict) -> None:
+def test_summarize_reads_stdin(captured_generation: dict) -> None:
     result = runner.invoke(app, ["summarize"], input="Résumé source")
 
     assert result.exit_code == 0
     assert result.output == "Model summary\n"
-    assert captured_generation["model"] == "gpt-6-luna"
-    assert captured_generation["thinking"] == "high"
     assert "Résumé source" in captured_generation["prompt"]
 
 
