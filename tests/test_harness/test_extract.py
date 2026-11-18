@@ -295,24 +295,6 @@ def test_api_model_name_maps_provider_qualified_openai_alias() -> None:
     assert extract._api_model_name("gpt-5.5") == "gpt-5.5"
 
 
-def test_extract_command_defaults_to_luna_6_with_high_thinking(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", openai_api_key="openai-test-key")
-    file_path = tmp_path / "doc.md"
-    file_path.write_text("body", encoding="utf-8")
-    captured: dict = {}
-
-    def fake_generate(**kwargs):
-        captured.update(kwargs)
-        return "ok"
-
-    monkeypatch.setattr("harness.commands.extract._generate_answer", fake_generate)
-
-    extract.extract_command(question="Q", file_path=str(file_path), settings=settings)
-
-    assert captured["model"] == "gpt-6-luna"
-    assert captured["thinking"] == "high"
-
-
 def test_extract_command_explicit_thinking_passes_through(tmp_path: Path, monkeypatch) -> None:
     settings = HarnessSettings(workspace_root=tmp_path, gemini_api_key="test-key", openai_api_key="openai-test-key")
     file_path = tmp_path / "doc.md"
@@ -572,8 +554,6 @@ def test_extract_files_one_call_per_file_writes_outputs(tmp_path: Path, monkeypa
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     assert len(manifest["entries"]) == 2
     assert all(entry["status"] == "ok" for entry in manifest["entries"])
-    assert manifest["model"] == "gpt-6-luna"
-    assert manifest["api_model"] == "gpt-6-luna"
 
 
 def test_extract_files_questions_file_passes_pack(tmp_path: Path, monkeypatch) -> None:

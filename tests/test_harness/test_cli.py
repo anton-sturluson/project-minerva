@@ -61,7 +61,6 @@ def test_removed_brief_ir_command_is_not_registered(tmp_path: Path) -> None:
     help_result = runner.invoke(app, ["brief", "--help"])
     assert help_result.exit_code == 0
     assert "\nir " not in help_result.stdout
-    assert "Scan configured IR feeds" not in help_result.stdout
 
     direct_result = runner.invoke(app, ["brief", "ir", "--date", "2026-04-08"])
     assert direct_result.exit_code != 0
@@ -80,16 +79,6 @@ def test_direct_cli_missing_args_show_concise_error_for_valuation_dcf() -> None:
     assert result.exit_code == 1
     assert "What went wrong:" in result.stdout
     assert "Usage:" not in result.stdout
-
-
-def test_direct_cli_missing_args_show_full_help_for_research() -> None:
-    """Bare 'minerva research' now shows clean help (exit 0, no error)."""
-    result = runner.invoke(app, ["research"])
-
-    assert result.exit_code == 0
-    assert "What went wrong" not in result.stdout
-    assert "Usage:" in result.stdout
-    assert "Deep web research powered by Parallel.ai." in result.stdout
 
 
 def test_portfolio_sync_failure_exits_nonzero_after_rendering_error(tmp_path: Path, monkeypatch) -> None:

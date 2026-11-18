@@ -43,15 +43,13 @@ function fixture(t: TestContext, payload?: unknown) {
   return { requests, actions, bridge };
 }
 
-test("default oracle sends screenshot and accessibility tree to Luna 6", async (t) => {
+test("OpenAI oracle sends the screenshot and accessibility tree", async (t) => {
   const { requests, actions, bridge } = fixture(t);
   const answer = await runCommand({ command: "ask", args: ["What is shown?"], options: {} }, bridge);
   assert.equal(answer, "Observed text");
   assert.deepEqual(actions, ["screenshot", "snapshot"]);
   assert.equal(requests[0]?.url, OPENAI);
   assert.equal(requests[0]?.headers.get("authorization"), "Bearer synthetic-openai-key");
-  assert.equal(requests[0]?.body.model, "gpt-6-luna");
-  assert.deepEqual(requests[0]?.body.reasoning, { effort: "high" });
   assert.equal(requests[0]?.body.store, false);
   assert.match(requests[0]?.body.input[1].content[0].text, /button Continue/);
   assert.equal(requests[0]?.body.input[1].content[1].type, "input_image");

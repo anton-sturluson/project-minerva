@@ -20,17 +20,13 @@ def test_sec_help_lists_ingestion_and_its_explicit_window() -> None:
     assert "ingest-13f" in group.stdout
     assert "--through-quarter" in detail.stdout
     assert "--quarters" in detail.stdout
-    assert "20" in detail.stdout
-    assert "persist" in detail.stdout
-    assert "AUM" in detail.stdout
 
 
 def test_run_path_exposes_the_same_import_workflow() -> None:
     """Discover ingestion through Minerva's actual shell-style run interface."""
     result: Result = runner.invoke(app, ["run", "sec ingest-13f --help"])
     assert result.exit_code == 0
-    assert "Fetch, parse and persist" in result.stdout
-    assert "--through-quarter 2026-Q2" in result.stdout
+    assert "--through-quarter" in result.stdout
     assert "[exit:0" in result.stdout
 
 

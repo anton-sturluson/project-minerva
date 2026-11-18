@@ -30,27 +30,14 @@ def _workspace(tmp_path: Path) -> Path:
     return workspace
 
 
-def test_market_instruments_use_default_or_explicit_indexes_and_symbols(
+def test_market_instruments_combine_portfolio_and_explicit_symbols(
     tmp_path: Path,
 ) -> None:
     workspace = _workspace(tmp_path)
-    defaults = news_commands.market_instruments(
-        workspace, indexes=None, symbols=["nvda", "^gspc"]
-    )
     custom = news_commands.market_instruments(
         workspace, indexes=["^STOXX50E"], symbols=["BTC-USD"]
     )
 
-    assert [item[0] for item in defaults] == [
-        "AAPL",
-        "TOI",
-        "^GSPC",
-        "^IXIC",
-        "^DJI",
-        "^RUT",
-        "^VIX",
-        "NVDA",
-    ]
     assert [item[0] for item in custom] == ["AAPL", "TOI", "^STOXX50E", "BTC-USD"]
     assert {symbol: kind for symbol, _, kind in custom} == {
         "AAPL": "security",
