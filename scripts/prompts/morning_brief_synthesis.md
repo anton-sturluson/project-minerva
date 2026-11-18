@@ -39,7 +39,8 @@ uv run minerva extract-files \
   --questions-file "$SELECTION_TMP/relevance-prompt.md" \
   --files "$SELECTION_TMP/batch-*" \
   --out "$SELECTION_TMP/results" \
-  --model gpt-6.1-sol \
+  --model gpt-6.2-sol \
+  --max-tokens 100000 \
   --thinking high \
   --concurrency "$BATCH_COUNT"
 ```
