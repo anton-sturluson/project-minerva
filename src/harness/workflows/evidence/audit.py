@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -186,7 +187,7 @@ def _render_external_contents(paths: CompanyPaths, entries: list[dict[str, Any]]
 
 
 def _read_source_text(source_path: Path) -> str:
-    """Read text from a file or directory of markdown files."""
+    """Read text, a verified PDF companion, or a complete legacy PDF conversion."""
     if source_path.is_dir():
         md_files = sorted(p for p in source_path.glob("*.md") if p.name != "_sections.md")
         if not md_files:
@@ -194,5 +195,31 @@ def _read_source_text(source_path: Path) -> str:
         parts = [p.read_text(encoding="utf-8") for p in md_files]
         return "\n\n".join(parts)
     if source_path.exists():
+        if source_path.suffix.lower() == ".pdf":
+            return _read_pdf_source_text(source_path)
         return source_path.read_text(encoding="utf-8")
     return f"(file not found: {source_path})"
+
+
+def _read_pdf_source_text(source_path: Path) -> str:
+    # Keep optional PDF dependencies lazy, including for verified OCR companions.
+    from minerva.documents import DocumentError, pair_files, pdf_markdown, sha256
+
+    _, md_path, receipt_path, _ = pair_files(source_path.with_suffix(""))
+    try:
+        data = source_path.read_bytes()
+        if receipt_path.exists() or receipt_path.is_symlink():
+            # source_sha256 can bind raw HTML, not the generated reading PDF.
+            # A present but broken receipt must never silently trigger re-extraction.
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            companion = md_path.read_bytes()
+            if (receipt["files"][source_path.name] != sha256(data)
+                    or receipt["files"][md_path.name] != sha256(companion)):
+                raise DocumentError(f"PDF pair integrity error for {source_path.name}: file hash mismatch")
+            return companion.decode("utf-8")
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise DocumentError(f"PDF pair integrity/read error for {source_path.name}: {exc}") from exc
+
+    # Legacy sources without receipts must not trust a same-name Markdown file.
+    # This converter retains the pinned parser, completeness guards and warnings.
+    return pdf_markdown(data, source_path.name)[0]
