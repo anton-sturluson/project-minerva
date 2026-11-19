@@ -27,12 +27,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.optional-dependencies]
+documents = ["pymupdf==2.1"]
 jobwatch = ["openai", "fastapi", "jinja2", "uvicorn"]
 
 [project.scripts]
 jobwatch-crawl = "jobwatch.crawler:main"
 jobwatch-dashboard = "dashboard.app:main"
 minerva = "harness.cli:app"
+pdf2md = "harness.commands.documents:pdf2md_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/minerva", "src/jobwatch", "src/harness", "dashboard"]

@@ -6,6 +6,7 @@ import typer
 
 from harness.commands import (
     analyze,
+    documents,
     brief,
     evidence,
     extract,
@@ -22,6 +23,7 @@ from harness.commands import (
 
 def register_commands(app: typer.Typer) -> None:
     """Register all command groups on the root Typer app."""
+    app.add_typer(documents.app, name="documents")
     app.add_typer(sec.app, name="sec")
     app.add_typer(evidence.app, name="evidence")
     app.add_typer(portfolio.app, name="portfolio")

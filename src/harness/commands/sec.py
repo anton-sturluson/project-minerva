@@ -19,6 +19,9 @@ from harness.commands.common import (
     retry_call,
     should_retry_network_error,
 )
+from minerva.documents import DocumentError
+from minerva.filing_documents import collect_filing, collect_attachment
+
 from harness.config import HarnessSettings, get_settings
 from harness.commands.research_ingest import INGEST_13F_HELP, ingest_13f_command
 from harness.output import CommandResult, OutputEnvelope
@@ -146,6 +149,7 @@ def dispatch(
                 str(args[1]),
                 form=str(parsed.get("form", "10-K")),
                 file_format=str(parsed.get("format", "html")),
+                accession=str(parsed["accession"]) if "accession" in parsed else None,
                 output_path=str(parsed["output"]) if "output" in parsed else None,
                 settings=settings,
             )
@@ -282,23 +286,30 @@ def download_filing_command(
     form: str = "10-K",
     file_format: str = "html",
     output_path: str | None = None,
+    accession: str | None = None,
     settings: HarnessSettings,
 ) -> CommandResult:
     """Download a single filing to disk."""
     start: float = time.perf_counter()
-    
+    if file_format not in {"html", "markdown", "pair"}:
+        return CommandResult.from_text("", stderr="--format must be html, markdown, or pair", exit_code=1)
+
     identity_error = _configure_edgar(settings)
     if identity_error:
         return error_result(identity_error, "set EDGAR_IDENTITY and retry", ["`export EDGAR_IDENTITY='Minerva Research research@example.com'`"], start)
 
     try:
-        filing = retry_call(lambda: _latest_filing(Company(ticker), form=form), should_retry=should_retry_network_error)
+        company = Company(ticker)
+        filing = retry_call(lambda: _filing_for_accession(company, form=form, accession=accession), should_retry=should_retry_network_error)
         filing_date: str = str(getattr(filing, "filing_date", getattr(filing, "date", "latest")))
-        accession: str = str(getattr(filing, "accession_number", "unknown"))
+        selected_accession: str = str(getattr(filing, "accession_number", getattr(filing, "accession_no", "unknown")))
         ext: str = "html" if file_format == "html" else "md"
-        target: Path = resolve_path(output_path or f"{ticker}-{form}-{filing_date}.{ext}")
+        target: Path = resolve_path(output_path or (f"{ticker}-{form}-{filing_date}" if file_format == "pair" else f"{ticker}-{form}-{filing_date}.{ext}"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        _save_filing(filing, target, file_format=file_format)
+        if file_format == "pair":
+            collect_filing(filing, target)
+        else:
+            _save_filing(filing, target, file_format=file_format)
     except Exception as exc:
         return error_result(
             f"failed to download {form} for {ticker}: {exc}",
@@ -312,7 +323,7 @@ def download_filing_command(
             f"saved_to: {relative_display_path(target)}",
             f"form: {form}",
             f"filing_date: {filing_date}",
-            f"accession_number: {accession}",
+            f"accession_number: {selected_accession}",
         ]
     )
     return CommandResult.from_text(body, duration_ms=elapsed_ms(start))
@@ -414,13 +425,14 @@ def financials_command(
     settings = get_settings()
     _print(get_financials_command(ticker, periods=periods, statement_type=statement_type, settings=settings))
 
-@app.command("download", help="Download a filing as HTML or markdown.\n\nExample:\n  minerva sec download AAPL --form 10-K --format markdown")
+@app.command("download", help="Download a complete filing as HTML, Markdown, or a PDF+MD pair.\n\nExample:\n  minerva sec download AAPL --form 10-K --format markdown")
 def download_command(
     ctx: typer.Context,
     ticker: str | None = typer.Argument(None, help="Company ticker or CIK."),
     form: str = typer.Option("10-K", "--form", help="Filing form type."),
-    file_format: str = typer.Option("html", "--format", help="Output format: html or markdown."),
-    output: str | None = typer.Option(None, "--output", help="Output file path."),
+    file_format: str = typer.Option("html", "--format", help="Output format: html, markdown, or pair (output is a new stem)."),
+    output: str | None = typer.Option(None, "--output", help="Output file path, or NEW stem for pair."),
+    accession: str | None = typer.Option(None, "--accession", help="Exact accession; use --form 13F-HR/A for amendments."),
 ) -> None:
     if not ticker:
         abort_with_help(
@@ -430,7 +442,7 @@ def download_command(
             alternatives=["`minerva sec download AAPL --form 10-K --format markdown`", "`minerva sec bulk-download AAPL`"],
         )
     settings = get_settings()
-    _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output, settings=settings))
+    _print(download_filing_command(ticker, form=form, file_format=file_format, output_path=output, accession=accession, settings=settings))
 
 @app.command("bulk-download", help="Download a filing library for a single company.\n\nExample:\n  minerva sec bulk-download AAPL --output ./filings")
 def bulk_download_cli_command(
@@ -467,7 +479,7 @@ def _download_filing_sections(
     form: str,
     out_dir: Path,
 ) -> dict[str, Any]:
-    """Download individual sections from a filing using edgartools structured access.
+    """Legacy explicit section export (NOT complete-document collection).
 
     Falls back to single-file download when structured access fails.
     Returns {"mode": "split"|"single", "sections": [...]}.
@@ -540,8 +552,19 @@ def _fetch_financials_frame(ticker: str, *, periods: int, statement_type: str):
     if statement_type == "balance":
         return company.balance_sheet(periods=periods, period="annual", as_dataframe=True)
     if statement_type == "cash":
-        return company.cashflow_statement(periods=periods, period="annual", as_dataframe=True)
+        return company.cash_flow_statement(periods=periods, period="annual", as_dataframe=True)
     raise ValueError(f"unknown financial statement type: {statement_type}")
+
+def _filing_for_accession(company: Any, *, form: str, accession: str | None) -> Any:
+    if accession is None:
+        return _latest_filing(company, form=form)
+    filings = company.get_filings(form=form, accession_number=accession)
+    if filings is None or len(filings) != 1:
+        raise ValueError(f"Expected exactly one {form} filing for accession {accession}")
+    filing = filings[0]
+    if str(filing.form) != form or str(filing.accession_no) != accession:
+        raise ValueError("SEC filing identity does not match requested form and accession")
+    return filing
 
 def _latest_filing(company: Any, *, form: str) -> Any:
     filing_list = _list_filings(company, form=form, limit=1)
@@ -592,53 +615,51 @@ def _bulk_download_one(
     quarters: int,
     earnings: int,
     include_financials: bool,
-    include_html: bool = True,
 ) -> list[str]:
     company = Company(ticker)
     company_root = base_output
     company_root.mkdir(parents=True, exist_ok=True)
 
     downloaded = {"10-K": 0, "10-Q": 0, "earnings": 0}
-    skipped = 0
+    errors = []
 
     for form, count, folder_name in [("10-K", annual, "10-K"), ("10-Q", quarters, "10-Q")]:
-        target_dir = company_root / folder_name
-        target_dir.mkdir(parents=True, exist_ok=True)
-        for filing in _list_filings(company, form=form, limit=count):
-            date_str = _filing_date(filing)
-            section_dir = target_dir / date_str
-            if section_dir.exists():
-                skipped += 1
-                continue
-            _download_filing_sections(filing=filing, form=form, out_dir=section_dir)
-            downloaded[form] += 1
+        filings = _list_filings(company, form=form, limit=count)
+        if len(filings) < count:
+            errors.append(f"Requested {count} {form} filings; available {len(filings)} exact-form filings")
+        for filing in filings:
+            # Accession prevents same-date originals/amendments colliding.
+            accession = str(getattr(filing, "accession_no", getattr(filing, "accession_number", "unknown")))
+            stem = company_root / folder_name / f"{_filing_date(filing)}-{accession}" / "filing"
+            try:
+                # Existing directories are NOT proof of completeness. A rerun fails clearly.
+                collect_filing(filing, stem)
+                downloaded[form] += 1
+            except Exception as exc:
+                errors.append(f"{form} {accession}: {exc}")
 
-    earnings_dir = company_root / "earnings"
-    earnings_dir.mkdir(parents=True, exist_ok=True)
-    for filing in _list_filings(company, form="8-K", limit=earnings):
-        date_str = _filing_date(filing)
-        markdown_target = earnings_dir / f"{date_str}.md"
-        html_target = earnings_dir / f"{date_str}.html"
-        if markdown_target.exists() and (not include_html or html_target.exists()):
-            skipped += 1
-            continue
+    # An arbitrary 8-K is not an earnings release: require Item 2.02 AND EX-99.1.
+    found = 0
+    for filing in _list_filings(company, form="8-K", limit=max(earnings * 10, 0)):
+        if found >= earnings:
+            break
+        accession = str(getattr(filing, "accession_no", getattr(filing, "accession_number", "unknown")))
         try:
-            wrote_any = False
-            if not markdown_target.exists():
-                exhibits = getattr(filing, "exhibits", []) or []
-                exhibit_99_1 = next((ex for ex in exhibits if getattr(ex, "document_type", None) == "EX-99.1"), None)
-                if exhibit_99_1 is not None:
-                    markdown_target.write_text(_attachment_markdown(exhibit_99_1), encoding="utf-8")
-                else:
-                    _save_filing(filing, markdown_target, file_format="markdown")
-                wrote_any = True
-            if include_html and not html_target.exists():
-                _save_filing(filing, html_target, file_format="html")
-                wrote_any = True
-            if wrote_any:
-                downloaded["earnings"] += 1
-        except Exception:
-            continue
+            items = str(getattr(filing.obj(), "items", ""))
+            if "2.02" not in items:
+                continue
+            exhibits = getattr(filing, "exhibits", []) or []
+            exhibit = next((ex for ex in exhibits if getattr(ex, "document_type", None) == "EX-99.1"), None)
+            if exhibit is None:
+                continue
+            found += 1
+            stem = company_root / "earnings" / f"{_filing_date(filing)}-{accession}"
+            collect_attachment(exhibit, stem, accession=accession)
+            downloaded["earnings"] += 1
+        except Exception as exc:
+            errors.append(f"earnings {accession}: {exc}")
+    if found < earnings:
+        errors.append(f"Requested {earnings} earnings releases; found {found} Item 2.02 + EX-99.1 filings in bounded 8-K search")
 
     if include_financials:
         financials_dir = company_root / "financials"
@@ -647,16 +668,21 @@ def _bulk_download_one(
             markdown_target = financials_dir / f"{statement_type}.md"
             csv_target = financials_dir / f"{statement_type}.csv"
             if markdown_target.exists() and csv_target.exists():
-                skipped += 1
                 continue
-            frame = _fetch_financials_frame(ticker, periods=5, statement_type=statement_type).reset_index()
-            if not markdown_target.exists():
-                markdown_target.write_text(
-                    f"# {ticker.upper()} {statement_type.title()} Financials\n\n{dataframe_to_markdown(frame, max_rows=40)}",
-                    encoding="utf-8",
-                )
-            if not csv_target.exists():
-                frame.to_csv(csv_target, index=False)
+            try:
+                frame = _fetch_financials_frame(ticker, periods=5, statement_type=statement_type).reset_index()
+                if not markdown_target.exists():
+                    markdown_target.write_text(
+                        f"# {ticker.upper()} {statement_type.title()} Financials\n\n{dataframe_to_markdown(frame, max_rows=len(frame))}",
+                        encoding="utf-8",
+                    )
+                if not csv_target.exists():
+                    frame.to_csv(csv_target, index=False)
+            except Exception as exc:
+                errors.append(f"financials {statement_type}: {exc}")
+
+    if errors:
+        raise DocumentError("Incomplete bulk collection; completed pairs preserved. " + "; ".join(errors))
 
     return [
         f"{ticker.upper()} bulk download to {relative_display_path(company_root)}",
@@ -664,18 +690,32 @@ def _bulk_download_one(
         f"  10-Q: {downloaded['10-Q']} downloaded",
         f"  Earnings: {downloaded['earnings']} downloaded",
         f"  Financials: {'included' if include_financials else 'skipped'}",
-        f"  Skipped: {skipped}",
         "  Errors: 0",
     ]
 
 def _list_filings(company: Company, *, form: str, limit: int) -> list[Any]:
     if limit <= 0:
         return []
-    filings = company.get_filings(form=form).latest(limit)
+    # edgartools includes amendments by default, even for an exact form query.
+    # Filter BEFORE latest(limit), so a newer amendment cannot hide the original.
+    available = company.get_filings(form=form, amendments=form.endswith("/A"))
+    if available is None:
+        return []
+    if form.endswith("/A"):
+        # edgartools strips /A with amendments=False and includes the original
+        # with amendments=True. Select the literal form before applying the limit.
+        exact = [filing for filing in available if str(filing.form) == form]
+        return sorted(exact, key=_filing_date, reverse=True)[:limit]
+    filings = available.latest(limit)
+    if filings is None:
+        return []
     try:
-        return list(filings)
+        result = list(filings)
     except TypeError:
-        return [filings]
+        result = [filings]
+    if any(str(filing.form) != form for filing in result):
+        raise ValueError(f"SEC returned a filing other than requested exact form {form}")
+    return result
 
 def _filing_date(filing: Any) -> str:
     return str(getattr(filing, "filing_date", getattr(filing, "date", "latest")))
@@ -690,7 +730,7 @@ def _dispatch_help(subcommand: str, alternatives: list[str]) -> CommandResult:
         "10k": "Usage: sec 10k <ticker> [--items 1,1A,7]",
         "13f": "Usage: sec 13f <cik> [--output PATH]",
         "financials": "Usage: sec financials <ticker> [--periods 5] [--type income|balance|cash]",
-        "download": "Usage: sec download <ticker> [--form 10-K] [--format html|markdown] [--output PATH]",
+        "download": "Usage: sec download <ticker> [--form 10-K] [--format html|markdown|pair] [--output PATH]",
         "bulk-download": "Usage: sec bulk-download <ticker> [--output DIR] [--annual 5] [--quarters 4] [--earnings 4] [--financials true|false]",
     }
     return CommandResult.from_text(
@@ -718,3 +758,5 @@ def _usage_error(what: str, what_to_do: str, alternatives: list[str], help_text:
 def _print(result: CommandResult) -> None:
     envelope = OutputEnvelope.from_result(result, workspace_root=get_settings().ensure_workspace_root())
     typer.echo(envelope.render())
+    if result.exit_code:
+        raise typer.Exit(result.exit_code)

@@ -138,6 +138,7 @@ def test_download_filing_command_saves_markdown(tmp_path: Path, monkeypatch) -> 
     settings = HarnessSettings(workspace_root=tmp_path, edgar_identity="Minerva Research minerva@example.com")
 
     class _FakeFiling:
+        form = "10-K"
         filing_date = "2025-11-01"
         accession_number = "000000"
 
@@ -152,8 +153,9 @@ def test_download_filing_command_saves_markdown(tmp_path: Path, monkeypatch) -> 
         def __init__(self, ticker: str) -> None:
             self.ticker = ticker
 
-        def get_filings(self, *, form: str):
+        def get_filings(self, *, form: str, amendments: bool):
             assert form == "10-K"
+            assert amendments is False
             return _FakeFilings()
 
     monkeypatch.setattr("harness.commands.sec.Company", _FakeCompany)
@@ -228,86 +230,20 @@ def test_minerva_sec_helper_uses_holdings_dataframe_directly(monkeypatch) -> Non
     assert comparison["previous"].equals(expected_previous)
 
 
-def test_bulk_download_command_materializes_latest_results_and_falls_back_to_text(tmp_path: Path, monkeypatch) -> None:
-    settings = HarnessSettings(workspace_root=tmp_path, edgar_identity="Minerva Research minerva@example.com")
-
-    class _FakeMarkdownFiling:
-        def __init__(self, filing_date: str, body: str) -> None:
-            self.filing_date = filing_date
-            self._body = body
-
-        def markdown(self) -> str:
-            return self._body
-
-    class _FakeTextOnlyFiling:
-        def __init__(self, filing_date: str, body: str) -> None:
-            self.filing_date = filing_date
-            self._body = body
-
-        def markdown(self) -> str:
-            raise AttributeError("markdown unavailable")
-
-        def text(self) -> str:
-            return self._body
-
-    class _FakeFilingsCollection:
-        def __init__(self, filings):
-            self._filings = filings
-
-        def latest(self, count: int):
-            return self
-
-        def markdown(self) -> str:
-            raise AssertionError("bulk download should not call markdown() on the filings collection")
-
-        def __iter__(self):
-            return iter(self._filings)
-
-    class _FakeCompany:
-        def __init__(self, ticker: str) -> None:
-            self.ticker = ticker
-
-        def get_filings(self, *, form: str):
-            if form == "10-K":
-                return _FakeFilingsCollection(
-                    [
-                        _FakeMarkdownFiling("2025-10-31", "# annual 1"),
-                        _FakeTextOnlyFiling("2024-10-31", "annual 2 text"),
-                    ]
-                )
-            if form == "10-Q":
-                return _FakeFilingsCollection([_FakeMarkdownFiling("2025-06-30", "# quarter 1")])
-            if form == "8-K":
-                return _FakeFilingsCollection([_FakeTextOnlyFiling("2025-07-24", "earnings text")])
-            raise AssertionError(f"unexpected form {form}")
-
-        def income_statement(self, *, periods: int, period: str, as_dataframe: bool):
-            return pd.DataFrame({"2024": [100.0]}, index=["Revenue"])
-
-        def balance_sheet(self, *, periods: int, period: str, as_dataframe: bool):
-            return pd.DataFrame({"2024": [50.0]}, index=["Cash"])
-
-        def cashflow_statement(self, *, periods: int, period: str, as_dataframe: bool):
-            return pd.DataFrame({"2024": [25.0]}, index=["FCF"])
-
-    monkeypatch.setattr("harness.commands.sec.Company", _FakeCompany)
-    monkeypatch.setattr("harness.commands.sec._configure_edgar", lambda settings: None)
-
-    result = sec.bulk_download_command(
-        ticker="AAPL",
-        output_dir=str(tmp_path / "bulk"),
-        annual=2,
-        quarters=1,
-        earnings=1,
-        include_financials=False,
-        settings=settings,
-    )
-
+def test_bulk_download_uses_complete_pairs_not_selected_items(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+    settings = HarnessSettings(workspace_root=tmp_path)
+    filing = SimpleNamespace(form="10-K", accession_no="0000001", filing_date="2026-11-01")
+    monkeypatch.setattr(sec, "Company", lambda ticker: object())
+    monkeypatch.setattr(sec, "_configure_edgar", lambda settings: None)
+    monkeypatch.setattr(sec, "_list_filings", lambda company, form, limit: [filing] if form == "10-K" else [])
+    seen = []
+    def collect(source, stem):
+        seen.append((source, stem))
+        assert source is filing
+        assert stem.name == "filing"
+    monkeypatch.setattr(sec, "collect_filing", collect)
+    result = sec.bulk_download_command(ticker="EXAMPLE", output_dir=str(tmp_path), annual=1, quarters=0, earnings=0, include_financials=False, settings=settings)
     assert result.exit_code == 0
-    # 10-K/10-Q are now per-section directories (fallback mode since fake filings have no obj()).
-    assert (tmp_path / "bulk" / "10-K" / "2025-10-31").is_dir()
-    assert (tmp_path / "bulk" / "10-K" / "2025-10-31" / "filing.md").read_text(encoding="utf-8") == "# annual 1"
-    assert (tmp_path / "bulk" / "10-K" / "2024-10-31").is_dir()
-    assert (tmp_path / "bulk" / "10-K" / "2024-10-31" / "_sections.md").exists()
-    # Earnings remain flat files.
-    assert (tmp_path / "bulk" / "earnings" / "2025-07-24.md").read_text(encoding="utf-8") == "earnings text"
+    assert len(seen) == 1
+    assert "2026-11-01-0000001" in str(seen[0][1])
