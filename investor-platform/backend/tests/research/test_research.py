@@ -286,11 +286,11 @@ def test_coverage_and_comparison_agree_on_filing_state(
     assert comparison["status"] == ("available" if available else "unavailable")
 
 
-def test_confidential_and_value_mismatch_are_not_complete(
+def test_confidential_omissions_block_but_summary_value_mismatches_do_not(
     database: Engine,
     tmp_path: Path,
 ) -> None:
-    """Incomplete disclosures and inconsistent table totals cannot qualify coverage."""
+    """Incomplete disclosures block activity; a summary discrepancy preserves usable rows."""
     manager_id: UUID = registry(database, tmp_path)
     table: bytes = f"<informationTable>{row('2', '100')}</informationTable>".encode()
     metadata: FilingMetadata = {
@@ -327,10 +327,71 @@ def test_confidential_and_value_mismatch_are_not_complete(
             "https://www.sec.gov/example/primary.xml",
             "https://www.sec.gov/example/table.xml",
         )
-        assert result.status == "blocked"
-        assert "value" in result.reason
+        assert result.status == "complete"
+        assert result.reason is None
+        assert result.evidence["value_reconciliation"]["difference_usd"] == "-100"
     principal: bytes = table.replace(b">SH<", b">PRN<")
     assert parse_holdings(principal, date(2026, 8, 1))[0]["share_type"] == "PRN"
+
+
+def test_summary_value_mismatch_preserves_quantity_activity_and_row_based_weights(
+    database: Engine, db_client: TestClient, tmp_path: Path
+) -> None:
+    """A mismatched cover total does not hide reported increases, new positions, or exits."""
+    manager_id: UUID = registry(database, tmp_path)
+    filing(
+        database,
+        manager_id,
+        "2026-03-31",
+        "previous",
+        row("10", "100", cusip="111111111") + row("5", "100", cusip="222222222"),
+        count=2,
+    )
+    metadata: FilingMetadata = {
+        "accession": "mismatched-summary",
+        "report_period": "2026-06-30",
+        "filed_date": "2026-08-01",
+        "form": "13F-HR",
+        "primary_document": "primary.xml",
+    }
+    primary: bytes = (
+        b"<edgarSubmission><tableEntryTotal>2</tableEntryTotal>"
+        b"<tableValueTotal>2000</tableValueTotal></edgarSubmission>"
+    )
+    table: bytes = (
+        "<informationTable>"
+        + row("15", "150", cusip="111111111")
+        + row("2", "50", cusip="333333333")
+        + "</informationTable>"
+    ).encode()
+    with Session(database) as session:
+        manager: ResearchManager = session.get(ResearchManager, manager_id)
+        store_filing(
+            session,
+            manager,
+            metadata,
+            primary,
+            table,
+            "https://www.sec.gov/example/primary.xml",
+            "https://www.sec.gov/example/table.xml",
+        )
+        session.commit()
+
+    response: dict = db_client.get(
+        "/api/research/managers/example/changes?quarter=2026-06-30"
+    ).json()
+    assert response["status"] == "available" and response["reason"] is None
+    changes: dict[str, dict] = {item["cusip"]: item for item in response["changes"]}
+    assert changes["111111111"]["kind"] == "increased"
+    assert Decimal(changes["111111111"]["quantity_change"]) == 5
+    assert Decimal(changes["111111111"]["current_weight"]) == Decimal("0.75")
+    assert changes["222222222"]["kind"] == "exited"
+    assert changes["333333333"]["kind"] == "new"
+    assert Decimal(changes["333333333"]["current_weight"]) == Decimal("0.25")
+    activity: dict = db_client.get("/api/research/activity?quarter=2026-06-30").json()
+    assert activity["included_managers"] == 1
+    assert {item["cusip"] for item in activity["increased"]} == {"111111111", "333333333"}
+    assert {item["cusip"] for item in activity["decreased"]} == {"222222222"}
 
 
 def test_historical_sec_period_and_explicit_blocked_retry_preserve_evidence(
@@ -523,10 +584,11 @@ def test_value_ranking_preserves_decimal_cents_beyond_default_precision() -> Non
     [
         ("298", 3, True),
         ("302", 3, True),
-        ("297.9", 3, False),
-        ("302.1", 3, False),
+        ("297.9", 3, True),
+        ("302.1", 3, True),
         ("300", 3, True),
         ("298", 2, False),
+        ("-1", 3, False),
     ],
 )
 def test_value_reconciliation_uses_raw_rows_and_reporting_units(
@@ -537,7 +599,7 @@ def test_value_reconciliation_uses_raw_rows_and_reporting_units(
     declared_count: int,
     complete: bool,
 ) -> None:
-    """Bound independently rounded totals without changing rows or relaxing count validation."""
+    """Retain reconciliation evidence without blocking rows or relaxing count validation."""
     manager_id: UUID = registry(database, tmp_path)
     table: bytes = f"<informationTable>{row('2', '100') * 3}</informationTable>".encode()
     primary: bytes = (

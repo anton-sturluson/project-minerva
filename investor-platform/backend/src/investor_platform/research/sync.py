@@ -281,8 +281,8 @@ def store_filing(
                 if abs(difference) <= limit
                 else "outside_rounding_limit",
             }
-            if not reported_value.is_finite() or reported_value < 0 or abs(difference) > limit:
-                error = "Reported table value does not match imported rows within rounding bounds"
+            if not reported_value.is_finite() or reported_value < 0:
+                error = "Reported table value is invalid"
         if not quarter_end(period):
             error = "Report period is not a calendar quarter end"
         if element_text(root, "isConfidentialOmitted").lower() in {"true", "1"}:
