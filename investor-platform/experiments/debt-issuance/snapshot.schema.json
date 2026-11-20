@@ -1,0 +1,891 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/debt-issuance-pilot.schema.json",
+  "title": "Debt issuance extraction pilot snapshot",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "cutoff_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ticker": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "cik": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ticker",
+          "name",
+          "cik",
+          "category"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "fiscal_periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string",
+            "format": "date"
+          },
+          "end": {
+            "type": "string",
+            "format": "date"
+          },
+          "fiscal_year": {
+            "type": "integer"
+          },
+          "fiscal_quarter": {
+            "enum": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "presentation": {
+            "enum": [
+              "reported_quarter",
+              "derived_quarter",
+              "reported_ytd",
+              "reported_annual"
+            ]
+          },
+          "currency": {
+            "const": "USD"
+          },
+          "cfo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "cash_capex": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "debt_cash_proceeds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "debt_cash_repayments": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "fields": {
+            "type": "object",
+            "properties": {
+              "cfo": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "reported",
+                      "derived",
+                      "missing"
+                    ]
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "derivation_inputs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "accession": {
+                          "type": "string"
+                        },
+                        "filed_date": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "start": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "end": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "value": {
+                          "type": "string",
+                          "pattern": "^-?\\d+(?:\\.\\d+)?$"
+                        },
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "concept": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "const": "USD"
+                        },
+                        "scope": {
+                          "type": "string"
+                        },
+                        "filing_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "accession",
+                        "filed_date",
+                        "start",
+                        "end",
+                        "value",
+                        "source_id",
+                        "concept",
+                        "unit",
+                        "scope",
+                        "filing_url"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "label",
+                  "scope",
+                  "status",
+                  "source_ids",
+                  "derivation_inputs",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "cash_capex": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "reported",
+                      "derived",
+                      "missing"
+                    ]
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "derivation_inputs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "accession": {
+                          "type": "string"
+                        },
+                        "filed_date": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "start": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "end": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "value": {
+                          "type": "string",
+                          "pattern": "^-?\\d+(?:\\.\\d+)?$"
+                        },
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "concept": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "const": "USD"
+                        },
+                        "scope": {
+                          "type": "string"
+                        },
+                        "filing_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "accession",
+                        "filed_date",
+                        "start",
+                        "end",
+                        "value",
+                        "source_id",
+                        "concept",
+                        "unit",
+                        "scope",
+                        "filing_url"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "label",
+                  "scope",
+                  "status",
+                  "source_ids",
+                  "derivation_inputs",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "debt_cash_proceeds": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "reported",
+                      "derived",
+                      "missing"
+                    ]
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "derivation_inputs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "accession": {
+                          "type": "string"
+                        },
+                        "filed_date": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "start": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "end": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "value": {
+                          "type": "string",
+                          "pattern": "^-?\\d+(?:\\.\\d+)?$"
+                        },
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "concept": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "const": "USD"
+                        },
+                        "scope": {
+                          "type": "string"
+                        },
+                        "filing_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "accession",
+                        "filed_date",
+                        "start",
+                        "end",
+                        "value",
+                        "source_id",
+                        "concept",
+                        "unit",
+                        "scope",
+                        "filing_url"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "label",
+                  "scope",
+                  "status",
+                  "source_ids",
+                  "derivation_inputs",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "debt_cash_repayments": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "reported",
+                      "derived",
+                      "missing"
+                    ]
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "derivation_inputs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "accession": {
+                          "type": "string"
+                        },
+                        "filed_date": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "start": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "end": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "value": {
+                          "type": "string",
+                          "pattern": "^-?\\d+(?:\\.\\d+)?$"
+                        },
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "concept": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "const": "USD"
+                        },
+                        "scope": {
+                          "type": "string"
+                        },
+                        "filing_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "accession",
+                        "filed_date",
+                        "start",
+                        "end",
+                        "value",
+                        "source_id",
+                        "concept",
+                        "unit",
+                        "scope",
+                        "filing_url"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "label",
+                  "scope",
+                  "status",
+                  "source_ids",
+                  "derivation_inputs",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "cfo",
+              "cash_capex",
+              "debt_cash_proceeds",
+              "debt_cash_repayments"
+            ],
+            "additionalProperties": false
+          },
+          "duration_months": {
+            "type": "integer",
+            "enum": [
+              3,
+              6,
+              9,
+              12
+            ]
+          }
+        },
+        "required": [
+          "entity_id",
+          "start",
+          "end",
+          "fiscal_year",
+          "fiscal_quarter",
+          "presentation",
+          "currency",
+          "cfo",
+          "cash_capex",
+          "debt_cash_proceeds",
+          "debt_cash_repayments",
+          "fields",
+          "duration_months"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "bond_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "legal_issuer": {
+            "type": "string"
+          },
+          "pricing_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "closing_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "status": {
+            "enum": [
+              "closed",
+              "priced",
+              "announced"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "face_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "instrument_type": {
+            "enum": [
+              "nonconvertible",
+              "convertible"
+            ]
+          },
+          "maturities": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "entity_id",
+          "legal_issuer",
+          "pricing_date",
+          "closing_date",
+          "status",
+          "currency",
+          "face_amount",
+          "instrument_type",
+          "maturities",
+          "purpose",
+          "source_ids"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "other_financings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "spgi_periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date"
+          },
+          "end": {
+            "type": "string",
+            "format": "date"
+          },
+          "fiscal_year": {
+            "type": "integer"
+          },
+          "fiscal_quarter": {
+            "enum": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "currency": {
+            "const": "USD"
+          },
+          "billed_ig": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "billed_hy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "billed_other": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "billed_total": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "ratings_transaction_revenue": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "ratings_non_transaction_revenue": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?\\d+(?:\\.\\d+)?$"
+          },
+          "source_refs": {
+            "type": "object",
+            "properties": {
+              "billed_ig": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "billed_hy": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "billed_other": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "billed_total": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "ratings_transaction_revenue": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "ratings_non_transaction_revenue": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "billed_ig",
+              "billed_hy",
+              "billed_other",
+              "billed_total",
+              "ratings_transaction_revenue",
+              "ratings_non_transaction_revenue"
+            ],
+            "additionalProperties": false
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "fiscal_year",
+          "fiscal_quarter",
+          "currency",
+          "billed_ig",
+          "billed_hy",
+          "billed_other",
+          "billed_total",
+          "ratings_transaction_revenue",
+          "ratings_non_transaction_revenue",
+          "source_refs"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "dataset": {
+            "type": "string"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date"
+          },
+          "status": {
+            "enum": [
+              "complete_for_stated_scope",
+              "partial",
+              "unavailable"
+            ]
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "entity_id",
+          "dataset",
+          "window_start",
+          "window_end",
+          "status",
+          "limitations",
+          "source_ids"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "accession": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filed_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "retrieved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "accession",
+          "filed_date",
+          "retrieved_at",
+          "sha256"
+        ],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "cutoff_date",
+    "entities",
+    "fiscal_periods",
+    "bond_events",
+    "other_financings",
+    "spgi_periods",
+    "coverage",
+    "sources"
+  ],
+  "additionalProperties": false
+}
