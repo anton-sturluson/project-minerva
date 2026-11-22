@@ -20,7 +20,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.sql.elements import ColumnElement
 
 
 class Base(DeclarativeBase):
@@ -199,11 +198,6 @@ class ResearchManager(Base):
     slug: Mapped[str] = mapped_column(String(80))
     cik: Mapped[str] = mapped_column(String(10))
     profile: Mapped[dict] = mapped_column(JSONB)
-
-    @classmethod
-    def is_tracked(cls) -> ColumnElement[bool]:
-        """Select curated managers while preserving archived profiles and holdings."""
-        return ~cls.profile.contains({"archived": True})
 
 
 class ResearchFiling(Base):

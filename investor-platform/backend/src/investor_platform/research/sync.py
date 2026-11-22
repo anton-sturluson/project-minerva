@@ -499,7 +499,7 @@ def main() -> None:
     parser.add_argument(
         "--all-investors",
         action="store_true",
-        help="Collect existing tracked database investors without refreshing catalog metadata",
+        help="Collect existing database investors without refreshing catalog metadata",
     )
     default_start_year: int = date.today().year - 10
     parser.add_argument(
@@ -542,14 +542,14 @@ def main() -> None:
                 return
         query: Select[tuple[ResearchManager]] = (
             select(ResearchManager)
-            .where(ResearchManager.workspace_id == LOCAL_WORKSPACE, ResearchManager.is_tracked())
+            .where(ResearchManager.workspace_id == LOCAL_WORKSPACE)
             .order_by(ResearchManager.slug)
         )
         if args.manager:
             query = query.where(ResearchManager.slug == args.manager)
         managers: list[ResearchManager] = list(session.scalars(query))
         if not managers:
-            parser.error("No matching tracked manager in the workspace database")
+            parser.error("No matching manager in the workspace database")
         manager: ResearchManager
         failed: bool = False
         for manager in managers:

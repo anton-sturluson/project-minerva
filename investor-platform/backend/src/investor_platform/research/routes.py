@@ -161,7 +161,7 @@ def list_managers(session: DatabaseSession, actor: CurrentActor) -> dict:
     managers: list[ResearchManager] = list(
         session.scalars(
             select(ResearchManager)
-            .where(ResearchManager.workspace_id == actor.workspace_id, ResearchManager.is_tracked())
+            .where(ResearchManager.workspace_id == actor.workspace_id)
             .order_by(ResearchManager.slug)
         )
     )

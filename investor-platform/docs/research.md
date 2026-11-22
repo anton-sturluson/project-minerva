@@ -39,15 +39,13 @@ From the repository root, use the main CLI with the existing database and SEC id
 uv run minerva sec ingest-13f --quarters 20 --through-quarter 2026-Q2
 ```
 
-This collects 2021-Q3 through 2026-Q2, exactly twenty report quarters, for every tracked investor already stored in the workspace database. The final quarter is explicit; the CLI does not guess which quarter has filed. Minerva delegates to the existing platform importer and parser, without adding or refreshing catalog records. Collection includes tracked investors whose AUM is undisclosed. Archived profiles are excluded.
+This collects 2021-Q3 through 2026-Q2, exactly twenty report quarters, for every investor already stored in the workspace database. The final quarter is explicit; the CLI does not guess which quarter has filed. Minerva delegates to the existing platform importer and parser, without adding or refreshing catalog records. Collection includes investors whose AUM is undisclosed.
 
 Counts and fetched filing documents stay within the inclusive window; saved filings outside it are retained. Repeated runs skip saved accessions. Missing or blocked quarters remain explicit, and reporting entities are not automatically joined to fill gaps. The internal backend command accepts the same window with `--all-investors`; it cannot combine `--start-year` with `--quarters`.
 
 ## Manager selection and AUM
 
 The reviewed catalog defines which managers are followed. AUM is informational metadata; its amount, disclosure date, or absence does not gate the directory, SEC collection, or stock activity. A sourced firm or adviser AUM figure is kept separate from the value of disclosed 13F holdings. For Form ADV, its date is the disclosure filing date rather than a separate valuation date. Page requests do not fetch or refresh AUM evidence.
-
-A profile with `archived: true` is removed from the directory, activity rankings, and future collection, including all-investor history imports. Its saved filings and manager detail remain accessible through direct manager API requests. Catalog loading retains archived records and their histories; removing the archive flag restores tracking. Missing archive flags mean the manager remains tracked.
 
 ## Interpret coverage and changes
 

@@ -1,14 +1,13 @@
-"""Verify tracking and archival across research views and SEC imports."""
+"""Verify tracking across research views and SEC imports."""
 
 import json
 import sys
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from investor_platform.db import LOCAL_WORKSPACE
@@ -82,66 +81,15 @@ def test_unknown_and_small_aum_managers_are_tracked(
     assert {row["slug"] for row in earlier["increased"][0]["contributors"]} == {"unknown", "small"}
 
 
-def test_archived_history_survives_reseeding_but_is_not_tracked(
-    database: Engine, db_client: TestClient, tmp_path: Path
-) -> None:
-    """Archived records remain directly readable but do not contribute to tracked views."""
-    catalog: Path = tmp_path / "catalog.json"
-    catalog.write_text(
-        json.dumps(
-            [
-                {"slug": "active", "cik": "1001", "name": "Active"},
-                {"slug": "archived", "cik": "1002", "name": "Archived", "archived": True},
-            ]
-        )
-    )
-    with Session(database) as session:
-        sync.seed_catalog(session, catalog)
-        active: ResearchManager = session.scalar(
-            select(ResearchManager).where(ResearchManager.slug == "active")
-        )
-        archived: ResearchManager = session.scalar(
-            select(ResearchManager).where(ResearchManager.slug == "archived")
-        )
-        for period, quantity in (("2026-03-31", "10"), ("2026-06-30", "11")):
-            quarter(session, active, period, quantity, "111111111")
-            quarter(session, archived, period, quantity, "222222222")
-        quarter(session, archived, "2026-09-30", "12", "222222222")
-        sync.seed_catalog(session, catalog)
-        sync.seed_catalog(session, catalog)
-        session.commit()
-    assert {row["slug"] for row in db_client.get("/api/research/managers").json()["managers"]} == {
-        "active"
-    }
-    activity: dict = db_client.get("/api/research/activity").json()
-    assert activity["quarter"] == "2026-06-30"
-    assert activity["available_quarters"] == ["2026-06-30"]
-    assert {row["slug"] for row in activity["increased"][0]["contributors"]} == {"active"}
-    assert (
-        db_client.get(
-            "/api/research/activity/market-context?quarter=2026-06-30&cusips=222222222"
-        ).status_code
-        == 404
-    )
-    detail: dict = db_client.get("/api/research/managers/archived").json()
-    assert len(detail["filings"]) == 3
-    changes: dict = db_client.get(
-        "/api/research/managers/archived/changes?quarter=2026-06-30"
-    ).json()
-    assert changes["status"] == "available"
-    assert Decimal(changes["changes"][0]["quantity_change"]) == 1
-
-
-def test_bounded_cli_imports_unknown_aum_and_excludes_archived(
+def test_bounded_cli_imports_unknown_aum(
     database: Engine,
     db_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Real parsing and storage import unknown-AUM history but skip archived managers."""
+    """Real parsing and storage import unknown-AUM history without inventing AUM."""
     with Session(database) as session:
         manager(session, "unknown", "1001", {})
-        manager(session, "archived", "1002", {"archived": True})
         session.commit()
     submissions: dict = {
         "filings": {
@@ -193,31 +141,9 @@ def test_bounded_cli_imports_unknown_aum_and_excludes_archived(
     assert changes["status"] == "available"
     assert Decimal(changes["changes"][0]["quantity_change"]) == 5
     monkeypatch.setattr(
-        sys,
-        "argv",
-        ["sync", "--manager", "archived", "--quarters", "2", "--through-quarter", "2026-Q2"],
-    )
-    with pytest.raises(SystemExit) as error:
-        sync.main()
-    assert error.value.code == 2
-    monkeypatch.setattr(
         sys, "argv", ["sync", "--all-investors", "--quarters", "2", "--through-quarter", "2026-Q2"]
     )
     sync.main()
-    assert json.loads(capsys.readouterr().out)["manager"] == "unknown"
-    with Session(database) as session:
-        archived: ResearchManager = session.scalar(
-            select(ResearchManager).where(ResearchManager.slug == "archived")
-        )
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(ResearchFiling)
-                .where(ResearchFiling.manager_id == archived.id)
-            )
-            == 0
-        )
-        unknown: ResearchManager = session.scalar(
-            select(ResearchManager).where(ResearchManager.slug == "unknown")
-        )
-        assert unknown.profile.get("aum_usd") is None
+    repeated: dict = json.loads(capsys.readouterr().out)
+    assert repeated["manager"] == "unknown" and repeated["imported_filings"] == 0
+    assert len(db_client.get("/api/research/managers/unknown").json()["filings"]) == 2

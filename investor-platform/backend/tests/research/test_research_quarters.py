@@ -92,12 +92,6 @@ def test_bounded_cli_preserves_database_roster_and_counts_exact_scope(
             cik="1002",
             profile={"name": "Custom Beta"},
         )
-        archived: ResearchManager = ResearchManager(
-            workspace_id=LOCAL_WORKSPACE,
-            slug="archived",
-            cik="1004",
-            profile={"name": "Archived", "archived": True},
-        )
         other_owner: UUID = uuid4()
         other_workspace: UUID = uuid4()
         session.add(Owner(id=other_owner))
@@ -110,7 +104,7 @@ def test_bounded_cli_preserves_database_roster_and_counts_exact_scope(
             cik="1003",
             profile={"name": "Foreign Example"},
         )
-        session.add_all([alpha, beta, archived, foreign])
+        session.add_all([alpha, beta, foreign])
         session.flush()
         alpha_id: UUID = alpha.id
         period: str
@@ -157,6 +151,6 @@ def test_bounded_cli_preserves_database_roster_and_counts_exact_scope(
     assert outcomes[0]["complete_filings"] == 2 and outcomes[0]["blocked_filings"] == 1
     assert outcomes[1]["complete_filings"] == outcomes[1]["blocked_filings"] == 0
     with Session(database) as session:
-        assert session.scalar(select(func.count()).select_from(ResearchManager)) == 4
+        assert session.scalar(select(func.count()).select_from(ResearchManager)) == 3
         assert session.scalar(select(func.count()).select_from(ResearchFiling)) == 5
         assert session.get(ResearchManager, alpha_id).profile == {"name": "Custom Alpha"}

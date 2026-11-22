@@ -11,9 +11,9 @@ from harness.commands.common import elapsed_ms
 from harness.output import CommandResult
 
 INGEST_13F_HELP: str = (
-    "Fetch, parse and persist quarterly SEC 13F holdings for every tracked investor.\n\n"
+    "Fetch, parse and persist quarterly SEC 13F holdings for every stored investor.\n\n"
     "Uses the platform importer and existing DATABASE_URL and EDGAR_IDENTITY configuration.\n"
-    "AUM does not gate collection or activity; archived managers are excluded.\n\n"
+    "AUM does not gate collection or activity.\n\n"
     "Example:\n"
     "  minerva sec ingest-13f --quarters 20 --through-quarter 2026-Q2"
 )
