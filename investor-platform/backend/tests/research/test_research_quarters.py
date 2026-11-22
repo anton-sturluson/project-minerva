@@ -1,19 +1,17 @@
 """Verify exact report-quarter windows and existing database investor selection."""
 
 import json
-import os
-import subprocess
 import sys
 from datetime import date
-from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Engine, func, select, text
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from investor_platform.db import LOCAL_WORKSPACE
 from investor_platform.models import Owner, ResearchFiling, ResearchManager, Workspace
+from investor_platform.research import sync
 from investor_platform.research.sync import quarter_window, submission_rows
 
 
@@ -77,7 +75,9 @@ def test_submission_rows_keep_only_inclusive_report_periods() -> None:
     assert rows[0]["form"] == "13F-HR/A"
 
 
-def test_bounded_cli_preserves_database_roster_and_counts_exact_scope(database: Engine) -> None:
+def test_bounded_cli_preserves_database_roster_and_counts_exact_scope(
+    database: Engine, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """The real CLI reads owned stored investors without seeding or changing catalog metadata."""
     with Session(database) as session:
         alpha: ResearchManager = ResearchManager(
@@ -131,34 +131,23 @@ def test_bounded_cli_preserves_database_roster_and_counts_exact_scope(database: 
                 )
             )
         session.commit()
-    with database.connect() as connection:
-        schema: str = connection.scalar(text("SELECT current_schema()"))
-    environment: dict[str, str] = {
-        **os.environ,
-        "DATABASE_URL": database.url.render_as_string(hide_password=False),
-        "PGOPTIONS": f"-csearch_path={schema}",
-    }
-    environment.pop("EDGAR_IDENTITY", None)
-    result: subprocess.CompletedProcess[str] = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "investor_platform.research.sync",
-            "--quarters",
-            "20",
-            "--through-quarter",
-            "2026-Q2",
-        ],
-        cwd=Path(__file__).resolve().parents[2],
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=15,
-    )
-    outcomes: list[dict] = [json.loads(line) for line in result.stdout.splitlines()]
+
+    def read_submissions(_client: sync.SECClient, url: str) -> bytes:
+        """Return an empty synthetic SEC index for each tracked manager."""
+        assert url in {
+            "https://data.sec.gov/submissions/CIK0000001001.json",
+            "https://data.sec.gov/submissions/CIK0000001002.json",
+        }
+        return b'{"filings":{"recent":{"form":[]},"files":[]}}'
+
+    monkeypatch.setattr(sync.SECClient, "read", read_submissions)
+    monkeypatch.setattr(sync, "make_engine", lambda: database)
+    monkeypatch.setenv("EDGAR_IDENTITY", "Example research research@example.com")
+    monkeypatch.setattr(sys, "argv", ["sync", "--quarters", "20", "--through-quarter", "2026-Q2"])
+    sync.main()
+    outcomes: list[dict] = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [row["manager"] for row in outcomes] == ["custom-alpha", "custom-beta"]
-    assert all(row["status"] == "skipped" for row in outcomes)
+    assert all(row["imported_filings"] == 0 for row in outcomes)
     assert outcomes[0]["complete_filings"] == 2 and outcomes[0]["blocked_filings"] == 1
     assert outcomes[1]["complete_filings"] == outcomes[1]["blocked_filings"] == 0
     with Session(database) as session:

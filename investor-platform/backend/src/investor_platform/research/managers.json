@@ -930,5 +930,52 @@
     "aum_as_of": "2026-08-03",
     "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/108260/PDF/108260.pdf",
     "aum_measurement": "regulatory_aum"
+  },
+  {
+    "slug": "duquesne",
+    "name": "Duquesne Family Office",
+    "investor_names": [
+      "Stanley Druckenmiller"
+    ],
+    "cik": "0001536411",
+    "website_url": "https://www.sec.gov/edgar/browse/?CIK=1536411",
+    "letters_url": null,
+    "focus": "Global macro; opportunistic equities",
+    "history_start_year": 2011,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001536411.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001536411.json",
+      "https://www.sec.gov/Archives/edgar/data/1536411/000153641112000002/0001536411-12-000002-index.htm",
+      "https://www.morganstanley.com/insights/videos/hard-lessons/duquesne-stan-druckenmiller-iliana-bouzali"
+    ],
+    "aum_usd": null,
+    "aum_as_of": null,
+    "aum_source_url": null,
+    "aum_measurement": null,
+    "notes": "Family-office AUM is not independently verified. SEC filer page is used because no official firm website was verified. Duquesne Capital Management (CIK 1008925) is a separate reporting entity; its holdings are not joined to this history."
+  },
+  {
+    "slug": "appaloosa",
+    "name": "Appaloosa",
+    "investor_names": [
+      "David Tepper"
+    ],
+    "cik": "0001656456",
+    "website_url": "https://adviserinfo.sec.gov/firm/summary/281909",
+    "letters_url": null,
+    "focus": "Opportunistic equities; distressed and event-driven investing",
+    "history_start_year": 2016,
+    "history_source_url": "https://data.sec.gov/submissions/CIK0001656456.json",
+    "source_urls": [
+      "https://data.sec.gov/submissions/CIK0001656456.json",
+      "https://www.sec.gov/Archives/edgar/data/1656456/000165645616000007/0001656456-16-000007-index.html",
+      "https://reports.adviserinfo.sec.gov/reports/ADV/281909/PDF/281909.pdf",
+      "https://tepperfoundation.org/about/our-founder/"
+    ],
+    "aum_usd": "20396101407",
+    "aum_as_of": "2026-03-25",
+    "aum_source_url": "https://reports.adviserinfo.sec.gov/reports/ADV/281909/PDF/281909.pdf",
+    "aum_measurement": "regulatory_aum",
+    "notes": "AUM date is the Form ADV filing date. SEC adviser profile is used because no official firm website was verified. Appaloosa Management (CIK 1006438) is a separate legacy reporting entity; its holdings are not joined to this history."
   }
 ]

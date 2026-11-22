@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from investor_platform.db import Actor, CurrentActor, DatabaseSession
 from investor_platform.models import ResearchFiling, ResearchHolding, ResearchManager
-from investor_platform.research.eligibility import manager_eligibility
 from investor_platform.research.snapshots import (
     HoldingKey,
     Position,
@@ -130,7 +129,6 @@ def manager_view(
         "cik": manager.cik,
         "portfolio_company_count": company_count,
         "portfolio_company_count_quarter": latest_period.isoformat() if latest_period else None,
-        "eligibility": manager_eligibility(manager.profile, date.today()),
         "coverage": {
             "quarters": len(usable),
             "first_quarter": usable[0].isoformat() if usable else None,
