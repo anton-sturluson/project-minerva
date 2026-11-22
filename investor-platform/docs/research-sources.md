@@ -1,6 +1,6 @@
 # Research manager sources
 
-Original 21-manager history checks were verified on 2026-10-07; 17 value-manager additions and AUM disclosures were checked on 2026-10-08. The seed contains 38 research managers. Technology and growth managers come first; the focus labels are research categories, not a measured technology exposure or an endorsement. People are associated founders or investors, not a claim that they currently control every reported position. The SEC submission indexes verify each reporting entity and its CIK. ([SEC submissions API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces))
+Original 21-manager history checks were verified on 2026-10-07; 17 value-manager additions and AUM disclosures were checked on 2026-10-08. Duquesne and Appaloosa sources were checked on 2026-11-22. The seed contains 40 research managers. Technology and growth managers come first; the focus labels are research categories, not a measured technology exposure or an endorsement. People are associated founders or investors, not a claim that they currently control every reported position. The SEC submission indexes verify each reporting entity and its CIK. ([SEC submissions API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces))
 
 `history_start_year` is the report year of the earliest 13F-HR found in the checked submission indexes, including historical shards where present. It is not the firm's founding year and does not prove uninterrupted quarterly filings. Establish ten-year coverage from imported filings and report missing quarters. D1 starts at 2018-12-31 and GQG at 2016-12-31: neither has ten years of observed periods as of verification. Pershing's current parent starts at 2025-06-30; its legacy filer starts at 2005-12-31. Keep the entities distinct. ([SEC D1](https://data.sec.gov/submissions/CIK0001747057.json); [SEC GQG](https://data.sec.gov/submissions/CIK0001697233.json); [SEC current Pershing](https://data.sec.gov/submissions/CIK0002026053.json); [SEC legacy Pershing](https://data.sec.gov/submissions/CIK0001336528.json))
 
@@ -45,20 +45,27 @@ Original 21-manager history checks were verified on 2026-10-07; 17 value-manager
 | Lountzis Asset Management | 0001821168 | 2020-06-30 | 2020-08-14 | [SEC index](https://data.sec.gov/submissions/CIK0001821168.json) |
 | Greenhaven Road Capital | 0001741129 | 2019-12-31 | 2020-02-14 | [SEC index](https://data.sec.gov/submissions/CIK0001741129.json) |
 | Weitz Investment Management | 0000883965 | 1999-03-31 | 1999-05-07 | [SEC index](https://data.sec.gov/submissions/CIK0000883965.json) |
+| Duquesne Family Office | 0001536411 | 2011-12-31 | 2012-02-09 | [SEC index](https://data.sec.gov/submissions/CIK0001536411.json) |
+| Appaloosa | 0001656456 | 2016-03-31 | 2016-05-13 | [SEC index](https://data.sec.gov/submissions/CIK0001656456.json) |
 | First Eagle Investment Management | 0001325447 | 2006-06-30 | 2006-07-18 | [SEC index](https://data.sec.gov/submissions/CIK0001325447.json) |
 
 Dorsey and Himalaya each begin at 2016-12-31 and have less than ten years of observed periods at verification. Greenhaven Road begins at 2019-12-31 and Lountzis at 2020-06-30. Keep these as shorter-history candidates despite longer operating histories. Greenhaven Road (Scott Miller) is distinct from Greenhaven Associates (Edgar Wachenheim). ([Dorsey SEC](https://data.sec.gov/submissions/CIK0001671657.json); [Himalaya SEC](https://data.sec.gov/submissions/CIK0001709323.json); [Greenhaven Road SEC](https://data.sec.gov/submissions/CIK0001741129.json); [Lountzis SEC](https://data.sec.gov/submissions/CIK0001821168.json); [Greenhaven Road team](https://www.greenhavenroad.com/about))
 
 Greenlight's current reporter is DME Capital Management (CIK 1489933), beginning in 2024 Q1. Its legacy Greenlight Capital Inc. reporter (CIK 1079114) ends in 2023 Q4. Ruane's current partnership (CIK 1720792) begins in 2018 Q1, while its legacy corporation (CIK 728014) has earlier reports. The catalog retains separate histories and legacy source links; do not join snapshots across either transition without review. ([DME SEC](https://data.sec.gov/submissions/CIK0001489933.json); [legacy Greenlight SEC](https://data.sec.gov/submissions/CIK0001079114.json); [Ruane partnership SEC](https://data.sec.gov/submissions/CIK0001720792.json); [Ruane legacy SEC](https://data.sec.gov/submissions/CIK0000728014.json))
 
+Duquesne Family Office (CIK 1536411) and Appaloosa LP (CIK 1656456) are tracked under their current reporting identities. Their histories are kept separate from Duquesne Capital Management (CIK 1008925) and Appaloosa Management (CIK 1006438), respectively. The standard ten-year backfill starts in 2016; an earliest-filing reference does not mean every earlier filing has been imported. ([Duquesne first filing](https://www.sec.gov/Archives/edgar/data/1536411/000153641112000002/0001536411-12-000002-index.htm); [Appaloosa first filing](https://www.sec.gov/Archives/edgar/data/1656456/000165645616000007/0001656456-16-000007-index.html))
+
 ## Assets under management
 
 The minimum is USD 50 million in independently sourced firm/adviser AUM or regulatory AUM. It is separate from the value of reportable 13F holdings. Unknown or unverified AUM remains visible as a candidate and is excluded from the stock-activity universe until supported. An AUM figure is a dated disclosure, not a claim about assets today. ([SEC Form ADV](https://www.sec.gov/files/formadv.pdf))
+
+Duquesne Family Office has no verified public total-AUM disclosure in the reviewed sources. Its 13F holdings value and Stanley Druckenmiller’s personal wealth are not substituted for firm AUM.
 
 The regulatory AUM entries below use each adviser's official Form ADV, Item 5.F total regulatory assets under management. The date is the **disclosure filing date**, recorded in `aum_as_of`; the filing does not supply an exact valuation date for this field. Regulatory AUM can include leverage and assets outside the 13F universe. The source-date label preserves that measurement distinction; specific adviser/reporter affiliations are noted separately where needed.
 
 | Manager | AUM (USD) | Measurement | Source date | Primary source |
 | --- | ---: | --- | --- | --- |
+| Appaloosa | 20,396,101,407 | Regulatory AUM | 2026-03-25 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/281909/PDF/281909.pdf) |
 | Tiger Global | 77,993,959,953 | Regulatory AUM | 2026-03-27 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/160318/PDF/160318.pdf) |
 | Coatue | 92,705,722,582 | Regulatory AUM | 2026-07-29 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/157910/PDF/157910.pdf) |
 | Viking Global | 78,202,235,935 | Regulatory AUM | 2026-06-15 | [SEC Form ADV](https://reports.adviserinfo.sec.gov/reports/ADV/132272/PDF/132272.pdf) |
