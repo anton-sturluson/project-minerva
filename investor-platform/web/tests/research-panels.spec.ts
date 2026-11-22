@@ -17,11 +17,6 @@ const managers = Array.from({ length: 18 }, (_, index) => ({
   aum_as_of: "2026-01-01",
   aum_source_url: "https://example.com/aum",
   aum_measurement: "firm_aum",
-  eligibility: {
-    status: "eligible",
-    minimum_aum_usd: "50000000",
-    reason: null,
-  },
   coverage: {
     quarters: 2,
     first_quarter: "2026-03-31",

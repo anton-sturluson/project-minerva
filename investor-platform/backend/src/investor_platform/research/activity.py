@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from investor_platform.db import CurrentActor, DatabaseSession
 from investor_platform.domain import ACCOUNTING_PRECISION
 from investor_platform.models import ResearchFiling, ResearchManager
-from investor_platform.research.eligibility import Eligibility, manager_eligibility
 from investor_platform.research.snapshots import (
     PositionChange,
     load_holdings,
@@ -85,7 +84,6 @@ def activity_for_quarter(
     periods: dict[UUID, set[date]],
     quarter: date,
     available_quarters: list[date],
-    eligibility_by_manager: dict[UUID, Eligibility],
 ) -> dict:
     """Compare each manager at the selected quarter, retaining exclusions and evidence."""
     prior: date = previous_quarter(quarter)
@@ -94,16 +92,13 @@ def activity_for_quarter(
     excluded: list[dict[str, str]] = []
     included: int = 0
     manager: ResearchManager
-    eligible: list[ResearchManager] = [
-        manager
-        for manager in managers
-        if eligibility_by_manager[manager.id]["status"] == "eligible"
-        and {quarter, prior}.issubset(periods.get(manager.id, set()))
+    comparable: list[ResearchManager] = [
+        manager for manager in managers if {quarter, prior}.issubset(periods.get(manager.id, set()))
     ]
     filings: list[ResearchFiling] = list(
         session.scalars(
             select(ResearchFiling).where(
-                ResearchFiling.manager_id.in_([manager.id for manager in eligible]),
+                ResearchFiling.manager_id.in_([manager.id for manager in comparable]),
                 ResearchFiling.report_period.in_([quarter, prior]),
             )
         )
@@ -117,13 +112,12 @@ def activity_for_quarter(
         for manager in managers:
             name: str = manager.profile["name"]
             manager_periods: set[date] = periods.get(manager.id, set())
-            eligibility: Eligibility = eligibility_by_manager[manager.id]
-            reason: str | None = eligibility["reason"]
+            reason: str | None = None
             comparison: dict = {}
             changes: list[PositionChange] = []
-            if reason is None and (quarter not in manager_periods or prior not in manager_periods):
+            if quarter not in manager_periods or prior not in manager_periods:
                 reason = "Missing selected or previous adjacent quarter"
-            elif reason is None:
+            else:
                 comparison = manager_comparison(
                     session,
                     manager,
@@ -210,9 +204,7 @@ def activity_for_quarter(
         "previous_quarter": prior.isoformat(),
         "available_quarters": [period.isoformat() for period in available_quarters],
         "status": "available" if included else "unavailable",
-        "reason": None
-        if included
-        else "No eligible managers have a usable adjacent-quarter comparison",
+        "reason": None if included else "No managers have a usable adjacent-quarter comparison",
         "included_managers": included,
         "total_managers": len(managers),
         "excluded_managers": excluded,
@@ -231,7 +223,7 @@ def get_activity(
     managers: list[ResearchManager] = list(
         session.scalars(
             select(ResearchManager)
-            .where(ResearchManager.workspace_id == actor.workspace_id)
+            .where(ResearchManager.workspace_id == actor.workspace_id, ResearchManager.is_tracked())
             .order_by(ResearchManager.slug)
         )
     )
@@ -240,40 +232,26 @@ def get_activity(
     manager_id: UUID
     period: date
     for manager_id, period in session.execute(
-        select(ResearchFiling.manager_id, ResearchFiling.report_period)
-        .join(ResearchManager, ResearchManager.id == ResearchFiling.manager_id)
-        .where(ResearchManager.workspace_id == actor.workspace_id)
+        select(ResearchFiling.manager_id, ResearchFiling.report_period).where(
+            ResearchFiling.manager_id.in_([manager.id for manager in managers])
+        )
     ):
         if quarter_end(period):
             periods.setdefault(manager_id, set()).add(period)
-    as_of: date = date.today()
-    eligibility_by_manager: dict[UUID, Eligibility] = {
-        manager.id: manager_eligibility(manager.profile, as_of) for manager in managers
-    }
-    eligible_ids: set[UUID] = {
-        manager.id
-        for manager in managers
-        if eligibility_by_manager[manager.id]["status"] == "eligible"
-    }
     available: list[date] = sorted(
         {
             period
-            for manager_id, manager_periods in periods.items()
-            if manager_id in eligible_ids
+            for manager_periods in periods.values()
             for period in manager_periods
             if previous_quarter(period) in manager_periods
         },
         reverse=True,
     )
     if quarter is not None:
-        return activity_for_quarter(
-            session, managers, periods, quarter, available, eligibility_by_manager
-        )
+        return activity_for_quarter(session, managers, periods, quarter, available)
     newest_unavailable: dict | None = None
     for period in available:
-        result: dict = activity_for_quarter(
-            session, managers, periods, period, available, eligibility_by_manager
-        )
+        result: dict = activity_for_quarter(session, managers, periods, period, available)
         if result["included_managers"]:
             return result
         if newest_unavailable is None:
@@ -285,15 +263,14 @@ def get_activity(
         "previous_quarter": None,
         "available_quarters": [],
         "status": "unavailable",
-        "reason": "No eligible managers have an adjacent-quarter filing pair",
+        "reason": "No managers have an adjacent-quarter filing pair",
         "included_managers": 0,
         "total_managers": len(managers),
         "excluded_managers": [
             {
                 "slug": manager.slug,
                 "name": manager.profile["name"],
-                "reason": eligibility_by_manager[manager.id]["reason"]
-                or "No adjacent-quarter filing pair has been imported",
+                "reason": "No adjacent-quarter filing pair has been imported",
             }
             for manager in managers
         ],

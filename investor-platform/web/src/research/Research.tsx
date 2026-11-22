@@ -27,11 +27,6 @@ type Manager = {
   aum_source_url: string | null;
   aum_measurement:
     "regulatory_aum" | "firm_aum" | "verified_lower_bound" | null;
-  eligibility: {
-    status: "eligible" | "below_minimum" | "unverified";
-    minimum_aum_usd: string;
-    reason: string | null;
-  };
   coverage: Coverage;
   portfolio_company_count: number | null;
   portfolio_company_count_quarter: string | null;
@@ -126,20 +121,20 @@ function AumSummary({ manager }: { manager: Manager }) {
     firm_aum: "Firm AUM",
     verified_lower_bound: "AUM lower bound",
   };
-  if (manager.eligibility.status === "unverified") {
-    return (
-      <p className="form-note">AUM unverified · {manager.eligibility.reason}</p>
-    );
-  }
+  if (!manager.aum_usd) return <p className="form-note">AUM not disclosed</p>;
   return (
     <p className="form-note">
-      {manager.aum_measurement && labels[manager.aum_measurement]}:{" "}
-      {manager.aum_usd && (
-        <span title={exactDollars(manager.aum_usd)}>
-          {dollars(manager.aum_usd)} · {manager.aum_as_of}
-        </span>
+      {manager.aum_measurement ? labels[manager.aum_measurement] : "AUM"}:{" "}
+      <span title={exactDollars(manager.aum_usd)}>
+        {dollars(manager.aum_usd)}
+        {manager.aum_as_of && ` · ${manager.aum_as_of}`}
+      </span>
+      {manager.aum_source_url && (
+        <>
+          {" "}
+          · <SourceLink url={manager.aum_source_url}>Source</SourceLink>
+        </>
       )}
-      {manager.eligibility.reason && <> · {manager.eligibility.reason}</>}
     </p>
   );
 }
@@ -308,7 +303,6 @@ function ManagersDirectory() {
   const [retry, setRetry] = useState(0);
   const [search, setSearch] = useState("");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
-  const [showCandidates, setShowCandidates] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const detailRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -338,7 +332,6 @@ function ManagersDirectory() {
   }, [retry]);
   const visible = managers?.filter(
     (manager) =>
-      (showCandidates || manager.eligibility.status === "eligible") &&
       (!verifiedOnly || manager.coverage.continuous_decade) &&
       [manager.name, manager.investor_names.join(" "), manager.focus]
         .join(" ")
@@ -364,10 +357,6 @@ function ManagersDirectory() {
       )}
       {managers && managers.length > 0 && (
         <>
-          <p className="form-note">
-            Minimum verified AUM:{" "}
-            {dollars(managers[0].eligibility.minimum_aum_usd)}.
-          </p>
           <div className="research-controls">
             <label>
               Find a manager{" "}
@@ -384,14 +373,6 @@ function ManagersDirectory() {
                 onChange={(event) => setVerifiedOnly(event.target.checked)}
               />{" "}
               Verified 10-year coverage only
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={showCandidates}
-                onChange={(event) => setShowCandidates(event.target.checked)}
-              />{" "}
-              Show unverified or below-minimum managers
             </label>
           </div>
           <div className="research-layout">

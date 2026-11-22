@@ -324,6 +324,7 @@ def get_market_context(
             .join(ResearchManager, ResearchFiling.manager_id == ResearchManager.id)
             .where(
                 ResearchManager.workspace_id == actor.workspace_id,
+                ResearchManager.is_tracked(),
                 ResearchFiling.report_period.in_([previous_quarter(quarter), quarter]),
                 ResearchHolding.cusip.in_(requested),
                 ResearchHolding.share_type == "SH",

@@ -22,7 +22,6 @@ from sqlalchemy.orm import Session
 
 from investor_platform.db import LOCAL_WORKSPACE, make_engine
 from investor_platform.models import ResearchFiling, ResearchHolding, ResearchManager
-from investor_platform.research.eligibility import Eligibility, manager_eligibility
 from investor_platform.research.snapshots import HoldingKey, Position, quarter_end
 
 CATALOG: Path = Path(__file__).with_name("managers.json")
@@ -500,7 +499,7 @@ def main() -> None:
     parser.add_argument(
         "--all-investors",
         action="store_true",
-        help="Collect existing database investors regardless of AUM eligibility",
+        help="Collect existing tracked database investors without refreshing catalog metadata",
     )
     default_start_year: int = date.today().year - 10
     parser.add_argument(
@@ -543,37 +542,17 @@ def main() -> None:
                 return
         query: Select[tuple[ResearchManager]] = (
             select(ResearchManager)
-            .where(ResearchManager.workspace_id == LOCAL_WORKSPACE)
+            .where(ResearchManager.workspace_id == LOCAL_WORKSPACE, ResearchManager.is_tracked())
             .order_by(ResearchManager.slug)
         )
         if args.manager:
             query = query.where(ResearchManager.slug == args.manager)
         managers: list[ResearchManager] = list(session.scalars(query))
         if not managers:
-            parser.error("No matching manager in the workspace database")
+            parser.error("No matching tracked manager in the workspace database")
         manager: ResearchManager
         failed: bool = False
         for manager in managers:
-            eligibility: Eligibility = manager_eligibility(manager.profile, date.today())
-            if not args.all_investors and eligibility["status"] != "eligible":
-                print(
-                    json.dumps(
-                        {
-                            "manager": manager.slug,
-                            "status": "skipped",
-                            "reason": eligibility["reason"],
-                            **filing_counts(
-                                session,
-                                manager.id,
-                                start_year,
-                                start_period=start_period,
-                                end_period=end_period,
-                            ),
-                        }
-                    ),
-                    flush=True,
-                )
-                continue
             if client is None:
                 try:
                     client = SECClient(os.environ.get("EDGAR_IDENTITY", ""))
