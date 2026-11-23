@@ -117,7 +117,7 @@ main,
 #activity,
 #performance,
 #post-mortem,
-#research,
+.research,
 .corrections {
   scroll-margin-top: calc(var(--header-height) + 16px);
 }
@@ -845,18 +845,18 @@ summary:focus-visible {
   margin-top: 20px;
 }
 @media (min-width: 801px) {
-  #research {
+  .research-managers {
     display: flex;
     flex-direction: column;
     height: calc(100dvh - var(--header-height) - 36px);
   }
-  #research > section {
+  .research-managers > section {
     display: flex;
     flex: 1;
     flex-direction: column;
     min-height: 0;
   }
-  #research > section > .form-note {
+  .research-managers > section > .form-note {
     flex: 0 0 auto;
   }
   .research-layout {
@@ -1178,4 +1178,210 @@ summary:focus-visible {
 }
 .economics-selector [role="group"] [role="option"] {
   padding-left: 24px;
+}
+
+.diverging-chart {
+  border-block: 1px solid var(--rule);
+  margin-block: 20px;
+  padding-block: 16px;
+  min-width: 0;
+}
+.diverging-chart h4 {
+  font-size: 21px;
+  margin: 0 0 14px;
+}
+.chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 18px;
+  margin-block: 12px 20px;
+}
+.chart-controls label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.chart-controls input {
+  width: 210px;
+  max-width: 100%;
+}
+.diverging-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  font:
+    13px Arial,
+    sans-serif;
+  margin-bottom: 12px;
+}
+.diverging-legend i {
+  display: inline-block;
+  width: 16px;
+  height: 9px;
+  margin-right: 6px;
+}
+.diverging-left {
+  background: var(--plum);
+}
+.diverging-right {
+  background: var(--blue);
+}
+.diverging-rows {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.diverging-row {
+  display: grid;
+  grid-template-columns: minmax(0, 230px) minmax(0, 1fr);
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  background: transparent;
+}
+.diverging-row[aria-expanded="true"] {
+  box-shadow: inset 3px 0 var(--plum);
+  background: var(--lilac);
+}
+.diverging-name {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+  font:
+    14px Arial,
+    sans-serif;
+}
+.diverging-issuer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diverging-suffix {
+  flex-shrink: 0;
+}
+.diverging-plot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 28px;
+  margin-inline: 55px;
+  min-width: 0;
+}
+.diverging-half {
+  position: relative;
+  min-width: 0;
+}
+.diverging-half:first-child {
+  border-right: 1px solid var(--rule);
+}
+.diverging-bar {
+  position: absolute;
+  top: 5px;
+  height: 18px;
+}
+.diverging-bar.diverging-left {
+  right: 0;
+}
+.diverging-bar.diverging-right {
+  left: 0;
+}
+.diverging-value {
+  position: absolute;
+  top: 6px;
+  white-space: nowrap;
+  font:
+    12px Arial,
+    sans-serif;
+}
+.diverging-value-left {
+  color: var(--plum);
+  transform: translateX(-5px);
+}
+.diverging-value-right {
+  color: var(--blue);
+  transform: translateX(5px);
+}
+.diverging-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 10px 63px 0 305px;
+  font:
+    11px "Courier New",
+    monospace;
+  color: var(--plum);
+}
+.diverging-unit {
+  text-align: center;
+  font:
+    13px Arial,
+    sans-serif;
+}
+.diverging-details {
+  border-top: 2px solid var(--ink);
+  padding-top: 16px;
+  margin-top: 20px;
+}
+.diverging-detail-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.diverging-details h5 {
+  margin: 0 0 14px;
+  font-size: 18px;
+  scroll-margin-top: calc(var(--header-height) + 20px);
+}
+.diverging-details h5:focus {
+  outline: 2px solid var(--blue);
+  outline-offset: 4px;
+}
+.diverging-details > section {
+  margin-top: 20px;
+}
+.chart-position-details {
+  display: grid;
+  gap: 10px;
+}
+.chart-position-details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.chart-position-details dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 800px) {
+  .diverging-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .diverging-axis {
+    margin-inline: 63px;
+  }
+  .chart-controls label {
+    max-width: 100%;
+  }
+  .chart-controls select {
+    max-width: 100%;
+  }
+}
+.diverging-chart {
+  container-type: inline-size;
+}
+@container (max-width: 700px) {
+  .diverging-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .diverging-axis {
+    margin-inline: 63px;
+  }
 }

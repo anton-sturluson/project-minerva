@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { DivergingBarChart } from "../components/DivergingBarChart";
+import { securityLabel, useResearchSymbols } from "./securityLabels";
 import { api, errorMessage } from "../api";
 import { Economics } from "./Economics";
 import { InstitutionalStockActivity } from "./InstitutionalStockActivity";
@@ -50,6 +52,7 @@ type Change = {
   quantity_change: string;
   current_value_usd: string;
   value_change_usd: string;
+  previous_weight: string | null;
   current_weight: string | null;
   weight_change: string | null;
 };
@@ -136,6 +139,159 @@ function AumSummary({ manager }: { manager: Manager }) {
         </>
       )}
     </p>
+  );
+}
+
+function ManagerWeightChart({ comparison }: { comparison: Comparison }) {
+  const [search, setSearch] = useState("");
+  const [order, setOrder] = useState("absolute");
+  const [limit, setLimit] = useState(10);
+  const shares = comparison.changes.filter(
+    (change) => change.share_type === "SH" && !change.put_call,
+  );
+  const rows = shares
+    .filter(
+      (change) =>
+        change.weight_change !== null &&
+        Number.isFinite(Number(change.weight_change)) &&
+        Number(change.weight_change) !== 0,
+    )
+    .map((change) => {
+      const delta = Number(change.weight_change) * 100;
+      return {
+        id: `${change.cusip}|${change.put_call}|${change.share_type}`,
+        change,
+        left: Math.max(0, -delta),
+        right: Math.max(0, delta),
+      };
+    });
+  const matching = rows.filter(({ change }) =>
+    `${change.issuer} ${change.security_class} ${change.cusip}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+  const score = (row: (typeof rows)[number]) =>
+    order === "increased"
+      ? row.right
+      : order === "decreased"
+        ? row.left
+        : Math.max(row.left, row.right);
+  const visible = matching
+    .sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id))
+    .slice(0, limit);
+  const symbols = useResearchSymbols(visible.map((row) => row.change.cusip));
+  if (rows.length === 0)
+    return (
+      <p className="form-note">
+        {shares.some((change) => change.weight_change === null)
+          ? "Portfolio weight changes unavailable."
+          : "No reported portfolio weight changes."}
+      </p>
+    );
+  const domainMax = Math.max(
+    2,
+    Math.ceil(
+      Math.max(...rows.map((row) => Math.max(row.left, row.right))) / 2,
+    ) * 2,
+  );
+  return (
+    <DivergingBarChart
+      title="Portfolio weight changes"
+      rows={visible.map((row) => ({
+        id: row.id,
+        ...securityLabel(row.change.issuer, symbols[row.change.cusip]?.symbol),
+        left: row.left,
+        right: row.right,
+      }))}
+      domainMax={domainMax}
+      leftLabel="Weight decreased"
+      rightLabel="Weight increased"
+      unitLabel="Change in reported 13F weight (pp)"
+      formatValue={(value, side) =>
+        weightChange((side === "left" ? -value / 100 : value / 100).toString())
+      }
+      formatTick={(value) => String(value)}
+      renderDetails={(selected) => {
+        const { change } = rows.find((row) => row.id === selected.id)!;
+        return (
+          <>
+            <p className="form-note">
+              {quarterLabel(comparison.previous_quarter)} →{" "}
+              {quarterLabel(comparison.quarter)} · {change.security_class} ·{" "}
+              {change.cusip}
+            </p>
+            <dl className="chart-position-details">
+              <div>
+                <dt>Share-count change</dt>
+                <dd>{changeLabels[change.kind] ?? change.kind}</dd>
+              </div>
+              <div>
+                <dt>Shares</dt>
+                <dd>
+                  {quantity(change.previous_quantity)} →{" "}
+                  {quantity(change.current_quantity)}
+                </dd>
+              </div>
+              <div>
+                <dt>Reported 13F weight</dt>
+                <dd>
+                  {weight(change.previous_weight ?? null)} →{" "}
+                  {weight(change.current_weight)}
+                </dd>
+              </div>
+              <div>
+                <dt>Weight change</dt>
+                <dd>{weightChange(change.weight_change)}</dd>
+              </div>
+            </dl>
+            <div className="research-links">
+              {comparison.source_urls.map((url, index) => (
+                <SourceLink key={url} url={url}>
+                  Filing {index + 1}
+                </SourceLink>
+              ))}
+            </div>
+          </>
+        );
+      }}
+    >
+      <div className="chart-controls">
+        <label>
+          Find a security
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <label>
+          Order
+          <select
+            aria-label="Chart order"
+            value={order}
+            onChange={(e) => setOrder(e.target.value)}
+          >
+            <option value="absolute">Largest weight changes</option>
+            <option value="increased">Largest weight increases</option>
+            <option value="decreased">Largest weight decreases</option>
+          </select>
+        </label>
+        <label>
+          Show
+          <select
+            aria-label="Securities shown"
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+          >
+            <option value={10}>10 securities</option>
+            <option value={20}>20 securities</option>
+          </select>
+        </label>
+        <span className="form-note">
+          {Math.min(limit, matching.length)} of {matching.length}
+        </span>
+      </div>
+    </DivergingBarChart>
   );
 }
 
@@ -242,23 +398,17 @@ function QuarterlyChanges({
 }
 
 export function Research({
-  activity,
-  economics = false,
+  section,
+  anchor,
 }: {
-  activity: boolean;
-  economics?: boolean;
+  section: "activity" | "managers" | "economics";
+  anchor: string;
 }) {
   return (
     <section
-      id={
-        economics
-          ? "research/economics"
-          : activity
-            ? "research/activity"
-            : "research"
-      }
+      id={anchor}
       aria-labelledby="research-heading"
-      className="research"
+      className={`research research-${section}`}
     >
       <h2 id="research-heading">
         <span aria-hidden="true">✳ </span>Research
@@ -268,27 +418,27 @@ export function Research({
         aria-label="Research navigation"
       >
         <a
-          href="#research"
-          aria-current={!activity && !economics ? "page" : undefined}
-        >
-          [ Managers ]
-        </a>
-        <a
           href="#research/activity"
-          aria-current={activity ? "page" : undefined}
+          aria-current={section === "activity" ? "page" : undefined}
         >
           [ Stock activity ]
         </a>
         <a
+          href="#research/managers"
+          aria-current={section === "managers" ? "page" : undefined}
+        >
+          [ Managers ]
+        </a>
+        <a
           href="#research/economics"
-          aria-current={economics ? "page" : undefined}
+          aria-current={section === "economics" ? "page" : undefined}
         >
           [ Economics ]
         </a>
       </nav>
-      {economics ? (
+      {section === "economics" ? (
         <Economics />
-      ) : activity ? (
+      ) : section === "activity" ? (
         <InstitutionalStockActivity />
       ) : (
         <ManagersDirectory />
@@ -590,10 +740,18 @@ function ManagerDetail({ slug }: { slug: string }) {
                   {comparison.changes.length === 0 ? (
                     <p>No disclosed positions in these quarters.</p>
                   ) : (
-                    <QuarterlyChanges
-                      changes={comparison.changes}
-                      annual={period === "annual"}
-                    />
+                    <>
+                      {period === "quarterly" && (
+                        <ManagerWeightChart
+                          key={`${comparison.previous_quarter}-${comparison.quarter}`}
+                          comparison={comparison}
+                        />
+                      )}
+                      <QuarterlyChanges
+                        changes={comparison.changes}
+                        annual={period === "annual"}
+                      />
+                    </>
                   )}
                 </>
               )}

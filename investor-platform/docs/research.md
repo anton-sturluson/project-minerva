@@ -1,4 +1,4 @@
-# Research manager directory
+# Research
 
 The Research view reads a PostgreSQL manager registry with official websites, public letter or commentary sources, and SEC filing links. The reviewed [catalog](../backend/src/investor_platform/research/managers.json) includes established technology, growth, and value investors with imported filing coverage. See [source verification](research-sources.md).
 
@@ -71,7 +71,7 @@ Annual results reuse the quarterly quantity and value calculation at the two bou
 
 ## Stock activity
 
-Research has two subsections: Managers and Stock activity (`#research/activity`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included managers and lists exclusions for missing, blocked, or zero-value snapshots.
+Research opens Stock activity at `#research` or `#research/activity`, followed by Managers (`#research/managers`) and Economics (`#research/economics`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included managers and lists exclusions for missing, blocked, or zero-value snapshots.
 
 The two rankings show shares increased (including new positions) and shares decreased (including exits). A manager contributes once per CUSIP and direction. Rankings exclude options and principal positions; share-type disclosures can also include funds. Unchanged quantities do not contribute, even when their value or weight changes. Share changes can reflect splits or reporting changes as well as trades.
 
@@ -80,6 +80,22 @@ The activity API returns a deterministic order by contributing manager count, th
 The stock table shows ten stocks per direction first and reveals ten more at a time. Stocks start folded. Expanding a stock shows a full-width manager table with before/after quantities and portfolio weights, and weight change. Manager tables start with ten rows and reveal ten more at a time, ordered by current 13F weight descending, with manager name as the tie-breaker. Changing a sortable heading reorders the full set and resets the display to ten stocks. A quarter change restores the defaults. Folding a stock resets its manager table to ten rows. The same stock can appear in both rankings when managers disagree. Activity is calculated from stored snapshots through the shared comparison calculation. Market context loads separately for visible CUSIPs. Filing evidence remains in the activity API and stored records; the contributor table has no Sources column.
 
 The activity API retains the contributor’s reported quarter-end price and date for compatibility; the manager table does not display them. This proxy is disclosed holding value in USD divided by disclosed shares: current-quarter values for a retained or new position, and previous-quarter values and date for an exit. A positive reference quantity is required; otherwise price and date are unavailable. It is not an execution price, purchase cost or sale proceeds, and never divides value change by share change. ([SEC Form 13F instructions](https://www.sec.gov/info/edgar/forms/form13f.pdf))
+
+### Interactive activity charts
+
+The activity overview joins the full increased and decreased cohorts by CUSIP, retaining separate security classes. Left bars count managers with reductions or exits; right bars count managers with increases or newly reported positions. The default order is the sum of both counts descending, with CUSIP as the tie-breaker. Directional orders retain both bars. Search covers issuer, class and CUSIP before the 10/20-security display limit. The symmetric axis uses the full quarter's largest directional count and stays fixed while controls change. Unchanged quantities are excluded; reported quantity changes can include corporate actions and reporting changes, not only trades.
+
+Selecting a chart row opens both contributor groups, before/after shares and weights, and filing links. Keyboard activation focuses the detail heading; Close or Escape returns focus to the row. Quarter changes and controls that remove the selected row clear its details. The existing tables retain independent sorting, pagination and market context.
+
+The quarterly manager view reuses the same chart layout for reported portfolio-weight changes in percentage points, sorted by absolute change and position identity. It includes non-option share positions with a finite, nonzero API weight difference, including unchanged shares whose weights moved. Direction follows weight rather than share count. Weights retain the full reported 13F denominator, including disclosed options and principal positions. New positions and exits use the comparison delta only when available; a zero-value endpoint makes it unavailable. Chart details show the share-count status separately. This is allocation change, not trade cash flow. Annual views retain their existing position tables.
+
+[The shared chart](../web/src/components/DivergingBarChart.tsx) owns the layout, accessible row controls and selected-detail focus; feature callers supply measurements, identity, ranking, labels and detail content. No chart library is required.
+
+### Chart security labels
+
+Chart rows use one line: `Issuer ($TICKER)`. Class and CUSIP remain in selected details and existing tables. `GET /api/research/activity/symbols?cusips=...` resolves at most twenty CUSIP/CINS identities through the same exact OpenFIGI resolver and one-day mapping cache used by market context. Every requested identity must occur as a positive, non-option share position in the workspace's stored research filings. This includes historical quarters for manager charts. Private portfolio records are not used.
+
+The identity-only endpoint never fetches price history. Charts request symbols only for visible rows and keep names usable when mapping is unavailable; they do not guess symbols or render an empty ticker suffix. Unsupported stored identifiers keep their name-only labels without blocking valid identifiers in the same chart. Transport failures and temporary mapping outages are retried when rows are revisited, without an automatic retry loop; definitive no-match results remain cached. Share-class symbols retain the mapping's raw format, such as `ABC/A`, rather than price-provider spelling. The response retains mapping timestamp and composite FIGI evidence. It is a current US equity mapping, not proof of a historical ticker. Selecting or searching a chart does not add market-price requests.
 
 ## Stock market context
 

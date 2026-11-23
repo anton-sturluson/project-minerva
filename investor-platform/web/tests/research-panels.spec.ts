@@ -26,6 +26,18 @@ const managers = Array.from({ length: 18 }, (_, index) => ({
 }));
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/research/activity/symbols?*", (route) =>
+    route.fulfill({
+      json: {
+        symbols: Object.fromEntries(
+          (new URL(route.request().url()).searchParams.get("cusips") ?? "")
+            .split(",")
+            .map((cusip) => [cusip, { symbol: "EXM" }]),
+        ),
+      },
+    }),
+  );
   await page.route("**/api/research/managers", (route) =>
     route.fulfill({ json: { managers } }),
   );
@@ -72,7 +84,7 @@ test.beforeEach(async ({ page }) => {
       },
     }),
   );
-  await page.goto("/#research");
+  await page.goto("/#research/managers");
 });
 
 test("manager panels scroll independently and selection preserves the directory position", async ({
