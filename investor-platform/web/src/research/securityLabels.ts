@@ -19,14 +19,18 @@ export function useResearchSymbols(cusips: string[]) {
     const missing = key
       .split(",")
       .filter((cusip) => cusip && !cache.current[cusip]);
-    for (let start = 0; start < missing.length; start += 20) {
-      const batch = missing.slice(start, start + 20);
-      api<{ symbols: Record<string, SymbolMapping> }>(
-        `/research/activity/symbols?cusips=${batch.join(",")}`,
-        { signal: controller.signal },
-        20000,
-      ).then(
-        (response) => {
+    async function loadSymbols() {
+      for (let start = 0; start < missing.length; start += 20) {
+        if (controller.signal.aborted) return;
+        const batch = missing.slice(start, start + 20);
+        try {
+          const response = await api<{
+            symbols: Record<string, SymbolMapping>;
+          }>(
+            `/research/activity/symbols?cusips=${batch.join(",")}`,
+            { signal: controller.signal },
+            20000,
+          );
           if (controller.signal.aborted) return;
           const received = Object.fromEntries(
             batch.map((cusip) => [
@@ -41,16 +45,19 @@ export function useResearchSymbols(cusips: string[]) {
           );
           cache.current = { ...cache.current, ...resolved };
           setSymbols((previous) => ({ ...previous, ...received }));
-        },
-        () => {
+          if (Object.values(received).some((mapping) => mapping.retryable))
+            return;
+        } catch {
           if (controller.signal.aborted) return;
           const unavailable = Object.fromEntries(
             batch.map((cusip) => [cusip, { symbol: null }]),
           );
           setSymbols((previous) => ({ ...previous, ...unavailable }));
-        },
-      );
+          return;
+        }
+      }
     }
+    void loadSymbols();
     return () => controller.abort();
   }, [key]);
   return symbols;

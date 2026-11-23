@@ -923,9 +923,17 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await chart.screenshot({
     path: test.info().outputPath("activity-light.png"),
   });
-  await chart
-    .getByLabel("Securities shown", { exact: true })
-    .selectOption("20");
+  await chart.getByLabel("Securities shown", { exact: true }).fill("25");
+  await expect(chart.locator(".diverging-row")).toHaveCount(18);
+  await chart.getByLabel("Securities shown").fill("13");
+  await expect(chart.locator(".diverging-row")).toHaveCount(13);
+  for (const invalid of ["", "0", "-2", "2.5"]) {
+    await chart.getByLabel("Securities shown").fill(invalid);
+    await expect(chart.locator(".diverging-row")).toHaveCount(13);
+    await chart.getByLabel("Securities shown").press("Tab");
+    await expect(chart.getByLabel("Securities shown")).toHaveValue("13");
+  }
+  await chart.getByLabel("Securities shown").fill("25");
   await expect(chart.locator(".diverging-row")).toHaveCount(18);
   await expect(page.getByText("$125.50").first()).toBeVisible();
   const before = priceRequests;
@@ -956,6 +964,12 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await expect(details.getByRole("link").first()).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(first).toBeFocused();
+  await chart.locator(".diverging-row").nth(12).click();
+  await expect(details).toBeVisible();
+  await chart.getByLabel("Securities shown").fill("5");
+  await expect(chart.locator(".diverging-row")).toHaveCount(5);
+  await expect(details).toHaveCount(0);
+  await chart.getByLabel("Securities shown").fill("25");
   await chart.getByLabel("Find a security").fill("Other security 11");
   await expect(chart.locator(".diverging-row")).toHaveCount(1);
   await expect(chart.locator(".diverging-row")).toContainText(
@@ -976,7 +990,7 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await expect(page.locator(".skip-link")).toHaveAttribute("href", "#research");
   await page.getByLabel("Theme", { exact: true }).selectOption("dark");
   await chart.getByLabel("Find a security").fill("");
-  await chart.getByLabel("Securities shown").selectOption("10");
+  await chart.getByLabel("Securities shown").fill("10");
   await chart.screenshot({ path: test.info().outputPath("activity-dark.png") });
   expect(
     await page.evaluate(
@@ -1066,4 +1080,89 @@ test("ticker enrichment recovers on revisit and preserves tickers beside long na
   await chart.getByLabel("Find a security").fill("");
   await expect(chart.locator(".diverging-suffix")).toHaveText("($EXM/A)");
   expect(requests).toBe(resolvedRequests);
+});
+
+test("custom counts bound ticker lookups and cancel queued rows when scope changes", async ({
+  page,
+}) => {
+  const data = {
+    ...activity,
+    decreased: [],
+    increased: Array.from({ length: 80 }, (_, index) => ({
+      ...activity.increased[2],
+      cusip: String(910000000 + index),
+      issuer: `Security ${String(index).padStart(3, "0")}`,
+    })),
+  };
+  const requests: string[][] = [];
+  let active = 0;
+  let maximumActive = 0;
+  let gate: Promise<void> | null = null;
+  let release: () => void = () => {};
+  let finished: Promise<void> = Promise.resolve();
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({ json: data }),
+  );
+  await page.route("**/api/research/activity/symbols?*", async (route) => {
+    const cusips = (
+      new URL(route.request().url()).searchParams.get("cusips") ?? ""
+    ).split(",");
+    requests.push(cusips);
+    active++;
+    maximumActive = Math.max(maximumActive, active);
+    const pending = gate;
+    let done: () => void = () => {};
+    finished = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    try {
+      if (pending) await pending;
+      await route.fulfill({
+        json: {
+          symbols: Object.fromEntries(
+            cusips.map((cusip) => [cusip, { symbol: "EXM" }]),
+          ),
+        },
+      });
+    } finally {
+      active--;
+      done();
+    }
+  });
+  await page.goto("/#research/activity");
+  const chart = page.getByRole("region", {
+    name: "Reported holding changes",
+    exact: true,
+  });
+  await expect(chart.locator(".diverging-suffix")).toHaveCount(10);
+  // Measure expansion after development-mode mount effects have settled.
+  await expect.poll(() => active).toBe(0);
+  maximumActive = 0;
+  const initialRequests = requests.length;
+  gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await chart.getByLabel("Securities shown").fill("55");
+  await expect(chart.locator(".diverging-row")).toHaveCount(55);
+  await expect.poll(() => requests.length).toBeGreaterThan(initialRequests);
+  release();
+  gate = null;
+  await expect(chart.locator(".diverging-suffix")).toHaveCount(55);
+  expect(maximumActive).toBe(1);
+  expect(requests.every((batch) => batch.length <= 20)).toBe(true);
+  const loadedRequests = requests.length;
+  gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await chart.getByLabel("Securities shown").fill("80");
+  await expect(chart.locator(".diverging-row")).toHaveCount(80);
+  await expect.poll(() => requests.length).toBe(loadedRequests + 1);
+  await chart.getByLabel("Find a security").fill("Security 000");
+  await expect(chart.locator(".diverging-row")).toHaveCount(1);
+  release();
+  gate = null;
+  await finished;
+  await chart.getByLabel("Find a security").press("Tab");
+  expect(requests).toHaveLength(loadedRequests + 1);
+  await expect(chart.locator(".diverging-suffix")).toHaveText("($EXM)");
 });

@@ -617,6 +617,10 @@ test("manager chart measures weight changes independently from share direction",
     exact: true,
   });
   await expect(chart.locator(".diverging-row")).toHaveCount(3);
+  await chart.getByLabel("Securities shown").fill("2");
+  await expect(chart.locator(".diverging-row")).toHaveCount(2);
+  await chart.getByLabel("Securities shown").fill("17");
+  await expect(chart.locator(".diverging-row")).toHaveCount(3);
   await expect(chart.locator(".diverging-row").first()).toContainText(
     "+3.00 pp",
   );

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DivergingBarChart } from "../components/DivergingBarChart";
 import { securityLabel, useResearchSymbols } from "./securityLabels";
+import { ChartRowLimit } from "./ChartRowLimit";
 import { api, errorMessage } from "../api";
 import { Economics } from "./Economics";
 import { InstitutionalStockActivity } from "./InstitutionalStockActivity";
@@ -276,17 +277,7 @@ function ManagerWeightChart({ comparison }: { comparison: Comparison }) {
             <option value="decreased">Largest weight decreases</option>
           </select>
         </label>
-        <label>
-          Show
-          <select
-            aria-label="Securities shown"
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-          >
-            <option value={10}>10 securities</option>
-            <option value={20}>20 securities</option>
-          </select>
-        </label>
+        <ChartRowLimit value={limit} onChange={setLimit} />
         <span className="form-note">
           {Math.min(limit, matching.length)} of {matching.length}
         </span>

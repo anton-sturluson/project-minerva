@@ -1206,6 +1206,9 @@ summary:focus-visible {
   width: 210px;
   max-width: 100%;
 }
+.chart-controls input[type="number"] {
+  width: 100px;
+}
 .diverging-legend {
   display: flex;
   flex-wrap: wrap;
