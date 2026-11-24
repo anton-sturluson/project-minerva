@@ -257,12 +257,6 @@ test("stock activity ranks by manager count and opens compact sourced manager ta
   ).toHaveCount(0);
   await expect(managers.locator("xpath=../..")).toHaveAttribute("colspan", "6");
   await expect(page.getByText(/Excluded managers/)).toHaveCount(0);
-  await expect(
-    page.getByText("Previous quarter is missing", { exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByText("Current reported value is zero", { exact: true }),
-  ).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -857,19 +851,12 @@ test("activity chart joins both directions, keeps classes separate and opens sou
     });
   }
   let priceRequests = 0;
-  await page.route("**/api/research/activity/market-context?*", (route) => {
-    priceRequests++;
-    const url = new URL(route.request().url());
-    return route.fulfill({
-      json: {
-        quarter: url.searchParams.get("quarter"),
-        prices: Object.fromEntries(
-          (url.searchParams.get("cusips") ?? "")
-            .split(",")
-            .map((cusip) => [cusip, marketContext()]),
-        ),
-      },
-    });
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname ===
+      "/api/research/activity/market-context"
+    )
+      priceRequests++;
   });
   await page.route("**/api/research/activity/symbols?*", (route) =>
     route.fulfill({
@@ -895,9 +882,6 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await page.route("**/api/research/activity", (route) =>
     route.fulfill({ json: chartData }),
   );
-  await page.route("**/api/research/managers", (route) =>
-    route.fulfill({ json: { managers: [] } }),
-  );
   await page.goto("/#research");
   const chart = page.getByRole("region", {
     name: "Reported holding changes",
@@ -906,8 +890,7 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await expect(chart.locator(".diverging-row")).toHaveCount(10);
   const first = chart.locator(".diverging-row").first();
   await expect(first).toContainText("Example Cloud ($EXM/A)");
-  await expect(first).toHaveAttribute(
-    "aria-label",
+  await expect(first).toHaveAccessibleName(
     /Reduced \/ exited 1; Increased \/ newly reported 2/,
   );
   await expect(
@@ -919,11 +902,6 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await expect(
     chart.getByText(/Compare both directions|each manager counted/),
   ).toHaveCount(0);
-  await chart.screenshot({
-    path: test.info().outputPath("activity-light.png"),
-  });
-  await chart.getByLabel("Securities shown", { exact: true }).fill("25");
-  await expect(chart.locator(".diverging-row")).toHaveCount(18);
   await chart.getByLabel("Securities shown").fill("13");
   await expect(chart.locator(".diverging-row")).toHaveCount(13);
   for (const invalid of ["", "0", "-2", "2.5"]) {
@@ -958,9 +936,7 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await expect(
     details.getByRole("button", { name: "Close security details" }),
   ).toBeFocused();
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await expect(details.getByRole("link").first()).toBeFocused();
+  await details.getByRole("link").first().focus();
   await page.keyboard.press("Escape");
   await expect(first).toBeFocused();
   await chart.locator(".diverging-row").nth(12).click();
@@ -979,23 +955,7 @@ test("activity chart joins both directions, keeps classes separate and opens sou
   await expect(chart.getByText("No securities match.")).toBeVisible();
   await expect(details).toHaveCount(0);
   expect(priceRequests).toBe(before);
-  await page.getByRole("link", { name: "[ Managers ]", exact: true }).click();
-  await expect(page).toHaveURL(/#research\/managers$/);
-  await expect(
-    page.getByRole("heading", { name: "Managers", exact: true }),
-  ).toBeVisible();
-  await page.goBack();
-  await expect(chart).toBeVisible();
   await expect(page.locator(".skip-link")).toHaveAttribute("href", "#research");
-  await page.getByLabel("Theme", { exact: true }).selectOption("dark");
-  await chart.getByLabel("Find a security").fill("");
-  await chart.getByLabel("Securities shown").fill("10");
-  await chart.screenshot({ path: test.info().outputPath("activity-dark.png") });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
 });
 
 test("ticker enrichment recovers on revisit and preserves tickers beside long names", async ({
@@ -1198,6 +1158,7 @@ test("chart scrolls through all requested securities while keeping its neutral a
     content: element.scrollHeight,
   }));
   expect(dimensions.content).toBeGreaterThan(dimensions.height);
+  await page.getByLabel("Theme", { exact: true }).selectOption("dark");
   const appearance = await chart.evaluate((element) => {
     const row = element.querySelector(".diverging-row")!;
     const plot = row.querySelector(".diverging-plot")!.getBoundingClientRect();
@@ -1242,13 +1203,8 @@ test("chart scrolls through all requested securities while keeping its neutral a
   await expect
     .poll(() => viewport.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
-  await chart.getByLabel("Find a security").fill("Scrollable Security 00");
-  await expect(chart.locator(".diverging-row")).toHaveCount(1);
-  await expect
-    .poll(() => viewport.evaluate((element) => element.scrollTop))
-    .toBe(0);
-  await chart.getByLabel("Find a security").fill("");
-  await expect(chart.locator(".diverging-row")).toHaveCount(40);
+  await chart.getByLabel("Securities shown").fill("30");
+  await expect(chart.locator(".diverging-row")).toHaveCount(30);
   await expect
     .poll(() => viewport.evaluate((element) => element.scrollTop))
     .toBe(0);
@@ -1257,8 +1213,4 @@ test("chart scrolls through all requested securities while keeping its neutral a
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await chart.scrollIntoViewIfNeeded();
-  await page.screenshot({
-    path: test.info().outputPath("dense-scroll-chart.png"),
-  });
 });

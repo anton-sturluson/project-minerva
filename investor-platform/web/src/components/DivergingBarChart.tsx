@@ -42,9 +42,12 @@ export function DivergingBarChart({
   useEffect(() => {
     if (viewport.current) viewport.current.scrollTop = 0;
   }, [rowOrder]);
-  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const selectedButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (selectedId && !selected) setSelectedId(null);
+    if (selectedId && !selected) {
+      setSelectedId(null);
+      selectedButton.current = null;
+    }
   }, [selectedId, selected]);
   useEffect(() => {
     if (selectedId && heading.current) {
@@ -53,7 +56,8 @@ export function DivergingBarChart({
     }
   }, [selectedId]);
   function close() {
-    if (selectedId) buttons.current.get(selectedId)?.focus();
+    selectedButton.current?.focus();
+    selectedButton.current = null;
     setSelectedId(null);
   }
   return (
@@ -94,17 +98,15 @@ export function DivergingBarChart({
               {rows.map((row) => (
                 <li key={row.id}>
                   <button
-                    ref={(button) => {
-                      if (button) buttons.current.set(row.id, button);
-                      else buttons.current.delete(row.id);
-                    }}
                     className="diverging-row"
                     aria-expanded={selectedId === row.id}
                     aria-controls={`${id}-details`}
                     aria-label={`${row.label}${row.suffix ? ` ${row.suffix}` : ""}: ${leftLabel} ${formatValue(row.left, "left")}; ${rightLabel} ${formatValue(row.right, "right")}.`}
-                    onClick={() =>
-                      selectedId === row.id ? close() : setSelectedId(row.id)
-                    }
+                    onClick={(event) => {
+                      selectedButton.current = event.currentTarget;
+                      if (selectedId === row.id) close();
+                      else setSelectedId(row.id);
+                    }}
                   >
                     <span
                       className="diverging-name"

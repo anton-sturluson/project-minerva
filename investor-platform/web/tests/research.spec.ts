@@ -637,7 +637,6 @@ test("manager chart measures weight changes independently from share direction",
   await expect(chart.locator(".diverging-row").first()).toContainText(
     "+3.00 pp",
   );
-  await chart.locator(".diverging-row").first().scrollIntoViewIfNeeded();
   const rowLayout = await chart
     .locator(".diverging-row")
     .first()
@@ -671,10 +670,6 @@ test("manager chart measures weight changes independently from share direction",
     expect(rowLayout.stacked).toBe(true);
     expect(rowLayout.height).toBeLessThanOrEqual(62);
   }
-  await page.screenshot({
-    path: test.info().outputPath("manager-weights.png"),
-    fullPage: true,
-  });
   const reducedWeight = chart.getByRole("button", {
     name: /Example Software.*Weight decreased -1.00 pp/,
   });

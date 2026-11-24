@@ -48,11 +48,6 @@ export function useResearchSymbols(cusips: string[]) {
           if (Object.values(received).some((mapping) => mapping.retryable))
             return;
         } catch {
-          if (controller.signal.aborted) return;
-          const unavailable = Object.fromEntries(
-            batch.map((cusip) => [cusip, { symbol: null }]),
-          );
-          setSymbols((previous) => ({ ...previous, ...unavailable }));
           return;
         }
       }
