@@ -71,7 +71,7 @@ Annual results reuse the quarterly quantity and value calculation at the two bou
 
 ## Stock activity
 
-Research opens Stock activity at `#research` or `#research/activity`, followed by Managers (`#research/managers`) and Economics (`#research/economics`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included managers and lists exclusions for missing, blocked, or zero-value snapshots.
+Research opens Stock activity at `#research` or `#research/activity`, followed by Managers (`#research/managers`) and Economics (`#research/economics`). The activity view compares all managers at one selected calendar quarter and the immediately preceding quarter. Its default is the newest quarter with a usable manager comparison; it does not combine each manager's latest, potentially different quarter. Coverage shows included and total manager counts. Only usable adjacent-quarter comparisons contribute; the activity response omits per-manager exclusion diagnostics.
 
 The two rankings show shares increased (including new positions) and shares decreased (including exits). A manager contributes once per CUSIP and direction. Rankings exclude options and principal positions; share-type disclosures can also include funds. Unchanged quantities do not contribute, even when their value or weight changes. Share changes can reflect splits or reporting changes as well as trades.
 
@@ -89,7 +89,7 @@ Selecting a chart row opens both contributor groups, before/after shares and wei
 
 The quarterly manager view reuses the same chart layout for reported portfolio-weight changes in percentage points, sorted by absolute change and position identity. It includes non-option share positions with a finite, nonzero API weight difference, including unchanged shares whose weights moved. Direction follows weight rather than share count. Weights retain the full reported 13F denominator, including disclosed options and principal positions. New positions and exits use the comparison delta only when available; a zero-value endpoint makes it unavailable. Chart details show the share-count status separately. This is allocation change, not trade cash flow. Annual views retain their existing position tables.
 
-[The shared chart](../web/src/components/DivergingBarChart.tsx) owns the layout, accessible row controls and selected-detail focus; feature callers supply measurements, identity, ranking, labels and detail content. No chart library is required.
+[The shared chart](../web/src/components/DivergingBarChart.tsx) owns the layout, accessible row controls and selected-detail focus; feature callers supply measurements, identity, ranking, labels and detail content. Names and bars align on one compact row when the chart is at least 480px wide; smaller containers stack them with tighter spacing. Row hit areas remain at least 44px high. No chart library is required.
 
 ### Chart security labels
 

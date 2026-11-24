@@ -136,11 +136,18 @@ export function DivergingBarChart({
             ))}
           </ul>
           <div className="diverging-axis" aria-hidden="true">
-            {[-domainMax, -domainMax / 2, 0, domainMax / 2, domainMax].map(
-              (value) => (
-                <span key={value}>{formatTick(value)}</span>
-              ),
-            )}
+            <div className="diverging-ticks">
+              {[-domainMax, -domainMax / 2, 0, domainMax / 2, domainMax].map(
+                (value) => (
+                  <span
+                    key={value}
+                    style={{ left: `${50 + (value / domainMax) * 50}%` }}
+                  >
+                    {formatTick(value)}
+                  </span>
+                ),
+              )}
+            </div>
           </div>
           <p className="diverging-unit">{unitLabel}</p>
         </>

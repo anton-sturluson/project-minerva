@@ -157,7 +157,7 @@ def test_common_quarter_counts_signed_average_and_contributor_evidence(
     data: dict = db_client.get("/api/research/activity?quarter=2026-06-30").json()
     assert data["status"] == "available"
     assert data["included_managers"] == data["total_managers"] == 3
-    assert data["excluded_managers"] == []
+    assert "excluded_managers" not in data
     assert data["previous_quarter"] == "2026-03-31"
     assert [item["cusip"] for item in data["increased"]] == ["111111111", "333333333", "222222222"]
     first: dict = data["increased"][0]
@@ -239,10 +239,8 @@ def test_default_falls_back_to_newest_usable_pair_without_mixing_quarters(
     assert newest["status"] == "unavailable"
     assert newest["included_managers"] == 0
     assert newest["increased"] == newest["decreased"] == []
-    reasons: dict[str, str] = {item["slug"]: item["reason"] for item in newest["excluded_managers"]}
-    assert "Missing" in reasons["stale"] and "Missing" in reasons["missing"]
-    assert "incomplete" in reasons["blocked"]
-    assert "zero" in reasons["zero"]
+    assert newest["total_managers"] == 4
+    assert "excluded_managers" not in newest
     default: dict = db_client.get("/api/research/activity").json()
     assert default["quarter"] == "2026-03-31"
     assert default["previous_quarter"] == "2025-12-31"
@@ -301,7 +299,8 @@ def test_empty_registry_and_no_adjacent_pairs_are_explicit(
         session.commit()
     unavailable: dict = db_client.get("/api/research/activity").json()
     assert unavailable["quarter"] is None
-    assert unavailable["excluded_managers"][0]["slug"] == "missing"
+    assert unavailable["included_managers"] == 0 and unavailable["total_managers"] == 1
+    assert "excluded_managers" not in unavailable
 
 
 def test_ties_use_cusip_and_zero_quantity_presence_is_not_activity(

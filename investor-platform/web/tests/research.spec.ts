@@ -625,6 +625,39 @@ test("manager chart measures weight changes independently from share direction",
     "+3.00 pp",
   );
   await chart.locator(".diverging-row").first().scrollIntoViewIfNeeded();
+  const rowLayout = await chart
+    .locator(".diverging-row")
+    .first()
+    .evaluate((row) => {
+      const name = row
+        .querySelector(".diverging-name")!
+        .getBoundingClientRect();
+      const plot = row
+        .querySelector(".diverging-plot")!
+        .getBoundingClientRect();
+      const ticks = row
+        .closest(".diverging-chart")!
+        .querySelector(".diverging-ticks > span:nth-child(3)")!
+        .getBoundingClientRect();
+      return {
+        chartWidth: row.closest(".diverging-chart")!.getBoundingClientRect()
+          .width,
+        height: row.getBoundingClientRect().height,
+        centers: Math.abs(name.y + name.height / 2 - plot.y - plot.height / 2),
+        stacked: name.bottom <= plot.top,
+        axisOffset: Math.abs(
+          (ticks.left + ticks.right) / 2 - (plot.left + plot.right) / 2,
+        ),
+      };
+    });
+  expect(rowLayout.axisOffset).toBeLessThan(1);
+  if (rowLayout.chartWidth >= 480) {
+    expect(rowLayout.centers).toBeLessThan(1);
+    expect(rowLayout.height).toBeLessThanOrEqual(44);
+  } else {
+    expect(rowLayout.stacked).toBe(true);
+    expect(rowLayout.height).toBeLessThanOrEqual(62);
+  }
   await page.screenshot({
     path: test.info().outputPath("manager-weights.png"),
     fullPage: true,

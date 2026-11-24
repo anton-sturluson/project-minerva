@@ -983,9 +983,6 @@ summary:focus-visible {
   margin-top: 8px;
   font-size: 12px;
 }
-.activity-coverage {
-  margin: 14px 0;
-}
 .research-change-group h4 {
   margin: 0 0 8px;
   padding-bottom: 4px;
@@ -1235,14 +1232,17 @@ summary:focus-visible {
   padding: 0;
   margin: 0;
 }
-.diverging-row {
+.diverging-row,
+.diverging-axis {
   display: grid;
-  grid-template-columns: minmax(0, 230px) minmax(0, 1fr);
-  width: 100%;
-  min-height: 48px;
-  align-items: center;
+  grid-template-columns: minmax(0, min(230px, 40%)) minmax(0, 1fr);
   gap: 12px;
-  padding: 10px 8px;
+}
+.diverging-row {
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  padding: 6px 8px;
   border: 0;
   border-bottom: 1px solid var(--rule);
   text-align: left;
@@ -1310,14 +1310,26 @@ summary:focus-visible {
   transform: translateX(5px);
 }
 .diverging-axis {
-  display: flex;
-  justify-content: space-between;
-  margin: 10px 63px 0 305px;
+  padding: 10px 8px 0;
   font:
     11px "Courier New",
     monospace;
   color: var(--plum);
 }
+.diverging-axis::before {
+  content: "";
+}
+.diverging-ticks {
+  position: relative;
+  height: 1.2em;
+  margin-inline: 55px;
+}
+.diverging-ticks > span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
 .diverging-unit {
   text-align: center;
   font:
@@ -1362,13 +1374,6 @@ summary:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 @media (max-width: 800px) {
-  .diverging-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
-  }
-  .diverging-axis {
-    margin-inline: 63px;
-  }
   .chart-controls label {
     max-width: 100%;
   }
@@ -1379,12 +1384,13 @@ summary:focus-visible {
 .diverging-chart {
   container-type: inline-size;
 }
-@container (max-width: 700px) {
-  .diverging-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
-  }
+@container (max-width: 479px) {
+  .diverging-row,
   .diverging-axis {
-    margin-inline: 63px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .diverging-axis::before {
+    display: none;
   }
 }

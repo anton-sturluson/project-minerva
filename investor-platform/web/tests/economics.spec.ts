@@ -53,7 +53,6 @@ test.beforeEach(async ({ page }) => {
         reason: "No comparisons",
         included_managers: 0,
         total_managers: 0,
-        excluded_managers: [],
         increased: [],
         decreased: [],
       },

@@ -34,7 +34,6 @@ type Activity = {
   reason: string | null;
   included_managers: number;
   total_managers: number;
-  excluded_managers: { slug: string; name: string; reason: string }[];
   increased: ActivityRow[];
   decreased: ActivityRow[];
 };
@@ -712,20 +711,6 @@ export function InstitutionalStockActivity() {
           <p>
             {data.included_managers} of {data.total_managers} managers included.
           </p>
-          {data.excluded_managers.length > 0 && (
-            <details className="activity-coverage">
-              <summary>
-                Excluded managers ({data.excluded_managers.length})
-              </summary>
-              <ul>
-                {data.excluded_managers.map((manager) => (
-                  <li key={manager.slug}>
-                    <strong>{manager.name}</strong>: {manager.reason}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
           {data.status === "unavailable" ? (
             <p role="status">Stock activity unavailable: {data.reason}</p>
           ) : (

@@ -75,18 +75,6 @@ const activity = {
   reason: null,
   included_managers: 3,
   total_managers: 5,
-  excluded_managers: [
-    {
-      slug: "missing",
-      name: "Example Missing Manager",
-      reason: "Previous quarter is missing",
-    },
-    {
-      slug: "empty",
-      name: "Example Empty Manager",
-      reason: "Current reported value is zero",
-    },
-  ],
   increased: [
     {
       cusip: "123456780",
@@ -261,9 +249,13 @@ test("stock activity ranks by manager count and opens compact sourced manager ta
     }),
   ).toHaveCount(0);
   await expect(managers.locator("xpath=../..")).toHaveAttribute("colspan", "6");
-  await page.getByText("Excluded managers (2)", { exact: true }).click();
-  await expect(page.getByText("Previous quarter is missing")).toBeVisible();
-  await expect(page.getByText("Current reported value is zero")).toBeVisible();
+  await expect(page.getByText(/Excluded managers/)).toHaveCount(0);
+  await expect(
+    page.getByText("Previous quarter is missing", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Current reported value is zero", { exact: true }),
+  ).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

@@ -85,11 +85,10 @@ def activity_for_quarter(
     quarter: date,
     available_quarters: list[date],
 ) -> dict:
-    """Compare each manager at the selected quarter, retaining exclusions and evidence."""
+    """Compare usable managers at the selected quarter, retaining source evidence."""
     prior: date = previous_quarter(quarter)
     increased: dict[str, ActivityRow] = {}
     decreased: dict[str, ActivityRow] = {}
-    excluded: list[dict[str, str]] = []
     included: int = 0
     manager: ResearchManager
     comparable: list[ResearchManager] = [
@@ -109,31 +108,22 @@ def activity_for_quarter(
     holdings = load_holdings(session, filings)
     with localcontext() as context:
         context.prec = ACCOUNTING_PRECISION
-        for manager in managers:
-            name: str = manager.profile["name"]
-            manager_periods: set[date] = periods.get(manager.id, set())
-            reason: str | None = None
-            comparison: dict = {}
-            changes: list[PositionChange] = []
-            if quarter not in manager_periods or prior not in manager_periods:
-                reason = "Missing selected or previous adjacent quarter"
-            else:
-                comparison = manager_comparison(
-                    session,
-                    manager,
-                    quarter,
-                    filings=grouped.get(manager.id, []),
-                    holdings=holdings,
-                )
-                changes = comparison["changes"]
-                reason = comparison["reason"]
-                if reason is None and (
-                    not changes or any(change["weight_change"] is None for change in changes)
-                ):
-                    reason = "A quarter has zero disclosed portfolio value; weights are unavailable"
-            if reason is not None:
-                excluded.append({"slug": manager.slug, "name": name, "reason": reason})
+        for manager in comparable:
+            comparison: dict = manager_comparison(
+                session,
+                manager,
+                quarter,
+                filings=grouped.get(manager.id, []),
+                holdings=holdings,
+            )
+            changes: list[PositionChange] = comparison["changes"]
+            if (
+                comparison["status"] != "available"
+                or not changes
+                or any(change["weight_change"] is None for change in changes)
+            ):
                 continue
+            name: str = manager.profile["name"]
             included += 1
             seen: set[str] = set()
             change: PositionChange
@@ -207,7 +197,6 @@ def activity_for_quarter(
         "reason": None if included else "No managers have a usable adjacent-quarter comparison",
         "included_managers": included,
         "total_managers": len(managers),
-        "excluded_managers": excluded,
         "increased": rank_cohort(increased, increased=True),
         "decreased": rank_cohort(decreased, increased=False),
     }
@@ -266,14 +255,6 @@ def get_activity(
         "reason": "No managers have an adjacent-quarter filing pair",
         "included_managers": 0,
         "total_managers": len(managers),
-        "excluded_managers": [
-            {
-                "slug": manager.slug,
-                "name": manager.profile["name"],
-                "reason": "No adjacent-quarter filing pair has been imported",
-            }
-            for manager in managers
-        ],
         "increased": [],
         "decreased": [],
     }
