@@ -1,6 +1,17 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/research/activity/symbols?*", (route) =>
+    route.fulfill({
+      json: {
+        symbols: Object.fromEntries(
+          (new URL(route.request().url()).searchParams.get("cusips") ?? "")
+            .split(",")
+            .map((cusip) => [cusip, { symbol: "EXM" }]),
+        ),
+      },
+    }),
+  );
   await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
 });
 
@@ -173,7 +184,7 @@ test("research sources, quarter changes, coverage filter and missing comparison"
           : comparison,
       }),
   );
-  await page.goto("/#research");
+  await page.goto("/#research/managers");
   await expect(
     page.getByRole("heading", { name: "Research", exact: true }),
   ).toBeVisible();
@@ -200,6 +211,14 @@ test("research sources, quarter changes, coverage filter and missing comparison"
     exact: true,
   });
   await expect(increased.locator("tbody tr")).toHaveCount(2);
+  const securityCell = increased
+    .locator("tbody tr")
+    .first()
+    .getByRole("cell")
+    .first();
+  await expect(securityCell).not.toContainText("123456780");
+  await expect(securityCell).toHaveAttribute("title", "COM · 123456780");
+  await expect(securityCell).not.toContainText("COM");
   await expect(increased.locator("tbody tr").nth(0)).toContainText(
     "Example New Cloud",
   );
@@ -278,7 +297,7 @@ test("research service failure can recover and empty registry is clear", async (
         })
       : route.fulfill({ json: { managers: [] } }),
   );
-  await page.goto("/#research");
+  await page.goto("/#research/managers");
   await expect(page.getByRole("alert")).toContainText(
     "Research database unavailable",
   );
@@ -330,7 +349,7 @@ test("managers remain searchable regardless of AUM and retain history", async ({
     "**/api/research/managers/unknown-manager/changes?*",
     (route) => route.fulfill({ json: comparison }),
   );
-  await page.goto("/#research");
+  await page.goto("/#research/managers");
   await expect(page.getByRole("button", { name: manager.name })).toBeVisible();
   await expect(page.getByRole("button", { name: below.name })).toBeVisible();
   await expect(page.getByRole("button", { name: unknown.name })).toBeVisible();
@@ -402,7 +421,7 @@ test("compact values preserve share direction and expose exact amounts", async (
         },
       }),
   );
-  await page.goto("/#research");
+  await page.goto("/#research/managers");
   await page.getByRole("button", { name: manager.name }).click();
   const decreased = page.getByRole("region", {
     name: "Quantity decreased positions",
@@ -483,7 +502,7 @@ test("annual net change uses year selection and preserves quarterly comparison",
       });
     },
   );
-  await page.goto("/#research");
+  await page.goto("/#research/managers");
   await page.getByRole("button", { name: manager.name }).click();
   await expect(
     page.getByRole("region", {
@@ -528,6 +547,148 @@ test("annual net change uses year selection and preserves quarterly comparison",
       exact: true,
     }),
   ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("manager chart measures weight changes independently from share direction", async ({
+  page,
+}) => {
+  const changed = {
+    ...comparison,
+    changes: [
+      {
+        ...comparison.changes[1],
+        previous_weight: "0.20",
+        current_weight: "0.19",
+        weight_change: "-0.01",
+      },
+      {
+        ...comparison.changes[0],
+        previous_weight: "0",
+        current_weight: "0.03",
+        weight_change: "0.03",
+      },
+      {
+        ...comparison.changes[1],
+        cusip: "123456788",
+        issuer: "Unchanged shares",
+        kind: "unchanged",
+        category: "unchanged",
+        previous_quantity: "125",
+        previous_weight: "0.02",
+        current_weight: "0.03",
+        weight_change: "0.01",
+      },
+      {
+        ...comparison.changes[1],
+        cusip: "123456787",
+        issuer: "Unavailable weight",
+        weight_change: null,
+      },
+      {
+        ...comparison.changes[1],
+        cusip: "123456786",
+        issuer: "Option excluded",
+        put_call: "CALL",
+      },
+    ],
+  };
+  await page.route("**/api/research/managers", (route) =>
+    route.fulfill({ json: { managers: [manager] } }),
+  );
+  await page.route("**/api/research/managers/example-manager", (route) =>
+    route.fulfill({
+      json: {
+        ...manager,
+        filings: [
+          {
+            quarter: "2026-06-30",
+            filed_date: "2026-08-14",
+            source_url: "https://example.com/filing",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(
+    "**/api/research/managers/example-manager/changes?*",
+    (route) => route.fulfill({ json: changed }),
+  );
+  await page.goto("/#research/managers");
+  await page.getByRole("button", { name: manager.name, exact: true }).click();
+  const chart = page.getByRole("region", {
+    name: "Portfolio weight changes",
+    exact: true,
+  });
+  await expect(chart.locator(".diverging-row")).toHaveCount(3);
+  const optionCell = page
+    .getByRole("cell")
+    .filter({ hasText: "Option excluded" });
+  await expect(optionCell).toContainText("Option excluded (CALL)");
+  await expect(optionCell).not.toContainText("123456786");
+  await chart.getByLabel("Securities shown").fill("2");
+  await expect(chart.locator(".diverging-row")).toHaveCount(2);
+  await chart.getByLabel("Securities shown").fill("17");
+  await expect(chart.locator(".diverging-row")).toHaveCount(3);
+  await expect(chart.locator(".diverging-row").first()).toContainText(
+    "+3.00 pp",
+  );
+  const rowLayout = await chart
+    .locator(".diverging-row")
+    .first()
+    .evaluate((row) => {
+      const name = row
+        .querySelector(".diverging-name")!
+        .getBoundingClientRect();
+      const plot = row
+        .querySelector(".diverging-plot")!
+        .getBoundingClientRect();
+      const ticks = row
+        .closest(".diverging-chart")!
+        .querySelector(".diverging-ticks > span:nth-child(3)")!
+        .getBoundingClientRect();
+      return {
+        chartWidth: row.closest(".diverging-chart")!.getBoundingClientRect()
+          .width,
+        height: row.getBoundingClientRect().height,
+        centers: Math.abs(name.y + name.height / 2 - plot.y - plot.height / 2),
+        stacked: name.bottom <= plot.top,
+        axisOffset: Math.abs(
+          (ticks.left + ticks.right) / 2 - (plot.left + plot.right) / 2,
+        ),
+      };
+    });
+  expect(rowLayout.axisOffset).toBeLessThan(1);
+  if (rowLayout.chartWidth >= 480) {
+    expect(rowLayout.centers).toBeLessThan(1);
+    expect(rowLayout.height).toBeLessThanOrEqual(44);
+  } else {
+    expect(rowLayout.stacked).toBe(true);
+    expect(rowLayout.height).toBeLessThanOrEqual(62);
+  }
+  const reducedWeight = chart.getByRole("button", {
+    name: /Example Software.*Weight decreased -1.00 pp/,
+  });
+  await reducedWeight.click();
+  const details = chart.locator(".diverging-details");
+  await expect(details).toContainText("Increased");
+  await expect(details).toContainText("100 → 125");
+  await expect(details).toContainText("20.00% → 19.00%");
+  await expect(details).toContainText("-1.00 pp");
+  await expect(details.getByRole("link", { name: "Filing 1" })).toHaveAttribute(
+    "href",
+    "https://example.com/filing",
+  );
+  await chart.getByRole("button", { name: /Unchanged shares/ }).click();
+  await expect(details).toContainText("Unchanged");
+  await expect(details).toContainText("+1.00 pp");
+  await chart.getByLabel("Find a security").fill("missing security");
+  await expect(chart.getByText("No securities match.")).toBeVisible();
+  await expect(details).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

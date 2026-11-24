@@ -43,8 +43,20 @@ const observations = [
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/research/managers", (route) =>
-    route.fulfill({ json: { managers: [] } }),
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({
+      json: {
+        quarter: null,
+        previous_quarter: null,
+        available_quarters: [],
+        status: "unavailable",
+        reason: "No comparisons",
+        included_managers: 0,
+        total_managers: 0,
+        increased: [],
+        decreased: [],
+      },
+    }),
   );
   await page.route("**/api/research/economics", (route) =>
     route.fulfill({

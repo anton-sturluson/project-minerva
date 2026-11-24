@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { DivergingBarChart } from "../components/DivergingBarChart";
+import { securityLabel, useResearchSymbols } from "./securityLabels";
+import { ChartRowLimit } from "./ChartRowLimit";
 import { api, errorMessage } from "../api";
 import { number, percent, quarterLabel } from "../format";
 
@@ -31,7 +34,6 @@ type Activity = {
   reason: string | null;
   included_managers: number;
   total_managers: number;
-  excluded_managers: { slug: string; name: string; reason: string }[];
   increased: ActivityRow[];
   decreased: ActivityRow[];
 };
@@ -98,9 +100,11 @@ const columns: { key: SortColumn; label: string; help?: string }[] = [
 function ContributorsTable({
   contributors,
   issuer,
+  showSources = false,
 }: {
   contributors: Contributor[];
   issuer: string;
+  showSources?: boolean;
 }) {
   const [limit, setLimit] = useState(10);
   const ordered = [...contributors].sort(
@@ -136,6 +140,7 @@ function ContributorsTable({
               >
                 Weight change (pp)
               </th>
+              {showSources && <th scope="col">Filings</th>}
             </tr>
           </thead>
           <tbody>
@@ -156,6 +161,15 @@ function ContributorsTable({
                 <td className="number">
                   {percentagePoints(manager.weight_change_pp)}
                 </td>
+                {showSources && (
+                  <td>
+                    {manager.source_urls.map((url, index) => (
+                      <a key={url} href={url} target="_blank" rel="noreferrer">
+                        Filing {index + 1}{" "}
+                      </a>
+                    ))}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -207,6 +221,7 @@ function StockRow({
         <td>
           <button
             className="activity-stock-toggle"
+            title={`${row.security_class} · ${row.cusip}`}
             aria-expanded={expanded}
             aria-controls={panelId}
             onClick={() => setExpanded(!expanded)}
@@ -214,9 +229,6 @@ function StockRow({
             <span aria-hidden="true">{expanded ? "▾ " : "▸ "}</span>
             {row.issuer}
           </button>
-          <small>
-            {row.security_class} · {row.cusip}
-          </small>
         </td>
         <td className="number">{row.manager_count}</td>
         <td className="number">{percent(String(averageWeight))}</td>
@@ -411,6 +423,142 @@ function RankedActivity({
   );
 }
 
+function StockActivityChart({ data }: { data: Activity }) {
+  const [search, setSearch] = useState("");
+  const [order, setOrder] = useState("total");
+  const [limit, setLimit] = useState(10);
+  const joined = new Map<
+    string,
+    {
+      security: ActivityRow;
+      left: number;
+      right: number;
+      increased: Contributor[];
+      decreased: Contributor[];
+    }
+  >();
+  for (const direction of ["increased", "decreased"] as const) {
+    for (const security of data[direction]) {
+      const row = joined.get(security.cusip) ?? {
+        security,
+        left: 0,
+        right: 0,
+        increased: [],
+        decreased: [],
+      };
+      row[direction === "increased" ? "right" : "left"] =
+        security.manager_count;
+      row[direction] = security.contributors;
+      joined.set(security.cusip, row);
+    }
+  }
+  const rows = [...joined.values()];
+  const matching = rows.filter(({ security }) =>
+    `${security.issuer} ${security.security_class} ${security.cusip}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+  const score = (row: (typeof rows)[number]) =>
+    order === "increased"
+      ? row.right
+      : order === "decreased"
+        ? row.left
+        : row.left + row.right;
+  const visible = matching
+    .sort(
+      (a, b) =>
+        score(b) - score(a) || a.security.cusip.localeCompare(b.security.cusip),
+    )
+    .slice(0, limit);
+  const symbols = useResearchSymbols(visible.map((row) => row.security.cusip));
+  if (rows.length === 0) return <p>No reported share changes.</p>;
+  const domainMax = Math.max(
+    2,
+    Math.ceil(
+      Math.max(...rows.map((row) => Math.max(row.left, row.right))) / 2,
+    ) * 2,
+  );
+  return (
+    <DivergingBarChart
+      title="Reported holding changes"
+      rows={visible.map((row) => ({
+        id: row.security.cusip,
+        ...securityLabel(
+          row.security.issuer,
+          symbols[row.security.cusip]?.symbol,
+        ),
+        left: row.left,
+        right: row.right,
+      }))}
+      domainMax={domainMax}
+      leftLabel="Reduced / exited"
+      rightLabel="Increased / newly reported"
+      unitLabel="Number of managers"
+      formatValue={(value) => String(value)}
+      formatTick={(value) => String(Math.abs(value))}
+      renderDetails={(selected) => {
+        const row = joined.get(selected.id)!;
+        return (
+          <>
+            <p className="form-note">
+              {quarterLabel(data.previous_quarter!)} →{" "}
+              {quarterLabel(data.quarter!)} · {row.security.security_class} ·{" "}
+              {row.security.cusip}
+            </p>
+            {(["increased", "decreased"] as const).map((direction) => (
+              <section key={direction} aria-label={`${direction} contributors`}>
+                <h5>
+                  {direction === "increased"
+                    ? "Increased / newly reported"
+                    : "Reduced / exited"}{" "}
+                  ({row[direction].length})
+                </h5>
+                {row[direction].length ? (
+                  <ContributorsTable
+                    key={`${selected.id}-${direction}`}
+                    contributors={row[direction]}
+                    issuer={`${row.security.issuer} ${direction}`}
+                    showSources
+                  />
+                ) : (
+                  <p>No managers in this direction.</p>
+                )}
+              </section>
+            ))}
+          </>
+        );
+      }}
+    >
+      <div className="chart-controls">
+        <label>
+          Find a security
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <label>
+          Order
+          <select
+            aria-label="Chart order"
+            value={order}
+            onChange={(e) => setOrder(e.target.value)}
+          >
+            <option value="total">Most managers changed</option>
+            <option value="increased">Most increased / new</option>
+            <option value="decreased">Most reduced / exited</option>
+          </select>
+        </label>
+        <ChartRowLimit value={limit} onChange={setLimit} />
+        <span className="form-note">
+          {Math.min(limit, matching.length)} of {matching.length}
+        </span>
+      </div>
+    </DivergingBarChart>
+  );
+}
+
 function ActivityTables({ data }: { data: Activity }) {
   const [visible, setVisible] = useState<Record<string, string[]>>({});
   const [prices, setPrices] = useState<MarketPrices>({});
@@ -475,6 +623,7 @@ function ActivityTables({ data }: { data: Activity }) {
   }
   return (
     <>
+      <StockActivityChart data={data} />
       <RankedActivity
         title="Most increased"
         rows={data.increased}
@@ -560,20 +709,6 @@ export function InstitutionalStockActivity() {
           <p>
             {data.included_managers} of {data.total_managers} managers included.
           </p>
-          {data.excluded_managers.length > 0 && (
-            <details className="activity-coverage">
-              <summary>
-                Excluded managers ({data.excluded_managers.length})
-              </summary>
-              <ul>
-                {data.excluded_managers.map((manager) => (
-                  <li key={manager.slug}>
-                    <strong>{manager.name}</strong>: {manager.reason}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
           {data.status === "unavailable" ? (
             <p role="status">Stock activity unavailable: {data.reason}</p>
           ) : (

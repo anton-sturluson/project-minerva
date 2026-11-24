@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, Select, select
 from sqlalchemy.orm import Session
 
 from investor_platform.db import CurrentActor, DatabaseSession
@@ -35,6 +35,7 @@ MAPPING_URL: str = "https://api.openfigi.com/v3/mapping"
 class Mapping(TypedDict):
     """An exact US composite mapping or an explicit unusable mapping result."""
 
+    retryable: NotRequired[bool]
     symbol: str | None
     composite_figi: str | None
     reason: str | None
@@ -170,6 +171,7 @@ def resolve_mappings(engine: Engine, workspace_id: UUID, cusips: list[str]) -> d
                     "symbol": None,
                     "composite_figi": None,
                     "reason": "Security mapping provider unavailable; retry later",
+                    "retryable": True,
                     "mapped_at": now.isoformat(),
                 }
             break
@@ -301,6 +303,48 @@ def price_context(
         return unavailable(mapping, "No valid daily closing prices in this quarter")
 
 
+def require_research_shares(
+    session: Session,
+    workspace_id: UUID,
+    requested: list[str],
+    periods: list[date] | None = None,
+) -> None:
+    """Require every requested identity to occur in the workspace's public share filings."""
+    query: Select[tuple[str]] = (
+        select(ResearchHolding.cusip)
+        .join(ResearchFiling, ResearchHolding.filing_id == ResearchFiling.id)
+        .join(ResearchManager, ResearchFiling.manager_id == ResearchManager.id)
+        .where(
+            ResearchManager.workspace_id == workspace_id,
+            ResearchHolding.cusip.in_(requested),
+            ResearchHolding.share_type == "SH",
+            ResearchHolding.put_call == "",
+            ResearchHolding.quantity > 0,
+        )
+    )
+    if periods is not None:
+        query = query.where(ResearchFiling.report_period.in_(periods))
+    owned: set[str] = set(session.scalars(query))
+    if owned != set(requested):
+        raise HTTPException(404, "Requested security not found in workspace research filings")
+
+
+@router.get("/symbols")
+def get_symbols(
+    cusips: Annotated[str, Query(min_length=9, max_length=199)],
+    session: DatabaseSession,
+    actor: CurrentActor,
+) -> dict:
+    """Resolve up to twenty public research identities without fetching price history."""
+    requested: list[str] = cusips.split(",")
+    if len(requested) > 20 or any(not re.fullmatch(r"[A-Z0-9]{9}", cusip) for cusip in requested):
+        raise HTTPException(422, "Choose at most twenty valid CUSIPs")
+    requested = list(dict.fromkeys(requested))
+    require_research_shares(session, actor.workspace_id, requested)
+    engine: Engine = session.get_bind().engine
+    return {"symbols": resolve_mappings(engine, actor.workspace_id, requested)}
+
+
 @router.get("/market-context")
 def get_market_context(
     quarter: date,
@@ -317,23 +361,9 @@ def get_market_context(
     ):
         raise HTTPException(422, "Choose a calendar quarter end and at most twenty valid CUSIPs")
     requested = list(dict.fromkeys(requested))
-    owned: set[str] = set(
-        session.scalars(
-            select(ResearchHolding.cusip)
-            .join(ResearchFiling, ResearchHolding.filing_id == ResearchFiling.id)
-            .join(ResearchManager, ResearchFiling.manager_id == ResearchManager.id)
-            .where(
-                ResearchManager.workspace_id == actor.workspace_id,
-                ResearchFiling.report_period.in_([previous_quarter(quarter), quarter]),
-                ResearchHolding.cusip.in_(requested),
-                ResearchHolding.share_type == "SH",
-                ResearchHolding.put_call == "",
-                ResearchHolding.quantity > 0,
-            )
-        )
+    require_research_shares(
+        session, actor.workspace_id, requested, [previous_quarter(quarter), quarter]
     )
-    if owned != set(requested):
-        raise HTTPException(404, "Requested security not found in workspace research filings")
     engine: Engine = session.get_bind().engine
     mappings: dict[str, Mapping] = resolve_mappings(engine, actor.workspace_id, requested)
     start: date = quarter.replace(month=((quarter.month - 1) // 3) * 3 + 1, day=1)

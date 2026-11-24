@@ -73,6 +73,10 @@ Pair plum market-value bars with thin neutral cost-basis bars, and show both per
 
 The user requested a persistent header and more space for holdings and performance. The app uses a compact sticky wordmark, bracket navigation and theme selector. The top-five allocation graphic is removed; holdings retain market/cost weights and add unrealized gain percentages and a stocks-only totals row. Cash remains a separate row. Provider provenance stays in API results and documentation rather than a visible banner.
 
+## Research chart refinement · 23 November 2026
+
+Keep Research charts text-light: use a short title, directional legend and metric unit without instructional paragraphs or count explanations. Security names and verified tickers share one line (`Issuer ($TICKER)`); identity details and filing evidence open on selection. Stock Activity is the default Research section, followed by Managers and Economics. Manager charts measure portfolio-weight changes in percentage points using the same two-sided layout.
+
 ## Verification
 
 The saved standalone export was exercised in a browser at desktop and 320px widths. Checks covered portfolio, notebook, and source-index navigation; topic changes; marking a note for follow-up; and restoring the selected note and mark after reload. The narrow source-index view had no page-level horizontal overflow, and no browser console errors were observed. The original selected concept also had its narrow holdings layout checked. Skill validation and reference-link checks passed.

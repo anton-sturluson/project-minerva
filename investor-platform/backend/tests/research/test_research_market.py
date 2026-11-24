@@ -238,6 +238,8 @@ def test_endpoint_sanitizes_provider_failure_and_recovers_without_retry_loop(
         raise HTTPError(request.full_url, 429, "private-provider-diagnostic", {}, None)
 
     monkeypatch.setattr(research_market, "urlopen", quota)
+    symbols = db_client.get("/api/research/activity/symbols?cusips=111111111").json()["symbols"]
+    assert symbols["111111111"]["retryable"] is True
     endpoint: str = "/api/research/activity/market-context?quarter=2026-06-30&cusips=111111111"
     response: Response = db_client.get(endpoint)
     assert response.status_code == 200
@@ -601,3 +603,68 @@ def test_endpoint_maps_cins_and_class_shares_to_provider_symbols(
         ).json()
         == response.json()
     )
+
+
+def test_symbols_use_exact_mapping_without_fetching_prices(
+    database: Engine, db_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Historical share identities resolve independently from prices and retain class tickers."""
+    seed_research(database)
+    with Session(database) as session:
+        owner = session.scalar(select(ResearchManager).where(ResearchManager.slug == "public"))
+        quarter(session, owner, "2024-03-31", [position("666666666", "10", "100")])
+        session.commit()
+
+    def mapping_response(request: Request, timeout: int) -> io.BytesIO:
+        jobs = json.loads(request.data)
+        assert [job["idValue"] for job in jobs] == ["111111111", "222222222", "666666666"]
+        return io.BytesIO(
+            json.dumps(
+                [
+                    {"data": [mapped_row("SYNTH/A")]},
+                    {"data": [mapped_row("SYNTH"), mapped_row("OTHER")]},
+                    {"warning": "No identifier found"},
+                ]
+            ).encode()
+        )
+
+    def no_history(*args: object, **kwargs: object) -> None:
+        pytest.fail("Identity lookup must not fetch price history")
+
+    monkeypatch.setattr(research_market, "urlopen", mapping_response)
+    monkeypatch.setattr(market, "history", no_history)
+    monkeypatch.setattr(tiingo, "get", no_history)
+    response = db_client.get("/api/research/activity/symbols?cusips=111111111,222222222,666666666")
+    assert response.status_code == 200
+    symbols = response.json()["symbols"]
+    assert symbols["111111111"]["symbol"] == "SYNTH/A"
+    assert symbols["111111111"]["composite_figi"] == "BBG000000001"
+    assert symbols["222222222"]["symbol"] is None
+    assert "Ambiguous" in symbols["222222222"]["reason"]
+    assert symbols["666666666"]["symbol"] is None
+    assert "No exact" in symbols["666666666"]["reason"]
+    assert datetime.fromisoformat(symbols["111111111"]["mapped_at"]).tzinfo is not None
+
+
+def test_symbols_reject_unowned_option_and_invalid_identities(
+    database: Engine, db_client: TestClient
+) -> None:
+    """Identity-only lookup retains workspace ownership and bounded public-share scope."""
+    seed_research(database)
+    with Session(database) as session:
+        owner_id = uuid4()
+        workspace_id = uuid4()
+        session.add(Owner(id=owner_id))
+        session.flush()
+        session.add(Workspace(id=workspace_id, owner_id=owner_id))
+        session.flush()
+        foreign = manager(session, "foreign", "1002", workspace_id)
+        quarter(session, foreign, "2026-06-30", [position("555555555", "10", "100")])
+        session.commit()
+    endpoint = "/api/research/activity/symbols?cusips="
+    for cusip in ["555555555", "444444444", "999999999"]:
+        assert db_client.get(endpoint + cusip).status_code == 404
+    assert db_client.get(endpoint + "bad-symbol").status_code == 422
+    assert db_client.get(endpoint + ",".join(["111111111"] * 21)).status_code == 422
+    with Session(database) as session:
+        assert session.scalar(select(func.count()).select_from(MarketCache)) == 0

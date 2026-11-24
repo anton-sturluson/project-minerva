@@ -30,6 +30,7 @@ function currentPage(hash: string): Page {
       ? "post-mortem"
       : hash === "#research" ||
           hash === "#research/activity" ||
+          hash === "#research/managers" ||
           hash === "#research/economics"
         ? "research"
         : "portfolio";
@@ -115,8 +116,14 @@ export function App() {
         </div>
         {page === "research" && (
           <Research
-            activity={hash === "#research/activity"}
-            economics={hash === "#research/economics"}
+            section={
+              hash === "#research/managers"
+                ? "managers"
+                : hash === "#research/economics"
+                  ? "economics"
+                  : "activity"
+            }
+            anchor={hash.slice(1)}
           />
         )}
       </main>

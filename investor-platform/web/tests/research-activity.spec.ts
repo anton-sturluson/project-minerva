@@ -16,6 +16,17 @@ function marketContext() {
   };
 }
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/research/activity/symbols?*", (route) =>
+    route.fulfill({
+      json: {
+        symbols: Object.fromEntries(
+          (new URL(route.request().url()).searchParams.get("cusips") ?? "")
+            .split(",")
+            .map((cusip) => [cusip, { symbol: "EXM" }]),
+        ),
+      },
+    }),
+  );
   await page.route("**/api/accounts", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/research/activity/market-context?*", (route) => {
     const url = new URL(route.request().url());
@@ -64,18 +75,6 @@ const activity = {
   reason: null,
   included_managers: 3,
   total_managers: 5,
-  excluded_managers: [
-    {
-      slug: "missing",
-      name: "Example Missing Manager",
-      reason: "Previous quarter is missing",
-    },
-    {
-      slug: "empty",
-      name: "Example Empty Manager",
-      reason: "Current reported value is zero",
-    },
-  ],
   increased: [
     {
       cusip: "123456780",
@@ -185,6 +184,13 @@ test("stock activity ranks by manager count and opens compact sourced manager ta
   });
   const stocks = increased.locator(".activity-stock-row");
   await expect(stocks).toHaveCount(3);
+  await expect(stocks.first().getByRole("cell").first()).toHaveText(
+    "▸ Example Cloud",
+  );
+  await expect(stocks.first().locator("button")).toHaveAttribute(
+    "title",
+    "COM · 123456780",
+  );
   await expect(stocks.locator("button")).toHaveText([
     "▸ Example Cloud",
     "▸ Example Software",
@@ -250,16 +256,17 @@ test("stock activity ranks by manager count and opens compact sourced manager ta
     }),
   ).toHaveCount(0);
   await expect(managers.locator("xpath=../..")).toHaveAttribute("colspan", "6");
-  await page.getByText("Excluded managers (2)", { exact: true }).click();
-  await expect(page.getByText("Previous quarter is missing")).toBeVisible();
-  await expect(page.getByText("Current reported value is zero")).toBeVisible();
+  await expect(page.getByText(/Excluded managers/)).toHaveCount(0);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
   await page.getByRole("link", { name: "[ Managers ]", exact: true }).click();
-  await expect(page).toHaveURL(/#research$/);
+  await expect(page).toHaveURL(/#research\/managers$/);
+  await expect(
+    page.getByRole("heading", { name: "Managers", exact: true }),
+  ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/#research\/activity$/);
   await expect(
@@ -816,4 +823,394 @@ test("loading quarter prices do not block holdings and late old-quarter response
   await expect(list.locator(".activity-stock-row")).not.toContainText(
     "$999.00",
   );
+});
+
+test("activity chart joins both directions, keeps classes separate and opens sourced details", async ({
+  page,
+}) => {
+  const chartData = structuredClone(activity);
+  chartData.increased[1].issuer = "Example Cloud";
+  chartData.increased[1].security_class = "CL B";
+  chartData.decreased.push({
+    ...chartData.decreased[2],
+    contributors: [
+      {
+        ...chartData.decreased[2].contributors[0],
+        slug: "gamma",
+        name: "Example Gamma",
+      },
+    ],
+    cusip: "123456780",
+    issuer: "Example Cloud",
+  });
+  for (let index = 0; index < 12; index++) {
+    chartData.increased.push({
+      ...chartData.increased[2],
+      cusip: String(800000000 + index),
+      issuer: `Other security ${index}`,
+    });
+  }
+  let priceRequests = 0;
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname ===
+      "/api/research/activity/market-context"
+    )
+      priceRequests++;
+  });
+  await page.route("**/api/research/activity/symbols?*", (route) =>
+    route.fulfill({
+      json: {
+        symbols: Object.fromEntries(
+          (new URL(route.request().url()).searchParams.get("cusips") ?? "")
+            .split(",")
+            .map((cusip) => [
+              cusip,
+              {
+                symbol:
+                  cusip === "123456780"
+                    ? "EXM/A"
+                    : cusip === "123456781"
+                      ? "EXM/B"
+                      : null,
+              },
+            ]),
+        ),
+      },
+    }),
+  );
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({ json: chartData }),
+  );
+  await page.goto("/#research");
+  const chart = page.getByRole("region", {
+    name: "Reported holding changes",
+    exact: true,
+  });
+  await expect(chart.locator(".diverging-row")).toHaveCount(10);
+  const first = chart.locator(".diverging-row").first();
+  await expect(first).toContainText("Example Cloud ($EXM/A)");
+  await expect(first).toHaveAccessibleName(
+    /Reduced \/ exited 1; Increased \/ newly reported 2/,
+  );
+  await expect(
+    chart.getByText("Example Cloud ($EXM/B)", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    chart.getByText("Number of managers", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    chart.getByText(/Compare both directions|each manager counted/),
+  ).toHaveCount(0);
+  await chart.getByLabel("Securities shown").fill("13");
+  await expect(chart.locator(".diverging-row")).toHaveCount(13);
+  for (const invalid of ["", "0", "-2", "2.5"]) {
+    await chart.getByLabel("Securities shown").fill(invalid);
+    await expect(chart.locator(".diverging-row")).toHaveCount(13);
+    await chart.getByLabel("Securities shown").press("Tab");
+    await expect(chart.getByLabel("Securities shown")).toHaveValue("13");
+  }
+  await chart.getByLabel("Securities shown").fill("25");
+  await expect(chart.locator(".diverging-row")).toHaveCount(18);
+  await expect(page.getByText("$125.50").first()).toBeVisible();
+  const before = priceRequests;
+  await first.focus();
+  await page.keyboard.press("Enter");
+  const details = chart.locator(".diverging-details");
+  await expect(
+    details.getByRole("heading", {
+      name: "Example Cloud ($EXM/A)",
+      exact: true,
+    }),
+  ).toBeFocused();
+  await expect(
+    details.getByRole("region", { name: "increased contributors" }),
+  ).toContainText("Example Alpha");
+  await expect(
+    details.getByRole("region", { name: "decreased contributors" }),
+  ).toContainText("Example Gamma");
+  await expect(
+    details.getByRole("link", { name: "Filing 1", exact: true }).first(),
+  ).toHaveAttribute("href", "https://example.com/beta/previous");
+  await page.keyboard.press("Tab");
+  await expect(
+    details.getByRole("button", { name: "Close security details" }),
+  ).toBeFocused();
+  await details.getByRole("link").first().focus();
+  await page.keyboard.press("Escape");
+  await expect(first).toBeFocused();
+  await chart.locator(".diverging-row").nth(12).click();
+  await expect(details).toBeVisible();
+  await chart.getByLabel("Securities shown").fill("5");
+  await expect(chart.locator(".diverging-row")).toHaveCount(5);
+  await expect(details).toHaveCount(0);
+  await chart.getByLabel("Securities shown").fill("25");
+  await chart.getByLabel("Find a security").fill("Other security 11");
+  await expect(chart.locator(".diverging-row")).toHaveCount(1);
+  await expect(chart.locator(".diverging-row")).toContainText(
+    "Other security 11",
+  );
+  await chart.locator(".diverging-row").click();
+  await chart.getByLabel("Find a security").fill("no matches");
+  await expect(chart.getByText("No securities match.")).toBeVisible();
+  await expect(details).toHaveCount(0);
+  expect(priceRequests).toBe(before);
+  await expect(page.locator(".skip-link")).toHaveAttribute("href", "#research");
+});
+
+test("ticker enrichment recovers on revisit and preserves tickers beside long names", async ({
+  page,
+}) => {
+  const longName = "Example exceptionally long issuer name and security class";
+  const data = {
+    ...activity,
+    decreased: [],
+    increased: [
+      { ...activity.increased[0], issuer: longName },
+      {
+        ...activity.increased[1],
+        cusip: "1*3456789",
+        issuer: "Unsupported identity",
+      },
+    ],
+  };
+  let requests = 0;
+  let phase: "network" | "temporary" | "available" = "network";
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({ json: data }),
+  );
+  await page.route("**/api/research/activity/symbols?*", async (route) => {
+    const cusips = new URL(route.request().url()).searchParams.get("cusips");
+    expect(cusips).toBe("123456780");
+    requests++;
+    if (phase === "network")
+      return route.fulfill({
+        status: 503,
+        json: { detail: "Synthetic outage" },
+      });
+    return route.fulfill({
+      json: {
+        symbols: {
+          "123456780":
+            phase === "temporary"
+              ? { symbol: null, retryable: true }
+              : { symbol: "EXM/A" },
+        },
+      },
+    });
+  });
+  await page.goto("/#research/activity");
+  const chart = page.getByRole("region", {
+    name: "Reported holding changes",
+    exact: true,
+  });
+  await expect.poll(() => requests).toBeGreaterThan(0);
+  await expect(chart.getByText(longName, { exact: true })).toBeVisible();
+  for (const nextPhase of ["temporary", "available"] as const) {
+    await chart.getByLabel("Find a security").fill("Unsupported identity");
+    await expect(chart.locator(".diverging-row")).toHaveCount(1);
+    phase = nextPhase;
+    const response = page.waitForResponse("**/api/research/activity/symbols?*");
+    await chart.getByLabel("Find a security").fill("");
+    await response;
+  }
+  await expect(chart.locator(".diverging-suffix")).toHaveText("($EXM/A)");
+  for (const width of [320, 1000]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await chart.locator(".diverging-suffix").evaluate((element) => {
+        const ticker = element.getBoundingClientRect();
+        const label = element.parentElement!.getBoundingClientRect();
+        return (
+          ticker.left >= label.left &&
+          ticker.right <= label.right &&
+          ticker.width > 0
+        );
+      }),
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  const resolvedRequests = requests;
+  await chart.getByLabel("Find a security").fill("Unsupported identity");
+  await chart.getByLabel("Find a security").fill("");
+  await expect(chart.locator(".diverging-suffix")).toHaveText("($EXM/A)");
+  expect(requests).toBe(resolvedRequests);
+});
+
+test("custom counts bound ticker lookups and cancel queued rows when scope changes", async ({
+  page,
+}) => {
+  const data = {
+    ...activity,
+    decreased: [],
+    increased: Array.from({ length: 80 }, (_, index) => ({
+      ...activity.increased[2],
+      cusip: String(910000000 + index),
+      issuer: `Security ${String(index).padStart(3, "0")}`,
+    })),
+  };
+  const requests: string[][] = [];
+  let active = 0;
+  let maximumActive = 0;
+  let gate: Promise<void> | null = null;
+  let release: () => void = () => {};
+  let finished: Promise<void> = Promise.resolve();
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({ json: data }),
+  );
+  await page.route("**/api/research/activity/symbols?*", async (route) => {
+    const cusips = (
+      new URL(route.request().url()).searchParams.get("cusips") ?? ""
+    ).split(",");
+    requests.push(cusips);
+    active++;
+    maximumActive = Math.max(maximumActive, active);
+    const pending = gate;
+    let done: () => void = () => {};
+    finished = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    try {
+      if (pending) await pending;
+      await route.fulfill({
+        json: {
+          symbols: Object.fromEntries(
+            cusips.map((cusip) => [cusip, { symbol: "EXM" }]),
+          ),
+        },
+      });
+    } finally {
+      active--;
+      done();
+    }
+  });
+  await page.goto("/#research/activity");
+  const chart = page.getByRole("region", {
+    name: "Reported holding changes",
+    exact: true,
+  });
+  await expect(chart.locator(".diverging-suffix")).toHaveCount(10);
+  // Measure expansion after development-mode mount effects have settled.
+  await expect.poll(() => active).toBe(0);
+  maximumActive = 0;
+  const initialRequests = requests.length;
+  gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await chart.getByLabel("Securities shown").fill("55");
+  await expect(chart.locator(".diverging-row")).toHaveCount(55);
+  await expect.poll(() => requests.length).toBeGreaterThan(initialRequests);
+  release();
+  gate = null;
+  await expect(chart.locator(".diverging-suffix")).toHaveCount(55);
+  expect(maximumActive).toBe(1);
+  expect(requests.every((batch) => batch.length <= 20)).toBe(true);
+  const loadedRequests = requests.length;
+  gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await chart.getByLabel("Securities shown").fill("80");
+  await expect(chart.locator(".diverging-row")).toHaveCount(80);
+  await expect.poll(() => requests.length).toBe(loadedRequests + 1);
+  await chart.getByLabel("Find a security").fill("Security 000");
+  await expect(chart.locator(".diverging-row")).toHaveCount(1);
+  release();
+  gate = null;
+  await finished;
+  await chart.getByLabel("Find a security").press("Tab");
+  expect(requests).toHaveLength(loadedRequests + 1);
+  await expect(chart.locator(".diverging-suffix")).toHaveText("($EXM)");
+});
+
+test("chart scrolls through all requested securities while keeping its neutral axis aligned", async ({
+  page,
+}) => {
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({
+      json: {
+        ...activity,
+        decreased: [],
+        increased: Array.from({ length: 40 }, (_, index) => ({
+          ...activity.increased[2],
+          cusip: String(920000000 + index),
+          issuer: `Scrollable Security ${String(index).padStart(2, "0")}`,
+        })),
+      },
+    }),
+  );
+  await page.goto("/#research/activity");
+  const chart = page.getByRole("region", {
+    name: "Reported holding changes",
+    exact: true,
+  });
+  await chart.getByLabel("Securities shown").fill("40");
+  await expect(chart.locator(".diverging-suffix")).toHaveCount(40);
+  const viewport = chart.getByRole("region", {
+    name: "Reported holding changes securities",
+    exact: true,
+  });
+  const dimensions = await viewport.evaluate((element) => ({
+    height: element.clientHeight,
+    content: element.scrollHeight,
+  }));
+  expect(dimensions.content).toBeGreaterThan(dimensions.height);
+  await page.getByLabel("Theme", { exact: true }).selectOption("dark");
+  const appearance = await chart.evaluate((element) => {
+    const row = element.querySelector(".diverging-row")!;
+    const plot = row.querySelector(".diverging-plot")!.getBoundingClientRect();
+    const name = row.querySelector(".diverging-name")!;
+    const axis = element.querySelector(".diverging-axis")!;
+    const zero = axis
+      .querySelector(".diverging-ticks > span:nth-child(3)")!
+      .getBoundingClientRect();
+    return {
+      axisOffset: Math.abs(
+        (zero.left + zero.right) / 2 - (plot.left + plot.right) / 2,
+      ),
+      neutral:
+        getComputedStyle(axis).color ===
+        getComputedStyle(element.querySelector("h4")!).color,
+      font: parseFloat(getComputedStyle(name).fontSize),
+      bar: row.querySelector(".diverging-bar")!.getBoundingClientRect().height,
+      row: row.getBoundingClientRect().height,
+      coarse: matchMedia("(pointer: coarse)").matches,
+      width: element.getBoundingClientRect().width,
+    };
+  });
+  expect(appearance.axisOffset).toBeLessThan(1);
+  expect(appearance.neutral).toBe(true);
+  expect(appearance.font).toBeLessThanOrEqual(12);
+  expect(appearance.bar).toBeLessThanOrEqual(14);
+  expect(appearance.row).toBeLessThanOrEqual(
+    appearance.width < 480 ? 48 : appearance.coarse ? 44 : 36,
+  );
+  await viewport.focus();
+  await page.keyboard.press("End");
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  const last = chart.locator(".diverging-row").last();
+  await last.click();
+  await expect(chart.locator(".diverging-details")).toContainText(
+    "Scrollable Security 39",
+  );
+  await chart.getByRole("button", { name: "Close security details" }).click();
+  await expect(last).toBeFocused();
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await chart.getByLabel("Securities shown").fill("30");
+  await expect(chart.locator(".diverging-row")).toHaveCount(30);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBe(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });
