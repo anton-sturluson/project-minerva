@@ -339,8 +339,11 @@ function QuarterlyChanges({
                           change.share_type,
                         ].join("|")}
                       >
-                        <td>
+                        <td
+                          title={`${change.security_class} · ${change.cusip}`}
+                        >
                           {change.issuer}
+                          {change.put_call && ` (${change.put_call})`}
                           <br />
                           <small>
                             {changeLabels[change.kind] ?? change.kind}
@@ -350,11 +353,6 @@ function QuarterlyChanges({
                             {quantity(change.previous_quantity)} →{" "}
                             {quantity(change.current_quantity)}{" "}
                             {change.share_type}
-                          </small>
-                          <br />
-                          <small>
-                            {change.security_class} {change.put_call} ·{" "}
-                            {change.cusip}
                           </small>
                         </td>
                         <td className="numeric">

@@ -37,6 +37,11 @@ export function DivergingBarChart({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = rows.find((row) => row.id === selectedId);
   const heading = useRef<HTMLHeadingElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  const rowOrder = JSON.stringify(rows.map((row) => row.id));
+  useEffect(() => {
+    if (viewport.current) viewport.current.scrollTop = 0;
+  }, [rowOrder]);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   useEffect(() => {
     if (selectedId && !selected) setSelectedId(null);
@@ -78,63 +83,71 @@ export function DivergingBarChart({
         <p role="status">No securities match.</p>
       ) : (
         <>
-          <ul className="diverging-rows">
-            {rows.map((row) => (
-              <li key={row.id}>
-                <button
-                  ref={(button) => {
-                    if (button) buttons.current.set(row.id, button);
-                    else buttons.current.delete(row.id);
-                  }}
-                  className="diverging-row"
-                  aria-expanded={selectedId === row.id}
-                  aria-controls={`${id}-details`}
-                  aria-label={`${row.label}${row.suffix ? ` ${row.suffix}` : ""}: ${leftLabel} ${formatValue(row.left, "left")}; ${rightLabel} ${formatValue(row.right, "right")}.`}
-                  onClick={() =>
-                    selectedId === row.id ? close() : setSelectedId(row.id)
-                  }
-                >
-                  <span
-                    className="diverging-name"
-                    title={`${row.label}${row.suffix ? ` ${row.suffix}` : ""}`}
+          <div
+            className="diverging-scroll"
+            ref={viewport}
+            role="region"
+            aria-label={`${title} securities`}
+            tabIndex={0}
+          >
+            <ul className="diverging-rows">
+              {rows.map((row) => (
+                <li key={row.id}>
+                  <button
+                    ref={(button) => {
+                      if (button) buttons.current.set(row.id, button);
+                      else buttons.current.delete(row.id);
+                    }}
+                    className="diverging-row"
+                    aria-expanded={selectedId === row.id}
+                    aria-controls={`${id}-details`}
+                    aria-label={`${row.label}${row.suffix ? ` ${row.suffix}` : ""}: ${leftLabel} ${formatValue(row.left, "left")}; ${rightLabel} ${formatValue(row.right, "right")}.`}
+                    onClick={() =>
+                      selectedId === row.id ? close() : setSelectedId(row.id)
+                    }
                   >
-                    <span className="diverging-issuer">{row.label}</span>
-                    {row.suffix && (
-                      <>
-                        {" "}
-                        <span className="diverging-suffix">{row.suffix}</span>
-                      </>
-                    )}
-                  </span>
-                  <span className="diverging-plot" aria-hidden="true">
-                    {(["left", "right"] as const).map((side) => {
-                      const extent = `${(100 * row[side]) / domainMax}%`;
-                      return (
-                        <span className="diverging-half" key={side}>
-                          <span
-                            className={`diverging-bar diverging-${side}`}
-                            style={{ width: extent }}
-                          />
-                          {row[side] > 0 && (
+                    <span
+                      className="diverging-name"
+                      title={`${row.label}${row.suffix ? ` ${row.suffix}` : ""}`}
+                    >
+                      <span className="diverging-issuer">{row.label}</span>
+                      {row.suffix && (
+                        <>
+                          {" "}
+                          <span className="diverging-suffix">{row.suffix}</span>
+                        </>
+                      )}
+                    </span>
+                    <span className="diverging-plot" aria-hidden="true">
+                      {(["left", "right"] as const).map((side) => {
+                        const extent = `${(100 * row[side]) / domainMax}%`;
+                        return (
+                          <span className="diverging-half" key={side}>
                             <span
-                              className={`diverging-value diverging-value-${side}`}
-                              style={
-                                side === "left"
-                                  ? { right: extent }
-                                  : { left: extent }
-                              }
-                            >
-                              {formatValue(row[side], side)}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+                              className={`diverging-bar diverging-${side}`}
+                              style={{ width: extent }}
+                            />
+                            {row[side] > 0 && (
+                              <span
+                                className={`diverging-value diverging-value-${side}`}
+                                style={
+                                  side === "left"
+                                    ? { right: extent }
+                                    : { left: extent }
+                                }
+                              >
+                                {formatValue(row[side], side)}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
           <div className="diverging-axis" aria-hidden="true">
             <div className="diverging-ticks">
               {[-domainMax, -domainMax / 2, 0, domainMax / 2, domainMax].map(

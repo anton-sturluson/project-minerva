@@ -211,6 +211,14 @@ test("research sources, quarter changes, coverage filter and missing comparison"
     exact: true,
   });
   await expect(increased.locator("tbody tr")).toHaveCount(2);
+  const securityCell = increased
+    .locator("tbody tr")
+    .first()
+    .getByRole("cell")
+    .first();
+  await expect(securityCell).not.toContainText("123456780");
+  await expect(securityCell).toHaveAttribute("title", "COM · 123456780");
+  await expect(securityCell).not.toContainText("COM");
   await expect(increased.locator("tbody tr").nth(0)).toContainText(
     "Example New Cloud",
   );
@@ -617,6 +625,11 @@ test("manager chart measures weight changes independently from share direction",
     exact: true,
   });
   await expect(chart.locator(".diverging-row")).toHaveCount(3);
+  const optionCell = page
+    .getByRole("cell")
+    .filter({ hasText: "Option excluded" });
+  await expect(optionCell).toContainText("Option excluded (CALL)");
+  await expect(optionCell).not.toContainText("123456786");
   await chart.getByLabel("Securities shown").fill("2");
   await expect(chart.locator(".diverging-row")).toHaveCount(2);
   await chart.getByLabel("Securities shown").fill("17");

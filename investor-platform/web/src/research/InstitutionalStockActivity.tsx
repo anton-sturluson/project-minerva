@@ -221,6 +221,7 @@ function StockRow({
         <td>
           <button
             className="activity-stock-toggle"
+            title={`${row.security_class} · ${row.cusip}`}
             aria-expanded={expanded}
             aria-controls={panelId}
             onClick={() => setExpanded(!expanded)}
@@ -228,9 +229,6 @@ function StockRow({
             <span aria-hidden="true">{expanded ? "▾ " : "▸ "}</span>
             {row.issuer}
           </button>
-          <small>
-            {row.security_class} · {row.cusip}
-          </small>
         </td>
         <td className="number">{row.manager_count}</td>
         <td className="number">{percent(String(averageWeight))}</td>

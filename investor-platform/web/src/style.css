@@ -905,6 +905,7 @@ summary:focus-visible {
   scroll-margin-top: calc(var(--header-height) + 16px);
   border-left: 1px solid var(--rule);
   padding-left: 22px;
+  padding-bottom: 6px;
 }
 .research-detail details {
   margin-top: 20px;
@@ -1178,6 +1179,8 @@ summary:focus-visible {
 }
 
 .diverging-chart {
+  container-type: inline-size;
+  --diverging-row-height: 36px;
   border-block: 1px solid var(--rule);
   margin-block: 20px;
   padding-block: 16px;
@@ -1227,6 +1230,18 @@ summary:focus-visible {
 .diverging-right {
   background: var(--blue);
 }
+.diverging-scroll {
+  max-height: min(calc(15 * var(--diverging-row-height)), 60dvh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.diverging-scroll:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.diverging-row:focus-visible {
+  outline-offset: -2px;
+}
 .diverging-rows {
   list-style: none;
   padding: 0;
@@ -1235,14 +1250,14 @@ summary:focus-visible {
 .diverging-row,
 .diverging-axis {
   display: grid;
-  grid-template-columns: minmax(0, min(230px, 40%)) minmax(0, 1fr);
+  grid-template-columns: minmax(0, min(190px, 36%)) minmax(0, 1fr);
   gap: 12px;
 }
 .diverging-row {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--diverging-row-height);
   align-items: center;
-  padding: 6px 8px;
+  padding: 4px 8px;
   border: 0;
   border-bottom: 1px solid var(--rule);
   text-align: left;
@@ -1258,7 +1273,7 @@ summary:focus-visible {
   min-width: 0;
   white-space: nowrap;
   font:
-    14px Arial,
+    12px Arial,
     sans-serif;
 }
 .diverging-issuer {
@@ -1271,7 +1286,7 @@ summary:focus-visible {
 .diverging-plot {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  height: 28px;
+  height: 22px;
   margin-inline: 55px;
   min-width: 0;
 }
@@ -1284,8 +1299,9 @@ summary:focus-visible {
 }
 .diverging-bar {
   position: absolute;
-  top: 5px;
-  height: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 14px;
 }
 .diverging-bar.diverging-left {
   right: 0;
@@ -1295,26 +1311,28 @@ summary:focus-visible {
 }
 .diverging-value {
   position: absolute;
-  top: 6px;
+  top: 50%;
   white-space: nowrap;
   font:
-    12px Arial,
+    11px Arial,
     sans-serif;
 }
 .diverging-value-left {
   color: var(--plum);
-  transform: translateX(-5px);
+  transform: translate(-5px, -50%);
 }
 .diverging-value-right {
   color: var(--blue);
-  transform: translateX(5px);
+  transform: translate(5px, -50%);
 }
 .diverging-axis {
   padding: 10px 8px 0;
   font:
     11px "Courier New",
     monospace;
-  color: var(--plum);
+  color: var(--ink);
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
 }
 .diverging-axis::before {
   content: "";
@@ -1381,14 +1399,19 @@ summary:focus-visible {
     max-width: 100%;
   }
 }
-.diverging-chart {
-  container-type: inline-size;
+@media (pointer: coarse) {
+  .diverging-chart {
+    --diverging-row-height: 44px;
+  }
 }
 @container (max-width: 479px) {
+  .diverging-scroll {
+    --diverging-row-height: 48px;
+  }
   .diverging-row,
   .diverging-axis {
     grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
+    gap: 3px;
   }
   .diverging-axis::before {
     display: none;

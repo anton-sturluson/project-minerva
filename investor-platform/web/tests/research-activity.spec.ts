@@ -184,6 +184,13 @@ test("stock activity ranks by manager count and opens compact sourced manager ta
   });
   const stocks = increased.locator(".activity-stock-row");
   await expect(stocks).toHaveCount(3);
+  await expect(stocks.first().getByRole("cell").first()).toHaveText(
+    "▸ Example Cloud",
+  );
+  await expect(stocks.first().locator("button")).toHaveAttribute(
+    "title",
+    "COM · 123456780",
+  );
   await expect(stocks.locator("button")).toHaveText([
     "▸ Example Cloud",
     "▸ Example Software",
@@ -1157,4 +1164,101 @@ test("custom counts bound ticker lookups and cancel queued rows when scope chang
   await chart.getByLabel("Find a security").press("Tab");
   expect(requests).toHaveLength(loadedRequests + 1);
   await expect(chart.locator(".diverging-suffix")).toHaveText("($EXM)");
+});
+
+test("chart scrolls through all requested securities while keeping its neutral axis aligned", async ({
+  page,
+}) => {
+  await page.route("**/api/research/activity", (route) =>
+    route.fulfill({
+      json: {
+        ...activity,
+        decreased: [],
+        increased: Array.from({ length: 40 }, (_, index) => ({
+          ...activity.increased[2],
+          cusip: String(920000000 + index),
+          issuer: `Scrollable Security ${String(index).padStart(2, "0")}`,
+        })),
+      },
+    }),
+  );
+  await page.goto("/#research/activity");
+  const chart = page.getByRole("region", {
+    name: "Reported holding changes",
+    exact: true,
+  });
+  await chart.getByLabel("Securities shown").fill("40");
+  await expect(chart.locator(".diverging-suffix")).toHaveCount(40);
+  const viewport = chart.getByRole("region", {
+    name: "Reported holding changes securities",
+    exact: true,
+  });
+  const dimensions = await viewport.evaluate((element) => ({
+    height: element.clientHeight,
+    content: element.scrollHeight,
+  }));
+  expect(dimensions.content).toBeGreaterThan(dimensions.height);
+  const appearance = await chart.evaluate((element) => {
+    const row = element.querySelector(".diverging-row")!;
+    const plot = row.querySelector(".diverging-plot")!.getBoundingClientRect();
+    const name = row.querySelector(".diverging-name")!;
+    const axis = element.querySelector(".diverging-axis")!;
+    const zero = axis
+      .querySelector(".diverging-ticks > span:nth-child(3)")!
+      .getBoundingClientRect();
+    return {
+      axisOffset: Math.abs(
+        (zero.left + zero.right) / 2 - (plot.left + plot.right) / 2,
+      ),
+      neutral:
+        getComputedStyle(axis).color ===
+        getComputedStyle(element.querySelector("h4")!).color,
+      font: parseFloat(getComputedStyle(name).fontSize),
+      bar: row.querySelector(".diverging-bar")!.getBoundingClientRect().height,
+      row: row.getBoundingClientRect().height,
+      coarse: matchMedia("(pointer: coarse)").matches,
+      width: element.getBoundingClientRect().width,
+    };
+  });
+  expect(appearance.axisOffset).toBeLessThan(1);
+  expect(appearance.neutral).toBe(true);
+  expect(appearance.font).toBeLessThanOrEqual(12);
+  expect(appearance.bar).toBeLessThanOrEqual(14);
+  expect(appearance.row).toBeLessThanOrEqual(
+    appearance.width < 480 ? 48 : appearance.coarse ? 44 : 36,
+  );
+  await viewport.focus();
+  await page.keyboard.press("End");
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  const last = chart.locator(".diverging-row").last();
+  await last.click();
+  await expect(chart.locator(".diverging-details")).toContainText(
+    "Scrollable Security 39",
+  );
+  await chart.getByRole("button", { name: "Close security details" }).click();
+  await expect(last).toBeFocused();
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await chart.getByLabel("Find a security").fill("Scrollable Security 00");
+  await expect(chart.locator(".diverging-row")).toHaveCount(1);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBe(0);
+  await chart.getByLabel("Find a security").fill("");
+  await expect(chart.locator(".diverging-row")).toHaveCount(40);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBe(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await chart.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: test.info().outputPath("dense-scroll-chart.png"),
+  });
 });
