@@ -51,13 +51,13 @@ uv run minerva extract-files \
 uv run minerva brief resolve-selection --selection-dir "$SELECTION_TMP"
 ```
 
-Use `selected-keys.jsonl` for the verified union. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage using the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by the selection model unless their source is exactly `wsj` or `economist`. Label rumors and third-party interpretations.
+Use `selected-keys.jsonl` for the verified union. Auto-advance means eligible for final main-agent review, not guaranteed publication. Query titles and sources for the union first. Read summaries for first-party sources (including filings and IR), regulators, WSJ, Economist, Reuters, and other clearly high-quality reporting. For Yahoo, Benzinga, Seeking Alpha, Chartmill, Fintel, and similar sources, use the title unless the article appears to contain a unique material fact or genuine variant perception. Deduplicate overlapping coverage using the strongest original evidence or incremental insight. Classify portfolio/watchlist items using `holdings_path` and `watchlist_path`, and rank the results. Do not query articles excluded by the selection model unless their source is exactly `wsj` or `economist`, or the bounded shortfall review in Section 4 requires it. Label rumors and third-party interpretations.
 6. Before writing, read up to five most recent previous `slack-brief.md` outputs in dated sibling run directories. Exclude developments already covered unless today's evidence adds a material new fact; if retained, write only the update.
 7. Delete the temporary directory after selection.
 
 ## 4. Write the Slack brief
 
-Write the canonical `slack_brief_output` from the verified union, with exactly these four sections in order and no other text or sections. Do not create a separate report or memo:
+Write the canonical `slack_brief_output` from the verified union and any qualifying additions from the bounded shortfall review below, with exactly these four sections in order and no other text or sections. Do not create a separate report or memo:
 
 ```text
 _Crawler:_ {total articles} — {source} {count} · {source} {count} · ...; {successful}/{total} collectors succeeded, {failed} failed.
@@ -72,7 +72,11 @@ _Political / Macro_
 • _{Investor takeaway}:_ {Concise helpful explanation with original-source links.}
 ```
 
-For `_Worth Knowing Today_`, select up to 10 distinct, evidence-backed non-portfolio developments useful to a long-term investor. Include durable business, technological, social, demographic, labor, institutional, or resource shifts that can materially reshape demand, productivity, costs, incentives, or risk. Exclude Political / Macro events and never add filler. When fewer than 10 developments qualify, include every qualifying development; never query or read rejected articles merely to reach the maximum.
+For `_Worth Knowing Today_`, select exactly 10 distinct, evidence-backed non-portfolio developments useful to a long-term investor. Include durable business, technological, social, demographic, labor, institutional, or resource shifts that can materially reshape demand, productivity, costs, incentives, or risk. Exclude Political / Macro events, duplicates, and filler; do not split one development into multiple items to reach 10.
+
+If the initial shortlist contains fewer than 10 qualifying developments after classification and deduplication, perform one bounded shortfall review of the remaining complete summaries in the same fixed window. Query titles and sources first, then read the summaries of plausible candidates, including articles the selection model excluded. Look across the full range of useful long-term topics above rather than restricting the section to major corporate announcements. Apply the same evidence, source-quality, prior-coverage, and no-filler standards; use no additional model calls, web browsing, collection, or older articles. Retain each added article's key and original source URL for traceability.
+
+Before writing, count the top-level bullets between `_Worth Knowing Today_` and `_Political / Macro_` and require exactly 10. If the available evidence still cannot support 10 qualifying developments, stop and return a concise selection failure stating the qualifying count and the `prepared_evidence` artifact path. Do not publish a shorter normal brief or invent items to satisfy the count.
 
 Include up to five distinct, evidence-backed event-driven developments in `_Political / Macro_` that materially change the outlook for growth, inflation, rates, trade, regulation, resource supply, or geopolitical tail risk. Exclude routine political activity, and do not duplicate any development from `_Worth Knowing Today_`.
 
@@ -80,12 +84,6 @@ If nothing material occurred for the portfolio or watchlist:
 
 ```text
 • No material portfolio or watchlist developments during the collection period.
-```
-
-If no non-portfolio event qualifies for `_Worth Knowing Today_`:
-
-```text
-• No qualifying non-portfolio developments during the collection period.
 ```
 
 If no event qualifies for `_Political / Macro_`:
